@@ -1,0 +1,132 @@
+{# Server-Detail-Header `/servers/<id>`.
+
+   Variablen-Vertrag (gesetzt in app/views/server_detail.py:show):
+     - `server`         : Server (mit eager-loaded tag_links.tag)
+     - `available_tags` : list[Tag] — fuer den Add-Tag-Selector
+     - `add_form`       : CSRFOnlyForm
+     - `remove_form`    : CSRFOnlyForm
+
+   Findings-Tabelle und View-Toggle gehoeren in Block E — hier nur Header
+   mit Status-Badges und HTMX-Tag-Editor.
+
+   Stale-Logik analog zu settings/servers.html via `is_older_than_h`-Filter:
+   - Server-Stale: last_scan_at > expected_scan_interval_h.
+   - DB-Stale: trivy_db_updated_at > 168h (1 Woche, konservativer Anzeige-
+     wert; die strenge 30h-Schwelle gilt fuer das "Aufmerksamkeit"-Dashboard).
+#}
+{% extends "base.html" %}
+
+{% block title %}{{ server.name }} · secscan{% endblock %}
+
+{% block content %}
+{% set is_active = not server.revoked_at and not server.retired_at %}
+{% set scan_stale = is_active
+   and (not server.last_scan_at
+        or server.last_scan_at | is_older_than_h(server.expected_scan_interval_h)) %}
+{% set db_stale = is_active
+   and (not server.trivy_db_updated_at
+        or server.trivy_db_updated_at | is_older_than_h(168)) %}
+
+<section class="space-y-6 max-w-5xl mx-auto">
+  <header class="card bg-base-200 shadow-sm">
+    <div class="card-body p-5 space-y-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h1 class="text-2xl font-semibold font-mono break-all">{{ server.name }}</h1>
+          {% if server.os_pretty_name or server.kernel_version or server.architecture %}
+            <p class="text-sm opacity-70 mt-1">
+              {% if server.os_pretty_name %}{{ server.os_pretty_name }}{% endif %}
+              {% if server.kernel_version %}
+                {% if server.os_pretty_name %} · {% endif %}{{ server.kernel_version }}
+              {% endif %}
+              {% if server.architecture %}
+                {% if server.os_pretty_name or server.kernel_version %} · {% endif %}{{ server.architecture }}
+              {% endif %}
+            </p>
+          {% endif %}
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <a href="{{ url_for('dashboard.index') }}"
+             class="link link-hover text-sm">
+            zurueck zum Dashboard
+          </a>
+        </div>
+      </div>
+
+      {# Status-Badge-Reihe. Reihenfolge: schlimmster Marker zuerst. #}
+      <div class="flex flex-wrap gap-2">
+        {% if server.revoked_at %}
+          <span class="badge badge-error"
+                title="Widerrufen am {{ server.revoked_at.strftime('%Y-%m-%d %H:%M') }}">
+            revoked
+          </span>
+        {% elif server.retired_at %}
+          <span class="badge badge-ghost"
+                title="Stillgelegt am {{ server.retired_at.strftime('%Y-%m-%d %H:%M') }}">
+            retired
+          </span>
+        {% else %}
+          <span class="badge badge-success">active</span>
+        {% endif %}
+
+        {% if scan_stale %}
+          <span class="badge badge-warning"
+                title="Letzter Scan aelter als erwarteter Interval ({{ server.expected_scan_interval_h }}h).">
+            stale
+          </span>
+        {% endif %}
+        {% if db_stale %}
+          <span class="badge badge-warning"
+                title="Trivy-DB veraltet (Schwelle: 7 Tage).">
+            db veraltet
+          </span>
+        {% endif %}
+      </div>
+
+      {# Meta-Box: Scan- und DB-Zeitstempel + Scan-Interval. #}
+      <dl class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+        <div>
+          <dt class="opacity-60 text-xs uppercase tracking-wide">Letzter Scan</dt>
+          <dd>
+            {% if server.last_scan_at %}
+              <time datetime="{{ server.last_scan_at.isoformat() }}"
+                    title="{{ server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+                {{ server.last_scan_at | relative_time }}
+              </time>
+            {% else %}
+              <span class="opacity-60">noch nie</span>
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt class="opacity-60 text-xs uppercase tracking-wide">Trivy-DB</dt>
+          <dd>
+            {% if server.trivy_db_updated_at %}
+              <time datetime="{{ server.trivy_db_updated_at.isoformat() }}"
+                    title="{{ server.trivy_db_updated_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+                {{ server.trivy_db_updated_at | relative_time }}
+              </time>
+            {% else %}
+              <span class="opacity-60">unbekannt</span>
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt class="opacity-60 text-xs uppercase tracking-wide">Scan-Interval</dt>
+          <dd>{{ server.expected_scan_interval_h }}h erwartet</dd>
+        </div>
+      </dl>
+
+      {# HTMX-Tag-Editor. Wird vom Endpoint als ganzes Fragment ersetzt. #}
+      <div>
+        <h2 class="text-xs uppercase tracking-wide opacity-60 mb-2">Tags</h2>
+        {% include "servers/_tag_editor.html" %}
+      </div>
+    </div>
+  </header>
+
+  <section class="opacity-70 text-sm text-center">
+    Findings-Tabelle folgt in Block E.
+  </section>
+</section>
+{% endblock %}

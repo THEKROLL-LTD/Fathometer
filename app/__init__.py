@@ -186,6 +186,8 @@ def create_app() -> Flask:
     app.register_blueprint(health_bp)
 
     from app.views.auth import auth_bp
+    from app.views.dashboard import dashboard_bp
+    from app.views.server_detail import server_detail_bp
     from app.views.servers import servers_bp
     from app.views.settings import settings_bp
     from app.views.setup import setup_bp
@@ -194,6 +196,8 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(servers_bp)
+    app.register_blueprint(server_detail_bp)
+    app.register_blueprint(dashboard_bp)
 
     # API-Blueprint (Block C). Routes werden in `register_api_routes`
     # importiert (lazy, vermeidet Zirkulaere durch `from app import csrf,
