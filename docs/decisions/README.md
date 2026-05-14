@@ -16,6 +16,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0008](0008-secrets-out-of-mvp.md) | Secret-Scanning out of MVP | Akzeptiert |
 | [0009](0009-no-mobile.md) | Mobile-responsive Layout out of scope | Akzeptiert |
 | [0010](0010-deepseek-v3-default.md) | DeepSeek V3 als LLM-Default-Modell | Akzeptiert |
+| [0011](0011-lang-pkgs-target-disambiguation.md) | `package_name@target`-Disambiguation für lang-pkgs | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

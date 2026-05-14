@@ -1,0 +1,217 @@
+{# Server-Liste unter /settings/servers.
+
+   Variablen:
+     - `servers` (Iterable[Server])  — Felder:
+         id, name, revoked_at, retired_at, last_scan_at,
+         expected_scan_interval_h, os_pretty_name, kernel_version,
+         architecture, trivy_db_updated_at, tag_links[*].tag (name, color).
+     - `revoke_form`, `retire_form` (CSRFOnlyForm)
+
+   Stale-Logik (siehe ARCHITECTURE §14):
+     - Server "stale" wenn last_scan_at aelter als expected_scan_interval_h.
+     - Trivy-DB "veraltet" wenn trivy_db_updated_at > 7 Tage alt (168h).
+   Beide Schwellen kommen ueber den `is_older_than_h`-Jinja-Filter.
+
+   Relative Zeitangaben ("vor 2h" / "noch nie") liefert der `relative_time`-
+   Jinja-Filter (definiert in app/__init__.py). #}
+{% extends "base.html" %}
+
+{% block title %}Server · secscan{% endblock %}
+
+{% block content %}
+<section class="max-w-6xl mx-auto space-y-8">
+  <header>
+    <h1 class="text-2xl font-semibold">Server</h1>
+    <p class="opacity-70 text-sm mt-1">
+      Registrierte Server. Revoke macht den API-Key sofort unbrauchbar;
+      Retire stilllegt den Server und resolved alle offenen Findings.
+    </p>
+  </header>
+
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title">Registrierte Server</h2>
+
+      {% if servers %}
+        <div class="overflow-x-auto mt-2">
+          <table class="table table-zebra">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Tags</th>
+                <th>Letzter Scan</th>
+                <th>Status</th>
+                <th class="text-right">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for srv in servers %}
+                {% set is_active = not srv.revoked_at and not srv.retired_at %}
+                {% set scan_stale = is_active
+                  and srv.last_scan_at
+                  and (srv.last_scan_at | is_older_than_h(srv.expected_scan_interval_h)) %}
+                {% set trivy_db_stale = is_active
+                  and srv.trivy_db_updated_at
+                  and (srv.trivy_db_updated_at | is_older_than_h(168)) %}
+                <tr class="hover">
+                  {# Name + OS/Kernel/Arch als gedämpfter Subtext. #}
+                  <td>
+                    <div class="font-mono font-medium">{{ srv.name }}</div>
+                    {% if srv.os_pretty_name or srv.kernel_version or srv.architecture %}
+                      <div class="text-xs opacity-60 mt-0.5">
+                        {% if srv.os_pretty_name %}{{ srv.os_pretty_name }}{% endif %}
+                        {% if srv.kernel_version %}
+                          {% if srv.os_pretty_name %} · {% endif %}{{ srv.kernel_version }}
+                        {% endif %}
+                        {% if srv.architecture %}
+                          {% if srv.os_pretty_name or srv.kernel_version %} · {% endif %}{{ srv.architecture }}
+                        {% endif %}
+                      </div>
+                    {% endif %}
+                  </td>
+
+                  {# Tags als farbige DaisyUI-Badges. Border und Text mit der
+                     Tag-Farbe; Hintergrund neutral, damit Theme-Kontrast bleibt.
+                     `tag.color` ist serverseitig auf #rrggbb-Regex validiert. #}
+                  <td>
+                    {% if srv.tag_links %}
+                      <div class="flex flex-wrap gap-1">
+                        {% for link in srv.tag_links %}
+                          <span class="badge badge-outline font-mono text-xs"
+                                style="border-color: {{ link.tag.color }}; color: {{ link.tag.color }};">
+                            {{ link.tag.name }}
+                          </span>
+                        {% endfor %}
+                      </div>
+                    {% else %}
+                      <span class="opacity-50 text-xs">—</span>
+                    {% endif %}
+                  </td>
+
+                  {# Letzter Scan: relativer String + Stale-/Trivy-DB-Badges. #}
+                  <td>
+                    <div>
+                      {% if srv.last_scan_at %}
+                        <time datetime="{{ srv.last_scan_at.isoformat() }}"
+                              title="{{ srv.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+                          {{ srv.last_scan_at | relative_time }}
+                        </time>
+                      {% else %}
+                        <span class="opacity-60">noch nie</span>
+                      {% endif %}
+                    </div>
+                    <div class="mt-1 flex flex-wrap gap-1">
+                      {% if scan_stale %}
+                        <span class="badge badge-error badge-sm"
+                              title="Letzter Scan aelter als erwarteter Interval ({{ srv.expected_scan_interval_h }}h).">
+                          stale
+                        </span>
+                      {% endif %}
+                      {% if trivy_db_stale %}
+                        <span class="badge badge-warning badge-sm"
+                              title="Trivy-DB aelter als 7 Tage (Stand: {{ srv.trivy_db_updated_at.strftime('%Y-%m-%d') }}).">
+                          trivy-db veraltet
+                        </span>
+                      {% endif %}
+                    </div>
+                  </td>
+
+                  {# Status: error/neutral/success — eine Farbe pro Status. #}
+                  <td>
+                    {% if srv.revoked_at %}
+                      <span class="badge badge-error"
+                            title="Widerrufen am {{ srv.revoked_at.strftime('%Y-%m-%d %H:%M') }}">
+                        revoked
+                      </span>
+                    {% elif srv.retired_at %}
+                      <span class="badge badge-neutral"
+                            title="Stillgelegt am {{ srv.retired_at.strftime('%Y-%m-%d %H:%M') }}">
+                        retired
+                      </span>
+                    {% else %}
+                      <span class="badge badge-success">active</span>
+                    {% endif %}
+                  </td>
+
+                  {# Actions: Dropdown mit Rotate-Hint / Revoke / Retire. #}
+                  <td class="text-right">
+                    {% if is_active %}
+                      <div class="dropdown dropdown-end">
+                        <button tabindex="0"
+                                class="btn btn-ghost btn-sm"
+                                aria-label="Aktionen fuer {{ srv.name }}">
+                          ... Mehr
+                        </button>
+                        <ul tabindex="0"
+                            class="dropdown-content menu bg-base-100 rounded-box shadow-md w-64 z-50 p-2">
+                          {# Key-Rotation: nur Hinweis, kein Browser-Endpoint.
+                             Die Rotation laeuft per Operator-Workflow ueber
+                             agent/secscan-register.sh. #}
+                          <li>
+                            <div class="flex flex-col items-start gap-1 cursor-default">
+                              <span class="font-medium">Key rotieren</span>
+                              <span class="text-xs opacity-70">
+                                Per <code class="font-mono">secscan-register.sh</code> auf dem Host.
+                              </span>
+                            </div>
+                          </li>
+                          <li>
+                            <form method="post"
+                                  action="{{ url_for('servers.revoke_server', server_id=srv.id) }}"
+                                  x-data
+                                  @submit="if (!confirm('Server-Key revoken? Der Agent kann danach keine Scans mehr pushen.')) $event.preventDefault();">
+                              {{ revoke_form.csrf_token }}
+                              <button type="submit"
+                                      class="text-warning w-full text-left"
+                                      aria-label="Server {{ srv.name }} widerrufen">
+                                Revoke
+                              </button>
+                            </form>
+                          </li>
+                          <li>
+                            <form method="post"
+                                  action="{{ url_for('servers.retire_server', server_id=srv.id) }}"
+                                  x-data
+                                  @submit="if (!confirm('Server stilllegen? Alle offenen Findings werden als resolved markiert.')) $event.preventDefault();">
+                              {{ retire_form.csrf_token }}
+                              <button type="submit"
+                                      class="text-error w-full text-left"
+                                      aria-label="Server {{ srv.name }} stilllegen">
+                                Retire
+                              </button>
+                            </form>
+                          </li>
+                        </ul>
+                      </div>
+                    {% else %}
+                      <span class="opacity-60 text-sm">keine Aktionen</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        {# Empty-State mit Registrierungs-Snippet aus agent/README.md. #}
+        <div class="mt-2 space-y-3">
+          <p class="opacity-70">
+            Noch keine Server registriert.
+          </p>
+          <p class="text-sm opacity-70">
+            Auf dem Ziel-Host registrieren mit
+            <code class="font-mono">agent/secscan-register.sh</code>:
+          </p>
+          <pre class="bg-base-300 text-base-content rounded-md p-3 text-xs overflow-x-auto"><code>SECSCAN_MASTER_KEY="&lt;dein-master-key&gt;" \
+  ./secscan-register.sh https://secscan.example.com prod-web-01 24 \
+  | install -m 600 /dev/stdin /etc/secscan/api-key</code></pre>
+          <p class="text-xs opacity-60">
+            Der Server-Key wird nur einmal ausgegeben. Bei Verlust per
+            <code class="font-mono">secscan-register.sh</code> neu rotieren.
+          </p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

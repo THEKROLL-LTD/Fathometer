@@ -17,7 +17,7 @@ Konfiguriert in dieser Reihenfolge:
 from __future__ import annotations
 
 import sys
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import structlog
@@ -51,6 +51,54 @@ csrf: CSRFProtect = CSRFProtect()
 
 
 _VALID_THEMES: frozenset[str] = frozenset({"light", "dark", "auto"})
+
+
+def _relative_time(value: datetime | None) -> str:
+    """Formatiere einen Zeitstempel als deutsche Relativangabe.
+
+    Beispiele: "gerade eben", "vor 5min", "vor 2h", "vor 3 Tagen". Bei `None`
+    gibt der Filter "noch nie" zurueck. Naive datetimes werden als UTC
+    interpretiert (defensive).
+    """
+    if value is None:
+        return "noch nie"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    delta = datetime.now(tz=UTC) - value
+    seconds = int(delta.total_seconds())
+    if seconds < 0:
+        # Zukunft — selten (Clock-Skew). Wir zeigen "gerade eben".
+        return "gerade eben"
+    if seconds < 60:
+        return "gerade eben"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"vor {minutes}min"
+    hours = minutes // 60
+    if hours < 24:
+        return f"vor {hours}h"
+    days = hours // 24
+    if days < 30:
+        return f"vor {days} Tag" + ("" if days == 1 else "en")
+    months = days // 30
+    if months < 12:
+        return f"vor {months} Monat" + ("" if months == 1 else "en")
+    years = days // 365
+    return f"vor {years} Jahr" + ("" if years == 1 else "en")
+
+
+def _is_older_than_h(value: datetime | None, hours: int) -> bool:
+    """`True` wenn `value` mehr als `hours` Stunden in der Vergangenheit liegt.
+
+    Bei `None` -> `False` (Stale-Badge unterdrueckt, "noch nie" reicht aus).
+    """
+    if value is None:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    delta = datetime.now(tz=UTC) - value
+    return delta.total_seconds() > hours * 3600
+
 
 # Pfade, die ohne abgeschlossenes Setup erreichbar bleiben muessen.
 _SETUP_EXEMPT_PREFIXES: tuple[str, ...] = (
@@ -105,6 +153,12 @@ def create_app() -> Flask:
     # Wir zusaetzlich select_autoescape-aequivalent: alle Templates escapen.
     app.jinja_env.autoescape = True
 
+    # Jinja-Filter: relative Zeitangaben fuer Templates. Minimal-invasiv,
+    # damit alle Templates ohne Anpassung der Views "vor 2h" / "vor 3 Tagen"
+    # rendern koennen. Bei `None` wird "noch nie" geliefert.
+    app.jinja_env.filters["relative_time"] = _relative_time
+    app.jinja_env.filters["is_older_than_h"] = _is_older_than_h
+
     # 4. Rate-Limiter initialisieren. Defaults: §9.
     limiter.init_app(app)
     # Default-Limits gelten fuer alle Routes; spezifische Endpoints koennen
@@ -132,12 +186,22 @@ def create_app() -> Flask:
     app.register_blueprint(health_bp)
 
     from app.views.auth import auth_bp
+    from app.views.servers import servers_bp
     from app.views.settings import settings_bp
     from app.views.setup import setup_bp
 
     app.register_blueprint(setup_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(servers_bp)
+
+    # API-Blueprint (Block C). Routes werden in `register_api_routes`
+    # importiert (lazy, vermeidet Zirkulaere durch `from app import csrf,
+    # limiter` in den Endpoint-Modulen).
+    from app.api import api_bp, register_api_routes
+
+    register_api_routes()
+    app.register_blueprint(api_bp)
 
     # 8. Theme-Cookie-Handling — leichtgewichtiger Stub fuer Light/Dark/Auto.
     @app.before_request
