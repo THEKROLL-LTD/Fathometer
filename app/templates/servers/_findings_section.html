@@ -1,0 +1,152 @@
+{# Findings-Sektion fuer den Server-Detail-View (Block E).
+
+   Variablen-Vertrag (gesetzt in app/views/server_detail.py):
+     - `server`        : Server (eager-loaded tag_links.tag)
+     - `view_filter`   : FindingsViewFilter (mode/status/class/severity/...)
+     - `counts`        : dict[str, int] — open/acknowledged/resolved/total/kev_open
+     - `findings`      : list[Finding] — fuer mode=list
+     - `groups`        : list[PackageGroup] — fuer mode=group
+     - `diff`          : DiffSection | None — fuer mode=diff
+     - `ack_form`      : AcknowledgeForm
+     - `reopen_form`   : ReopenForm
+     - `note_form`     : NoteForm
+     - `group_ack_form`: GroupAcknowledgeForm
+     - `csrf_form`     : CSRFOnlyForm
+
+   Wird sowohl direkt aus `detail.html` als auch als HTMX-Partial gerendert.
+
+   Filter-State liegt vollstaendig im URL-Query-String — Bookmarks und Share-
+   Links funktionieren direkt (§7). Form ist `method="get"`; HTMX-Targeting
+   ist optional auf das `#findings-section`-Wrap.
+#}
+{% from "_macros.html" import severity_badge, kev_badge %}
+<section class="space-y-4" id="findings-section">
+  {# Header: Titel + Counts-Badges. #}
+  <header class="flex flex-wrap items-center justify-between gap-2">
+    <h2 class="text-xl font-semibold">Findings</h2>
+    <div class="flex flex-wrap items-center gap-2 text-sm">
+      <span class="badge badge-warning gap-1" title="Offene Findings">
+        <span class="font-semibold">{{ counts.open }}</span> open
+      </span>
+      <span class="badge badge-info gap-1" title="Acknowledged">
+        <span class="font-semibold">{{ counts.acknowledged }}</span> ack
+      </span>
+      <span class="badge badge-success gap-1" title="Resolved">
+        <span class="font-semibold">{{ counts.resolved }}</span> resolved
+      </span>
+      {% if counts.kev_open %}
+        <span class="badge badge-error ring-1 ring-error/40 gap-1"
+              title="Offene KEV-Findings — bekannte aktiv ausgenutzte CVEs.">
+          <span class="font-semibold">{{ counts.kev_open }}</span> KEV
+        </span>
+      {% endif %}
+    </div>
+  </header>
+
+  {# Mode-Tabs — jeder Tab ist ein Link, der nur `mode` ueberschreibt und alle
+     anderen Filter-Werte aus dem aktuellen Query-String erhaelt. #}
+  <nav class="tabs tabs-boxed bg-base-200" role="tablist" aria-label="View-Modus">
+    {% for mode_value, mode_label in [
+      ('list',  'Liste'),
+      ('group', 'Gruppiert nach Paket'),
+      ('diff',  'Diff seit letztem Scan'),
+    ] %}
+      <a class="tab {% if view_filter.mode == mode_value %}tab-active{% endif %}"
+         role="tab"
+         aria-selected="{{ 'true' if view_filter.mode == mode_value else 'false' }}"
+         href="{{ url_for('server_detail.show', server_id=server.id) }}?{{ view_filter.to_query_string(override={'mode': mode_value}) }}">
+        {{ mode_label }}
+      </a>
+    {% endfor %}
+  </nav>
+
+  {# Filter-Form: alle Filter aus dem Query-String, kein Server-State.
+     Diff-Mode hat keine Filter (Diff zeigt immer den vollen Zustand). #}
+  {% if view_filter.mode != 'diff' %}
+  <form method="get"
+        action="{{ url_for('server_detail.show', server_id=server.id) }}"
+        class="card bg-base-200 shadow-sm">
+    <div class="card-body p-4 flex flex-wrap items-end gap-3 text-sm">
+      {# Mode bleibt erhalten. #}
+      <input type="hidden" name="mode" value="{{ view_filter.mode }}">
+
+      <label class="form-control">
+        <span class="label-text text-xs opacity-70 pb-1">Status</span>
+        <select name="status" class="select select-bordered select-sm">
+          <option value="open"         {% if view_filter.status == 'open' %}selected{% endif %}>offen</option>
+          <option value="acknowledged" {% if view_filter.status == 'acknowledged' %}selected{% endif %}>acknowledged</option>
+          <option value="resolved"     {% if view_filter.status == 'resolved' %}selected{% endif %}>resolved</option>
+          <option value="all"          {% if view_filter.status == 'all' %}selected{% endif %}>alle</option>
+        </select>
+      </label>
+
+      {# Class-Toggle als 3er-Buttons-Group (DaisyUI `join`). #}
+      <div class="form-control">
+        <span class="label-text text-xs opacity-70 pb-1">Klasse</span>
+        <div class="join" role="group" aria-label="Finding-Klasse">
+          {% for cls_val, cls_label, cls_title in [
+            ('both',      'OS + Lang', 'Beide — OS-Pakete oben.'),
+            ('os-pkgs',   'nur OS',     'System-Pakete (apk/apt/rpm).'),
+            ('lang-pkgs', 'nur Lang',   'Library-Findings in installierten Binaries.'),
+          ] %}
+            <button type="submit" name="class" value="{{ cls_val }}"
+                    class="btn btn-sm join-item {% if view_filter.finding_class == cls_val %}btn-active btn-primary{% endif %}"
+                    title="{{ cls_title }}"
+                    aria-pressed="{{ 'true' if view_filter.finding_class == cls_val else 'false' }}">
+              {{ cls_label }}
+            </button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <label class="form-control">
+        <span class="label-text text-xs opacity-70 pb-1">Severity-Min</span>
+        <select name="severity" class="select select-bordered select-sm">
+          <option value="all"      {% if not view_filter.severity %}selected{% endif %}>alle</option>
+          <option value="critical" {% if view_filter.severity and view_filter.severity.value == 'critical' %}selected{% endif %}>critical</option>
+          <option value="high"     {% if view_filter.severity and view_filter.severity.value == 'high'     %}selected{% endif %}>high+</option>
+          <option value="medium"   {% if view_filter.severity and view_filter.severity.value == 'medium'   %}selected{% endif %}>medium+</option>
+          <option value="low"      {% if view_filter.severity and view_filter.severity.value == 'low'      %}selected{% endif %}>low+</option>
+        </select>
+      </label>
+
+      <label class="form-control cursor-pointer">
+        <span class="label-text text-xs opacity-70 pb-1">&nbsp;</span>
+        <div class="flex items-center gap-2 h-8">
+          <input type="checkbox" name="kev_only" value="1"
+                 class="checkbox checkbox-sm checkbox-error"
+                 {% if view_filter.kev_only %}checked{% endif %}>
+          <span class="text-sm">nur KEV</span>
+        </div>
+      </label>
+
+      <label class="form-control flex-1 min-w-48">
+        <span class="label-text text-xs opacity-70 pb-1">Suche</span>
+        <input type="text"
+               name="q"
+               value="{{ view_filter.search or '' }}"
+               class="input input-bordered input-sm"
+               placeholder="CVE-ID, Paket, Titel…"
+               aria-label="Suche nach CVE-ID, Paket oder Titel">
+      </label>
+
+      <div class="flex items-center gap-2">
+        <button type="submit" class="btn btn-sm btn-primary">filtern</button>
+        <a href="{{ url_for('server_detail.show', server_id=server.id) }}?mode={{ view_filter.mode }}"
+           class="link link-hover text-xs opacity-70">
+          zuruecksetzen
+        </a>
+      </div>
+    </div>
+  </form>
+  {% endif %}
+
+  {# Body je nach Modus. #}
+  {% if view_filter.mode == 'list' %}
+    {% include "servers/_view_list.html" %}
+  {% elif view_filter.mode == 'group' %}
+    {% include "servers/_view_group.html" %}
+  {% else %}
+    {% include "servers/_view_diff.html" %}
+  {% endif %}
+</section>

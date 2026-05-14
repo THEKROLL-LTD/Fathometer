@@ -128,6 +128,45 @@
     {% block content %}{% endblock %}
   </main>
 
+  {# Global Toast-Container.
+     Listener auf `toast`-Window-Event — feuert von Alpine-Komponenten via
+     `$dispatch('toast', {msg: '...', kind: 'success'|'error'|'info'})`.
+     DaisyUI-`toast`-Slot rechts unten, Auto-Dismiss nach 3s. #}
+  <div id="global-toast-host"
+       x-data="{
+         items: [],
+         push(detail) {
+           const id = Date.now() + Math.random();
+           const kind = (detail && detail.kind) || 'info';
+           const msg  = (detail && detail.msg)  || '';
+           this.items.push({ id, msg, kind });
+           setTimeout(() => {
+             this.items = this.items.filter(t => t.id !== id);
+           }, 3000);
+         }
+       }"
+       @toast.window="push($event.detail)"
+       class="toast toast-end toast-bottom z-50"
+       aria-live="polite"
+       aria-atomic="true">
+    <template x-for="t in items" :key="t.id">
+      <div class="alert shadow-lg"
+           :class="{
+             'alert-success': t.kind === 'success',
+             'alert-error':   t.kind === 'error',
+             'alert-info':    t.kind === 'info' || (t.kind !== 'success' && t.kind !== 'error')
+           }">
+        <span x-text="t.msg"></span>
+      </div>
+    </template>
+  </div>
+
+  {# Modal-Mount fuer HTMX-eingespielte Inhalte (Finding-Detail, Status-Change).
+     Endpoints liefern HTML-Fragmente; HTMX schreibt sie in `#modal-host`
+     hinein. Das Schliessen passiert ueber `closeModal()` (Alpine-Snippet im
+     Template) ODER per `htmx:afterSwap`-Reset wenn das Fragment leer ist. #}
+  <div id="modal-host"></div>
+
   {# `themeToggle()` lebt in static/js/theme.js (oben mit `defer` eingebunden). #}
 
   {% block scripts %}{% endblock %}
