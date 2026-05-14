@@ -107,10 +107,75 @@ def login(
     assert resp.status_code == 302, (resp.status_code, resp.data[:200])
 
 
+# Block-C-Helpers ---------------------------------------------------------
+
+
+DEFAULT_TEST_MASTER_KEY = "test-master-key-32-bytes-minimum-entropy-aaa"
+
+
+def set_master_key(app: Flask, plain_master_key: str = DEFAULT_TEST_MASTER_KEY) -> None:
+    """Setzt den Master-Key direkt via ORM (SHA-256-Hash) ohne Setup-Wizard.
+
+    Wird von Block-C-Tests benutzt, die `/api/register` und `/api/keys/rotate`
+    testen — wir brauchen Kontrolle ueber den Klartext-Master-Key, den der
+    Wizard aber nur einmalig generiert.
+    """
+    from app.auth import hash_master_key
+    from app.db import get_session_factory
+    from app.settings_service import ensure_settings_row
+
+    factory = get_session_factory(app)
+    with app.app_context():
+        sess = factory()
+        try:
+            row = ensure_settings_row(sess)
+            row.master_key_hash = hash_master_key(plain_master_key)
+            sess.commit()
+        finally:
+            sess.close()
+
+
+def register_test_server(
+    app: Flask,
+    name: str = "testhost",
+    *,
+    interval_h: int = 24,
+) -> tuple[int, str]:
+    """Legt einen Server direkt via ORM an, gibt `(server_id, plain_api_key)` zurueck.
+
+    Bewusst nicht via HTTP — manche Tests wollen den Klartext-Key bereits
+    haben bevor irgendwelche Limiter triggern.
+    """
+    from app.auth import generate_server_key, hash_server_key
+    from app.db import get_session_factory
+    from app.models import Server
+
+    factory = get_session_factory(app)
+    with app.app_context():
+        sess = factory()
+        try:
+            plain = generate_server_key()
+            srv = Server(
+                name=name,
+                api_key_hash=hash_server_key(plain),
+                expected_scan_interval_h=interval_h,
+            )
+            sess.add(srv)
+            sess.flush()
+            srv_id = srv.id
+            sess.commit()
+            return (srv_id, plain)
+        finally:
+            sess.close()
+
+
 __all__ = [
     "ADMIN_PASSWORD",
     "ADMIN_USERNAME",
+    "DEFAULT_TEST_MASTER_KEY",
     "complete_setup",
     "create_admin_user",
     "login",
+    "register_test_server",
+    "set_master_key",
 ]
