@@ -192,9 +192,11 @@ def create_app() -> Flask:
     # 7. Blueprints.
     app.register_blueprint(health_bp)
 
+    from app.views.audit_view import audit_bp
     from app.views.auth import auth_bp
     from app.views.dashboard import dashboard_bp
     from app.views.findings import findings_bp
+    from app.views.search import search_bp
     from app.views.server_detail import server_detail_bp
     from app.views.servers import servers_bp
     from app.views.settings import settings_bp
@@ -206,6 +208,8 @@ def create_app() -> Flask:
     app.register_blueprint(servers_bp)
     app.register_blueprint(server_detail_bp)
     app.register_blueprint(findings_bp)
+    app.register_blueprint(search_bp)
+    app.register_blueprint(audit_bp)
     app.register_blueprint(dashboard_bp)
 
     # API-Blueprint (Block C). Routes werden in `register_api_routes`

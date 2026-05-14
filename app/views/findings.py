@@ -26,7 +26,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    Response,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask_login import current_user, login_required
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
@@ -36,6 +45,8 @@ from app.audit import log_event
 from app.db import get_session
 from app.forms import AcknowledgeForm, CSRFOnlyForm, GroupAcknowledgeForm, NoteForm, ReopenForm
 from app.models import Finding, FindingNote, FindingStatus
+from app.schemas.findings_view_filter import FindingsViewFilter
+from app.services.csv_export import stream_findings_csv
 
 log = structlog.get_logger(__name__)
 
@@ -403,6 +414,49 @@ def group_acknowledge() -> WerkzeugResponse | str:
         # setzen. Einfacher: 303-Redirect auf den Server-Detail-View.
         return redirect(url_for("server_detail.show", server_id=server_id), code=303)
     return redirect(url_for("server_detail.show", server_id=server_id))
+
+
+# ---------------------------------------------------------------------------
+# Findings-CSV-Export
+# ---------------------------------------------------------------------------
+
+
+@findings_bp.get("/export.csv")
+@login_required
+def export_csv() -> Response:
+    """Streamt die gefilterte Findings-Liste als CSV.
+
+    Akzeptiert dieselben Query-Parameter wie `/servers/<id>` (Findings-
+    View): `status`, `class`, `severity`, `kev_only`, `q`. Zusaetzlich
+    `server_id` (optional) um den Export auf einen Server einzuschraenken
+    — ohne `server_id` exportieren wir ueber die ganze Flotte.
+
+    `mode` wird ignoriert (CSV ist immer flach).
+    """
+    sess = get_session()
+    view_filter = FindingsViewFilter.from_request(request.args)
+    findings_filter = view_filter.to_findings_filter()
+
+    server_id_raw = (request.args.get("server_id") or "").strip()
+    server_id: int | None
+    try:
+        server_id = int(server_id_raw) if server_id_raw else None
+    except ValueError:
+        server_id = None
+
+    log.info(
+        "findings.csv_export",
+        server_id=server_id,
+        status=view_filter.status,
+        kev_only=view_filter.kev_only,
+    )
+
+    response = Response(
+        stream_findings_csv(sess, server_id=server_id, filter_obj=findings_filter),
+        mimetype="text/csv; charset=utf-8",
+    )
+    response.headers["Content-Disposition"] = 'attachment; filename="findings.csv"'
+    return response
 
 
 # ---------------------------------------------------------------------------

@@ -203,6 +203,16 @@ class NoteForm(FlaskForm):
     )
 
 
+class BulkActionForm(FlaskForm):
+    """Container fuer die Checkbox-basierte Bulk-Auswahl im Server-Detail.
+
+    Eigentliche Auswahl-IDs werden per JSON-Body an `/api/findings/bulk-
+    acknowledge` geschickt; diese Form dient nur als CSRF-Token-Halter
+    fuer den Modal-Submit aus dem Server-Detail-View und der globalen
+    Suche.
+    """
+
+
 class GroupAcknowledgeForm(FlaskForm):
     """Bulk-Acknowledge fuer alle OPEN-Findings eines Pakets.
 
@@ -230,6 +240,7 @@ __all__ = [
     "TAG_COLOR_REGEX",
     "TAG_NAME_REGEX",
     "AcknowledgeForm",
+    "BulkActionForm",
     "CSRFOnlyForm",
     "GroupAcknowledgeForm",
     "LoginForm",

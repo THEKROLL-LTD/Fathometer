@@ -29,6 +29,7 @@ from app.db import get_session
 from app.forms import (
     TAG_NAME_REGEX,
     AcknowledgeForm,
+    BulkActionForm,
     CSRFOnlyForm,
     GroupAcknowledgeForm,
     NoteForm,
@@ -122,6 +123,7 @@ def _render_findings_section(
         "reopen_form": ReopenForm(),
         "note_form": NoteForm(),
         "group_ack_form": GroupAcknowledgeForm(),
+        "bulk_form": BulkActionForm(),
         "csrf_form": CSRFOnlyForm(),
     }
 
