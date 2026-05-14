@@ -1,0 +1,56 @@
+# docker-compose-Setup fuer secscan (lokal und Single-Node-Hosting).
+# Zwei Services: `app` (Flask + Gunicorn) und `db` (Postgres 17).
+# Production-Empfehlung: Reverse-Proxy davor (nginx/Caddy/Traefik) — siehe
+# ARCHITECTURE.md §9.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-secscan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secscan}
+      POSTGRES_DB: ${POSTGRES_DB:-secscan}
+    volumes:
+      - secscan-db:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "${POSTGRES_USER:-secscan}" -d "${POSTGRES_DB:-secscan}"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SECSCAN_ENCRYPTION_KEY: ${SECSCAN_ENCRYPTION_KEY}
+      SECSCAN_SECRET_KEY: ${SECSCAN_SECRET_KEY}
+      SECSCAN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-secscan}:${POSTGRES_PASSWORD:-secscan}@db:5432/${POSTGRES_DB:-secscan}
+      SECSCAN_MAX_BODY_MB: ${SECSCAN_MAX_BODY_MB:-10}
+      SECSCAN_MAX_DECOMPRESSED_MB: ${SECSCAN_MAX_DECOMPRESSED_MB:-100}
+      SECSCAN_RATELIMIT_REGISTER: ${SECSCAN_RATELIMIT_REGISTER:-10/minute}
+      SECSCAN_RATELIMIT_LOGIN: ${SECSCAN_RATELIMIT_LOGIN:-5/minute}
+      SECSCAN_RATELIMIT_SCANS_UNAUTH: ${SECSCAN_RATELIMIT_SCANS_UNAUTH:-20/minute}
+      SECSCAN_RATELIMIT_SCANS_AUTH: ${SECSCAN_RATELIMIT_SCANS_AUTH:-60/hour}
+      SECSCAN_GUNICORN_WORKERS: ${SECSCAN_GUNICORN_WORKERS:-2}
+      SECSCAN_GUNICORN_TIMEOUT: ${SECSCAN_GUNICORN_TIMEOUT:-120}
+      SECSCAN_LOG_LEVEL: ${SECSCAN_LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  secscan-db:

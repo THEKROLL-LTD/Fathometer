@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="de" data-theme="{{ theme }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}secscan{% endblock %}</title>
+  {# Tailwind/DaisyUI/HTMX/Alpine kommen in Block H via CDN — siehe ADR-0001. #}
+</head>
+<body>
+  {% block content %}{% endblock %}
+</body>
+</html>

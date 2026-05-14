@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Test- und Tool-Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+
+# Env-Dateien — Beispiel bleibt eingecheckt
+.env
+.env.local
+.env.*
+!.env.example
+
+# Build-Artefakte
+*.log

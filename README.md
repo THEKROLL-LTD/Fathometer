@@ -4,6 +4,31 @@ Selbst-gehostete Web-App, die Trivy-Filesystem-Scans von Root-Servern einsammelt
 
 **Status: Spec-Phase abgeschlossen, Implementierung steht aus.**
 
+## Quick-Start
+
+Voraussetzung: Docker und Docker Compose. Kein Node, kein lokales Python noetig — alles laeuft im Container.
+
+```bash
+cp .env.example .env
+# Fernet-Key generieren und in .env unter SECSCAN_ENCRYPTION_KEY eintragen:
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Flask-Session-Geheimnis erzeugen und in .env unter SECSCAN_SECRET_KEY eintragen:
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+
+docker compose up -d --build
+curl -fsS http://localhost:8000/healthz
+```
+
+Erwartet wird eine JSON-Antwort `{"status":"ok"}`. `/readyz` antwortet unabhaengig vom DB-Zustand mit 200, sobald der App-Container lebt.
+
+### Reverse-Proxy in Produktion
+
+Die App lauscht im Container auf Port 8000 in Klartext-HTTP. **Sie ist nicht dafuer gedacht, direkt am Internet zu haengen.** Setze einen Reverse-Proxy davor (nginx, Caddy oder Traefik) und uebernimm dort TLS-Termination, Connection-Limits, Slow-Loris-Schutz und ideally eine IP-Allowlist auf `/api/scans` (nur die eigenen Server-IPs zulassen). Details und Empfehlungen in `ARCHITECTURE.md` §9.
+
+### Postgres-Backups
+
+Der Datenbank-Container persistiert in das Docker-Volume `secscan-db`. Wichtig ist hier ein regelmaessiger logischer Dump, kein Datei-Snapshot — Postgres-Datendateien sind zwischen Major-Versionen nicht binaerkompatibel und reine Volume-Backups verlieren beim naechsten Upgrade ihre Brauchbarkeit. Setze einen Cron-Job auf dem Host (oder einen Backup-Sidecar) auf, der den Dump auf eine externe Ablage rotiert und das wiederherstellbare Format nutzt das eure Org-Standards vorsehen. Wir liefern bewusst kein fertiges Backup-Snippet mit — die Wahl von Zielort, Verschluesselung und Retention ist eine Operator-Entscheidung. Hintergrund zur Speicher-Strategie und welche Daten ueberhaupt persistiert werden steht in `docs/decisions/0005-no-raw-json-storage.md`.
+
 ## Repo-Struktur
 
 ```

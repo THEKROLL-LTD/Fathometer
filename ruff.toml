@@ -1,0 +1,40 @@
+# Ruff-Konfiguration für secscan
+# Siehe CLAUDE.md: ruff check . && ruff format --check . muss grün sein.
+
+line-length = 100
+target-version = "py313"
+
+extend-exclude = [
+    "alembic/versions",
+    "agent",
+]
+
+[lint]
+# Strikte aber pragmatische Auswahl.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+    "N",   # pep8-naming
+    "S",   # flake8-bandit (Security)
+    "C4",  # flake8-comprehensions
+    "PIE", # flake8-pie
+    "PTH", # flake8-use-pathlib
+]
+ignore = [
+    "E501",  # line-length — wird vom Formatter erzwungen
+    "S101",  # assert in Tests ist ok
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+"alembic/env.py" = ["E402"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

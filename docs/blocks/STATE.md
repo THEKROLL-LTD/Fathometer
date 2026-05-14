@@ -4,20 +4,20 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Aktueller Block
 
-**A — Skelett und Basis** (noch nicht gestartet)
+**B — Models und Auth** (noch nicht gestartet)
 
-Plan: [`A-skeleton.md`](A-skeleton.md)
+Plan: [`B-models.md`](B-models.md)
 
 ## Completed
 
-(noch nichts — Spec-Phase abgeschlossen 2026-05-14, Implementierung steht aus)
+- **A — Skelett und Basis** · abgeschlossen 2026-05-14 · Branch `feat/block-a` · Reviewer-Freigabe nach Re-Review (Gunicorn `HOME=/app` + `--worker-tmp-dir /dev/shm`-Fix).
 
 ## Backlog (in Reihenfolge)
 
 | Block | Datei | Status |
 |-------|-------|--------|
-| A | [A-skeleton.md](A-skeleton.md) | nicht gestartet |
-| B | [B-models.md](B-models.md) | wartet auf A |
+| A | [A-skeleton.md](A-skeleton.md) | completed 2026-05-14 |
+| B | [B-models.md](B-models.md) | aktueller Block |
 | C | [C-ingest.md](C-ingest.md) | wartet auf B |
 | D | [D-dashboard.md](D-dashboard.md) | wartet auf C |
 | E | [E-triage.md](E-triage.md) | wartet auf D |
