@@ -1,0 +1,112 @@
+{
+  "_NOTE": "Synthetische Adversarial-Fixture. Jedes Vulnerability-Objekt enthaelt genau einen Bad-Input, dokumentiert im _attack-Feld. Ingest muss alle ablehnen oder die schaedlichen Werte verwerfen, ohne 500-Crash.",
+  "SchemaVersion": 2,
+  "ArtifactName": "adversarial-fixture",
+  "ArtifactType": "filesystem",
+  "Metadata": {
+    "OS": {"Family": "ubuntu", "Name": "22.04"},
+    "DataSource": {"ID": "test", "Name": "Test", "URL": "https://example.com"},
+    "UpdatedAt": "2026-05-14T00:00:00Z"
+  },
+  "Results": [
+    {
+      "Target": "adversarial",
+      "Class": "os-pkgs",
+      "Type": "ubuntu",
+      "Vulnerabilities": [
+        {
+          "_attack": "NUL-Byte-Marker in Title (im Test-Code wird das Marker durch echtes NUL ersetzt)",
+          "VulnerabilityID": "CVE-2026-00001",
+          "PkgName": "test-pkg-a",
+          "InstalledVersion": "1.0",
+          "FixedVersion": "1.1",
+          "Severity": "HIGH",
+          "Title": "Title with NULBYTEMARKER inside"
+        },
+        {
+          "_attack": "Skript-Tag in Title (XSS-Test)",
+          "VulnerabilityID": "CVE-2026-00002",
+          "PkgName": "test-pkg-b",
+          "InstalledVersion": "1.0",
+          "FixedVersion": "1.1",
+          "Severity": "HIGH",
+          "Title": "<script>alert('xss')</script>"
+        },
+        {
+          "_attack": "EPSS-Score ausserhalb [0.0, 1.0]",
+          "VulnerabilityID": "CVE-2026-00003",
+          "PkgName": "test-pkg-c",
+          "InstalledVersion": "1.0",
+          "FixedVersion": "1.1",
+          "Severity": "MEDIUM",
+          "Title": "Bad EPSS",
+          "EPSS": {"Score": 1.5, "Percentile": 1.7}
+        },
+        {
+          "_attack": "Ungueltige CVE-ID",
+          "VulnerabilityID": "CVE-foo-bar",
+          "PkgName": "test-pkg-d",
+          "InstalledVersion": "1.0",
+          "Severity": "LOW",
+          "Title": "Bad CVE-ID"
+        },
+        {
+          "_attack": "Severity ausserhalb der Whitelist",
+          "VulnerabilityID": "CVE-2026-00005",
+          "PkgName": "test-pkg-e",
+          "InstalledVersion": "1.0",
+          "Severity": "ULTRA_CRITICAL",
+          "Title": "Bad Severity"
+        },
+        {
+          "_attack": "Package-Name mit Path-Traversal-Versuch",
+          "VulnerabilityID": "CVE-2026-00006",
+          "PkgName": "../../../etc/passwd",
+          "InstalledVersion": "1.0",
+          "Severity": "HIGH",
+          "Title": "Path injection attempt in PkgName"
+        },
+        {
+          "_attack": "CVSS-Score ausserhalb [0.0, 10.0]",
+          "VulnerabilityID": "CVE-2026-00007",
+          "PkgName": "test-pkg-g",
+          "InstalledVersion": "1.0",
+          "Severity": "HIGH",
+          "Title": "Bad CVSS",
+          "CVSS": {
+            "test": {"V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "V3Score": 11.5}
+          }
+        },
+        {
+          "_attack": "Attack-Vector ausserhalb der Whitelist (geprueft via CVSS-Vector)",
+          "VulnerabilityID": "CVE-2026-00008",
+          "PkgName": "test-pkg-h",
+          "InstalledVersion": "1.0",
+          "Severity": "HIGH",
+          "Title": "Bad Vector",
+          "CVSS": {
+            "test": {"V3Vector": "CVSS:3.1/AV:Q/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "V3Score": 7.0}
+          }
+        },
+        {
+          "_attack": "CWE-ID mit ungueltigem Format",
+          "VulnerabilityID": "CVE-2026-00009",
+          "PkgName": "test-pkg-i",
+          "InstalledVersion": "1.0",
+          "Severity": "MEDIUM",
+          "Title": "Bad CWE",
+          "CweIDs": ["CWE-79", "NOT-A-CWE", "CWE-12345678"]
+        },
+        {
+          "_attack": "Reference mit nicht-http-Scheme",
+          "VulnerabilityID": "CVE-2026-00010",
+          "PkgName": "test-pkg-j",
+          "InstalledVersion": "1.0",
+          "Severity": "LOW",
+          "Title": "Bad reference",
+          "References": ["javascript:alert(1)", "file:///etc/passwd", "https://example.com/ok"]
+        }
+      ]
+    }
+  ]
+}
