@@ -1,0 +1,41 @@
+{# Generisches Status-Change-Modal (aktuell genutzt fuer Re-Open).
+
+   Wird ueber `{% with %}` aufgerufen — Caller setzt:
+     - `finding`        : Finding
+     - `action_url`     : str  — POST-Endpoint
+     - `title`          : str  — Modal-Headline
+     - `form_obj`       : Form (z.B. ReopenForm) — fuer CSRF-Token
+     - `submit_label`   : str  — Button-Label (z.B. "Re-Open")
+     - `title_id`       : str  — DOM-ID der Headline (a11y)
+
+   Comment ist optional (ADR-0006). Submit ohne Comment ist erlaubt.
+#}
+<form method="post"
+      action="{{ action_url }}"
+      class="space-y-3">
+  {{ form_obj.csrf_token }}
+
+  <h3 id="{{ title_id }}" class="text-lg font-semibold">
+    {{ title }}: <span class="font-mono">{{ finding.identifier_key }}</span>
+  </h3>
+  <p class="text-sm opacity-70">
+    Optional kannst du einen Kommentar dazu hinterlegen. Der Kommentar
+    erscheint als Note im Thread und ist <strong>niemals Pflicht</strong>.
+  </p>
+
+  <label class="form-control w-full">
+    <span class="label-text text-xs opacity-70 pb-1">Kommentar (optional)</span>
+    <textarea name="comment"
+              rows="3"
+              maxlength="8192"
+              class="textarea textarea-bordered w-full"
+              aria-label="Optionaler Kommentar"></textarea>
+  </label>
+
+  <div class="modal-action">
+    <button type="button"
+            class="btn btn-ghost btn-sm"
+            @click="reopenOpen = false">Abbrechen</button>
+    <button type="submit" class="btn btn-primary btn-sm">{{ submit_label }}</button>
+  </div>
+</form>

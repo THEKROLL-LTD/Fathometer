@@ -1,12 +1,15 @@
-"""Server-Detail-View `/servers/<id>` — nur Header + Tag-Editor.
+"""Server-Detail-View `/servers/<id>` — Triage-Hauptansicht (Block E).
 
-Die Findings-Tabelle ist Block-E-Material und folgt spaeter. Hier nur:
-- Header mit Name, OS-Subtext, Last-Scan, Status-Badges, Tags.
-- Inline-HTMX-Add/Remove auf Tags (CSRF-pflichtig, Audit-Events).
+Erweitert den Block-D-Header um die Findings-Sektion mit drei View-Modi:
+- `mode=list`  (Default) — flache Tabelle, Default-Sort nach §15.
+- `mode=group` — gruppiert nach `package_name`.
+- `mode=diff`  — Diff der letzten zwei Scans (siehe `diff_view`).
 
-Add/Remove geben jeweils das gleiche Partial `_tag_editor.html` zurueck,
-das HTMX mit `hx-swap="outerHTML"` an den `#tag-editor-wrap`-Container
-swapt.
+URL-Filter (alle optional, Defaults sicher): `mode`, `status`, `class`,
+`severity`, `kev_only`, `q`.
+
+HTMX-Pattern: bei `HX-Request: true` rendert der Endpoint *nur* das
+Findings-Fragment (`servers/_findings_section.html`), nicht die ganze Seite.
 """
 
 from __future__ import annotations
@@ -23,12 +26,32 @@ from werkzeug.wrappers import Response as WerkzeugResponse
 
 from app.audit import log_event
 from app.db import get_session
-from app.forms import TAG_NAME_REGEX, CSRFOnlyForm
+from app.forms import (
+    TAG_NAME_REGEX,
+    AcknowledgeForm,
+    CSRFOnlyForm,
+    GroupAcknowledgeForm,
+    NoteForm,
+    ReopenForm,
+)
 from app.models import Server, ServerTag, Tag
+from app.schemas.findings_view_filter import FindingsViewFilter
+from app.services.diff_view import DiffSection, compute_diff
+from app.services.findings_query import (
+    PackageGroup,
+    count_findings,
+    group_findings_by_package,
+    list_findings,
+)
 
 log = structlog.get_logger(__name__)
 
 server_detail_bp = Blueprint("server_detail", __name__, url_prefix="/servers")
+
+
+# ---------------------------------------------------------------------------
+# Loader-Helper
+# ---------------------------------------------------------------------------
 
 
 def _load_server_with_tags(server_id: int) -> Server | None:
@@ -57,18 +80,79 @@ def _render_tag_editor(server: Server) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Findings-Section-Render
+# ---------------------------------------------------------------------------
+
+
+def _render_findings_section(
+    server: Server,
+    view_filter: FindingsViewFilter,
+) -> dict[str, Any]:
+    """Sammelt die Render-Daten fuer die Findings-Sektion.
+
+    Rueckgabe als dict — die Template-Inklusion (`servers/_findings_section
+    .html`) konsumiert die Keys direkt. Wird sowohl beim Vollseiten- als
+    auch beim HTMX-Partial-Render genutzt.
+    """
+    sess = get_session()
+    findings_filter = view_filter.to_findings_filter()
+
+    counts = count_findings(sess, server.id, findings_filter)
+
+    findings_list: list[Any] = []
+    groups: list[PackageGroup] = []
+    diff: DiffSection | None = None
+
+    if view_filter.mode == "list":
+        findings_list = list_findings(sess, server.id, findings_filter)
+    elif view_filter.mode == "group":
+        groups = group_findings_by_package(sess, server.id, findings_filter)
+    else:  # diff
+        diff = compute_diff(sess, server.id)
+
+    return {
+        "server": server,
+        "view_filter": view_filter,
+        "counts": counts,
+        "findings": findings_list,
+        "groups": groups,
+        "diff": diff,
+        "ack_form": AcknowledgeForm(),
+        "reopen_form": ReopenForm(),
+        "note_form": NoteForm(),
+        "group_ack_form": GroupAcknowledgeForm(),
+        "csrf_form": CSRFOnlyForm(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+
 @server_detail_bp.get("/<int:server_id>")
 @login_required
 def show(server_id: int) -> Any:
     server = _load_server_with_tags(server_id)
     if server is None:
         abort(404)
+
+    view_filter = FindingsViewFilter.from_request(request.args)
+    section_ctx = _render_findings_section(server, view_filter)
+
+    # HTMX-Partial: nur die Findings-Sektion.
+    if request.headers.get("HX-Request") == "true":
+        return render_template("servers/_findings_section.html", **section_ctx)
+
+    # `section_ctx` enthaelt bereits `server` und Form-Instanzen; wir mergen
+    # nur die Header-spezifischen Variablen (Tag-Editor) hinzu.
     return render_template(
         "servers/detail.html",
-        server=server,
         available_tags=_all_tags(),
         add_form=CSRFOnlyForm(),
         remove_form=CSRFOnlyForm(),
+        **section_ctx,
     )
 
 
@@ -98,8 +182,7 @@ def add_tag(server_id: int) -> WerkzeugResponse | str:
         )
         return _redirect_or_partial(server)
 
-    # Schon vorhanden? Idempotent behandeln, kein Fehler — UI-Re-Submit nach
-    # Doppelklick darf nicht crashen.
+    # Schon vorhanden? Idempotent behandeln, kein Fehler.
     existing = sess.execute(
         select(ServerTag).where(ServerTag.server_id == server.id, ServerTag.tag_id == tag.id)
     ).scalar_one_or_none()

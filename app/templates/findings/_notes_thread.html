@@ -1,0 +1,101 @@
+{# Notes-Thread eines Findings.
+
+   Variablen-Vertrag:
+     - `finding`   : Finding (eager-loaded notes)
+     - `note_form` : NoteForm
+     - `csrf_form` : CSRFOnlyForm
+
+   Render:
+     - `{{ note.text | markdown_safe }}` ist sicher — `markdown_safe` ruft
+       intern `nh3.clean(...)` mit kleiner Tag-Whitelist auf und liefert
+       Markup zurueck. Kein `|safe` notwendig.
+     - Reihenfolge: neueste zuerst (Operator interessiert sich primaer
+       fuer den juengsten Stand).
+     - Delete-Button nur fuer eigene Notes (`author == current_user.username`).
+       System-Notes (`system-ack`, `system-reopen`) bleiben unloeschbar.
+     - HTMX: Add-Note-Form posted im Hintergrund, der Endpoint liefert das
+       Thread-Fragment zurueck — wir tauschen den `.notes-thread`-Container.
+#}
+<section class="space-y-3 notes-thread"
+         id="notes-thread-{{ finding.id }}">
+  <h4 class="text-xs uppercase tracking-wide opacity-60">Notizen</h4>
+
+  {% set live_notes = finding.notes | rejectattr('deleted_at') | list %}
+  {# Neueste zuerst — `sort` mit `created_at` als Key, dann reverse. #}
+  {% set ordered_notes = live_notes | sort(attribute='created_at', reverse=true) %}
+
+  {% if not ordered_notes %}
+    <p class="text-sm opacity-60">Noch keine Notizen.</p>
+  {% else %}
+    <ul class="space-y-2">
+      {% for note in ordered_notes %}
+        {% set is_system = note.author in ('system-ack', 'system-reopen') %}
+        {% set is_own    = (current_user is defined and current_user.is_authenticated
+                            and note.author == current_user.username) %}
+        <li class="card bg-base-200">
+          <div class="card-body p-3 space-y-1">
+            <header class="flex items-center justify-between text-xs opacity-70">
+              <span class="font-mono">
+                {{ note.author }}
+                {% if is_system %}
+                  <span class="badge badge-ghost badge-xs ml-1">system</span>
+                {% endif %}
+              </span>
+              <time datetime="{{ note.created_at.isoformat() }}"
+                    title="{{ note.created_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+                {{ note.created_at | relative_time }}
+              </time>
+            </header>
+
+            <div class="prose prose-sm max-w-none break-words">
+              {{ note.text | markdown_safe }}
+            </div>
+
+            {% if is_own %}
+              <form method="post"
+                    action="{{ url_for('findings.delete_note', finding_id=finding.id, note_id=note.id) }}"
+                    hx-post="{{ url_for('findings.delete_note', finding_id=finding.id, note_id=note.id) }}"
+                    hx-target="#notes-thread-{{ finding.id }}"
+                    hx-swap="outerHTML"
+                    hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'
+                    class="text-right -mt-1">
+                {{ csrf_form.csrf_token }}
+                <button type="submit"
+                        class="link link-hover text-xs opacity-60 hover:text-error"
+                        aria-label="Notiz loeschen">
+                  loeschen
+                </button>
+              </form>
+            {% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {# Add-Note-Form. Body ist Pflicht (NoteForm:DataRequired), nicht aus ADR-0006
+     ausgenommen — Notes selbst koennen Inhalt verlangen, nur Status-Comments
+     duerfen es nicht. #}
+  <form method="post"
+        action="{{ url_for('findings.add_note', finding_id=finding.id) }}"
+        hx-post="{{ url_for('findings.add_note', finding_id=finding.id) }}"
+        hx-target="#notes-thread-{{ finding.id }}"
+        hx-swap="outerHTML"
+        hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'
+        class="space-y-2">
+    {{ note_form.csrf_token }}
+    <label class="form-control w-full">
+      <span class="label-text text-xs opacity-70 pb-1">
+        Neue Notiz (Markdown-Subset: **fett**, *kursiv*, `code`, Listen, ``` Fences ```)
+      </span>
+      {{ note_form.body(
+        class_='textarea textarea-bordered w-full',
+        rows=3,
+        placeholder='Hinweis fuer das Team…',
+        **{'aria-label': 'Notiz-Text'}) }}
+    </label>
+    <div class="text-right">
+      <button type="submit" class="btn btn-sm">Note hinzufuegen</button>
+    </div>
+  </form>
+</section>

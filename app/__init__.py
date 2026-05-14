@@ -159,6 +159,13 @@ def create_app() -> Flask:
     app.jinja_env.filters["relative_time"] = _relative_time
     app.jinja_env.filters["is_older_than_h"] = _is_older_than_h
 
+    # Markdown-Safe Filter fuer Notizen — `nh3.clean(...)` ist in der
+    # Pipeline. Template ruft `{{ note.text | markdown_safe }}` auf, ohne
+    # `|safe` (Filter gibt Markup-Objekt zurueck).
+    from app.services.notes_render import render_note_markdown
+
+    app.jinja_env.filters["markdown_safe"] = render_note_markdown
+
     # 4. Rate-Limiter initialisieren. Defaults: §9.
     limiter.init_app(app)
     # Default-Limits gelten fuer alle Routes; spezifische Endpoints koennen
@@ -187,6 +194,7 @@ def create_app() -> Flask:
 
     from app.views.auth import auth_bp
     from app.views.dashboard import dashboard_bp
+    from app.views.findings import findings_bp
     from app.views.server_detail import server_detail_bp
     from app.views.servers import servers_bp
     from app.views.settings import settings_bp
@@ -197,6 +205,7 @@ def create_app() -> Flask:
     app.register_blueprint(settings_bp)
     app.register_blueprint(servers_bp)
     app.register_blueprint(server_detail_bp)
+    app.register_blueprint(findings_bp)
     app.register_blueprint(dashboard_bp)
 
     # API-Blueprint (Block C). Routes werden in `register_api_routes`

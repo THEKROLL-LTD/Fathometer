@@ -1,13 +1,20 @@
-{# Server-Detail-Header `/servers/<id>`.
+{# Server-Detail `/servers/<id>` — Header + Findings-Sektion (Block E).
 
    Variablen-Vertrag (gesetzt in app/views/server_detail.py:show):
      - `server`         : Server (mit eager-loaded tag_links.tag)
      - `available_tags` : list[Tag] — fuer den Add-Tag-Selector
      - `add_form`       : CSRFOnlyForm
      - `remove_form`    : CSRFOnlyForm
-
-   Findings-Tabelle und View-Toggle gehoeren in Block E — hier nur Header
-   mit Status-Badges und HTMX-Tag-Editor.
+     - `view_filter`    : FindingsViewFilter
+     - `counts`         : dict[str, int]
+     - `findings`       : list[Finding]            (fuer mode=list)
+     - `groups`         : list[PackageGroup]       (fuer mode=group)
+     - `diff`           : DiffSection | None       (fuer mode=diff)
+     - `ack_form`       : AcknowledgeForm
+     - `reopen_form`    : ReopenForm
+     - `note_form`      : NoteForm
+     - `group_ack_form` : GroupAcknowledgeForm
+     - `csrf_form`      : CSRFOnlyForm
 
    Stale-Logik analog zu settings/servers.html via `is_older_than_h`-Filter:
    - Server-Stale: last_scan_at > expected_scan_interval_h.
@@ -125,8 +132,6 @@
     </div>
   </header>
 
-  <section class="opacity-70 text-sm text-center">
-    Findings-Tabelle folgt in Block E.
-  </section>
+  {% include "servers/_findings_section.html" %}
 </section>
 {% endblock %}

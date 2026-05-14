@@ -1,0 +1,44 @@
+{# Acknowledge-Modal mit *optionalem* Kommentar (ADR-0006).
+
+   Variablen-Vertrag:
+     - `finding`  : Finding
+     - `ack_form` : AcknowledgeForm
+
+   Wichtig:
+     - Kein `required`-Attribut, kein `aria-required="true"` auf der Textarea.
+     - Submit-Button-Label ist "Abhaken" — NICHT "Abhaken mit Kommentar".
+     - Submit ist unabhaengig vom Comment-Feld aktivierbar (kein
+       client-seitiges "bitte ausfuellen"-Lock).
+#}
+<form method="post"
+      action="{{ url_for('findings.acknowledge', finding_id=finding.id) }}"
+      class="space-y-3">
+  {{ ack_form.csrf_token }}
+
+  <h3 id="ack-title-{{ finding.id }}" class="text-lg font-semibold">
+    Finding abhaken: <span class="font-mono">{{ finding.identifier_key }}</span>
+  </h3>
+  <p class="text-sm opacity-70">
+    Optional kannst du einen Kommentar dazu hinterlegen. Der Kommentar
+    erscheint als Note im Thread und ist <strong>niemals Pflicht</strong>.
+    Ohne Kommentar wird der Status-Wechsel ausschliesslich im Audit-Log
+    dokumentiert.
+  </p>
+
+  <label class="form-control w-full">
+    <span class="label-text text-xs opacity-70 pb-1">Kommentar (optional)</span>
+    {# Bewusst KEIN `required`, KEIN `aria-required="true"`. #}
+    <textarea name="comment"
+              rows="3"
+              maxlength="8192"
+              class="textarea textarea-bordered w-full"
+              aria-label="Optionaler Kommentar"></textarea>
+  </label>
+
+  <div class="modal-action">
+    <button type="button"
+            class="btn btn-ghost btn-sm"
+            @click="ackOpen = false">Abbrechen</button>
+    <button type="submit" class="btn btn-primary btn-sm">Abhaken</button>
+  </div>
+</form>

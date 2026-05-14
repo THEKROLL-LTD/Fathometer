@@ -1,0 +1,144 @@
+{# Wiederverwendbare Jinja-Macros fuer die Triage-UI (Block E).
+
+   `quick_copy(value, label=None, classes="")`
+   -------------------------------------------
+   Rendert ein kleines Clipboard-Icon-Button neben einem Wert. Klick kopiert
+   den Wert in die Zwischenablage (Browser-API `navigator.clipboard.writeText`)
+   und feuert ein globales `toast`-Event mit der Erfolgsmeldung.
+
+   Der Toast-Listener sitzt in `base.html` und zeigt eine DaisyUI-`alert`-Pille
+   am unteren Rand. Auto-Dismiss nach 3s.
+
+   Sicherheit:
+     - `value` wird durch Jinja-Autoescape gequoted; zusaetzlich vermeiden wir
+       Backticks/Single-Quotes-Edge-Cases, indem wir `tojson` einsetzen.
+     - Kein `|safe`, keine Inline-`onclick="…"`-Strings.
+
+   `severity_badge(severity)`
+   --------------------------
+   Einheitliche Severity-Pille im DaisyUI-Farbschema (siehe Block D).
+
+   `kev_badge(is_kev, size="sm")`
+   ------------------------------
+   Rote, ringed Pille fuer KEV-Findings. Sehr auffaellig (§15).
+
+   `epss_pill(score)` / `cvss_pill(score)`
+   ---------------------------------------
+   Kompakte numerische Pillen fuer EPSS-/CVSS-Werte; EPSS faerbt sich farbig
+   nach §15 (gruen < 1%, gelb 1-10%, orange 10-50%, rot > 50%).
+#}
+
+{% macro quick_copy(value, label=None, classes="") -%}
+  {%- if value -%}
+  <button type="button"
+          class="btn btn-ghost btn-xs px-1 align-middle {{ classes }}"
+          aria-label="{{ label or ('Kopieren: ' ~ value) }}"
+          title="In Zwischenablage kopieren"
+          x-data
+          @click.stop.prevent="
+            navigator.clipboard.writeText({{ value | tojson }})
+              .then(() => $dispatch('toast', {msg: 'Kopiert: ' + {{ value | tojson }}, kind: 'success'}))
+              .catch(() => $dispatch('toast', {msg: 'Kopieren fehlgeschlagen', kind: 'error'}))
+          ">
+    {# Heroicons "clipboard" (outline, 16px). Reines SVG, keine externe Abh. #}
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" stroke-width="1.8"
+         class="w-3.5 h-3.5 inline-block opacity-80"
+         aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 4.5h6a1.5 1.5 0 0 1 1.5 1.5v.75H7.5V6A1.5 1.5 0 0 1 9 4.5z" />
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M6 7.5h12a.75.75 0 0 1 .75.75v10.5A1.5 1.5 0 0 1 17.25 20.25H6.75A1.5 1.5 0 0 1 5.25 18.75V8.25A.75.75 0 0 1 6 7.5z" />
+    </svg>
+  </button>
+  {%- endif -%}
+{%- endmacro %}
+
+
+{% macro severity_badge(severity, size="sm") -%}
+  {%- set sev = severity.value if severity is not none and severity.value is defined else (severity or 'unknown') -%}
+  {%- set cls = 'badge-ghost' -%}
+  {%- if sev == 'critical' -%}{%- set cls = 'badge-error' -%}
+  {%- elif sev == 'high'   -%}{%- set cls = 'badge-warning' -%}
+  {%- elif sev == 'medium' -%}{%- set cls = 'badge-accent' -%}
+  {%- elif sev == 'low'    -%}{%- set cls = 'badge-info' -%}
+  {%- endif -%}
+  <span class="badge badge-{{ size }} {{ cls }} font-medium uppercase tracking-wide">{{ sev }}</span>
+{%- endmacro %}
+
+
+{% macro kev_badge(is_kev, size="sm") -%}
+  {%- if is_kev -%}
+  <span class="badge badge-{{ size }} badge-error font-semibold ring-1 ring-error/40"
+        title="CISA Known Exploited Vulnerability — aktiv in freier Wildbahn ausgenutzt.">
+    KEV
+  </span>
+  {%- endif -%}
+{%- endmacro %}
+
+
+{% macro epss_pill(score) -%}
+  {%- if score is not none -%}
+    {%- set pct = score * 100 -%}
+    {%- set cls = 'badge-success' -%}
+    {%- if pct >= 50 -%}{%- set cls = 'badge-error' -%}
+    {%- elif pct >= 10 -%}{%- set cls = 'badge-warning' -%}
+    {%- elif pct >= 1  -%}{%- set cls = 'badge-info' -%}
+    {%- endif -%}
+    <span class="badge badge-sm {{ cls }} font-mono"
+          title="EPSS — Wahrscheinlichkeit einer Ausnutzung in den naechsten 30 Tagen.">
+      {{ '%.1f%%' | format(pct) }}
+    </span>
+  {%- else -%}
+    <span class="opacity-30 text-xs">–</span>
+  {%- endif -%}
+{%- endmacro %}
+
+
+{% macro cvss_pill(score) -%}
+  {%- if score is not none -%}
+    {%- set cls = 'badge-ghost' -%}
+    {%- if score >= 9.0 -%}{%- set cls = 'badge-error' -%}
+    {%- elif score >= 7.0 -%}{%- set cls = 'badge-warning' -%}
+    {%- elif score >= 4.0 -%}{%- set cls = 'badge-accent' -%}
+    {%- elif score > 0.0 -%}{%- set cls = 'badge-info' -%}
+    {%- endif -%}
+    <span class="badge badge-sm {{ cls }} font-mono"
+          title="CVSS v3 Base-Score">
+      {{ '%.1f' | format(score) }}
+    </span>
+  {%- else -%}
+    <span class="opacity-30 text-xs">–</span>
+  {%- endif -%}
+{%- endmacro %}
+
+
+{# Trennt `pkg@/path/to/binary` in Paket-Name + Pfad fuer schoenere Darstellung.
+   Der Pfad-Teil ist nur bei lang-pkgs-Findings vorhanden (Trivy haengt das
+   Library-Target an den Paket-Namen mit "@" an). #}
+{% macro package_cell(package_name, finding_class=None) -%}
+  {%- if package_name and '@/' in package_name -%}
+    {%- set parts = package_name.split('@', 1) -%}
+    <div class="flex flex-col leading-tight min-w-0">
+      <span class="font-mono font-semibold truncate">{{ parts[0] }}</span>
+      <span class="font-mono text-xs opacity-60 truncate" title="{{ parts[1] }}">{{ parts[1] }}</span>
+    </div>
+  {%- else -%}
+    <span class="font-mono">{{ package_name }}</span>
+  {%- endif -%}
+  {%- if finding_class is not none and finding_class.value is defined and finding_class.value == 'os-pkgs' -%}
+    <span class="badge badge-ghost badge-xs ml-1 align-middle" title="OS-Paket">OS</span>
+  {%- endif -%}
+{%- endmacro %}
+
+
+{# Status-Pille — open/acknowledged/resolved konsistent eingefaerbt. #}
+{% macro status_badge(status) -%}
+  {%- set s = status.value if status is not none and status.value is defined else (status or '') -%}
+  {%- set cls = 'badge-ghost' -%}
+  {%- if s == 'open' -%}{%- set cls = 'badge-warning' -%}
+  {%- elif s == 'acknowledged' -%}{%- set cls = 'badge-info' -%}
+  {%- elif s == 'resolved' -%}{%- set cls = 'badge-success' -%}
+  {%- endif -%}
+  <span class="badge badge-sm {{ cls }}">{{ s }}</span>
+{%- endmacro %}

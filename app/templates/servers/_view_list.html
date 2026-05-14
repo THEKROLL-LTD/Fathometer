@@ -1,0 +1,197 @@
+{# View-Modus: flache Findings-Tabelle.
+
+   Variablen-Vertrag (durchgereicht von `_findings_section.html`):
+     - `findings`  : list[Finding]
+     - `ack_form`  : AcknowledgeForm
+     - `reopen_form`: ReopenForm
+     - `csrf_form` : CSRFOnlyForm
+     - `server`    : Server
+
+   Sortierung kommt vom Backend (§15: KEV/EPSS/CVSS/Severity/first_seen_at).
+   Die UI hebt nur visuell hervor (KEV-Pille mit ring, EPSS-Pille farbig).
+
+   Detail-Modal und Ack-Modal werden ueber Alpine-State pro Zeile gesteuert.
+   Bei groesseren Listen waere ein zentraler Modal-Host effizienter, aber
+   der State-Scope pro Row haelt den Code lokal und uebersichtlich.
+#}
+{% from "_macros.html" import quick_copy, severity_badge, kev_badge, epss_pill, cvss_pill, package_cell, status_badge %}
+
+{% if not findings %}
+  <div class="card bg-base-200">
+    <div class="card-body items-center text-center py-10">
+      <p class="opacity-60">Keine Findings fuer diesen Filter.</p>
+      <p class="text-xs opacity-50">
+        Probiere einen anderen Status oder setze die Filter zurueck.
+      </p>
+    </div>
+  </div>
+{% else %}
+<div class="overflow-x-auto">
+  <table class="table table-zebra table-sm align-middle">
+    <thead class="text-xs uppercase tracking-wide">
+      <tr>
+        <th class="w-24">Severity</th>
+        <th class="w-44">CVE</th>
+        <th>Paket</th>
+        <th class="w-40">installiert</th>
+        <th class="w-20">KEV</th>
+        <th class="w-20">EPSS</th>
+        <th class="w-16">CVSS</th>
+        <th class="w-28">Status</th>
+        <th class="w-28">Seit</th>
+        <th class="w-32 text-right">Aktion</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in findings %}
+      <tr class="hover {% if f.is_kev %}bg-error/5{% endif %}"
+          x-data="{ ackOpen: false, reopenOpen: false, detailOpen: false }">
+        <td>{{ severity_badge(f.severity) }}</td>
+
+        <td>
+          <div class="flex items-center gap-1 min-w-0">
+            <button type="button"
+                    class="link link-hover font-mono text-left"
+                    @click="detailOpen = true"
+                    aria-label="Details fuer {{ f.identifier_key }}">
+              {{ f.identifier_key }}
+            </button>
+            {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+          </div>
+          {% if f.title %}
+            <div class="text-xs opacity-70 truncate max-w-[28ch]" title="{{ f.title }}">
+              {{ f.title }}
+            </div>
+          {% endif %}
+        </td>
+
+        <td class="max-w-[28ch]">
+          <div class="flex items-center gap-1 min-w-0">
+            {{ package_cell(f.package_name, f.finding_class) }}
+            {{ quick_copy(f.package_name, label='Paket-Name kopieren') }}
+          </div>
+        </td>
+
+        <td class="font-mono text-xs">
+          {% if f.installed_version %}
+            <div title="{{ f.installed_version }}" class="truncate max-w-[20ch]">
+              {{ f.installed_version }}
+            </div>
+          {% else %}<span class="opacity-40">–</span>{% endif %}
+          {% if f.fixed_version %}
+            <div class="text-success opacity-80 truncate max-w-[20ch]"
+                 title="Fix verfuegbar: {{ f.fixed_version }}">
+              → {{ f.fixed_version }}
+            </div>
+          {% endif %}
+        </td>
+
+        <td>{{ kev_badge(f.is_kev) }}</td>
+        <td>{{ epss_pill(f.epss_score) }}</td>
+        <td>{{ cvss_pill(f.cvss_v3_score) }}</td>
+        <td>{{ status_badge(f.status) }}</td>
+
+        <td class="text-xs">
+          <time datetime="{{ f.first_seen_at.isoformat() }}"
+                title="{{ f.first_seen_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+            {{ f.first_seen_at | relative_time }}
+          </time>
+        </td>
+
+        <td class="text-right">
+          <div class="flex justify-end gap-1">
+            <button type="button"
+                    class="btn btn-xs btn-ghost"
+                    @click="detailOpen = true"
+                    aria-label="Details fuer {{ f.identifier_key }} oeffnen">
+              Details
+            </button>
+            {% if f.status.value == 'open' %}
+              <button type="button"
+                      class="btn btn-xs btn-primary"
+                      @click="ackOpen = true"
+                      aria-label="Finding {{ f.identifier_key }} abhaken">
+                Abhaken
+              </button>
+            {% elif f.status.value == 'acknowledged' %}
+              <button type="button"
+                      class="btn btn-xs btn-ghost"
+                      @click="reopenOpen = true"
+                      aria-label="Finding {{ f.identifier_key }} re-open">
+                Re-Open
+              </button>
+            {% endif %}
+          </div>
+
+          {# Detail-Modal (Alpine-controlled). Volle CVE-Info + Notes-Thread. #}
+          <dialog class="modal" :class="{'modal-open': detailOpen}"
+                  @keydown.escape.window="detailOpen = false"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="detail-title-{{ f.id }}">
+            <div class="modal-box max-w-3xl text-left" @click.stop>
+              {% with finding=f %}
+                {% include "findings/_detail_modal.html" %}
+              {% endwith %}
+              <div class="modal-action">
+                <button type="button" class="btn btn-sm"
+                        @click="detailOpen = false">Schliessen</button>
+              </div>
+            </div>
+            <form method="dialog" class="modal-backdrop"
+                  @click="detailOpen = false">
+              <button type="button" aria-label="Schliessen">close</button>
+            </form>
+          </dialog>
+
+          {# Ack-Modal (Alpine-controlled). Inline weil Form-State pro Zeile. #}
+          {% if f.status.value == 'open' %}
+            <dialog class="modal" :class="{'modal-open': ackOpen}"
+                    @keydown.escape.window="ackOpen = false"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="ack-title-{{ f.id }}">
+              <div class="modal-box max-w-lg" @click.stop>
+                {% with finding=f %}
+                  {% include "findings/_ack_modal.html" %}
+                {% endwith %}
+              </div>
+              <form method="dialog" class="modal-backdrop"
+                    @click="ackOpen = false">
+                <button type="button" aria-label="Schliessen">close</button>
+              </form>
+            </dialog>
+          {% elif f.status.value == 'acknowledged' %}
+            <dialog class="modal" :class="{'modal-open': reopenOpen}"
+                    @keydown.escape.window="reopenOpen = false"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="reopen-title-{{ f.id }}">
+              <div class="modal-box max-w-lg" @click.stop>
+                {% with finding=f, action_url=url_for('findings.reopen', finding_id=f.id),
+                        title='Finding wieder oeffnen',
+                        form_obj=reopen_form,
+                        submit_label='Re-Open',
+                        title_id='reopen-title-' ~ f.id %}
+                  {% include "findings/_status_change_modal.html" %}
+                {% endwith %}
+              </div>
+              <form method="dialog" class="modal-backdrop"
+                    @click="reopenOpen = false">
+                <button type="button" aria-label="Schliessen">close</button>
+              </form>
+            </dialog>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if findings | length >= 500 %}
+    <p class="text-xs opacity-60 mt-2">
+      Anzeige auf 500 Findings begrenzt — bitte Filter verfeinern.
+    </p>
+  {% endif %}
+</div>
+{% endif %}

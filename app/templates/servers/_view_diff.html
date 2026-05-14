@@ -1,0 +1,157 @@
+{# View-Modus: Diff seit letztem Scan.
+
+   Variablen-Vertrag:
+     - `diff`   : DiffSection | None
+     - `server` : Server
+
+   Drei Sektionen:
+     - "Neu seit letztem Scan"     (gruener Akzent — neue Findings)
+     - "Resolved seit letztem Scan" (gedaempft — durchgestrichen)
+     - "Veraendert"                 (Field-Level-Diff im MVP nicht verfuegbar)
+
+   Layout: zwei Spalten ab `md`, gestackt darunter (mobile-Default).
+#}
+{% from "_macros.html" import severity_badge, kev_badge, quick_copy %}
+
+{% if not diff or (diff.current_scan_at is none) %}
+  <div class="card bg-base-200">
+    <div class="card-body items-center text-center py-10">
+      <p class="opacity-60">Noch kein Scan eingegangen.</p>
+    </div>
+  </div>
+{% else %}
+
+<div class="card bg-base-200 shadow-sm">
+  <div class="card-body p-4">
+    <h3 class="font-semibold text-base">
+      {% if diff.previous_scan_at is none %}
+        Nur ein Scan vorhanden — alle aktuellen Findings sind neu.
+      {% else %}
+        Diff zwischen
+        <time datetime="{{ diff.previous_scan_at.isoformat() }}"
+              title="{{ diff.previous_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+          {{ diff.previous_scan_at | relative_time }}
+        </time>
+        und
+        <time datetime="{{ diff.current_scan_at.isoformat() }}"
+              title="{{ diff.current_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+          {{ diff.current_scan_at | relative_time }}
+        </time>
+      {% endif %}
+    </h3>
+    <div class="flex flex-wrap gap-3 text-xs opacity-80 mt-1">
+      <span class="badge badge-success badge-sm">
+        +{{ diff.new | length }} neu
+      </span>
+      <span class="badge badge-ghost badge-sm">
+        −{{ diff.resolved | length }} resolved
+      </span>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+  {# --- NEU --- #}
+  <section class="card bg-base-200 shadow-sm">
+    <div class="card-body p-4">
+      <header class="flex items-center justify-between">
+        <h3 class="font-semibold text-success">
+          Neu seit letztem Scan
+        </h3>
+        <span class="badge badge-success">{{ diff.new | length }}</span>
+      </header>
+      {% if not diff.new %}
+        <p class="text-sm opacity-60 mt-2">Keine neuen Findings.</p>
+      {% else %}
+        <ul class="divide-y divide-base-300 mt-2">
+          {% for f in diff.new %}
+          <li class="py-2 flex flex-wrap items-center gap-2 text-sm">
+            {{ severity_badge(f.severity) }}
+            {{ kev_badge(f.is_kev) }}
+            <span class="font-mono">{{ f.identifier_key }}</span>
+            {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+            <span class="font-mono opacity-80 truncate max-w-[24ch]"
+                  title="{{ f.package_name }}">{{ f.package_name }}</span>
+            <time class="ml-auto text-xs opacity-60"
+                  datetime="{{ f.first_seen_at.isoformat() }}"
+                  title="{{ f.first_seen_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+              {{ f.first_seen_at | relative_time }}
+            </time>
+          </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+  </section>
+
+  {# --- RESOLVED --- #}
+  <section class="card bg-base-200 shadow-sm">
+    <div class="card-body p-4">
+      <header class="flex items-center justify-between">
+        <h3 class="font-semibold opacity-80">
+          Resolved seit letztem Scan
+        </h3>
+        <span class="badge badge-ghost">{{ diff.resolved | length }}</span>
+      </header>
+      {% if not diff.resolved %}
+        <p class="text-sm opacity-60 mt-2">Keine Findings wurden seither resolved.</p>
+      {% else %}
+        <ul class="divide-y divide-base-300 mt-2">
+          {% for f in diff.resolved %}
+          <li class="py-2 flex flex-wrap items-center gap-2 text-sm opacity-70 line-through">
+            {{ severity_badge(f.severity) }}
+            <span class="font-mono">{{ f.identifier_key }}</span>
+            <span class="font-mono opacity-80 truncate max-w-[24ch]"
+                  title="{{ f.package_name }}">{{ f.package_name }}</span>
+            {% if f.resolved_at %}
+              <time class="ml-auto text-xs"
+                    datetime="{{ f.resolved_at.isoformat() }}"
+                    title="{{ f.resolved_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+                {{ f.resolved_at | relative_time }}
+              </time>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+{# --- CHANGED (im MVP nicht befuellt) --- #}
+<section class="card bg-base-200 shadow-sm mt-4">
+  <div class="card-body p-4">
+    <header class="flex items-center justify-between">
+      <h3 class="font-semibold">Veraendert</h3>
+      <span class="badge">{{ diff.changed | length }}</span>
+    </header>
+    {% if diff.changed %}
+      <ul class="divide-y divide-base-300 mt-2">
+        {% for change in diff.changed %}
+          <li class="py-2 text-sm">
+            <span class="font-mono">{{ change.finding.identifier_key }}</span>
+            <span class="opacity-70">
+              {% if change.old_severity and change.new_severity %}
+                Severity: {{ change.old_severity }} → {{ change.new_severity }}
+              {% endif %}
+              {% if change.old_cvss is not none and change.new_cvss is not none %}
+                · CVSS {{ '%.1f'|format(change.old_cvss) }} → {{ '%.1f'|format(change.new_cvss) }}
+              {% endif %}
+              {% if change.old_epss is not none and change.new_epss is not none %}
+                · EPSS {{ '%.2f%%'|format(change.old_epss * 100) }} → {{ '%.2f%%'|format(change.new_epss * 100) }}
+              {% endif %}
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-xs opacity-60 mt-1">
+        Field-Level-Diff steht noch nicht zur Verfuegung (siehe Block-E-Spec).
+        Schema-Erweiterung um eine `findings_history`-Tabelle ist als eigene
+        ADR vorgemerkt.
+      </p>
+    {% endif %}
+  </div>
+</section>
+
+{% endif %}

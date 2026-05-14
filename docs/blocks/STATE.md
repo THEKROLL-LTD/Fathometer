@@ -4,9 +4,9 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Aktueller Block
 
-**E — Triage** (noch nicht gestartet)
+**F — Bulk-Operationen und globale Suche** (noch nicht gestartet)
 
-Plan: [`E-triage.md`](E-triage.md)
+Plan: [`F-bulk.md`](F-bulk.md)
 
 ## Completed
 
@@ -14,6 +14,7 @@ Plan: [`E-triage.md`](E-triage.md)
 - **B — Datenmodell, Setup-Wizard und Auth** · abgeschlossen 2026-05-14 · Branch `feat/block-b` · Reviewer-Freigabe nach Template-Fix (Pattern-Escape) und Re-Run der adversarial-Tests. 96 Tests grün. Setup-Flow-Screenshot unter `docs/blocks/B-evidence/setup-flow.png`.
 - **C — Ingest, Server-Verwaltung und Agent-E2E** · abgeschlossen 2026-05-14 · Branch `feat/block-c` · Reviewer-Freigabe 24 PASS / 0 FAIL. 207 Tests grün, Coverage 91 %. Real-Fixture mit 306 Findings (296 lang-pkgs + 10 os-pkgs) durchläuft Ingest mit Auth-vor-Body-Parse (401 in 22 ms), gzip-Bomb-Bound (413 bei >100 MB), Idempotenz auf Re-Scan. Neue ADR-0011 (`package_name@target`-Disambiguation).
 - **D — Dashboard mit Tags und Stale-Detection** · abgeschlossen 2026-05-14 · Branch `feat/block-d` · Reviewer-Freigabe 8 PASS / 0 FAIL / 5 PENDING (Operator-UX). 306 Tests grün (99 neue Block-D-Tests), Coverage 93 %. Dashboard-Screenshot unter `docs/blocks/D-evidence/dashboard.png` mit 3 Servern, KEV-Badge, Stale-Marker, Tag-Filter-Form und Aufmerksamkeits-Sektion.
+- **E — Triage in der Server-Detail-View** · abgeschlossen 2026-05-14 · Branch `feat/block-e` · Reviewer-Freigabe 12 PASS / 0 FAIL. 67 neue Block-E-Tests grün (insgesamt 373+ Tests), Coverage 90 % auf Block-E-Modulen. Drei View-Modi (Liste, Group-by-Package, Diff), Modals für Ack/Re-Open mit OPTIONALEM Kommentar (ADR-006), Notes-Thread mit `nh3.clean()`-Markdown-Subset, Quick-Copy-Toast, XSS-Härtung verifiziert. Sicherheits-Fix: `delete_note` mit Owner-Check + 403 für `system-*`-Notes. Screenshots: `docs/blocks/E-evidence/{list,group,diff}.png`.
 
 ## Backlog (in Reihenfolge)
 
@@ -23,8 +24,8 @@ Plan: [`E-triage.md`](E-triage.md)
 | B | [B-models.md](B-models.md) | completed 2026-05-14 |
 | C | [C-ingest.md](C-ingest.md) | completed 2026-05-14 |
 | D | [D-dashboard.md](D-dashboard.md) | completed 2026-05-14 |
-| E | [E-triage.md](E-triage.md) | aktueller Block |
-| F | [F-bulk.md](F-bulk.md) | wartet auf E |
+| E | [E-triage.md](E-triage.md) | completed 2026-05-14 |
+| F | [F-bulk.md](F-bulk.md) | aktueller Block |
 | G | [G-llm.md](G-llm.md) | wartet auf F |
 | H | [H-polish.md](H-polish.md) | wartet auf G |
 
