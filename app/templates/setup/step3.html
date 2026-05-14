@@ -1,0 +1,74 @@
+{# Setup-Wizard Schritt 3 — Defaults setzen.
+   Variablen: `form` (SetupStep3Form). #}
+{% extends "base.html" %}
+{% from "setup/_wizard.html" import step_indicator %}
+
+{% block title %}Setup · Schritt 3 · secscan{% endblock %}
+
+{% block content %}
+<section class="max-w-2xl mx-auto">
+  {{ step_indicator(current=3) }}
+
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body">
+      <h1 class="card-title text-2xl">Defaults</h1>
+      <p class="opacity-70">
+        Diese Werte lassen sich spaeter unter Settings jederzeit anpassen.
+      </p>
+
+      <form method="post"
+            action="{{ url_for('setup.step3') }}"
+            class="space-y-4 mt-4">
+        {{ form.csrf_token }}
+
+        <div class="form-control">
+          {{ form.severity_threshold.label(class="label label-text") }}
+          {{ form.severity_threshold(class="select select-bordered w-full") }}
+          <p class="text-xs opacity-60 mt-1">
+            Findings ab dieser Stufe werden auf dem Dashboard farbig markiert.
+          </p>
+          {% for err in form.severity_threshold.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        <div class="form-control">
+          {{ form.stale_threshold_h.label(class="label label-text") }}
+          {{ form.stale_threshold_h(class="input input-bordered w-full", type="number", min=1, max=720) }}
+          <p class="text-xs opacity-60 mt-1">
+            Server gelten als stale, wenn ihr letzter Scan laenger als diese
+            Stundenzahl zurueckliegt.
+          </p>
+          {% for err in form.stale_threshold_h.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        <div class="form-control">
+          {{ form.stale_trivy_db_threshold_h.label(class="label label-text") }}
+          {{ form.stale_trivy_db_threshold_h(class="input input-bordered w-full", type="number", min=1, max=720) }}
+          <p class="text-xs opacity-60 mt-1">
+            Schwelle ab der die Trivy-Vulnerability-DB eines Servers als
+            veraltet markiert wird.
+          </p>
+          {% for err in form.stale_trivy_db_threshold_h.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        <div class="form-control">
+          {{ form.default_theme.label(class="label label-text") }}
+          {{ form.default_theme(class="select select-bordered w-full") }}
+          {% for err in form.default_theme.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        <div class="card-actions justify-end pt-2">
+          <button type="submit" class="btn btn-primary">Setup abschliessen</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}

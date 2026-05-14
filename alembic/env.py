@@ -23,8 +23,10 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# In Block A noch keine Models — Block B ersetzt das durch `Base.metadata`.
-target_metadata = None
+# Models einbinden — Block B liefert die echte `Base.metadata`.
+from app.models import Base
+
+target_metadata = Base.metadata
 
 
 def _get_url() -> str:

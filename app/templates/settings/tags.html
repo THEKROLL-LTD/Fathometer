@@ -1,0 +1,117 @@
+{# Tag-Verwaltung unter /settings/tags.
+   Variablen:
+     - `tags` (Iterable[Tag])  — Felder: id, name, color
+     - `form` (TagForm)        — Felder: name, color
+     - `delete_form` (CSRFOnlyForm)  — fuer Per-Row-Lösch-Buttons. #}
+{% extends "base.html" %}
+
+{% block title %}Tags · secscan{% endblock %}
+
+{% block content %}
+<section class="max-w-4xl mx-auto space-y-8">
+  <header>
+    <h1 class="text-2xl font-semibold">Tags</h1>
+    <p class="opacity-70 text-sm mt-1">
+      Tags gruppieren Server fuer Filter und Dashboard-Übersichten.
+    </p>
+  </header>
+
+  {# Anlege-Formular. #}
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title">Neuen Tag anlegen</h2>
+      <form method="post"
+            action="{{ url_for('settings.tags_create') }}"
+            class="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-3 items-end mt-2">
+        {{ form.csrf_token }}
+
+        <div class="form-control">
+          {{ form.name.label(class="label label-text") }}
+          {{ form.name(
+              class="input input-bordered w-full",
+              pattern="^[a-z0-9][a-z0-9._-]{0,31}$",
+              maxlength=32,
+              title="a-z, 0-9, '.', '_', '-' (Start mit Buchstabe/Ziffer, max 32 Zeichen)",
+              placeholder="z.b. prod"
+          ) }}
+          {% for err in form.name.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        <div class="form-control">
+          {{ form.color.label(class="label label-text") }}
+          {{ form.color(
+              class="input input-bordered w-20 h-12 p-1",
+              type="color"
+          ) }}
+          {% for err in form.color.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        <div>
+          <button type="submit" class="btn btn-primary">Anlegen</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {# Liste der vorhandenen Tags. #}
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title">Vorhandene Tags</h2>
+
+      {% if tags %}
+        <div class="overflow-x-auto mt-2">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Farbe</th>
+                <th>Name</th>
+                <th class="text-right">Aktion</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for tag in tags %}
+                <tr>
+                  <td>
+                    {# tag.color ist serverseitig auf #rrggbb-Regex validiert. #}
+                    <span class="inline-block w-6 h-6 rounded border border-base-300"
+                          style="background-color: {{ tag.color }};"
+                          aria-hidden="true"></span>
+                  </td>
+                  <td>
+                    <span class="badge badge-outline font-mono"
+                          style="border-color: {{ tag.color }}; color: {{ tag.color }};">
+                      {{ tag.name }}
+                    </span>
+                  </td>
+                  <td class="text-right">
+                    <form method="post"
+                          action="{{ url_for('settings.tags_delete', tag_id=tag.id) }}"
+                          class="inline"
+                          x-data
+                          @submit="if (!confirm('Tag wirklich loeschen?')) $event.preventDefault();">
+                      {{ delete_form.csrf_token }}
+                      <button type="submit"
+                              class="btn btn-ghost btn-sm text-error"
+                              aria-label="Tag {{ tag.name }} loeschen">
+                        Loeschen
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="opacity-70 mt-2">
+          Noch keine Tags. Lege oben deinen ersten Tag an.
+        </p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

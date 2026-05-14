@@ -8,21 +8,25 @@ Konfiguriert in dieser Reihenfolge:
 3. Flask-App mit `MAX_CONTENT_LENGTH=10 MB` Default und Jinja-Autoescape.
 4. `flask-limiter` mit in-memory Backend und Default-Limits aus
    ARCHITECTURE.md §9.
-5. Health-Blueprint.
-6. Theme-Cookie-Handler (light/dark/auto) als leichter Stub — UI in
-   spaeteren Bloecken.
+5. DB-Engine + Session-Factory.
+6. `flask-wtf` CSRF und `flask-login` LoginManager.
+7. Blueprints (Health, Setup, Auth, Settings).
+8. Theme-Cookie-Handler (light/dark/auto) und Setup-Guard.
 """
 
 from __future__ import annotations
 
 import sys
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import structlog
-from flask import Flask, Response, g, request
+from flask import Flask, Response, g, redirect, request, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_wtf import CSRFProtect
 from pydantic import ValidationError
+from werkzeug.wrappers import Response as WerkzeugResponse
 
 from app.config import Settings, load_settings
 from app.health import bp as health_bp
@@ -31,7 +35,7 @@ from app.logging_setup import configure_logging
 if TYPE_CHECKING:
     pass
 
-__all__ = ["create_app", "limiter"]
+__all__ = ["create_app", "csrf", "limiter"]
 
 # Global verfuegbarer Limiter — wird in `create_app` initialisiert. Andere
 # Module duerfen ihn via `from app import limiter` importieren und Decorators
@@ -41,8 +45,20 @@ limiter: Limiter = Limiter(
     storage_uri="memory://",
 )
 
+# CSRF-Schutz auf allen Browser-POSTs — HTMX-Requests muessen das Token im
+# `X-CSRFToken`-Header mitschicken.
+csrf: CSRFProtect = CSRFProtect()
+
 
 _VALID_THEMES: frozenset[str] = frozenset({"light", "dark", "auto"})
+
+# Pfade, die ohne abgeschlossenes Setup erreichbar bleiben muessen.
+_SETUP_EXEMPT_PREFIXES: tuple[str, ...] = (
+    "/setup",
+    "/static",
+    "/healthz",
+    "/readyz",
+)
 
 
 def create_app() -> Flask:
@@ -78,7 +94,9 @@ def create_app() -> Flask:
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=False,  # in Produktion via Reverse-Proxy auf True.
+        PERMANENT_SESSION_LIFETIME=timedelta(days=settings.session_lifetime_days),
         JSON_SORT_KEYS=False,
+        WTF_CSRF_TIME_LIMIT=None,  # Session-Lifetime regelt das.
     )
 
     # Jinja-Autoescape ist Flask-Default — wir verifizieren das explizit und
@@ -98,10 +116,30 @@ def create_app() -> Flask:
         "scans_auth": settings.ratelimit_scans_auth,
     }
 
-    # 5. Blueprints.
+    # 5. DB-Engine und Per-Request-Session-Lifecycle.
+    from app.db import close_session, init_engine
+
+    init_engine(app)
+    app.teardown_request(close_session)
+
+    # 6. CSRF und Login-Manager.
+    csrf.init_app(app)
+    from app.auth import init_auth
+
+    init_auth(app)
+
+    # 7. Blueprints.
     app.register_blueprint(health_bp)
 
-    # 6. Theme-Cookie-Handling — leichtgewichtiger Stub fuer Light/Dark/Auto.
+    from app.views.auth import auth_bp
+    from app.views.settings import settings_bp
+    from app.views.setup import setup_bp
+
+    app.register_blueprint(setup_bp)
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(settings_bp)
+
+    # 8. Theme-Cookie-Handling — leichtgewichtiger Stub fuer Light/Dark/Auto.
     @app.before_request
     def _resolve_theme() -> None:
         raw = request.cookies.get("theme", "auto")
@@ -124,6 +162,29 @@ def create_app() -> Flask:
                 samesite="Lax",
             )
         return response
+
+    # Setup-Guard: solange das Setup nicht abgeschlossen ist, leiten wir
+    # alle Browser-Requests auf den Wizard. `is_setup_completed()` liest aus
+    # der DB — wenn die DB nicht erreichbar ist, lassen wir den Request
+    # durchlaufen (Healthchecks duerfen weiterhin antworten).
+    @app.before_request
+    def _setup_guard() -> WerkzeugResponse | None:
+        path = request.path or "/"
+        if any(path.startswith(prefix) for prefix in _SETUP_EXEMPT_PREFIXES):
+            return None
+        # API-Endpunkte (Block C) sollen den Wizard nicht triggern — sie
+        # geben eigene 401-Antworten.
+        if path.startswith("/api/"):
+            return None
+        try:
+            from app.settings_service import is_setup_completed
+
+            if not is_setup_completed():
+                return redirect(url_for("setup.index"))
+        except Exception as exc:  # pragma: no cover — DB-down edge case
+            log.warning("setup_guard.db_unavailable", error=str(exc))
+            return None
+        return None
 
     log.info(
         "app.started",
