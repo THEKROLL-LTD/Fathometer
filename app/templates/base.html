@@ -52,6 +52,11 @@
     type="text/css"
   />
 
+  {# Theme-Toggle-Logic (Alpine-Komponente + Cookie/Media-Query-Wiring).
+     Defer-loaded — Alpine ist ebenfalls defer und initialisiert spaeter.
+     Inline-No-Flash-Resolver oben hat das `data-theme` schon gesetzt. #}
+  <script defer src="{{ url_for('static', filename='js/theme.js') }}"></script>
+
   {# Alpine.js (defer) — siehe ADR-0001. #}
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.7/dist/cdn.min.js"></script>
 
@@ -123,42 +128,7 @@
     {% block content %}{% endblock %}
   </main>
 
-  {# Alpine-Komponenten als globale Snippets — kompakt genug fuer inline. #}
-  <script>
-    function themeToggle(initial) {
-      return {
-        options: [
-          { value: "auto",  label: "Theme: Auto"  },
-          { value: "light", label: "Theme: Hell"  },
-          { value: "dark",  label: "Theme: Dunkel"},
-        ],
-        current: initial || "auto",
-        labelFor(v) {
-          var found = this.options.find(o => o.value === v);
-          return found ? found.label : "Theme";
-        },
-        applyTheme(v) {
-          var resolved = v;
-          if (v === "auto") {
-            resolved = window.matchMedia &&
-              window.matchMedia("(prefers-color-scheme: dark)").matches
-              ? "dark" : "light";
-          }
-          document.documentElement.setAttribute("data-theme", resolved);
-        },
-        select(v) {
-          this.current = v;
-          // Cookie 1 Jahr; SameSite=Lax matcht Server-Setting.
-          document.cookie = "theme=" + encodeURIComponent(v) +
-            "; Path=/; Max-Age=" + (60*60*24*365) + "; SameSite=Lax";
-          this.applyTheme(v);
-        },
-        init() {
-          this.applyTheme(this.current);
-        },
-      };
-    }
-  </script>
+  {# `themeToggle()` lebt in static/js/theme.js (oben mit `defer` eingebunden). #}
 
   {% block scripts %}{% endblock %}
 </body>

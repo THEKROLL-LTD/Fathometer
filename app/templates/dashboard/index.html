@@ -1,0 +1,86 @@
+{# Dashboard `/` — Server-Karten mit Tag-Filter und Aufmerksamkeits-Sektion.
+
+   Variablen-Vertrag (gesetzt in app/views/dashboard.py):
+     - `servers`        : list[ServerCardData]
+         - .server          (Server-Model: id, name, last_scan_at, ...)
+         - .severity_counts (SeverityCounts: critical/high/medium/low/unknown)
+         - .kev_open_count  (int)
+         - .is_stale        (bool)
+         - .is_db_stale     (bool)
+         - .is_active       (bool — not revoked and not retired)
+         - .highest_severity (Severity | None)
+         - .needs_attention  (bool)
+     - `attention`      : AttentionSection
+         - .stale_servers    (list[ServerCardData])
+         - .kev_servers      (list[ServerCardData])
+         - .db_stale_servers (list[ServerCardData])
+         - .all_cards        (list[ServerCardData] — dedupliziert)
+         - .is_empty         (bool)
+     - `filter`         : DashboardFilter (tags, tags_mode, severity, kev_only, stale_only)
+     - `available_tags` : list[Tag]
+     - `severity_threshold`   : Severity (entweder Filter-Override oder Settings-Default)
+     - `db_stale_threshold_h` : int (Stunden — fuer Hover-Texte)
+
+   Sicherheit: kein `|safe` auf Daten — alle Strings autoescaped.
+#}
+{% extends "base.html" %}
+
+{% block title %}Dashboard · secscan{% endblock %}
+
+{% block content %}
+<section class="space-y-6">
+  {# Header: Titel + Filterhinweis links, Reload + Settings-Link rechts. #}
+  <header class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold">Dashboard</h1>
+      <p class="text-sm opacity-70 mt-1">
+        {{ servers | length }} Server sichtbar
+        {% if filter.is_active %}<span class="badge badge-ghost badge-sm ml-1">gefiltert</span>{% endif %}
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      {% set qs = filter.to_query_string() %}
+      <a href="{{ url_for('dashboard.index') }}{% if qs %}?{{ qs }}{% endif %}"
+         class="btn btn-sm btn-ghost"
+         aria-label="Dashboard neu laden">
+        Aktualisieren
+      </a>
+      <a href="{{ url_for('servers.list_servers') }}"
+         class="btn btn-sm btn-outline">
+        Server verwalten
+      </a>
+    </div>
+  </header>
+
+  {# "Aufmerksamkeit noetig" steht oben — das ist der erste Blick. #}
+  {% if not attention.is_empty %}
+    {% include "dashboard/_attention.html" %}
+  {% endif %}
+
+  {% include "dashboard/_tag_filter.html" %}
+
+  {# Server-Grid. Empty-State unterscheidet "gar keine Server" vs.
+     "Filter blendet alles aus". #}
+  {% if servers %}
+    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+      {% for card in servers %}
+        {% include "dashboard/_card.html" %}
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card bg-base-200 shadow-sm">
+      <div class="card-body p-6 text-center space-y-2">
+        {% if filter.is_active %}
+          <p class="text-sm opacity-80">Keine Server passen zu deinem Filter.</p>
+          <a href="{{ url_for('dashboard.index') }}"
+             class="link link-hover text-sm">Filter zuruecksetzen</a>
+        {% else %}
+          <p class="text-sm opacity-80">Noch keine Server registriert.</p>
+          <a href="{{ url_for('servers.list_servers') }}"
+             class="link link-hover text-sm">Zur Server-Registrierung</a>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

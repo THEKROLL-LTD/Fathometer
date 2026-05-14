@@ -1,0 +1,148 @@
+{# Server-Karte fuer das Dashboard.
+
+   Erwartete Variable im Loop:
+     - `card` : ServerCardData
+         siehe dashboard/index.html fuer die Felder.
+     - `db_stale_threshold_h` : int (aus parent — fuer Tooltip)
+
+   Stil:
+     - Severity-Counts als kleine Pills, Farbschema:
+         critical = badge-error (rot)
+         high     = badge-warning (orange)
+         medium   = badge-accent (gelb-ton, je nach Theme)
+         low      = badge-info (blau)
+       Counts == 0 werden ausgeblendet, damit visuelles Rauschen niedrig
+       bleibt.
+     - KEV-Counter ist DAS zentrale Triage-Signal (§15) → rotes, kraeftiges
+       Badge oben rechts wenn > 0.
+     - Stale-/DB-Stale-Marker als warning-Badges; revoked/retired als ghost.
+     - Karte ist primaer ein Link auf /servers/<id>; Tag-Pills sind eigene
+       Links auf den Tag-Filter (damit Klick auf Tag nicht zum Server fuehrt
+       wird `@click.stop` via Alpine genutzt).
+#}
+{% set qs_owner = card.server.id %}
+<article x-data
+         class="card bg-base-200 shadow-sm hover:shadow-lg transition-shadow
+                {% if not card.is_active %}opacity-70{% endif %}
+                {% if card.kev_open_count > 0 %}ring-1 ring-error/40{% endif %}">
+  <a href="{{ url_for('server_detail.show', server_id=card.server.id) }}"
+     class="card-body p-4 space-y-3 block no-underline text-base-content">
+
+    {# Header: Server-Name + auffaelligstes Signal rechts (KEV > Severity > Status). #}
+    <div class="flex items-start justify-between gap-2">
+      <div class="min-w-0">
+        <h2 class="card-title text-base font-mono truncate">{{ card.server.name }}</h2>
+        {% if card.server.os_pretty_name or card.server.kernel_version or card.server.architecture %}
+          <p class="text-xs opacity-60 mt-0.5 truncate">
+            {% if card.server.os_pretty_name %}{{ card.server.os_pretty_name }}{% endif %}
+            {% if card.server.kernel_version %}
+              {% if card.server.os_pretty_name %} · {% endif %}{{ card.server.kernel_version }}
+            {% endif %}
+            {% if card.server.architecture %}
+              {% if card.server.os_pretty_name or card.server.kernel_version %} · {% endif %}{{ card.server.architecture }}
+            {% endif %}
+          </p>
+        {% endif %}
+      </div>
+      <div class="flex flex-col items-end gap-1 shrink-0">
+        {% if card.kev_open_count > 0 %}
+          <span class="badge badge-error font-semibold"
+                title="{{ card.kev_open_count }} aktive KEV-Findings — bekannte ausgenutzte CVEs.">
+            KEV {{ card.kev_open_count }}
+          </span>
+        {% endif %}
+        {% if not card.is_active %}
+          {% if card.server.revoked_at %}
+            <span class="badge badge-ghost badge-sm">revoked</span>
+          {% else %}
+            <span class="badge badge-ghost badge-sm">retired</span>
+          {% endif %}
+        {% elif card.highest_severity %}
+          {% set sev = card.highest_severity.value %}
+          <span class="badge badge-sm
+            {% if sev == 'critical' %}badge-error{% elif sev == 'high' %}badge-warning
+            {% elif sev == 'medium' %}badge-accent{% elif sev == 'low' %}badge-info
+            {% else %}badge-ghost{% endif %}">
+            {{ sev }}
+          </span>
+        {% else %}
+          <span class="badge badge-success badge-sm">clean</span>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Tag-Pills. Klick auf eine Pill ist ein Filter-Link (nicht zur Detailseite).
+       Click-Propagation auf den umschliessenden Karten-Link wird per
+       @click.stop unterbrochen. Tag-Farbe kommt aus DB und ist serverseitig
+       per Regex auf #rrggbb validiert — sicher fuer style=. #}
+    {% if card.server.tag_links %}
+      <div class="flex flex-wrap gap-1">
+        {% for link in card.server.tag_links %}
+          <a href="{{ url_for('dashboard.index') }}?tags={{ link.tag.name | urlencode }}"
+             @click.stop
+             class="badge badge-outline badge-sm font-mono hover:badge-primary"
+             style="border-color: {{ link.tag.color }}; color: {{ link.tag.color }};"
+             title="Nach Tag filtern: {{ link.tag.name }}">
+            {{ link.tag.name }}
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {# Severity-Counts. Reihe an kompakten Pills, nur was > 0 ist. #}
+    {% if card.severity_counts.total > 0 %}
+      <div class="flex flex-wrap gap-1 text-xs">
+        {% if card.severity_counts.critical %}
+          <span class="badge badge-error badge-sm" title="Critical Findings">
+            crit {{ card.severity_counts.critical }}
+          </span>
+        {% endif %}
+        {% if card.severity_counts.high %}
+          <span class="badge badge-warning badge-sm" title="High Findings">
+            high {{ card.severity_counts.high }}
+          </span>
+        {% endif %}
+        {% if card.severity_counts.medium %}
+          <span class="badge badge-accent badge-sm" title="Medium Findings">
+            med {{ card.severity_counts.medium }}
+          </span>
+        {% endif %}
+        {% if card.severity_counts.low %}
+          <span class="badge badge-info badge-sm" title="Low Findings">
+            low {{ card.severity_counts.low }}
+          </span>
+        {% endif %}
+        {% if card.severity_counts.unknown %}
+          <span class="badge badge-ghost badge-sm" title="Unknown Severity">
+            ?
+            {{ card.severity_counts.unknown }}
+          </span>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {# Footer-Zeile: Scan-Alter + Stale-/DB-Stale-Marker. #}
+    <div class="flex flex-wrap items-center gap-2 text-xs opacity-80">
+      <span title="{% if card.server.last_scan_at %}{{ card.server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}{% else %}noch nie{% endif %}">
+        Letzter Scan: {{ card.server.last_scan_at | relative_time }}
+      </span>
+      {% if card.is_stale and card.is_active %}
+        <span class="badge badge-warning badge-sm"
+              title="Letzter Scan aelter als erwarteter Interval ({{ card.server.expected_scan_interval_h }}h).">
+          stale
+        </span>
+      {% endif %}
+      {% if card.is_db_stale and card.is_active %}
+        <span class="badge badge-warning badge-sm"
+              title="Trivy-DB veraltet (Schwelle: {{ db_stale_threshold_h }}h){% if card.server.trivy_db_updated_at %} — Stand: {{ card.server.trivy_db_updated_at.strftime('%Y-%m-%d') }}{% endif %}.">
+          db veraltet
+        </span>
+      {% endif %}
+      {% if card.severity_counts.total > 0 %}
+        <span class="ml-auto opacity-70">
+          {{ card.severity_counts.total }} offen
+        </span>
+      {% endif %}
+    </div>
+  </a>
+</article>

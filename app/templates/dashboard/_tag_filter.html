@@ -1,0 +1,129 @@
+{# Tag-Filter und Toggles fuer das Dashboard.
+
+   Variablen:
+     - `filter`         : DashboardFilter
+     - `available_tags` : list[Tag]
+
+   Submit ist GET — alle Filter landen im URL-Query-String (ARCHITECTURE §7).
+   Bookmarks und Share-Links funktionieren damit direkt; es gibt keinen
+   Server-Form-State.
+
+   Stil:
+     - Tag-Chips als klickbare Checkbox-Labels. Die zugrundeliegenden
+       Checkboxen sind via `sr-only` versteckt; das Label aendert sein
+       Aussehen ueber `peer-checked:`. Sichere Tag-Farbe via inline-style
+       (color-Feld ist serverseitig auf #rrggbb regex-validiert).
+     - Severity-Override als Select, OR/AND als Radio-Toggle daneben.
+     - "Anwenden"-Button rechts, "Zuruecksetzen"-Link wenn Filter aktiv.
+
+   Sicherheit: kein `|safe`. Tag-Namen werden Standard-Jinja-escaped.
+#}
+<form method="get"
+      action="{{ url_for('dashboard.index') }}"
+      class="card bg-base-200 shadow-sm">
+  <div class="card-body p-4 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2 class="text-sm font-semibold uppercase tracking-wide opacity-80">
+        Filter
+      </h2>
+      {% if filter.is_active %}
+        <a href="{{ url_for('dashboard.index') }}"
+           class="link link-hover text-xs">
+          Filter zuruecksetzen
+        </a>
+      {% endif %}
+    </div>
+
+    {# Tag-Chips. #}
+    {% if available_tags %}
+      <fieldset>
+        <legend class="sr-only">Tags</legend>
+        <div class="flex flex-wrap gap-2">
+          {% for tag in available_tags %}
+            {% set is_selected = tag.name in filter.tags %}
+            <label class="cursor-pointer select-none">
+              <input type="checkbox"
+                     name="tags"
+                     value="{{ tag.name }}"
+                     class="peer sr-only"
+                     {% if is_selected %}checked{% endif %} />
+              <span class="badge badge-outline badge-md font-mono
+                           peer-checked:badge-primary peer-checked:text-primary-content
+                           hover:opacity-80"
+                    style="border-color: {{ tag.color }}; {% if not is_selected %}color: {{ tag.color }};{% endif %}">
+                {{ tag.name }}
+              </span>
+            </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+    {% else %}
+      <p class="text-xs opacity-60">
+        Keine Tags angelegt — unter
+        <a href="{{ url_for('settings.tags_list') }}" class="link link-hover">Settings · Tags</a>
+        anlegen.
+      </p>
+    {% endif %}
+
+    {# Untere Zeile: Mode, Severity, KEV-/Stale-Switch, Submit. #}
+    <div class="flex flex-wrap items-center gap-4 text-xs">
+      {# Tag-Modus als Radio-Toggle (klarer als Select). #}
+      <fieldset class="flex items-center gap-2">
+        <legend class="opacity-70">Tag-Modus:</legend>
+        <div class="join">
+          <input type="radio" name="tags_mode" value="or"
+                 id="tags_mode_or"
+                 class="join-item btn btn-xs"
+                 aria-label="ODER"
+                 {% if filter.tags_mode == 'or' %}checked{% endif %} />
+          <label for="tags_mode_or" class="sr-only">ODER</label>
+          <input type="radio" name="tags_mode" value="and"
+                 id="tags_mode_and"
+                 class="join-item btn btn-xs"
+                 aria-label="UND"
+                 {% if filter.tags_mode == 'and' %}checked{% endif %} />
+          <label for="tags_mode_and" class="sr-only">UND</label>
+        </div>
+        <span class="opacity-60">
+          {% if filter.tags_mode == 'and' %}alle Tags{% else %}mindestens einer{% endif %}
+        </span>
+      </fieldset>
+
+      <label class="flex items-center gap-2" for="filter-severity">
+        <span class="opacity-70">Severity ab:</span>
+        <select id="filter-severity"
+                name="severity"
+                class="select select-xs select-bordered">
+          <option value="">Default ({{ severity_threshold.value }})</option>
+          <option value="critical" {% if filter.severity and filter.severity.value == 'critical' %}selected{% endif %}>critical</option>
+          <option value="high"     {% if filter.severity and filter.severity.value == 'high'     %}selected{% endif %}>high</option>
+          <option value="medium"   {% if filter.severity and filter.severity.value == 'medium'   %}selected{% endif %}>medium</option>
+          <option value="low"      {% if filter.severity and filter.severity.value == 'low'      %}selected{% endif %}>low</option>
+        </select>
+      </label>
+
+      <label class="cursor-pointer flex items-center gap-2">
+        <input type="checkbox" name="kev_only" value="1"
+               class="checkbox checkbox-xs checkbox-error"
+               {% if filter.kev_only %}checked{% endif %} />
+        <span>nur KEV</span>
+      </label>
+
+      <label class="cursor-pointer flex items-center gap-2">
+        <input type="checkbox" name="stale_only" value="1"
+               class="checkbox checkbox-xs checkbox-warning"
+               {% if filter.stale_only %}checked{% endif %} />
+        <span>nur stale</span>
+      </label>
+
+      <div class="ml-auto flex items-center gap-2">
+        {% if filter.is_active %}
+          <a href="{{ url_for('dashboard.index') }}" class="btn btn-ghost btn-xs">
+            Reset
+          </a>
+        {% endif %}
+        <button type="submit" class="btn btn-primary btn-sm">Anwenden</button>
+      </div>
+    </div>
+  </div>
+</form>

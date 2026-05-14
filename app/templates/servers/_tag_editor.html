@@ -1,0 +1,76 @@
+{# Inline-Tag-Editor fuer den Server-Detail-Header.
+
+   Wird auch direkt von den HTMX-Routes zurueckgegeben — siehe
+   `app/views/server_detail.py:_render_tag_editor`. Der Server-Endpoint
+   liefert immer das ganze `#tag-editor-wrap`-Div, weil HTMX
+   `hx-swap="outerHTML"` darauf zielt.
+
+   Variablen:
+     - `server`         : Server (eager-loaded tag_links.tag)
+     - `available_tags` : list[Tag] — vollstaendige Tag-Liste
+     - `add_form`       : CSRFOnlyForm
+     - `remove_form`    : CSRFOnlyForm
+
+   Sicherheit:
+     - CSRF-Token via `csrf_token()` (Flask-WTF) im X-CSRFToken-Header
+       und in `hidden_tag()`-Form-Feldern.
+     - Tag-Farbe (`tag.color`) ist serverseitig per Regex auf #rrggbb
+       validiert — sicher fuer inline-style.
+#}
+<div id="tag-editor-wrap" class="space-y-3">
+  {# Liste der vergebenen Tags als entfernbare Pills (X-Button). #}
+  <div class="flex flex-wrap gap-1 items-center min-h-[1.75rem]">
+    {% if server.tag_links %}
+      {% for link in server.tag_links %}
+        <form method="post"
+              action="{{ url_for('server_detail.remove_tag', server_id=server.id, tag_id=link.tag.id) }}"
+              hx-post="{{ url_for('server_detail.remove_tag', server_id=server.id, tag_id=link.tag.id) }}"
+              hx-target="#tag-editor-wrap"
+              hx-swap="outerHTML"
+              hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'
+              class="inline">
+          {{ remove_form.hidden_tag() }}
+          <button type="submit"
+                  class="badge badge-outline gap-1 cursor-pointer hover:badge-error font-mono"
+                  style="border-color: {{ link.tag.color }}; color: {{ link.tag.color }};"
+                  title="Tag '{{ link.tag.name }}' entfernen"
+                  aria-label="Tag {{ link.tag.name }} entfernen">
+            <span>{{ link.tag.name }}</span>
+            <span aria-hidden="true" class="font-bold">×</span>
+          </button>
+        </form>
+      {% endfor %}
+    {% else %}
+      <span class="text-xs opacity-60">Keine Tags vergeben.</span>
+    {% endif %}
+  </div>
+
+  {# Add-Form: Combobox via Datalist — der Operator kann tippen oder aus den
+     Vorschlaegen waehlen. Nur Tags die der Server noch NICHT hat werden
+     vorgeschlagen. Submit triggert HTMX-Post und ersetzt das Wrap. #}
+  {% set assigned_ids = server.tag_links | map(attribute='tag.id') | list %}
+  <form method="post"
+        action="{{ url_for('server_detail.add_tag', server_id=server.id) }}"
+        hx-post="{{ url_for('server_detail.add_tag', server_id=server.id) }}"
+        hx-target="#tag-editor-wrap"
+        hx-swap="outerHTML"
+        hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'
+        class="flex items-center gap-2 max-w-md">
+    {{ add_form.hidden_tag() }}
+    <input type="text"
+           name="tag_name"
+           list="available-tag-options"
+           placeholder="Tag hinzufuegen…"
+           autocomplete="off"
+           class="input input-sm input-bordered flex-1"
+           aria-label="Tag-Name eingeben oder auswaehlen" />
+    <datalist id="available-tag-options">
+      {% for tag in available_tags %}
+        {% if tag.id not in assigned_ids %}
+          <option value="{{ tag.name }}"></option>
+        {% endif %}
+      {% endfor %}
+    </datalist>
+    <button type="submit" class="btn btn-sm btn-primary">Hinzufuegen</button>
+  </form>
+</div>
