@@ -4,21 +4,22 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Aktueller Block
 
-**B — Models und Auth** (noch nicht gestartet)
+**C — Ingest und Registrierung** (noch nicht gestartet)
 
-Plan: [`B-models.md`](B-models.md)
+Plan: [`C-ingest.md`](C-ingest.md)
 
 ## Completed
 
 - **A — Skelett und Basis** · abgeschlossen 2026-05-14 · Branch `feat/block-a` · Reviewer-Freigabe nach Re-Review (Gunicorn `HOME=/app` + `--worker-tmp-dir /dev/shm`-Fix).
+- **B — Datenmodell, Setup-Wizard und Auth** · abgeschlossen 2026-05-14 · Branch `feat/block-b` · Reviewer-Freigabe nach Template-Fix (Pattern-Escape) und Re-Run der adversarial-Tests. 96 Tests grün. Setup-Flow-Screenshot unter `docs/blocks/B-evidence/setup-flow.png`.
 
 ## Backlog (in Reihenfolge)
 
 | Block | Datei | Status |
 |-------|-------|--------|
 | A | [A-skeleton.md](A-skeleton.md) | completed 2026-05-14 |
-| B | [B-models.md](B-models.md) | aktueller Block |
-| C | [C-ingest.md](C-ingest.md) | wartet auf B |
+| B | [B-models.md](B-models.md) | completed 2026-05-14 |
+| C | [C-ingest.md](C-ingest.md) | aktueller Block |
 | D | [D-dashboard.md](D-dashboard.md) | wartet auf C |
 | E | [E-triage.md](E-triage.md) | wartet auf D |
 | F | [F-bulk.md](F-bulk.md) | wartet auf E |

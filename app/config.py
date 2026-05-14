@@ -57,6 +57,16 @@ class Settings(BaseSettings):
     # ----- Logging -----
     log_level: str = Field(default="INFO")
 
+    # ----- Argon2id-Cost-Parameter (siehe ARCHITECTURE.md §8) -----
+    # Defaults bewusst auf "~100ms auf moderner CPU" abgestimmt — siehe §9
+    # "Login-Brute-Force" — Argon2-Verify ist das natuerliche Rate-Limit.
+    argon2_time_cost: int = Field(default=3, ge=1, le=10)
+    argon2_memory_cost: int = Field(default=65536, ge=8192, le=1048576)
+    argon2_parallelism: int = Field(default=4, ge=1, le=16)
+
+    # ----- Session-Konfiguration -----
+    session_lifetime_days: int = Field(default=7, ge=1, le=90)
+
     @property
     def max_body_bytes(self) -> int:
         """Body-Limit in Bytes fuer Flask `MAX_CONTENT_LENGTH`."""
