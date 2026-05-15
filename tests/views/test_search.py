@@ -188,10 +188,14 @@ def test_search_tag_filter_restricts_results(db_app: Flask) -> None:
     resp = client.get("/findings/search?q=CVE-2024-CC001&kind=cve&tag=prod")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
+    # Search-Result-Tabelle isolieren — die Sidebar listet alle Server
+    # inkl. `srv-dev-1`, was nichts mit dem Filter zu tun hat.
+    table_start = body.index('data-test="search-results"')
+    table_end = body.index("</table>", table_start)
+    table = body[table_start:table_end]
     # Beide Findings haben dieselbe CVE-ID, aber nur einer auf prod-Server.
-    # Wir checken auf den Servername der durchgeht.
-    assert "srv-prod-1" in body
-    assert "srv-dev-1" not in body
+    assert "srv-prod-1" in table
+    assert "srv-dev-1" not in table
 
 
 # ---------------------------------------------------------------------------

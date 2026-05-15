@@ -14,11 +14,13 @@
 
    Relative Zeitangaben ("vor 2h" / "noch nie") liefert der `relative_time`-
    Jinja-Filter (definiert in app/__init__.py). #}
-{% extends "base.html" %}
+{# Block I: dynamisches `extends`. #}
+{% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
 
 {% block title %}Server · secscan{% endblock %}
 
-{% block content %}
+{% block detail_pane %}
+<div class="p-6">
 <section class="max-w-6xl mx-auto space-y-8">
   <header>
     <h1 class="text-2xl font-semibold">Server</h1>
@@ -214,4 +216,5 @@
     </div>
   </div>
 </section>
+</div>
 {% endblock %}

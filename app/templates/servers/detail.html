@@ -21,11 +21,15 @@
    - DB-Stale: trivy_db_updated_at > 168h (1 Woche, konservativer Anzeige-
      wert; die strenge 30h-Schwelle gilt fuer das "Aufmerksamkeit"-Dashboard).
 #}
-{% extends "base.html" %}
+{# Block I: extendet `base_app.html` (Sidebar + Detail-Pane) bei vollem
+   Request, ansonsten `_partial_shell.html` (nur das Fragment fuer HTMX).
+   `hx_partial` wird vom View gesetzt (siehe `server_detail.py`). #}
+{% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
 
 {% block title %}{{ server.name }} · secscan{% endblock %}
 
-{% block content %}
+{% block detail_pane %}
+<div class="p-6">
 {% set is_active = not server.revoked_at and not server.retired_at %}
 {% set scan_stale = is_active
    and (not server.last_scan_at
@@ -195,4 +199,5 @@
 
   {% include "servers/_findings_section.html" %}
 </section>
+</div>
 {% endblock %}

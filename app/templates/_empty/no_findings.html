@@ -1,0 +1,30 @@
+{# Empty-State: Server ohne offene Findings ueber der Schwelle (Block I §7a).
+
+   Erwartete Variablen:
+     - `server` : Server | None
+     - `severity_threshold` : Severity | None
+#}
+<div class="p-6">
+  <div class="card bg-base-100 shadow-sm max-w-2xl" data-empty="no_findings">
+    <div class="card-body">
+      <h2 class="card-title text-base">Keine offenen Findings</h2>
+      <p class="text-sm opacity-80">
+        {% if server %}
+          Server <span class="font-mono">{{ server.name }}</span> hat keine
+          offenen Findings ueber der aktuellen Severity-Schwelle.
+        {% else %}
+          Keine offenen Findings ueber der aktuellen Severity-Schwelle.
+        {% endif %}
+      </p>
+      {% if server %}
+        <div class="card-actions mt-2">
+          <a href="{{ url_for('server_detail.show', server_id=server.id) }}?status=all"
+             hx-get="{{ url_for('server_detail.show', server_id=server.id) }}?status=all"
+             hx-target="#detail-pane"
+             hx-push-url="true"
+             class="btn btn-sm btn-ghost">Alle Findings anzeigen</a>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>

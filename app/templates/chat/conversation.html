@@ -23,7 +23,9 @@
        bzw. `navigator.clipboard.writeText` abgesichert (siehe
        `_macros.html`).
 #}
-{% extends "base.html" %}
+{# Block I: extendet `base_app.html` (Chat ist immer eine Vollseite mit
+   Sidebar, kein HX-Fragment-Pfad). #}
+{% extends "base_app.html" %}
 {% import "_macros.html" as m %}
 
 {% block title %}LLM-Bewertung · {{ server.name }} · secscan{% endblock %}
@@ -32,7 +34,8 @@
   <script defer src="{{ url_for('static', filename='js/llm_chat.js') }}"></script>
 {% endblock %}
 
-{% block content %}
+{% block detail_pane %}
+<div class="p-6">
 {% set last_msg = messages[-1] if messages else None %}
 {% set last_role = (last_msg.role.value if last_msg and last_msg.role is not string else (last_msg.role if last_msg else '')) %}
 {% set auto_start = last_msg is not none and last_role == 'user' and conversation.status.value == 'active' and not token_usage.blocked %}
@@ -203,4 +206,5 @@
   {% endif %}
 
 </section>
+</div>
 {% endblock %}

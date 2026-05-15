@@ -1,0 +1,22 @@
+{# Empty-State: Audit-Log leer (Block I §7a).
+
+   Erwartete Variablen: keine.
+#}
+<div class="p-6">
+  <div class="card bg-base-100 shadow-sm max-w-2xl" data-empty="no_audit">
+    <div class="card-body">
+      <h2 class="card-title text-base">Keine Audit-Events</h2>
+      <p class="text-sm opacity-80">
+        Lege einen Server an oder fuehre eine Aktion aus, damit das
+        Audit-Log Eintraege bekommt.
+      </p>
+      <div class="card-actions mt-2">
+        <a href="{{ url_for('servers.list_servers') }}"
+           hx-get="{{ url_for('servers.list_servers') }}"
+           hx-target="#detail-pane"
+           hx-push-url="true"
+           class="btn btn-sm btn-ghost">Zur Server-Verwaltung</a>
+      </div>
+    </div>
+  </div>
+</div>

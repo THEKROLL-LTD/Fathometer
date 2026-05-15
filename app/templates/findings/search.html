@@ -17,14 +17,19 @@
      - CSRF fuer den Bulk-POST kommt aus `<meta name="csrf-token">` in
        base.html (siehe static/js/bulk_ack.js).
 #}
-{% extends "base.html" %}
+{# Block I: dynamisches `extends` — bei HX-Request liefert die View
+   ein Fragment ohne `<html>`-Wrapper (siehe `_partial_shell.html`),
+   sonst die volle Seite mit Sidebar (`base_app.html`). `hx_partial`
+   wird vom View gesetzt. #}
+{% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
 {% from "_macros.html" import severity_badge, kev_badge, status_badge,
                               quick_copy, package_cell, epss_pill, cvss_pill,
                               bulk_ack_modal %}
 
 {% block title %}Suche · secscan{% endblock %}
 
-{% block content %}
+{% block detail_pane %}
+<div class="p-6">
 {# Aeusserer Alpine-Scope: Match-Bulk-Komponente fuer die Aggregations-CTA.
    Auch wenn keine Aggregation gerendert wird, ist der Scope leichtgewichtig
    und stoert nichts. `criterion` wird unten dynamisch aus dem Backend-State
@@ -286,4 +291,5 @@
     {{ bulk_form.csrf_token }}
   </form>
 </section>
+</div>
 {% endblock %}

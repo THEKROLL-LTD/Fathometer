@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.db import get_session
 from app.forms import CSRFOnlyForm
 from app.models import Finding, FindingStatus, Server, ServerTag, Tag
+from app.views._sidebar_context import is_hx_request
 
 log = structlog.get_logger(__name__)
 
@@ -340,6 +341,9 @@ def search() -> Any:
         total=total,
         available_tags=available_tags,
         bulk_form=CSRFOnlyForm(),
+        # Block I: Sidebar-Layout-Flag. Frontend-Implementer entscheidet ob
+        # das Template auf base_app.html oder ein nacktes Fragment switcht.
+        hx_partial=is_hx_request(request),
     )
 
 

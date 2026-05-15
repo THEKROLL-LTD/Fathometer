@@ -1,0 +1,13 @@
+{# HTMX-Fragment-Shell (Block I).
+
+   Wird via dynamic `{% extends %}` aus den Detail-Pane-Views aufgerufen,
+   wenn `hx_partial=True` (HX-Request). Liefert nur den `detail_pane`-
+   Block ohne `<html>`-Wrapper, damit HTMX das Fragment in `#detail-pane`
+   einsetzen kann.
+
+   Wrapper-Div `#detail-pane-content` macht das Targeting in Tests einfacher
+   und erlaubt CSS-Transitions auf Pane-Wechsel.
+#}
+<div id="detail-pane-content">
+  {% block detail_pane %}{% endblock %}
+</div>

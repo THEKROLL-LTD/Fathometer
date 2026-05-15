@@ -180,10 +180,15 @@ def test_audit_filter_by_server_name_substring(db_app: Flask) -> None:
     resp = client.get("/audit/?server_name=prod-web")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert str(sid_match) in body
-    # Other-Server-Event darf nicht in der Tabelle sein — sein ID-String aber
-    # potenziell im Dropdown nicht. Wir zaehlen Vorkommen:
-    assert body.count(f">{sid_other}<") == 0
+    # Audit-Tabelle isolieren — Sidebar/QuickStats koennen IDs als
+    # Aggregat-Counter rendern ("2 Server", `>2<`), das soll den Test
+    # nicht stoeren. `data-test="audit-table"` markiert die Result-Tabelle.
+    table_start = body.index('data-test="audit-table"')
+    table_end = body.index("</table>", table_start)
+    table = body[table_start:table_end]
+    assert str(sid_match) in table
+    # Other-Server-Event darf nicht in der Tabelle sein.
+    assert table.count(f">{sid_other}<") == 0
 
 
 def test_audit_filter_by_tag(db_app: Flask) -> None:
@@ -209,9 +214,14 @@ def test_audit_filter_by_tag(db_app: Flask) -> None:
     resp = client.get("/audit/?tag=prod")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert str(sid_prod) in body
+    # Audit-Tabelle isolieren — Sidebar-QuickStats koennen Aggregat-IDs
+    # `>2<` rendern, die nichts mit dem Tabellen-Inhalt zu tun haben.
+    table_start = body.index('data-test="audit-table"')
+    table_end = body.index("</table>", table_start)
+    table = body[table_start:table_end]
+    assert str(sid_prod) in table
     # Dev-Server-Target-ID darf nicht in der gefilterten Tabelle stehen.
-    assert body.count(f">{sid_dev}<") == 0
+    assert table.count(f">{sid_dev}<") == 0
 
 
 def test_audit_pagination_50_per_page(db_app: Flask) -> None:

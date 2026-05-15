@@ -1,0 +1,43 @@
+{# Sidebar Filter-Chips (Block I, §7a Aufgabe 1 + 5).
+
+   Erwartete Variablen:
+     - `available_tags` : list[Tag] — alle Tags.
+     - `filter_tags`    : list[str] — aktive Tag-Filter (OR-Semantik).
+
+   Klick auf einen Chip toggled den Tag im URL-Query. Wir bauen den Toggle-
+   Link serverseitig, damit der Browser-Back-Button funktioniert und keine
+   Client-State-Persistenz noetig ist. `tag.color` ist serverseitig per
+   `#rrggbb`-Regex validiert (Block D), daher safe als style-Value.
+#}
+{% if available_tags %}
+  <div class="px-3 py-2 border-b border-base-300 shrink-0" id="sidebar-filter">
+    <ul class="flex flex-wrap gap-1" role="list" aria-label="Tag-Filter">
+      {% for tag in available_tags %}
+        {% set is_active = tag.name in (filter_tags or []) %}
+        {# Toggle-Query: aktiv -> Tag entfernen, sonst hinzufuegen. Andere
+           Tags werden mitgenommen damit Multi-Select bleibt. #}
+        {% set new_tags = [] %}
+        {% for t in (filter_tags or []) if t != tag.name %}{% set _ = new_tags.append(t) %}{% endfor %}
+        {% if not is_active %}{% set _ = new_tags.append(tag.name) %}{% endif %}
+        {% set qs_parts = [] %}
+        {% for t in new_tags %}{% set _ = qs_parts.append('tag=' ~ t) %}{% endfor %}
+        {% set qs = qs_parts | join('&') %}
+        <li>
+          <a href="{{ url_for('dashboard.index') }}{% if qs %}?{{ qs }}{% endif %}"
+             hx-get="{{ url_for('dashboard.index') }}{% if qs %}?{{ qs }}{% endif %}"
+             hx-target="#detail-pane"
+             hx-push-url="true"
+             class="badge badge-sm cursor-pointer transition
+                    {% if is_active %}badge-primary{% else %}badge-outline opacity-80 hover:opacity-100{% endif %}"
+             style="{% if not is_active %}border-color: {{ tag.color }}; color: {{ tag.color }};{% endif %}"
+             data-tag-name="{{ tag.name }}"
+             data-active="{{ '1' if is_active else '0' }}"
+             aria-pressed="{{ 'true' if is_active else 'false' }}"
+             aria-label="Tag {{ tag.name }} {% if is_active %}entfernen{% else %}aktivieren{% endif %}">
+            {{ tag.name }}
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}

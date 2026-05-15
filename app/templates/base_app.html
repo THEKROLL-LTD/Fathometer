@@ -1,0 +1,217 @@
+<!doctype html>
+{# App-Shell fuer eingeloggte secscan-Routen (Block I, §7a).
+
+   Standalone-Layout (extends NICHT von base.html), damit die App-Shell
+   eine eigene Topbar (kompakt, ohne Nav-Links) und ein Sidebar+Detail-
+   Pane-Skelett rendern kann. `base.html` bleibt unveraendert die Shell
+   fuer Pre-Login-Routen (Setup, Login).
+
+   Variablen-Vertrag (vom View, siehe `_sidebar_context.py`):
+     - `quick_stats`        : QuickStats | None
+     - `sidebar_servers`    : list[Server] (mit eager-loaded tag_links/tag)
+     - `sidebar_heartbeats` : dict[int, list[DailyStatus]]
+     - `available_tags`     : list[Tag]
+     - `filter_tags`        : list[str]
+     - `active_server_id`   : int | None
+     - `theme`              : 'auto'|'light'|'dark' (Context-Processor)
+
+   Bei `hx_partial=True` rendern die Views nur das Detail-Pane-Fragment
+   (sie extenden in dem Fall nicht `base_app.html`).
+
+   Sicherheit:
+     - Jinja-Autoescape global aktiv (siehe app/__init__.py).
+     - Niemals `|safe` auf Client- oder LLM-Daten.
+#}
+<html lang="de" data-theme="{% if theme == 'auto' %}light{% else %}{{ theme }}{% endif %}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>{% block title %}secscan{% endblock %}</title>
+
+  {# No-Flash-Theme-Resolver — gleiche Logik wie base.html. #}
+  <script>
+    (function () {
+      try {
+        var t = {{ theme | tojson }};
+        if (t === "auto") {
+          var prefersDark = window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.setAttribute(
+            "data-theme", prefersDark ? "dark" : "light"
+          );
+        }
+      } catch (e) { /* fail-open */ }
+    })();
+  </script>
+
+  {# Tailwind + DaisyUI via CDN — siehe ADR-0001. Pins identisch zu base.html. #}
+  <script src="https://cdn.tailwindcss.com/3.4.16?plugins=forms,typography"></script>
+  <link
+    href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css"
+    rel="stylesheet"
+    type="text/css"
+  />
+
+  {# Alpine, HTMX, Theme. Reihenfolge wie in base.html (defer). #}
+  <script defer src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.7/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+
+  {# Wiederverwendete Block-A/F/H-Komponenten. #}
+  <script defer src="{{ url_for('static', filename='js/bulk_ack.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/sse.js') }}"></script>
+
+  {# Block-I-Skripte. #}
+  <script defer src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/sse_highlight.js') }}"></script>
+
+  {% block head %}{% endblock %}
+</head>
+<body class="flex flex-col h-screen overflow-hidden bg-base-100 text-base-content antialiased text-sm">
+
+  {# ------------------------------------------------------------------
+     Topbar — kompakt (48px). App-Name links, Theme + User + Logout
+     rechts. KEINE Nav-Links — Navigation lebt in der Sidebar.
+     ------------------------------------------------------------------ #}
+  <header class="flex items-center justify-between gap-3 h-12 px-4
+                 bg-base-200 border-b border-base-300 shrink-0"
+          role="banner">
+    <div class="flex items-center gap-3 min-w-0">
+      <a href="{{ url_for('dashboard.index') if current_user is defined and current_user.is_authenticated else url_for('health.healthz') }}"
+         class="text-base font-semibold tracking-tight">secscan</a>
+    </div>
+    <div class="flex items-center gap-2">
+      <div x-data="themeToggle({{ theme | tojson }})" class="dropdown dropdown-end">
+        <button tabindex="0"
+                class="btn btn-ghost btn-xs"
+                aria-label="Theme auswaehlen">
+          <span x-text="labelFor(current)"></span>
+        </button>
+        <ul tabindex="0"
+            class="dropdown-content menu bg-base-100 rounded-box shadow-md w-40 z-50">
+          <template x-for="opt in options" :key="opt.value">
+            <li>
+              <button type="button"
+                      @click="select(opt.value)"
+                      :class="{'active': current === opt.value}"
+                      x-text="opt.label"></button>
+            </li>
+          </template>
+        </ul>
+      </div>
+
+      {% if current_user is defined and current_user.is_authenticated %}
+        <span class="text-xs opacity-70 ml-1 font-mono">{{ current_user.username }}</span>
+        <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="submit" class="btn btn-ghost btn-xs">Logout</button>
+        </form>
+      {% endif %}
+    </div>
+  </header>
+
+  {# Flash-Messages liegen ausserhalb des Sidebar/Detail-Pane-Splits, damit
+     sie immer sichtbar sind. Kein Scroll-Container — Topbar-naehe. #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="px-4 pt-2 space-y-1 shrink-0">
+        {% for category, message in messages %}
+          {% set cls = "alert-info" %}
+          {% if category == "success" %}{% set cls = "alert-success" %}
+          {% elif category == "error" %}{% set cls = "alert-error" %}
+          {% elif category == "warning" %}{% set cls = "alert-warning" %}
+          {% endif %}
+          <div class="alert {{ cls }} py-2" role="status">
+            <span>{{ message }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  {# ------------------------------------------------------------------
+     Main-Container: Sidebar links + Detail-Pane rechts.
+     ------------------------------------------------------------------ #}
+  <div class="flex flex-1 overflow-hidden min-h-0">
+
+    {# ---- Sidebar ---- #}
+    <aside class="w-80 lg:w-96 shrink-0 border-r border-base-300 bg-base-200/40
+                  overflow-y-auto flex flex-col"
+           id="sidebar-root"
+           aria-label="Sidebar"
+           x-data="sidebarSearch()">
+      {% block sidebar %}
+        {% include "sidebar/_quick_stats.html" %}
+        {% include "sidebar/_search.html" %}
+        {% include "sidebar/_filter.html" %}
+
+        <ul id="server-list"
+            role="list"
+            class="divide-y divide-base-300 flex-1">
+          {% for srv in (sidebar_servers or []) %}
+            {% with server=srv,
+                    cells=(sidebar_heartbeats or {}).get(srv.id, []),
+                    is_active=(active_server_id == srv.id) %}
+              {% include "sidebar/_server_row.html" %}
+            {% endwith %}
+          {% else %}
+            {% include "_empty/no_servers.html" %}
+          {% endfor %}
+        </ul>
+
+        {% include "sidebar/_settings_menu.html" %}
+      {% endblock %}
+    </aside>
+
+    {# ---- Detail-Pane ---- #}
+    <main class="flex-1 min-w-0 overflow-y-auto"
+          id="detail-pane"
+          role="main">
+      {% block detail_pane %}
+        {% if main_pane %}
+          {% include main_pane %}
+        {% else %}
+          {% include "_pane/welcome.html" %}
+        {% endif %}
+      {% endblock %}
+    </main>
+  </div>
+
+  {# Global Toast-Host — gleiche Komponente wie base.html (Block F). #}
+  <div id="global-toast-host"
+       x-data="{
+         items: [],
+         push(detail) {
+           const id = Date.now() + Math.random();
+           const kind = (detail && detail.kind) || 'info';
+           const msg  = (detail && detail.msg)  || '';
+           this.items.push({ id, msg, kind });
+           setTimeout(() => {
+             this.items = this.items.filter(t => t.id !== id);
+           }, 3000);
+         }
+       }"
+       @toast.window="push($event.detail)"
+       class="toast toast-end toast-bottom z-50"
+       aria-live="polite"
+       aria-atomic="true">
+    <template x-for="t in items" :key="t.id">
+      <div class="alert shadow-lg"
+           :class="{
+             'alert-success': t.kind === 'success',
+             'alert-error':   t.kind === 'error',
+             'alert-info':    t.kind === 'info' || (t.kind !== 'success' && t.kind !== 'error')
+           }">
+        <span x-text="t.msg"></span>
+      </div>
+    </template>
+  </div>
+
+  {# Modal-Mount fuer HTMX-eingespielte Inhalte (Block E). #}
+  <div id="modal-host"></div>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

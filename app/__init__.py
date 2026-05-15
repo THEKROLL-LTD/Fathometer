@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import sys
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from flask import Flask, Response, g, redirect, request, url_for
@@ -299,6 +299,35 @@ def create_app() -> Flask:
             }
         except Exception:  # pragma: no cover — DB/Setup-Edge-Case
             return {"llm_configured": False}
+
+    @app.context_processor
+    def _inject_sidebar_context() -> dict[str, Any]:
+        """Sidebar-Variablen fuer `base_app.html` (Block I).
+
+        Wird nur fuer authentifizierte, nicht-HX-Requests gebaut — bei
+        HTMX-Fragmenten extenden Templates `_partial_shell.html` und
+        brauchen die Sidebar nicht. Bei Fehlern (DB-down, kein Setup):
+        leerer dict, das Template faellt auf seine `or []`/`or {}`-
+        Defaults zurueck.
+
+        View-Kontext hat Vorrang vor Context-Processor (Flask-Default),
+        d.h. `server_detail.show` kann `active_server_id` und Dashboard
+        kann `quick_stats`/`available_tags` weiterhin selbst setzen.
+        """
+        # API-Endpoints und HTMX-Fragmente brauchen keinen Sidebar-Build.
+        if request.headers.get("HX-Request") == "true":
+            return {}
+        from flask_login import current_user
+
+        if not getattr(current_user, "is_authenticated", False):
+            return {}
+        try:
+            from app.views._sidebar_context import build_sidebar_context
+
+            return build_sidebar_context()
+        except Exception as exc:  # pragma: no cover — DB/Setup-Edge-Case
+            log.warning("sidebar_context.unavailable", error=str(exc))
+            return {}
 
     @app.after_request
     def _persist_theme(response: Response) -> Response:

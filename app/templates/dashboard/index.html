@@ -23,11 +23,16 @@
 
    Sicherheit: kein `|safe` auf Daten — alle Strings autoescaped.
 #}
-{% extends "base.html" %}
+{# Block-I-Layout: extendet `base_app.html` (Sidebar + Detail-Pane). Bei
+   HX-Request rendert die View ein anderes Partial (`_pane/welcome.html`)
+   und dieses Template wird nicht verwendet — daher kein `hx_partial`-Guard
+   noetig. #}
+{% extends "base_app.html" %}
 
 {% block title %}Dashboard · secscan{% endblock %}
 
-{% block content %}
+{% block detail_pane %}
+<div class="p-6">
 {# Block H — Live-Updates:
    - `dashboardSse(eventsUrl)` oeffnet einen EventSource auf `{{ events_url }}`
      und animiert die betroffene Karte bei `scan.received`.
@@ -99,4 +104,5 @@
     </div>
   {% endif %}
 </section>
+</div>
 {% endblock %}

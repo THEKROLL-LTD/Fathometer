@@ -29,7 +29,7 @@ import asyncio
 from typing import Any, cast
 
 import structlog
-from flask import Blueprint, flash, jsonify, redirect, render_template, url_for
+from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
 from sqlalchemy import select
 
@@ -46,6 +46,7 @@ from app.services.llm_client import (
     validate_base_url,
 )
 from app.settings_service import get_settings_row
+from app.views._sidebar_context import is_hx_request
 
 log = structlog.get_logger(__name__)
 llm_settings_bp = Blueprint("llm_settings", __name__, url_prefix="/settings/llm")
@@ -136,6 +137,8 @@ def show() -> Any:
         .scalars()
         .all()
         .__len__(),
+        # Block I: Sidebar-Layout-Flag.
+        hx_partial=is_hx_request(request),
     )
 
 

@@ -149,11 +149,18 @@ def show(server_id: int) -> Any:
 
     # `section_ctx` enthaelt bereits `server` und Form-Instanzen; wir mergen
     # nur die Header-spezifischen Variablen (Tag-Editor) hinzu.
+    #
+    # Block I: `active_server_id` markiert die Sidebar-Zeile, `hx_partial`
+    # signalisiert dem Template ob es im Fragment- oder Vollseiten-Modus
+    # gerendert wird. Der HX-Pfad oben hat bereits returned, deshalb hier
+    # immer `False`.
     return render_template(
         "servers/detail.html",
         available_tags=_all_tags(),
         add_form=CSRFOnlyForm(),
         remove_form=CSRFOnlyForm(),
+        active_server_id=server.id,
+        hx_partial=False,
         **section_ctx,
     )
 
