@@ -38,6 +38,7 @@ from app.services.stale_detection import (
     is_stale,
 )
 from app.settings_service import get_settings_row
+from app.views._sidebar_context import is_hx_request
 
 log = structlog.get_logger(__name__)
 
@@ -167,6 +168,22 @@ def index() -> Any:
     except Exception:  # pragma: no cover — Endpoint nicht registriert (Tests)
         events_url = "/events"
 
+    # Block I: bei HX-Request liefern wir nur die Welcome-Card (Detail-Pane-
+    # Fragment fuer die Sidebar-Klicks auf "Home"). Bei vollem Request
+    # rendern wir die Block-D-Vorlage weiterhin — die Tests des Blocks D
+    # erwarten das.
+    from app.services.quick_stats import get_quick_stats
+
+    if is_hx_request(request):
+        qs = get_quick_stats(sess, filter_tags=filt.tags or None, now=now)
+        return render_template("_pane/welcome.html", quick_stats=qs)
+
+    # Sidebar-Variablen werden via Context-Processor injiziert
+    # (`_inject_sidebar_context` in app/__init__.py). Damit der Tag-Filter
+    # `?tag=prod` auch die QuickStats in der Sidebar mitfiltert, ueber-
+    # schreiben wir `quick_stats` und `filter_tags` hier explizit.
+    quick_stats = get_quick_stats(sess, filter_tags=filt.tags or None, now=now)
+
     return render_template(
         "dashboard/index.html",
         servers=visible,
@@ -176,6 +193,8 @@ def index() -> Any:
         severity_threshold=severity_threshold,
         db_stale_threshold_h=db_stale_h,
         events_url=events_url,
+        quick_stats=quick_stats,
+        filter_tags=filt.tags,
     )
 
 

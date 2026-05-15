@@ -1,0 +1,50 @@
+{# Sidebar Settings-Menu am unteren Rand (Block I, §7a Aufgabe 7).
+
+   Links werden serverseitig via `url_for` aufgebaut. Klick laedt die
+   jeweilige Settings-View per HTMX in den Detail-Pane.
+
+   Endpunkte:
+     - servers.list_servers     — Server-Liste (Revoke/Retire)
+     - settings.tags_list       — Tag-Verwaltung
+     - llm_settings.show        — LLM-Provider-Konfiguration
+     - audit.list_events        — Audit-Log
+#}
+<nav class="mt-auto border-t border-base-300 px-3 py-2 shrink-0"
+     aria-label="Settings">
+  <details class="group">
+    <summary class="cursor-pointer text-[10px] uppercase tracking-wide opacity-60 select-none
+                    hover:opacity-100 transition-opacity">
+      Settings
+    </summary>
+    <ul class="mt-1 space-y-px text-xs">
+      <li>
+        <a href="{{ url_for('servers.list_servers') }}"
+           hx-get="{{ url_for('servers.list_servers') }}"
+           hx-target="#detail-pane"
+           hx-push-url="true"
+           class="block px-2 py-1 rounded hover:bg-base-300 transition-colors">Server</a>
+      </li>
+      <li>
+        <a href="{{ url_for('settings.tags_list') }}"
+           hx-get="{{ url_for('settings.tags_list') }}"
+           hx-target="#detail-pane"
+           hx-push-url="true"
+           class="block px-2 py-1 rounded hover:bg-base-300 transition-colors">Tags</a>
+      </li>
+      <li>
+        <a href="{{ url_for('llm_settings.show') }}"
+           hx-get="{{ url_for('llm_settings.show') }}"
+           hx-target="#detail-pane"
+           hx-push-url="true"
+           class="block px-2 py-1 rounded hover:bg-base-300 transition-colors">LLM-Provider</a>
+      </li>
+      <li>
+        <a href="{{ url_for('audit.list_events') }}"
+           hx-get="{{ url_for('audit.list_events') }}"
+           hx-target="#detail-pane"
+           hx-push-url="true"
+           class="block px-2 py-1 rounded hover:bg-base-300 transition-colors">Audit-Log</a>
+      </li>
+    </ul>
+  </details>
+</nav>

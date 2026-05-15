@@ -1,0 +1,24 @@
+{# Empty-State: Keine Server in der Flotte (Block I, §7a Empty-States).
+
+   Erwartete Variablen: keine.
+
+   Wird sowohl im Sidebar-`<ul>` als auch im Detail-Pane direkt eingebunden.
+   Daher rendern wir kein `<li>`-Wrapper-Element, sondern eine plain Card.
+   Im Sidebar-Kontext landet die Card durch `display:contents`-aequivalent
+   nicht in der Liste — wir wrappen daher selbst in `<li>` falls noetig.
+#}
+<li class="px-3 py-6 text-xs opacity-70 list-none" data-empty="no_servers">
+  <p class="mb-2">Noch kein Server registriert.</p>
+  <p class="mb-2">
+    Im
+    <a href="{{ url_for('servers.list_servers') }}"
+       hx-get="{{ url_for('servers.list_servers') }}"
+       hx-target="#detail-pane"
+       hx-push-url="true"
+       class="link link-primary">Setup</a>
+    einen Master-Key generieren und auf dem Ziel-Host
+    <code class="font-mono">secscan-register.sh</code> ausfuehren:
+  </p>
+  <pre class="bg-base-300 text-base-content rounded p-2 text-[10px] overflow-x-auto font-mono">SECSCAN_MASTER_KEY="..." \
+  ./secscan-register.sh https://secscan.example.com prod-web-01 24</pre>
+</li>

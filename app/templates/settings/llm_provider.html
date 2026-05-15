@@ -25,7 +25,8 @@
        oder `model` aendert, blocken wir den Submit per Alpine und
        zeigen einen Confirm-Dialog mit der Archivierungs-Warnung.
 #}
-{% extends "base.html" %}
+{# Block I: dynamisches `extends`. #}
+{% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
 
 {% block title %}LLM-Provider · secscan{% endblock %}
 
@@ -33,7 +34,8 @@
   <script defer src="{{ url_for('static', filename='js/llm_settings.js') }}"></script>
 {% endblock %}
 
-{% block content %}
+{% block detail_pane %}
+<div class="p-6">
 <section class="max-w-3xl mx-auto space-y-6">
   <header>
     <h1 class="text-2xl font-semibold">LLM-Provider</h1>
@@ -227,6 +229,7 @@
     </div>
   </div>
 </section>
+</div>
 
 {# Alpine-Komponente `llmProviderForm()` lebt in
    `static/js/llm_settings.js` (oben im `head`-Block mit `defer`

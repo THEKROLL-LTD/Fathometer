@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import structlog
-from flask import Blueprint, flash, make_response, redirect, render_template, url_for
+from flask import Blueprint, flash, make_response, redirect, render_template, request, url_for
 from flask_login import login_required
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -14,6 +14,7 @@ from app.audit import log_event
 from app.db import get_session
 from app.forms import CSRFOnlyForm, TagForm
 from app.models import Tag
+from app.views._sidebar_context import is_hx_request
 
 log = structlog.get_logger(__name__)
 settings_bp = Blueprint("settings", __name__, url_prefix="/settings")
@@ -29,6 +30,8 @@ def tags_list() -> Any:
         tags=tags,
         form=TagForm(),
         delete_form=CSRFOnlyForm(),
+        # Block I: Sidebar-Layout-Flag.
+        hx_partial=is_hx_request(request),
     )
 
 

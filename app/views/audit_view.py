@@ -45,6 +45,7 @@ from app.db import get_session
 from app.forms import TAG_NAME_REGEX
 from app.models import AuditEvent, Server, ServerTag, Tag
 from app.services.csv_export import stream_audit_csv
+from app.views._sidebar_context import is_hx_request
 
 log = structlog.get_logger(__name__)
 
@@ -244,6 +245,8 @@ def list_events() -> Any:
         actions=KNOWN_ACTIONS,
         available_tags=available_tags,
         csv_url=csv_url,
+        # Block I: Sidebar-Layout-Flag.
+        hx_partial=is_hx_request(request),
     )
 
 

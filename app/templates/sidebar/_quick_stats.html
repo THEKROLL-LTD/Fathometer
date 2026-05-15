@@ -1,0 +1,73 @@
+{# Sidebar Quick-Stats-Block (Block I, §7a).
+
+   Erwartete Variablen:
+     - `quick_stats` : QuickStats-Dataclass mit Feldern
+                         total_open, kev_open, critical_open, high_open,
+                         stale_servers.
+
+   Jeder Counter ist ein Link auf einen entsprechenden Filter; Klick setzt
+   den URL-Query und liefert die naechste Seite via HTMX. Bei direktem
+   Browser-Navigieren funktioniert der `href`-Fallback weiterhin (keine
+   reine JS-Aktion).
+
+   Farb-Mapping nach §7a Severity-Standard:
+     - KEV / Critical -> text-error
+     - High / Stale   -> text-warning
+     - Total          -> opacity-70 (gedaempft, neutral)
+#}
+<div class="px-3 py-2 border-b border-base-300 shrink-0" id="quick-stats">
+  {% if quick_stats %}
+    <dl class="grid grid-cols-5 gap-1 text-center">
+      <a href="{{ url_for('dashboard.index') }}"
+         hx-get="{{ url_for('dashboard.index') }}"
+         hx-target="#detail-pane"
+         hx-push-url="true"
+         class="hover:bg-base-300 rounded p-1 block transition-colors"
+         data-stat="total_open"
+         aria-label="{{ quick_stats.total_open }} offene Findings insgesamt">
+        <dt class="text-[10px] uppercase tracking-wide opacity-60">Open</dt>
+        <dd class="text-sm font-semibold font-mono">{{ quick_stats.total_open }}</dd>
+      </a>
+      <a href="{{ url_for('dashboard.index') }}?kev_only=1"
+         hx-get="{{ url_for('dashboard.index') }}?kev_only=1"
+         hx-target="#detail-pane"
+         hx-push-url="true"
+         class="hover:bg-base-300 rounded p-1 block transition-colors"
+         data-stat="kev_open"
+         aria-label="{{ quick_stats.kev_open }} KEV-Findings offen">
+        <dt class="text-[10px] uppercase tracking-wide opacity-60">KEV</dt>
+        <dd class="text-sm font-semibold font-mono {% if quick_stats.kev_open %}text-error{% endif %}">{{ quick_stats.kev_open }}</dd>
+      </a>
+      <a href="{{ url_for('dashboard.index') }}?severity=critical"
+         hx-get="{{ url_for('dashboard.index') }}?severity=critical"
+         hx-target="#detail-pane"
+         hx-push-url="true"
+         class="hover:bg-base-300 rounded p-1 block transition-colors"
+         data-stat="critical_open"
+         aria-label="{{ quick_stats.critical_open }} Critical-Findings offen">
+        <dt class="text-[10px] uppercase tracking-wide opacity-60">Crit</dt>
+        <dd class="text-sm font-semibold font-mono {% if quick_stats.critical_open %}text-error{% endif %}">{{ quick_stats.critical_open }}</dd>
+      </a>
+      <a href="{{ url_for('dashboard.index') }}?severity=high"
+         hx-get="{{ url_for('dashboard.index') }}?severity=high"
+         hx-target="#detail-pane"
+         hx-push-url="true"
+         class="hover:bg-base-300 rounded p-1 block transition-colors"
+         data-stat="high_open"
+         aria-label="{{ quick_stats.high_open }} High-Findings offen">
+        <dt class="text-[10px] uppercase tracking-wide opacity-60">High</dt>
+        <dd class="text-sm font-semibold font-mono {% if quick_stats.high_open %}text-warning{% endif %}">{{ quick_stats.high_open }}</dd>
+      </a>
+      <a href="{{ url_for('dashboard.index') }}?stale_only=1"
+         hx-get="{{ url_for('dashboard.index') }}?stale_only=1"
+         hx-target="#detail-pane"
+         hx-push-url="true"
+         class="hover:bg-base-300 rounded p-1 block transition-colors"
+         data-stat="stale_servers"
+         aria-label="{{ quick_stats.stale_servers }} Server stale">
+        <dt class="text-[10px] uppercase tracking-wide opacity-60">Stale</dt>
+        <dd class="text-sm font-semibold font-mono {% if quick_stats.stale_servers %}text-warning{% endif %}">{{ quick_stats.stale_servers }}</dd>
+      </a>
+    </dl>
+  {% endif %}
+</div>

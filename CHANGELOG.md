@@ -4,6 +4,106 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.2.0] — 2026-05-15
+
+UI-Modernisierung als Folge-Release nach v0.1.0. Funktional unveraendert
+— gleiche Routen, Endpoints, Daten-Vertraege. Layout wechselt von
+Multi-Page-Card-Grid zu Single-Page-Sidebar + Detail-Pane im
+uptime-kuma-Spirit.
+
+### Added — Block I: UI-Modernisierung
+
+- **Single-Page-Layout** in neuer `base_app.html`. Sidebar links
+  (320/384px) mit Quick-Stats, Sticky-Search (`/`-Shortcut), Tag-Filter,
+  Server-Liste mit Heartbeat-Bars, Settings-Akkordeon. Detail-Pane
+  rechts mit HTMX-Swap und `hx-push-url`.
+- **Heartbeat-Bars** pro Server-Eintrag in der Sidebar. 50 Tage als
+  vertikale Pillen, Severity-Farb-Mapping (critical=error,
+  high=warning, medium=accent, low=info, unknown=ghost, clean=success/40,
+  no-scan=base-300). KEV-Tage zusaetzlich mit `ring-1 ring-error`.
+  Tooltip mit 300ms-Delay zeigt Datum, max Severity, KEV-Count,
+  Scan-Status. Aggregation als Python-Service (Variante B),
+  Performance unter 200 ms fuer 50 Server x 50 Tage.
+- **Quick-Stats** als Mini-Block oben in der Sidebar: 5 Counter
+  (open / KEV / critical / high / stale-server) mit Filter-Klicks.
+- **Sticky-Search-Header** mit `/`-Shortcut. Live-Filter der
+  Server-Liste clientseitig (Substring auf Name + Tag-Namen).
+  `Enter` oeffnet globale Suche im Detail-Pane, `Esc` leert.
+- **Settings als Sidebar-Tab**: kompakte Akkordeon-Liste am unteren
+  Sidebar-Rand mit "Server", "Tags", "LLM-Provider", "API-Keys &
+  Master-Key", "About".
+- **HTMX-Routing-Refactor**: alle authentifizierten View-Routen
+  (`/`, `/servers/<id>`, `/findings/search`, `/audit/`, `/settings/*`)
+  liefern bei `HX-Request: true` nur das Detail-Pane-Fragment.
+  Direkt-URL und Bookmarks funktionieren weiter.
+- **Sidebar-Context-Processor**: Flask-`@app.context_processor`
+  injiziert Sidebar-Variablen automatisch fuer alle authentifizierten
+  Vollseiten-Renders, skipt bei HX-Request und unauthentifizierten
+  Routen.
+- **Empty-States** mit klaren CTAs unter `app/templates/_empty/`
+  (no_servers, no_findings, no_audit, no_search_results).
+- **Quick-Copy-Macro-Regression-Fix** aus Block F: `tojson | forceescape`
+  verhindert dass JS-Code im Attribut den DOM-Body verschmutzt.
+- **Subtle Fade-In bei SSE-Updates**: `htmx:afterSettle`-Listener und
+  `secscan:scan-received`-Custom-Event fuegen 1 s `bg-info/20`-Akzent
+  an Swap-Targets bzw. Sidebar-Rows.
+- **Monospace-Cleanup**: `font-mono`-Klasse auf CVE-IDs, Paketen,
+  Versionen, Hostnames, Kerneln, Pfaden, Hash-IDs ueber 6 zentrale
+  Templates.
+
+### Tests
+
+- 45 neue Block-I-Tests (Heartbeat-Aggregation, Quick-Stats,
+  Sidebar-Layout, Keyboard-Shortcut, Settings-Sidebar-Swap,
+  XSS-in-Heartbeat-Tooltip).
+- **674 Tests gruen** (629 + 45), Coverage **92.54 %**, Adversarial-
+  Suite weiterhin 131/131.
+- Performance-Sanity-Test: 50 Server x 50 Tage Heartbeat-Aggregation
+  unter 200 ms.
+
+### Security
+
+- security-auditor-Verdict: **CLEAN**.
+- XSS-Tests in Server-Namen, Heartbeat-Tooltip-Daten-Attributen,
+  Tag-Filter-Pfaden — alle escapeed via Jinja-Autoescape und JS
+  `textContent`.
+- Quick-Stats SQL ueber SQLAlchemy-ORM mit Bind-Parametern.
+- Open-Redirect via `hx-push-url`/`pushState` ausgeschlossen
+  (alle HTMX-URLs aus `url_for()`, Search-Pfad mit
+  `encodeURIComponent`-Schutz).
+- CSRF-Verhalten unveraendert (alle Block-I-Routen sind GET).
+
+### Architektur-Entscheidungen
+
+- **Heartbeat-Aggregation Variante B**: Python-Service mit on-the-fly-
+  Aggregation, keine Postgres-Materialized-View. Re-Open-Trigger:
+  wenn Sidebar-Render > 200 ms wird.
+- **`base.html` vs `base_app.html` Clean-Split**: `base.html` bleibt
+  fuer Pre-Auth-Routen (Login, Setup), `base_app.html` ist die App-
+  Shell fuer authentifizierte Routen. HX-Fragmente extenden
+  `_partial_shell.html`.
+- ADR-0012 dokumentiert warum Block I separater Block ist und
+  was bewusst draussen bleibt (Dark-Mode-Default, Mobile, Cmd-K,
+  Vim-Shortcuts, Optimistic-Updates).
+
+### Was bewusst draussen bleibt (siehe ADR-0012)
+
+- Mobile-Layout (ADR-0009 weiterhin in Kraft).
+- Dark-Mode als Default.
+- Cmd-K Command-Palette.
+- Vim-Style-Keyboard-Shortcuts.
+- Optimistic-Updates.
+- Loading-Skeletons (HTMX-Default reicht).
+
+### Screenshots
+
+- `docs/blocks/I-evidence/dashboard.png` — Sidebar mit 4 Servern,
+  Heartbeat-Bars, Quick-Stats; Detail-Pane mit Dashboard.
+- `docs/blocks/I-evidence/server-detail.png` — Sidebar mit aktiver
+  Server-Row, Detail-Pane mit Findings-Tabelle.
+
+---
+
 ## [v0.1.0] — 2026-05-15
 
 Erstes MVP-Release. Selbst-gehostete Web-App fuer Triage von
