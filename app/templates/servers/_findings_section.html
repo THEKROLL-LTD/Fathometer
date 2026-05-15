@@ -21,7 +21,7 @@
 #}
 {% from "_macros.html" import severity_badge, kev_badge %}
 <section class="space-y-4" id="findings-section">
-  {# Header: Titel + Counts-Badges. #}
+  {# Header: Titel + Counts-Badges + CSV-Export. #}
   <header class="flex flex-wrap items-center justify-between gap-2">
     <h2 class="text-xl font-semibold">Findings</h2>
     <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -40,6 +40,15 @@
           <span class="font-semibold">{{ counts.kev_open }}</span> KEV
         </span>
       {% endif %}
+      {# CSV-Export der aktuell gefilterten Findings (Block F).
+         `view_filter.to_query_string()` traegt alle aktiven Filter mit. #}
+      <a href="{{ url_for('findings.export_csv') }}?server_id={{ server.id }}&{{ view_filter.to_query_string() }}"
+         class="btn btn-xs btn-outline ml-2"
+         download
+         data-test="findings-csv-export"
+         title="Findings dieses Servers als CSV exportieren">
+        CSV
+      </a>
     </div>
   </header>
 

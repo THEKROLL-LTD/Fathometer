@@ -1,0 +1,224 @@
+{# Audit-View `/audit`.
+
+   Variablen-Vertrag (gesetzt in app/views/audit_view.py):
+     - `events`         : list[AuditEvent]
+     - `total`          : int
+     - `page`, `per_page`, `pages` : int
+     - `filter`         : dict (date_from, date_to, actor, action,
+                                server_id, server_name, tag)
+     - `actions`        : list[str] — KNOWN_ACTIONS
+     - `available_tags` : list[Tag]
+     - `csv_url`        : str
+
+   Sicherheit:
+     - `event.event_metadata` ist user-/agent-controlled → nur escaped.
+     - Kommentare und Actor-Namen ebenso.
+#}
+{% extends "base.html" %}
+
+{% block title %}Audit-Log · secscan{% endblock %}
+
+{# -------- Action-Kategorisierung fuer Badge-Farben ---------------------- #}
+{% macro action_badge(action) -%}
+  {%- set cls = 'badge-ghost' -%}
+  {%- if action.startswith('auth.failed') or action == 'ratelimit.tripped' -%}
+    {%- set cls = 'badge-error' -%}
+  {%- elif action.startswith('finding.acknowledged') or action.startswith('finding.bulk_acknowledged') or action == 'finding.resolved' -%}
+    {%- set cls = 'badge-success' -%}
+  {%- elif action.startswith('finding.note') or action == 'finding.reopened' -%}
+    {%- set cls = 'badge-warning' -%}
+  {%- elif action.startswith('server.') -%}
+    {%- set cls = 'badge-info' -%}
+  {%- elif action.startswith('tag.') -%}
+    {%- set cls = 'badge-accent' -%}
+  {%- elif action.startswith('key.rotated') -%}
+    {%- set cls = 'badge-warning' -%}
+  {%- elif action.startswith('auth.') -%}
+    {%- set cls = 'badge-info' -%}
+  {%- elif action.startswith('scan.') -%}
+    {%- set cls = 'badge-ghost' -%}
+  {%- elif action.startswith('settings.') -%}
+    {%- set cls = 'badge-accent' -%}
+  {%- elif action.startswith('llm.') -%}
+    {%- set cls = 'badge-info' -%}
+  {%- elif action == 'setup.completed' -%}
+    {%- set cls = 'badge-success' -%}
+  {%- endif -%}
+  <span class="badge badge-sm {{ cls }} font-mono">{{ action }}</span>
+{%- endmacro %}
+
+{% block content %}
+<section class="space-y-4">
+  <header class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold">Audit-Log</h1>
+      <p class="text-sm opacity-70 mt-1">
+        {{ total }} Eintraege · Seite {{ page }} / {{ pages }}
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="{{ csv_url }}"
+         class="btn btn-sm btn-outline"
+         download
+         data-test="audit-csv-export">
+        CSV-Export
+      </a>
+    </div>
+  </header>
+
+  {# ---- Filter-Form -------------------------------------------------------- #}
+  <form method="get" action="{{ url_for('audit.list_events') }}"
+        class="card bg-base-200 shadow-sm">
+    <div class="card-body p-4 flex flex-wrap items-end gap-3 text-sm">
+      <label class="form-control">
+        <span class="label-text text-xs opacity-70 pb-1">von</span>
+        <input type="date" name="date_from"
+               value="{{ filter.date_from.isoformat() if filter.date_from else '' }}"
+               class="input input-bordered input-sm">
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-70 pb-1">bis</span>
+        <input type="date" name="date_to"
+               value="{{ filter.date_to.isoformat() if filter.date_to else '' }}"
+               class="input input-bordered input-sm">
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-70 pb-1">Actor</span>
+        <input type="text" name="actor"
+               value="{{ filter.actor or '' }}"
+               class="input input-bordered input-sm"
+               placeholder="Username / Server-Name">
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-70 pb-1">Action</span>
+        <select name="action" class="select select-bordered select-sm">
+          <option value="">– alle –</option>
+          {% for a in actions %}
+            <option value="{{ a }}" {% if filter.action == a %}selected{% endif %}>{{ a }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-70 pb-1">Server-Name</span>
+        <input type="text" name="server_name"
+               value="{{ filter.server_name or '' }}"
+               class="input input-bordered input-sm"
+               placeholder="Substring">
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-70 pb-1">Tag</span>
+        <select name="tag" class="select select-bordered select-sm">
+          <option value="">– alle –</option>
+          {% for t in available_tags %}
+            <option value="{{ t.name }}" {% if filter.tag == t.name %}selected{% endif %}>{{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="flex items-center gap-2">
+        <button type="submit" class="btn btn-sm btn-primary">filtern</button>
+        <a href="{{ url_for('audit.list_events') }}"
+           class="link link-hover text-xs opacity-70">zuruecksetzen</a>
+      </div>
+    </div>
+  </form>
+
+  {% if events %}
+    <div class="overflow-x-auto">
+      <table class="table table-zebra table-sm align-middle" data-test="audit-table">
+        <thead class="text-xs uppercase tracking-wide">
+          <tr>
+            <th class="w-44">Zeitpunkt</th>
+            <th class="w-36">Actor</th>
+            <th class="w-52">Action</th>
+            <th class="w-44">Target</th>
+            <th>Kommentar / Metadata</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ev in events %}
+            <tr>
+              <td class="text-xs whitespace-nowrap">
+                <time datetime="{{ ev.ts.isoformat() }}"
+                      title="{{ ev.ts.strftime('%Y-%m-%d %H:%M:%S %Z') }}">
+                  {{ ev.ts | relative_time }}
+                </time>
+                <div class="opacity-50 text-[0.7rem]">
+                  {{ ev.ts.strftime('%Y-%m-%d %H:%M') }}
+                </div>
+              </td>
+              <td class="text-xs font-mono">{{ ev.actor }}</td>
+              <td>{{ action_badge(ev.action) }}</td>
+              <td class="text-xs">
+                {% if ev.target_type %}
+                  <span class="opacity-60">{{ ev.target_type }}</span>
+                {% endif %}
+                {% if ev.target_id %}
+                  <span class="font-mono">{{ ev.target_id }}</span>
+                {% endif %}
+                {% if not ev.target_type and not ev.target_id %}
+                  <span class="opacity-30">–</span>
+                {% endif %}
+              </td>
+              <td class="text-xs">
+                {% if ev.comment %}
+                  {% set short = ev.comment[:50] %}
+                  <div class="opacity-90"
+                       {% if ev.comment | length > 50 %}title="{{ ev.comment }}"{% endif %}>
+                    {{ short }}{% if ev.comment | length > 50 %}…{% endif %}
+                  </div>
+                {% endif %}
+                {% if ev.event_metadata %}
+                  <details class="mt-1">
+                    <summary class="cursor-pointer opacity-60 text-[0.7rem]">
+                      metadata
+                    </summary>
+                    <pre class="text-[0.7rem] whitespace-pre-wrap break-all
+                                bg-base-300/40 rounded p-2 mt-1 max-w-md">{{ ev.event_metadata }}</pre>
+                  </details>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# Pagination. #}
+    {% if pages > 1 %}
+      {% set parts = [] %}
+      {% if filter.date_from %}{% set _ = parts.append('date_from=' ~ filter.date_from.isoformat()) %}{% endif %}
+      {% if filter.date_to   %}{% set _ = parts.append('date_to='   ~ filter.date_to.isoformat()) %}{% endif %}
+      {% if filter.actor     %}{% set _ = parts.append('actor='     ~ filter.actor) %}{% endif %}
+      {% if filter.action    %}{% set _ = parts.append('action='    ~ filter.action) %}{% endif %}
+      {% if filter.server_id %}{% set _ = parts.append('server_id=' ~ filter.server_id) %}{% endif %}
+      {% if filter.server_name %}{% set _ = parts.append('server_name=' ~ filter.server_name) %}{% endif %}
+      {% if filter.tag       %}{% set _ = parts.append('tag='       ~ filter.tag) %}{% endif %}
+      {% set base_qs = parts | join('&') %}
+
+      <div class="join">
+        {% if page > 1 %}
+          <a class="join-item btn btn-sm"
+             href="{{ url_for('audit.list_events') }}?{{ base_qs }}{% if base_qs %}&{% endif %}page={{ page - 1 }}"
+             aria-label="vorherige Seite">←</a>
+        {% else %}
+          <span class="join-item btn btn-sm btn-disabled">←</span>
+        {% endif %}
+        <span class="join-item btn btn-sm btn-disabled">{{ page }} / {{ pages }}</span>
+        {% if page < pages %}
+          <a class="join-item btn btn-sm"
+             href="{{ url_for('audit.list_events') }}?{{ base_qs }}{% if base_qs %}&{% endif %}page={{ page + 1 }}"
+             aria-label="naechste Seite">→</a>
+        {% else %}
+          <span class="join-item btn btn-sm btn-disabled">→</span>
+        {% endif %}
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="card bg-base-200">
+      <div class="card-body p-8 text-center text-sm opacity-70">
+        Keine Audit-Eintraege fuer die aktuelle Filter-Kombination.
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

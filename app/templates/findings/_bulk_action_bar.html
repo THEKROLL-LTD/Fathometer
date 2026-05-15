@@ -1,0 +1,62 @@
+{# Sticky-Action-Bar fuer die Checkbox-basierte Bulk-Auswahl
+   (Server-Detail-Liste).
+
+   Erwartet einen umgebenden Alpine-Scope mit `selected: number[]`
+   (siehe `servers/_view_list.html`).
+
+   Diese Komponente baut ihren eigenen `bulkAckIds(...)`-Scope auf, der das
+   Modal kontrolliert. Die `selected`-Liste wird via Closure aus dem
+   aeusseren Scope gelesen, damit die Bar bei jedem Apply die aktuelle
+   Auswahl serialisiert.
+
+   Variablen-Vertrag:
+     - `server`     : Server  — fuer ID-Annotation in Tests
+     - `bulk_form`  : BulkActionForm — nur als CSRF-Token-Halter
+
+   Workflow:
+     1. User aktiviert Checkboxen in der Tabelle.
+     2. Klick auf "Auswahl abhaken" → `openModal()` triggert dry-run POST.
+     3. Modal zeigt count/server_count → User bestaetigt mit optionalem
+        Comment → apply POST mit `dry_run=false` → Reload.
+#}
+{% from "_macros.html" import bulk_ack_modal %}
+
+<div x-data="bulkAckIds(() => selected)"
+     data-server-id="{{ server.id }}">
+  {# Sticky-Bar — nur sichtbar wenn `selected.length > 0`. #}
+  <div x-show="selected.length > 0"
+       x-cloak
+       x-transition.opacity
+       class="fixed bottom-4 inset-x-0 mx-auto w-fit z-40
+              bg-base-100 border border-base-300 shadow-lg rounded-box
+              px-4 py-2 flex items-center gap-3"
+       role="region"
+       aria-label="Bulk-Aktionen"
+       data-test="bulk-action-bar">
+    <span class="text-sm">
+      <span x-text="selected.length" class="font-semibold"></span> ausgewaehlt
+    </span>
+    <button type="button"
+            class="btn btn-sm btn-primary"
+            @click="openModal()"
+            data-test="bulk-ack-open">
+      Auswahl abhaken
+    </button>
+    <button type="button"
+            class="btn btn-sm btn-ghost"
+            @click="selected = []"
+            data-test="bulk-ack-clear">
+      Abwaehlen
+    </button>
+  </div>
+
+  {# Bestaetigungs-Modal — wird vom `bulkAckIds`-Scope kontrolliert. #}
+  {{ bulk_ack_modal(id='bulk-ack-modal-detail',
+                    title='Ausgewaehlte Findings abhaken') }}
+
+  {# CSRF-Token-Halter — verbleibt als Fallback und fuer Tests die nach dem
+     `csrf_token`-Form-Feld greppen. Das JSON-POST nutzt das Meta-Token. #}
+  <form class="hidden" aria-hidden="true" data-bulk-csrf-form>
+    {{ bulk_form.csrf_token }}
+  </form>
+</div>

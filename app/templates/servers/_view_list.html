@@ -26,10 +26,39 @@
     </div>
   </div>
 {% else %}
+<div x-data="{
+       selected: [],
+       allIds() {
+         return Array.from(document.querySelectorAll('input[data-bulk-id]'))
+           .map(i => parseInt(i.value, 10));
+       },
+       toggleAll(checked) {
+         this.selected = checked ? this.allIds() : [];
+       },
+       get allSelected() {
+         const ids = this.allIds();
+         return ids.length > 0 && ids.every(id => this.selected.includes(id));
+       },
+       get someSelected() {
+         return this.selected.length > 0 && !this.allSelected;
+       }
+     }">
 <div class="overflow-x-auto">
   <table class="table table-zebra table-sm align-middle">
     <thead class="text-xs uppercase tracking-wide">
       <tr>
+        {# Checkbox-Spalte fuer Bulk-Auswahl (Block F).
+           Header-Checkbox toggled alle in der aktuell gerenderten Liste.
+           `indeterminate` zeigt Teil-Auswahl an. #}
+        <th class="w-8">
+          <input type="checkbox"
+                 class="checkbox checkbox-xs"
+                 aria-label="Alle in dieser Liste auswaehlen"
+                 :checked="allSelected"
+                 :indeterminate.prop="someSelected"
+                 @change="toggleAll($event.target.checked)"
+                 data-test="bulk-select-all">
+        </th>
         <th class="w-24">Severity</th>
         <th class="w-44">CVE</th>
         <th>Paket</th>
@@ -45,7 +74,19 @@
     <tbody>
       {% for f in findings %}
       <tr class="hover {% if f.is_kev %}bg-error/5{% endif %}"
+          :class="{ 'bg-primary/10': selected.includes({{ f.id }}) }"
           x-data="{ ackOpen: false, reopenOpen: false, detailOpen: false }">
+        <td>
+          <input type="checkbox"
+                 class="checkbox checkbox-xs"
+                 data-bulk-id="true"
+                 value="{{ f.id }}"
+                 aria-label="Finding {{ f.identifier_key }} fuer Bulk auswaehlen"
+                 :checked="selected.includes({{ f.id }})"
+                 @change="selected = $event.target.checked
+                                     ? [...selected, {{ f.id }}]
+                                     : selected.filter(id => id !== {{ f.id }})">
+        </td>
         <td>{{ severity_badge(f.severity) }}</td>
 
         <td>
@@ -193,5 +234,11 @@
       Anzeige auf 500 Findings begrenzt — bitte Filter verfeinern.
     </p>
   {% endif %}
+</div>
+
+  {# Sticky-Action-Bar fuer Bulk-Acknowledge. Bekommt `selected` aus dem
+     umgebenden Alpine-Scope und triggert das Modal mit dem
+     `bulkAckIds(...)`-Pattern. #}
+  {% include "findings/_bulk_action_bar.html" %}
 </div>
 {% endif %}
