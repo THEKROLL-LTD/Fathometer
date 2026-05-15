@@ -35,31 +35,42 @@
 
   // Alpine-Komponente. Globale Funktion, damit `x-data="themeToggle(...)"`
   // sie findet. Initial-Wert kommt aus dem Server (`theme`-Cookie/Default).
+  //
+  // ADR-0016 / Block-I-Refinement:
+  //   Der Header-Toggle ist nur noch ein Sun/Moon-Icon — kein Dropdown mit
+  //   `auto`-Option mehr. Wir behalten aber den `auto`-Mode im Backend-
+  //   Cookie als zulaessigen Wert (z.B. nach Setup-Default), der Klick
+  //   wechselt jedoch explizit zwischen `light` und `dark`. Wenn der
+  //   Initialwert `auto` ist, resolven wir gegen `prefers-color-scheme`
+  //   und kippen beim ersten Klick auf das Gegenteil.
   window.themeToggle = function (initial) {
     return {
-      options: [
-        { value: "auto", label: "Theme: Auto" },
-        { value: "light", label: "Theme: Hell" },
-        { value: "dark", label: "Theme: Dunkel" },
-      ],
       current: initial || "auto",
+      resolvedDark: false,
 
-      labelFor: function (value) {
-        var found = this.options.find(function (opt) {
-          return opt.value === value;
-        });
-        return found ? found.label : "Theme";
+      // Was das angezeigte Icon entscheidet: ist der gerade angewandte
+      // Theme-Wert "dark"? Sun-Icon zeigt im Dark-Mode (Klick -> light).
+      _computeResolvedDark: function () {
+        if (this.current === "dark") return true;
+        if (this.current === "light") return false;
+        // auto
+        return !!(window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches);
       },
 
-      select: function (value) {
-        this.current = value;
-        writeCookie(value);
-        applyTheme(value);
+      // Klick wechselt zwischen light und dark (kein auto im Header-Toggle).
+      cycle: function () {
+        var next = this.resolvedDark ? "light" : "dark";
+        this.current = next;
+        this.resolvedDark = next === "dark";
+        writeCookie(next);
+        applyTheme(next);
       },
 
       init: function () {
         var self = this;
         applyTheme(this.current);
+        this.resolvedDark = this._computeResolvedDark();
 
         // Im Auto-Mode auf Systemwechsel reagieren, ohne Reload.
         if (window.matchMedia) {
@@ -67,6 +78,7 @@
           var handler = function () {
             if (self.current === "auto") {
               applyTheme("auto");
+              self.resolvedDark = self._computeResolvedDark();
             }
           };
           if (mq.addEventListener) {

@@ -1,0 +1,18 @@
+{# Settings-Page (Mode 1: Vollseite, kein HX-Request).
+
+   Erbt von `base_app.html` (globale Sidebar + Detail-Pane) und rendert
+   die Settings-Shell als Detail-Pane-Inhalt.
+
+   Variablen wie in `_shell.html`. #}
+{% extends "base_app.html" %}
+
+{% block title %}Settings · secscan{% endblock %}
+
+{% block detail_pane %}
+<div class="settings-shell flex h-full">
+  {% include "settings/_nav.html" %}
+  <div id="settings-content" class="flex-1 overflow-y-auto">
+    {% include content_template %}
+  </div>
+</div>
+{% endblock %}

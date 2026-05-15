@@ -1,0 +1,25 @@
+{# Settings-Shell (Mode 2: HTMX-Detail-Pane-Fragment).
+
+   Wird vom Render-Helper `render_settings(...)` benutzt, wenn der
+   Request HTMX ist aber nicht direkt auf `#settings-content` zielt
+   (z.B. Klick auf "Settings" im Profile-Dropdown mit
+   `hx-target="#detail-pane"`).
+
+   Variablen:
+     - `active` (str)            — aktiver Tab-Bezeichner.
+     - `content_template` (str)  — Pfad des Content-Templates,
+                                   wird in `#settings-content` includiert.
+     - alle weiteren Template-Variablen werden 1:1 an das include
+       weitergereicht (Jinja-Default-Verhalten).
+
+   Stub — der frontend-implementer poliert das Layout. Wichtig fuer
+   Tests: das `#settings-content`-Element existiert mit dieser ID,
+   damit `hx-target="#settings-content"` aus der Settings-Nav greift. #}
+<div id="detail-pane-content">
+  <div class="settings-shell flex h-full">
+    {% include "settings/_nav.html" %}
+    <div id="settings-content" class="flex-1 overflow-y-auto">
+      {% include content_template %}
+    </div>
+  </div>
+</div>

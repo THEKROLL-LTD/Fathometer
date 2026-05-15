@@ -30,6 +30,9 @@
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>{% block title %}secscan{% endblock %}</title>
 
+  {# Alpine-Initial-Hide muss vor Stylesheets greifen. #}
+  <style>[x-cloak] { display: none !important; }</style>
+
   {# No-Flash-Theme-Resolver — gleiche Logik wie base.html. #}
   <script>
     (function () {
@@ -67,50 +70,21 @@
   <script defer src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
   <script defer src="{{ url_for('static', filename='js/sse_highlight.js') }}"></script>
 
+  {# Settings-Sub-View-Skripte. Registrieren nur globale Alpine-Komponenten;
+     ohne passendes `x-data` keine Nebeneffekte. Notwendig hier (statt im
+     Sub-Template `block head`) weil die Settings-Sub-Templates nach
+     ADR-0016-Refactor reines Content-Markup sind (kein `extends`). #}
+  <script defer src="{{ url_for('static', filename='js/llm_settings.js') }}"></script>
+
   {% block head %}{% endblock %}
 </head>
 <body class="flex flex-col h-screen overflow-hidden bg-base-100 text-base-content antialiased text-sm">
 
   {# ------------------------------------------------------------------
-     Topbar — kompakt (48px). App-Name links, Theme + User + Logout
-     rechts. KEINE Nav-Links — Navigation lebt in der Sidebar.
+     Header (ADR-0016): Logo + Dashboard + Suche links,
+     Theme-Toggle + Profile-Avatar rechts.
      ------------------------------------------------------------------ #}
-  <header class="flex items-center justify-between gap-3 h-12 px-4
-                 bg-base-200 border-b border-base-300 shrink-0"
-          role="banner">
-    <div class="flex items-center gap-3 min-w-0">
-      <a href="{{ url_for('dashboard.index') if current_user is defined and current_user.is_authenticated else url_for('health.healthz') }}"
-         class="text-base font-semibold tracking-tight">secscan</a>
-    </div>
-    <div class="flex items-center gap-2">
-      <div x-data="themeToggle({{ theme | tojson }})" class="dropdown dropdown-end">
-        <button tabindex="0"
-                class="btn btn-ghost btn-xs"
-                aria-label="Theme auswaehlen">
-          <span x-text="labelFor(current)"></span>
-        </button>
-        <ul tabindex="0"
-            class="dropdown-content menu bg-base-100 rounded-box shadow-md w-40 z-50">
-          <template x-for="opt in options" :key="opt.value">
-            <li>
-              <button type="button"
-                      @click="select(opt.value)"
-                      :class="{'active': current === opt.value}"
-                      x-text="opt.label"></button>
-            </li>
-          </template>
-        </ul>
-      </div>
-
-      {% if current_user is defined and current_user.is_authenticated %}
-        <span class="text-xs opacity-70 ml-1 font-mono">{{ current_user.username }}</span>
-        <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-          <button type="submit" class="btn btn-ghost btn-xs">Logout</button>
-        </form>
-      {% endif %}
-    </div>
-  </header>
+  {% include "layout/_header.html" %}
 
   {# Flash-Messages liegen ausserhalb des Sidebar/Detail-Pane-Splits, damit
      sie immer sichtbar sind. Kein Scroll-Container — Topbar-naehe. #}
@@ -143,9 +117,10 @@
            aria-label="Sidebar"
            x-data="sidebarSearch()">
       {% block sidebar %}
-        {% include "sidebar/_quick_stats.html" %}
+        {# Sidebar ist nach ADR-0016 reduziert auf Server-Suche und
+           Server-Liste. Quick-Stats und Filter wandern in den Dashboard-
+           Detail-Pane, Settings ins Profile-Dropdown. #}
         {% include "sidebar/_search.html" %}
-        {% include "sidebar/_filter.html" %}
 
         <ul id="server-list"
             role="list"
@@ -160,8 +135,6 @@
             {% include "_empty/no_servers.html" %}
           {% endfor %}
         </ul>
-
-        {% include "sidebar/_settings_menu.html" %}
       {% endblock %}
     </aside>
 

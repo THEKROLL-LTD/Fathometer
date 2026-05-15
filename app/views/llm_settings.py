@@ -29,7 +29,7 @@ import asyncio
 from typing import Any, cast
 
 import structlog
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, flash, jsonify, redirect, url_for
 from flask_login import login_required
 from sqlalchemy import select
 
@@ -46,7 +46,7 @@ from app.services.llm_client import (
     validate_base_url,
 )
 from app.settings_service import get_settings_row
-from app.views._sidebar_context import is_hx_request
+from app.views._settings_shell import render_settings
 
 log = structlog.get_logger(__name__)
 llm_settings_bp = Blueprint("llm_settings", __name__, url_prefix="/settings/llm")
@@ -126,8 +126,9 @@ def show() -> Any:
         model=setting_row.llm_model or "",
         daily_token_cap=setting_row.llm_daily_token_cap,
     )
-    return render_template(
-        "settings/llm_provider.html",
+    return render_settings(
+        active="llm",
+        content_template="settings/llm_provider.html",
         form=form,
         has_existing_key=_has_existing_key(setting_row),
         presets=LLM_PRESETS,
@@ -137,8 +138,6 @@ def show() -> Any:
         .scalars()
         .all()
         .__len__(),
-        # Block I: Sidebar-Layout-Flag.
-        hx_partial=is_hx_request(request),
     )
 
 
@@ -154,8 +153,9 @@ def update() -> Any:
             for err in errors:
                 flash(f"{field_name}: {err}", "error")
         return (
-            render_template(
-                "settings/llm_provider.html",
+            render_settings(
+                active="llm",
+                content_template="settings/llm_provider.html",
                 form=form,
                 has_existing_key=_has_existing_key(setting_row),
                 presets=LLM_PRESETS,

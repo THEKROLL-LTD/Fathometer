@@ -1,42 +1,18 @@
-{# LLM-Provider-Settings unter /settings/llm.
+{# LLM-Provider Content (ADR-0016 / Block-I-Refinement).
 
-   Template-Variablen:
+   Wird ueber `_settings_shell.render_settings(active="llm", ...)` in einem
+   von drei Modi gerendert. Daher KEIN `extends`. Template liefert nur das
+   Content-Markup. Das JS-Snippet `static/js/llm_settings.js` wird global
+   in `base_app.html` geladen — solange wir Content-Only oder Fragment
+   liefern, ist Alpine bereits initialisiert.
+
+   Variablen (siehe app/views/llm_settings.py::show):
      - `form` (LlmSettingsForm)
-         Felder: provider_name, base_url, api_key, model, daily_token_cap.
      - `has_existing_key` (bool)
-         True = Placeholder "•••• gesetzt" zeigen.
      - `presets` (list[dict])
-         Each: {name, base_url, model}. Frontend-Dropdown befuellt
-         `base_url`/`model` mit dem ausgewaehlten Preset.
      - `active_conversation_count` (int)
-         Wird im Provider-Wechsel-Warn-Modal verwendet.
-
-   Sicherheit:
-     - api_key wird NIE im Klartext gerendert (Form-Feld ist immer leer).
-     - CSRF-Token ueber `form.csrf_token` (Flask-WTF) bzw.
-       `<meta name="csrf-token">` fuer den Test-Verbindung-Fetch.
-
-   UX-Details:
-     - Preset-Dropdown fuellt `base_url`+`model` per Alpine.
-     - "Verbindung testen" ruft `/settings/llm/test-connection` (POST).
-       Achtung: Backend testet die **gespeicherten** Settings, nicht die
-       aktuell editierten Formwerte — wir zeigen den Hinweis explizit.
-     - Wenn `active_conversation_count > 0` UND der User die `base_url`
-       oder `model` aendert, blocken wir den Submit per Alpine und
-       zeigen einen Confirm-Dialog mit der Archivierungs-Warnung.
 #}
-{# Block I: dynamisches `extends`. #}
-{% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
-
-{% block title %}LLM-Provider · secscan{% endblock %}
-
-{% block head %}
-  <script defer src="{{ url_for('static', filename='js/llm_settings.js') }}"></script>
-{% endblock %}
-
-{% block detail_pane %}
-<div class="p-6">
-<section class="max-w-3xl mx-auto space-y-6">
+<div class="max-w-3xl p-6 space-y-6">
   <header>
     <h1 class="text-2xl font-semibold">LLM-Provider</h1>
     <p class="text-sm opacity-70 mt-1">
@@ -93,8 +69,6 @@
 
         <div class="form-control">
           {{ form.base_url.label(class="label label-text") }}
-          {# WTForms transformiert keine Underscores zu Dashes — Alpine
-             braucht aber `x-model`. Wir nutzen dict-unpacking. #}
           {{ form.base_url(**{
               "class": "input input-bordered w-full font-mono text-sm",
               "x-model": "baseUrl"
@@ -161,7 +135,7 @@
                   @click="testConnection()"
                   :disabled="testing">
             <span x-show="!testing">Verbindung testen</span>
-            <span x-show="testing" class="flex items-center gap-2">
+            <span x-show="testing" x-cloak class="flex items-center gap-2">
               <span class="loading loading-spinner loading-xs"></span>
               Probiere…
             </span>
@@ -194,9 +168,7 @@
           </template>
         </div>
 
-        {# ---- Provider-Wechsel-Confirm-Modal ----
-           Sichtbar wenn `confirmOpen` true ist (gesetzt in `onSubmit()`
-           bei `provider_changed` AND `activeConvCount > 0`). #}
+        {# Provider-Wechsel-Confirm-Modal. #}
         <dialog class="modal"
                 x-show="confirmOpen"
                 x-cloak
@@ -233,10 +205,4 @@
       </form>
     </div>
   </div>
-</section>
 </div>
-
-{# Alpine-Komponente `llmProviderForm()` lebt in
-   `static/js/llm_settings.js` (oben im `head`-Block mit `defer`
-   eingebunden). #}
-{% endblock %}

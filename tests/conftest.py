@@ -191,10 +191,31 @@ def db_app_env(
 
 
 def _truncate_all(engine: Any) -> None:
-    """Leert alle in Block-B-Tests beschreibbaren Tabellen und reset't Sequences."""
+    """Leert alle in Block-B-Tests beschreibbaren Tabellen und reset't Sequences.
+
+    Robustheit: vorherige Tests koennen Connections mit offener Transaction
+    hinterlassen (Connection-Leak im View-Pfad o.ae.). Diese blocken den
+    ACCESS-EXCLUSIVE-Lock den TRUNCATE braucht. Ohne Schutz haengt der
+    ganze Test-Lauf still. Drei Defensiv-Massnahmen:
+
+    1. `lock_timeout` cap't den Wait — nach 5s Fehler statt Endlos-Hang.
+    2. `statement_timeout` Fail-Safe auf der TRUNCATE-Statement-Ebene.
+    3. `pg_terminate_backend` killt verbliebene Connections auf derselben
+       DB (ausser uns selbst), damit der TRUNCATE freie Bahn hat.
+
+    Nicht-paralleltauglich (xdist), aber die Suite laeuft seriell.
+    """
     from sqlalchemy import text
 
     with engine.begin() as conn:
+        conn.execute(text("SET lock_timeout = '5s'"))
+        conn.execute(text("SET statement_timeout = '10s'"))
+        conn.execute(
+            text(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            )
+        )
         conn.execute(
             text(
                 "TRUNCATE TABLE "

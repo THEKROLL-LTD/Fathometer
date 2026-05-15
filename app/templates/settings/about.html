@@ -1,0 +1,55 @@
+{# About-Page (ADR-0016).
+
+   Wird ueber `_settings_shell.render_settings(active="about", ...)` als
+   Content-Markup gerendert. Read-only — niemals Geheimnisse anzeigen.
+
+   Variablen:
+     - `about` (dict) — Keys:
+         app_version, build_revision, alembic_revision,
+         python_version, flask_version, sqlalchemy_version,
+         trivy_db_stale_count, healthz_url.
+#}
+<div class="max-w-2xl p-6 space-y-6">
+  <header>
+    <h1 class="text-2xl font-semibold">About</h1>
+    <p class="opacity-70 text-sm mt-1">
+      Versions- und Build-Informationen (read-only).
+    </p>
+  </header>
+
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title">Versionen</h2>
+      <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm mt-2">
+        <dt class="opacity-60">App-Version</dt>
+        <dd class="font-mono">{{ about.app_version }}</dd>
+
+        <dt class="opacity-60">Build-Revision</dt>
+        <dd class="font-mono">{{ about.build_revision }}</dd>
+
+        <dt class="opacity-60">DB-Schema (Alembic)</dt>
+        <dd class="font-mono">{{ about.alembic_revision }}</dd>
+
+        <dt class="opacity-60">Python</dt>
+        <dd class="font-mono">{{ about.python_version }}</dd>
+
+        <dt class="opacity-60">Flask</dt>
+        <dd class="font-mono">{{ about.flask_version }}</dd>
+
+        <dt class="opacity-60">SQLAlchemy</dt>
+        <dd class="font-mono">{{ about.sqlalchemy_version }}</dd>
+
+        <dt class="opacity-60">Trivy-DB veraltet</dt>
+        <dd class="font-mono">{{ about.trivy_db_stale_count }} Server</dd>
+
+        <dt class="opacity-60">Healthcheck</dt>
+        <dd>
+          <a href="{{ about.healthz_url }}"
+             class="link link-primary font-mono"
+             target="_blank"
+             rel="noopener">{{ about.healthz_url }}</a>
+        </dd>
+      </dl>
+    </div>
+  </div>
+</div>

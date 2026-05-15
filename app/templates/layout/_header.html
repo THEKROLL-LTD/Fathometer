@@ -1,0 +1,78 @@
+{# secscan-Header (ADR-0016 / Block-I-Refinement).
+
+   Layout-Vertrag aus Mockup §66-180:
+     Links: Logo (`s`-Square) + Brand + Top-Level-Nav (Dashboard, Suche).
+     Rechts: Theme-Toggle (sun/moon) + Profile-Avatar mit Dropdown.
+
+   Sicherheit:
+     - Autoescape global aktiv; kein `|safe` auf Benutzer-Daten.
+     - Avatar-Initial nimmt `current_user.username[0].upper()` via Jinja
+       (`[:1]` ist Slice, kein `|upper`-Bug).
+     - Dropdown-State lebt im Alpine-`x-data` (lokal, kein localStorage).
+#}
+{% set p = request.path or "/" %}
+{% set is_dashboard_active = (p == "/" or p.startswith("/dashboard")) %}
+{% set is_search_active = p.startswith("/findings/search") or p.startswith("/search") %}
+<header class="navbar bg-base-200 border-b border-base-300 px-4 min-h-14 shrink-0"
+        role="banner">
+  <div class="flex-1 flex items-center gap-2 min-w-0">
+    {# Logo + Brand — Klick fuehrt auf das Dashboard. #}
+    <a href="{{ url_for('dashboard.index') if current_user is defined and current_user.is_authenticated else url_for('health.healthz') }}"
+       class="flex items-center gap-2 text-lg font-semibold tracking-tight hover:opacity-80">
+      <span class="inline-block w-6 h-6 rounded bg-primary text-primary-content
+                   text-center text-sm leading-6 font-bold"
+            aria-hidden="true">s</span>
+      <span>secscan</span>
+    </a>
+
+    {% if current_user is defined and current_user.is_authenticated %}
+      <nav class="flex items-center gap-1 ml-4 text-sm" aria-label="Hauptnavigation">
+        <a href="{{ url_for('dashboard.index') }}"
+           hx-get="{{ url_for('dashboard.index') }}"
+           hx-target="#detail-pane"
+           hx-push-url="true"
+           class="btn btn-ghost btn-sm {% if is_dashboard_active %}btn-active{% endif %}">
+          Dashboard
+        </a>
+        <a href="{{ url_for('search.search') }}"
+           hx-get="{{ url_for('search.search') }}"
+           hx-target="#detail-pane"
+           hx-push-url="true"
+           class="btn btn-ghost btn-sm {% if is_search_active %}btn-active{% endif %}">
+          Suche
+        </a>
+      </nav>
+    {% endif %}
+  </div>
+
+  <div class="flex-none flex items-center gap-1">
+    {# Theme-Toggle als Sun/Moon-Icon. Globale `themeToggle`-Komponente
+       lebt in `static/js/theme.js`. Wir reichen den initialen Cookie-Wert
+       als Argument; Alpine spiegelt das in `current`. #}
+    <div x-data="themeToggle({{ theme | tojson }})" class="flex items-center">
+      <button type="button"
+              @click="cycle()"
+              class="btn btn-ghost btn-sm btn-circle"
+              :aria-label="resolvedDark ? 'Hellen Modus aktivieren' : 'Dunklen Modus aktivieren'"
+              :title="resolvedDark ? 'Light-Mode' : 'Dark-Mode'">
+        {# Sun zeigt im Dark-Mode (Klick -> light). #}
+        <svg x-show="resolvedDark" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5"
+             viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+        </svg>
+        {# Moon zeigt im Light-Mode (Klick -> dark). #}
+        <svg x-show="!resolvedDark" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5"
+             viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+
+    {% if current_user is defined and current_user.is_authenticated %}
+      {% include "layout/_profile_dropdown.html" %}
+    {% endif %}
+  </div>
+</header>

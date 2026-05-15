@@ -4,6 +4,137 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.3.0] — 2026-05-15
+
+UI-Refinement-Release aus ADR-0016. Funktional gegenueber v0.2.0
+unveraendert — Layout wird kompakter und an uptime-kuma-Konvention
+angeglichen. Plus zwei neue Settings-Sub-Views: Master-Key-Rotation
+(schliesst §8-Spec-Luecke) und About.
+
+### Added — Block-I-Refinement (ADR-0016)
+
+- **Header kompakt** in `app/templates/layout/_header.html`: Logo +
+  Dashboard-Button + Suche-Button + Theme-Toggle (sichtbares Sun/Moon-
+  Icon) + Profile-Avatar mit Initial. Drei Top-Level-Items statt
+  vorher fuenf. Logo-Klick und Dashboard-Button identischer Effekt
+  (Dashboard-Default).
+- **Profile-Dropdown** in `app/templates/layout/_profile_dropdown.html`:
+  flache Eintraege Settings → Audit → Logout. Kein Sub-Menue.
+  `@click.outside`-Close, `@keydown.escape.window`-Close. Logout als
+  CSRF-geschuetztes POST-Form.
+- **Settings-View mit Sekundaer-Navigation** im Detail-Pane:
+  linke Nav-Liste (`app/templates/settings/_nav.html`) mit Tags,
+  LLM-Provider, Server-Verwaltung, Master-Key (Badge "neu"), About.
+  Aktiver Eintrag visuell hervorgehoben. Klick swappt nur den
+  Content-Bereich rechts via HTMX (`hx-target="#settings-content"`,
+  `hx-swap="innerHTML"`, `hx-push-url="true"`).
+- **3-Modi-Render-Helper** `app/views/_settings_shell.py`:
+  Vollseite (Direkt-URL/Bookmark), Shell-Fragment (HX mit
+  `hx-target="#detail-pane"`), Content-only (HX mit
+  `hx-target="settings-content"`). Saubere Trennung pro `HX-Target`-
+  Header.
+- **`/settings`-Alias** → 302 auf `/settings/servers/` (User-
+  Klarstellung — Server-Verwaltung ist der haeufiger genutzte Default
+  als Tags).
+- **Master-Key-Rotation** (`/settings/master-key`):
+  - `GET`: rendert Hinweis-Box mit Last-Set-Datum.
+  - `POST /rotate` mit Confirm-Modal davor: generiert neuen Master-
+    Key via `secrets.token_urlsafe(32)`, Hash-Update in `settings.
+    master_key_hash`, einmalige Klartext-Anzeige mit Copy-Button.
+  - Audit-Event `master_key.rotated` mit nur `metadata.hash_prefix`
+    (8 Hex-Zeichen) — NIEMALS Klartext oder voller Hash.
+  - Server-Keys bleiben gueltig (Hash-Trennung).
+  - CSRF zwingend.
+- **About-View** (`/settings/about`): read-only Versions-Info:
+  `app_version` (via `importlib.metadata`), `build_revision`
+  (Env-Var `SECSCAN_BUILD_REVISION` mit Fallback `dev`),
+  `alembic_revision`, Python-/Flask-/SQLAlchemy-Versionen,
+  Trivy-DB-Stale-Server-Count, Healthcheck-Link. Kein
+  Secret-Leak (`SECSCAN_ENCRYPTION_KEY`, `master_key_hash`,
+  `llm_api_key_encrypted` explizit nicht im Context).
+- **Dashboard-Default-Pane** uebernimmt die ehemaligen Sidebar-
+  Inhalte: Quick-Stats horizontal (Total open / KEV / Critical /
+  High / Stale-Server), Filter-Bar (Tag/Severity/KEV/Stale),
+  Platzhalter-Bereich mit expliziter "bewusst leer"-Notiz.
+- **Sidebar reduziert** auf reine Server-Liste mit Sticky-Search
+  (Placeholder umbenannt auf "Server filtern…") + Heartbeat-Bars.
+  Quick-Stats / Filter-Chips / Settings-Footer entfernt.
+- **`MasterKeyRotateForm`** in `app/forms.py`: CSRF-only WTForm.
+- **`Dockerfile`** mit `ARG SECSCAN_BUILD_REVISION=dev` → `ENV` in
+  Runtime-Stage, fuer GitHub-Actions-Release-Workflow per
+  `--build-arg ${{ github.sha }}`.
+
+### Fixed
+
+- **Test-Suite-Haenger** (`tests/conftest.py:_truncate_all`):
+  `TRUNCATE ... CASCADE` haengte stillschweigend wenn ein
+  vorheriger Test eine Connection mit offener Transaction
+  hinterlassen hat. Fix: `lock_timeout = '5s'` + `statement_
+  timeout = '10s'` + `pg_terminate_backend(pid)`-Cleanup vor dem
+  TRUNCATE. Volle Suite laeuft jetzt deterministisch in ~30s
+  statt potentiell Endlos-Hang.
+- **`pytest-timeout`-Dependency**: ergaenzt, sodass kuenftige
+  Haenger nicht den ganzen Lauf blockieren. Alle Test-Aufrufe
+  jetzt mit `--timeout=15 --timeout-method=thread`.
+
+### Tests
+
+- 48 neue Tests in `tests/views/`:
+  - `test_master_key_rotation.py` (9): Auth, CSRF, Hash-Aenderung,
+    Audit-Event mit hash_prefix, Klartext-Schutz, Server-Key-
+    Invarianz.
+  - `test_about_view.py` (10): alle Versions-Strings, Secret-
+    Leak-Check.
+  - `test_header_navigation.py` (8): Active-Marker, Logo-Href,
+    Dropdown-Reihenfolge, Logout-CSRF, Theme-Toggle.
+  - `test_settings_dropdown_swap.py` (20): 3 Render-Modi pro
+    5 Sub-Routes.
+  - `test_settings_alias_redirect.py` (4): `/settings` →
+    `/settings/servers/`.
+- 10 bestehende `test_dashboard.py`-Tests umgeschrieben auf neuen
+  Detail-Pane-Inhalt (Quick-Stats statt Card-Grid).
+- `test_settings_sidebar_swap.py` ersetzt durch
+  `test_settings_dropdown_swap.py`.
+- **Total: 722 passed**, Coverage 92.21 %.
+
+### Security
+
+- security-auditor-Verdict: **ACCEPTABLE WITH NOTES**.
+- CSRF auf `POST /settings/master-key/rotate` zwingend, Test
+  verifiziert 400 ohne Token.
+- Master-Key-Klartext: nur einmal im UI gerendert (Jinja-
+  Autoescape), nie in Logs (structlog redact pattern
+  `key|password|token|hash|authorization`), nie in Audit-
+  Metadata (nur hash_prefix[:8]).
+- About-View Secret-Leak-Tests gruen.
+- HX-Target-Header: kein Open-Redirect-/XSS-Vektor (reiner
+  String-Vergleich, kein URL-Build).
+- 1 low CONCERN: kein dedizierter XSS-Adversarial-Test fuer
+  Master-Key-Klartext-Render. Kein realer Angriffsvektor weil
+  `secrets.token_urlsafe(32)` zeichen-eingeschraenkt ist
+  ([A-Za-z0-9_-]). Defense-in-Depth-Test ist optional
+  fuer einen Folge-Block.
+
+### Architektur-Entscheidungen
+
+- **ADR-0016** (Header-Navigation kompakt, Settings und Audit ins
+  Profile-Dropdown): Block-I-Plan und ARCHITECTURE §7a werden nicht
+  editiert, Deltas im Addendum `docs/blocks/I-addendum-header-
+  layout.md` ausgewiesen.
+- Default-Settings-Sub-Tab: **Server-Verwaltung** (User-Klarstellung
+  gegenueber Addendum-Default Tags) — Server-Verwaltung ist
+  haeufiger genutzter Ops-View.
+
+### Screenshots
+
+- `docs/blocks/I-refinement-evidence/dashboard.png` — Header + Sidebar + Quick-Stats + Platzhalter.
+- `docs/blocks/I-refinement-evidence/profile-dropdown.png` — flaches Dropdown.
+- `docs/blocks/I-refinement-evidence/settings-servers.png` — Settings mit Sekundaer-Nav.
+- `docs/blocks/I-refinement-evidence/settings-master-key.png` — Rotations-View.
+- `docs/blocks/I-refinement-evidence/settings-about.png` — Versions-Info.
+
+---
+
 ## [v0.2.0] — 2026-05-15
 
 UI-Modernisierung als Folge-Release nach v0.1.0. Funktional unveraendert
