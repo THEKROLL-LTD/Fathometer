@@ -17,6 +17,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0009](0009-no-mobile.md) | Mobile-responsive Layout out of scope | Akzeptiert |
 | [0010](0010-deepseek-v3-default.md) | DeepSeek V3 als LLM-Default-Modell | Akzeptiert |
 | [0011](0011-lang-pkgs-target-disambiguation.md) | `package_name@target`-Disambiguation für lang-pkgs | Akzeptiert |
+| [0012](0012-block-i-ui-v2.md) | Block I bringt UI v2 als separate Phase nach MVP-Abschluss | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

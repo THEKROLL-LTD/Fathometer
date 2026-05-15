@@ -207,6 +207,83 @@ Ein "LLM-Bewertung anfordern"-Button startet eine neue Conversation oder springt
 
 **`/login`** ist die übliche Login-Page für den Admin.
 
+## 7a. UI v2 — Single-Page-Layout im uptime-kuma-Spirit (Block I)
+
+Diese Sektion beschreibt die UI-Modernisierung die in Block I umgesetzt wird, **nachdem** die MVP-Blöcke A-H gegen die §7-Spec abgeschlossen sind. §7 bleibt als Referenz für die MVP-UI bestehen — Block D, E, F wurden gegen §7 gebaut und sind reviewer-approved. Block I ersetzt das Layout, behält aber die funktionalen Routen und Daten-Verträge aus §7. Begründung der Trennung: ADR-0012.
+
+### Layout-Konzept
+
+Single-Page-Application im klassischen "Inbox"-Schema mit zwei festen Bereichen:
+
+- **Sidebar links** (320–360px breit, sticky volle Höhe). Enthält von oben nach unten: Quick-Stats-Block (5 Counter), Such-Input, Filter-Chips (Tags, Severity, KEV-only, Stale-only), die Server-Liste mit Heartbeat-Bars, am Ende Settings-Block (kompakte Liste: Tags, LLM-Provider, API-Keys, About).
+- **Detail-Pane rechts** (Rest der Breite, scrollt eigenständig). Default beim Login zeigt eine Welcome-Card mit Quick-Stats und einem Tipp ("Wähle links einen Server"). Klick auf einen Server in der Sidebar swappt die Findings-Tabelle in den Pane via HTMX. Klick auf einen Settings-Eintrag swappt die jeweilige Settings-Sub-View. Globale Suche und Audit-View bekommen eigene Detail-Pane-Zustände.
+
+Browser-Back/Forward funktioniert über `pushState` und `popstate`-Listener. Direkt-URL-Aufrufe (z.B. `/servers/42` per Bookmark) rendern die volle Seite mit Sidebar plus dem entsprechenden Detail-Pane-Zustand vorausgewählt. HTMX-Requests (erkennbar am `HX-Request: true` Header) liefern nur das Detail-Pane-Fragment.
+
+### Heartbeat-Bars
+
+Jeder Server in der Sidebar trägt rechts neben dem Namen eine horizontale Bar mit ~50 vertikalen Pillen-Segmenten (eine pro Tag, älteste links, heute rechts). Farbe pro Tag = "schlimmster Zustand der offenen Findings am Tagesende":
+
+- **Grün**: keine offenen Findings über der globalen Severity-Schwelle.
+- **Gelb**: offene Findings über der Schwelle vorhanden, aber alle acknowledged.
+- **Orange**: offene High-Severity-Findings über der Schwelle.
+- **Rot**: offene Critical-Findings ODER offene KEV-Findings (egal welche Severity).
+- **Grau**: kein Scan an diesem Tag (Stale-Lücke sichtbar).
+
+Hover auf einer Pille zeigt einen Tooltip mit: Datum (`YYYY-MM-DD`), Severity-Counts (`crit 4 · high 12 · med 31`), KEV-Count falls > 0, Last-Scan-Time des Tages oder "kein Scan". Tooltip-Verzögerung 300ms damit beim Mouse-Move drüber nichts flackert.
+
+DB-Aggregation: View `server_daily_status` materialisiert pro `(server_id, date_trunc('day', last_seen_at))` die Severity-Counts und höchste Severity. Alternative für MVP: SQL-Subquery pro Sidebar-Render, wenn die Server-Anzahl < 50 bleibt — Performance reicht. Die Aggregation berücksichtigt nur Findings mit Status `open` zum Tagesende; für KEV separater Counter weil Severity-orthogonal.
+
+### Quick-Stats oben in der Sidebar
+
+Fünf prominente Counter: **Total open**, **KEV**, **Critical**, **High**, **Stale-Server**. Klick auf einen Counter setzt den entsprechenden Filter (z.B. "Critical" → nur Server mit offenen Critical-Findings). Counter-Werte berechnen sich aus den aktuell sichtbaren Servern (also nach Tag-Filter), nicht aus der gesamten Flotte.
+
+### Density: Server-Liste statt Card-Grid
+
+Die Server-Liste ist eine vertikale Liste mit Border-Bottom zwischen Einträgen, keine Cards. Pro Eintrag in einer Zeile: Status-Pill links (Severity-Farbe + Symbol), Server-Name (als Link), Tag-Pills (kompakt), Heartbeat-Bar rechtsbündig. Hover-Zustand mit subtilem `bg-base-200`. Aktiver Server (im Detail-Pane angezeigt) bekommt einen linken Akzent-Border. Vertikaler Abstand pro Zeile ~52px — damit passen ~12 Server in einen typischen Viewport ohne Scroll. Kein Tag-Mode-Toggle in der Sidebar — Tag-Filter sind Multi-Select-Chips, Default ist OR ("mindestens eins"). Wer UND braucht: über Settings-Tag-Verwaltung kombinierte Tags anlegen oder einen Filter-Dropdown öffnen.
+
+### Typography: Monospace für technische Werte
+
+System-Monospace-Font (CSS `ui-monospace, SFMono-Regular, …`) für: CVE-IDs überall, Paketnamen, Versionen, Server-Hostnames, Kernel-Versionen, File-Paths in Trivy-Targets, Hash-IDs. Body bleibt sans-serif. Schrift-Skala wird auf drei Größen reduziert: 12px (`text-xs`) für Meta-Info, 14px (`text-sm`) für Body, 18px (`text-lg`) für Headings. Keine 24px+ Headings im Sidebar-Layout — wirkt deplaziert.
+
+### Sticky-Search mit Keyboard-Shortcut
+
+Such-Input am oberen Rand der Sidebar bleibt beim Scrollen sichtbar. `/`-Tastenkürzel fokussiert das Input von überall (außer wenn ein anderes Input bereits Fokus hat — dann gilt der Slash als normales Zeichen). `Esc` leert die Suche und entfernt den Fokus. Tippen filtert die Server-Liste live nach Server-Name oder Tag-Name (Fuzzy-Match clientseitig auf den geladenen Eintragsdaten). `Enter` mit Suchbegriff öffnet die volle globale CVE-/Paket-/Server-Suche im Detail-Pane.
+
+### Settings als Sidebar-Tab
+
+Am unteren Ende der Sidebar (oder als zweite Akkordeon-Sektion) eine kompakte Liste mit den Settings-Bereichen: "Tags", "LLM-Provider", "API-Keys & Master-Key", "About". Klick öffnet die jeweilige Settings-View im rechten Detail-Pane. Server-Verwaltung (Liste, Revoke, Retire) wandert ebenfalls hierher als "Server" Eintrag. Keine eigene `/settings`-Seite mehr — die Routen bleiben aber erhalten für Direkt-URL und werden im Sidebar-Layout gerendert.
+
+### Inline-Actions auf Hover
+
+Findings-Zeilen, Audit-Zeilen, Server-Zeilen: Action-Buttons (Acknowledge, Reopen, Settings-3-Dots) sind per Default auf `opacity-0` und werden auf Row-Hover sichtbar (`opacity-100` mit `transition-opacity duration-150`). Touch-Devices: `@media (hover: none)` lässt sie immer sichtbar. Aktiver Bulk-Select-Mode (wenn mindestens eine Checkbox an) zeigt alle Action-Buttons zusätzlich. Vorteil: bei 50 sichtbaren Findings wirkt die Tabelle nicht überladen; trotzdem sind Aktionen einen Klick weit weg.
+
+### Status-Pills mit Icons
+
+Jede Severity-Pill bekommt zusätzlich zum Farb-Hintergrund ein kleines Icon (Heroicons via CDN, geladen als SVG-Sprite). Mapping: Critical = `exclamation-triangle`, High = `chevron-double-up`, Medium = `minus-circle`, Low = `chevron-down`, Unknown = `question-mark-circle`. KEV bekommt eine separate runde rote Badge mit weißem Punkt (Indikator-Stil), nicht Icon. Stale-Server bekommen `clock` Icon, DB-Stale bekommen `calendar-days`. Alle Icons inline-SVG mit `aria-label` für Screenreader.
+
+### Subtle Fade-In bei SSE-Updates
+
+SSE-Channel aus Block H pusht Server-Updates. Wenn ein Server-Listeneintrag oder eine Card im Detail-Pane via HTMX-SSE-Swap aktualisiert wird, bekommt das ersetzende Element kurz (~1s) eine `bg-info-subtle` Akzent-Färbung mit `transition-colors duration-1000`. Damit sieht der User dass etwas live aktualisiert wurde, ohne dass es flackert oder springt. Anwendbar bei: neuer Scan kommt rein, Stale-Status wechselt, neue KEV-Findings.
+
+### Empty-States mit klaren CTAs
+
+Statt "keine Daten"-Texten bekommt jeder Empty-State eine kleine Card mit Erklärung und genau einer Next-Action. Beispiele:
+
+- **Keine Server registriert**: "Noch kein Server in der Flotte. Master-Key in Settings → API-Keys generieren, dann auf dem Ziel-Server `secscan-register.sh` ausführen. Anleitung im [Agent-README](agent/README.md)."
+- **Keine offenen Findings auf einem Server**: "Server hat keine offenen Findings über deiner Severity-Schwelle (`{schwelle}`). Letzte Bewertung: vor X Stunden." Mit Link zu "Schwelle ändern" in Settings und "Resolved-Findings anzeigen"-Toggle.
+- **Audit-Log leer**: "Noch keine Events. Die ersten kommen mit dem Setup-Wizard und der Server-Registrierung."
+- **Such-Treffer leer**: "Keine Treffer für `{query}`. Tipp: für CVE-IDs `CVE-2024-…` reicht ein Prefix; für Paketnamen reicht ein Fragment."
+
+### Was Block I bewusst NICHT macht
+
+- Kein Dark-Mode-Default-Wechsel (der Toggle aus §7 bleibt, Light bleibt Default — User-Setting im eigenen Theme-Cookie).
+- Kein Mobile-Optimierungs-Pass (siehe ADR-0009).
+- Keine Power-User-Features (Cmd-K-Palette, Vim-Style-Shortcuts j/k, Optimistic-Updates, Loading-Skeletons) — sind als Block J oder v2 vermerkt.
+- Keine Glass-Morphism-Effekte, Gradients, animierte Icons.
+- Keine Notifications- oder Activity-Feed-Bell in der Topbar — würde Notifications implizieren, die out-of-scope sind.
+- Keine Drei-Spalten-Layouts (Mail-App-Stil) — wir haben nur zwei Hierarchie-Ebenen.
+
 ## 8. Auth und Security
 
 Die UI-Auth ist Single-User, Session-basiert, mit gehashtem Passwort (Argon2id). Sessions per Flask-Login mit `SECRET_KEY` aus den Settings. Logout, Passwort-Change und Session-Timeout (Standard 7 Tage) sind selbstverständlich.

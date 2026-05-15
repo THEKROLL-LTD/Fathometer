@@ -166,6 +166,13 @@ def create_app() -> Flask:
 
     app.jinja_env.filters["markdown_safe"] = render_note_markdown
 
+    # LLM-Output-Sanitization (Block G): `nh3.clean(...)` mit Allowlist
+    # fuer `<a>`-Tags und erzwungenem `rel="noopener noreferrer nofollow"`.
+    # Templates rufen `{{ message.content | llm_safe }}` auf — **ohne** `|safe`.
+    from app.services.llm_sanitize import clean_llm_html
+
+    app.jinja_env.filters["llm_safe"] = clean_llm_html
+
     # 4. Rate-Limiter initialisieren. Defaults: §9.
     limiter.init_app(app)
     # Default-Limits gelten fuer alle Routes; spezifische Endpoints koennen
@@ -192,10 +199,12 @@ def create_app() -> Flask:
     # 7. Blueprints.
     app.register_blueprint(health_bp)
 
+    from app.api.llm_chat import llm_chat_bp
     from app.views.audit_view import audit_bp
     from app.views.auth import auth_bp
     from app.views.dashboard import dashboard_bp
     from app.views.findings import findings_bp
+    from app.views.llm_settings import llm_settings_bp
     from app.views.search import search_bp
     from app.views.server_detail import server_detail_bp
     from app.views.servers import servers_bp
@@ -205,12 +214,14 @@ def create_app() -> Flask:
     app.register_blueprint(setup_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(llm_settings_bp)
     app.register_blueprint(servers_bp)
     app.register_blueprint(server_detail_bp)
     app.register_blueprint(findings_bp)
     app.register_blueprint(search_bp)
     app.register_blueprint(audit_bp)
     app.register_blueprint(dashboard_bp)
+    app.register_blueprint(llm_chat_bp)
 
     # API-Blueprint (Block C). Routes werden in `register_api_routes`
     # importiert (lazy, vermeidet Zirkulaere durch `from app import csrf,
@@ -229,6 +240,26 @@ def create_app() -> Flask:
     @app.context_processor
     def _inject_theme() -> dict[str, str]:
         return {"theme": getattr(g, "theme", "auto")}
+
+    @app.context_processor
+    def _inject_llm_configured() -> dict[str, bool]:
+        """`llm_configured` fuer Templates (Server-Detail-Button).
+
+        True wenn `Setting.llm_base_url` UND `Setting.llm_model` gesetzt
+        sind. Falls die DB nicht erreichbar oder die Settings-Row noch
+        nicht existiert: False (fail-safe).
+        """
+        try:
+            from app.db import get_session
+            from app.settings_service import get_settings_row
+
+            sess = get_session()
+            row = get_settings_row(sess)
+            return {
+                "llm_configured": bool(row.llm_base_url and row.llm_model),
+            }
+        except Exception:  # pragma: no cover — DB/Setup-Edge-Case
+            return {"llm_configured": False}
 
     @app.after_request
     def _persist_theme(response: Response) -> Response:

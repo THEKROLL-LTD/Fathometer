@@ -88,6 +88,9 @@
           <a href="{{ url_for('search.search') }}" class="btn btn-ghost btn-sm">Suche</a>
           <a href="{{ url_for('audit.list_events') }}" class="btn btn-ghost btn-sm">Audit</a>
           <a href="{{ url_for('settings.tags_list') }}" class="btn btn-ghost btn-sm">Settings</a>
+          <a href="{{ url_for('llm_settings.show') }}"
+             class="btn btn-ghost btn-sm"
+             title="LLM-Provider-Konfiguration">LLM</a>
         </nav>
       {% endif %}
     </div>

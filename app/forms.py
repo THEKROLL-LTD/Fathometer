@@ -203,6 +203,68 @@ class NoteForm(FlaskForm):
     )
 
 
+class LlmSettingsForm(FlaskForm):
+    """LLM-Provider-Konfiguration (siehe ARCHITECTURE.md §7 / §10).
+
+    - `provider_name`: freier Anzeigename, max 64 Zeichen, gleiche Regex
+      wie Tag-Namen.
+    - `base_url`: Whitelist via `app.services.llm_client.validate_base_url`
+      (HTTPS oder `http://localhost`/`http://127.0.0.1`).
+    - `api_key`: optional; leer = behalte alten Wert.
+    - `model`: druckbares ASCII, max 128.
+    - `daily_token_cap`: Integer >= 1.
+    """
+
+    provider_name = StringField(
+        "Anzeigename",
+        validators=[OptionalValidator(), Length(max=64)],
+    )
+    base_url = StringField(
+        "Base-URL",
+        validators=[DataRequired(), Length(max=256)],
+    )
+    api_key = PasswordField(
+        "API-Key (leer lassen, um den bestehenden zu behalten)",
+        validators=[OptionalValidator(), Length(max=512)],
+    )
+    model = StringField(
+        "Modell-Name",
+        validators=[DataRequired(), Length(max=128)],
+    )
+    daily_token_cap = IntegerField(
+        "Tages-Token-Cap",
+        validators=[DataRequired(), NumberRange(min=1, max=10_000_000_000)],
+    )
+
+    def validate_provider_name(self, field: StringField) -> None:
+        if field.data is None or not field.data.strip():
+            return
+        candidate = field.data.strip()
+        if not TAG_NAME_REGEX.match(candidate):
+            raise ValidationError(
+                "Erlaubt: a-z, 0-9, '.', '_', '-' (Start mit Buchstabe/Ziffer, max 32 Zeichen)."
+            )
+
+    def validate_base_url(self, field: StringField) -> None:
+        from app.services.llm_client import validate_base_url as _vbu
+
+        if not field.data:
+            raise ValidationError("Base-URL erforderlich.")
+        try:
+            _vbu(field.data.strip())
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
+    def validate_model(self, field: StringField) -> None:
+        value = (field.data or "").strip()
+        if not value:
+            raise ValidationError("Modell-Name erforderlich.")
+        # Druckbares ASCII (0x20-0x7E), kein Whitespace am Anfang/Ende
+        # nach strip() bereits eliminiert.
+        if any(ord(ch) < 0x20 or ord(ch) > 0x7E for ch in value):
+            raise ValidationError("Nur druckbares ASCII erlaubt.")
+
+
 class BulkActionForm(FlaskForm):
     """Container fuer die Checkbox-basierte Bulk-Auswahl im Server-Detail.
 
@@ -243,6 +305,7 @@ __all__ = [
     "BulkActionForm",
     "CSRFOnlyForm",
     "GroupAcknowledgeForm",
+    "LlmSettingsForm",
     "LoginForm",
     "NoteForm",
     "ReopenForm",
