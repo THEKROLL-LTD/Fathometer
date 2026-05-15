@@ -72,6 +72,18 @@ class Settings(BaseSettings):
         """Body-Limit in Bytes fuer Flask `MAX_CONTENT_LENGTH`."""
         return self.max_body_mb * 1024 * 1024
 
+    @property
+    def encryption_key_has_low_entropy(self) -> bool:
+        """`True` wenn der Encryption-Key weniger als 16 distinkte Bytes hat.
+
+        Siehe ADR-0013: schwache Trivial-Keys (`aaaa…`, `1234567890…`)
+        loesen beim App-Start ein structlog-WARNING aus. Echte
+        Zufalls-Keys (`secrets.token_urlsafe(48)`) haben typisch 40+
+        distinkte Bytes — das Limit bei 16 ist konservativ.
+        """
+        raw = self.encryption_key.get_secret_value().encode("utf-8")
+        return len(set(raw)) < 16
+
 
 def load_settings() -> Settings:
     """Laedt Settings aus dem Environment.

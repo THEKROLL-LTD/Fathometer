@@ -279,5 +279,55 @@ def test_post_settings_persists_all_fields(db_app: Flask) -> None:
             sess.close()
 
 
+# ---------------------------------------------------------------------------
+# Rate-Limit (Block H): POST /settings/llm/test-connection ist 60/hour begrenzt.
+# ---------------------------------------------------------------------------
+
+
+def test_test_connection_rate_limit_60_per_hour_returns_429_on_61st(
+    db_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """61. POST in derselben Stunde gegen `/settings/llm/test-connection` -> 429."""
+    from app import limiter
+
+    create_admin_user(db_app)
+    enc = encrypt_api_key("dummy", "x" * 32)
+    _seed_settings(
+        db_app,
+        base_url="https://api.deepinfra.com/v1/openai",
+        model="deepseek-ai/DeepSeek-V3",
+        api_key_enc=enc,
+    )
+
+    # `LlmClient.test_connection` mocken — sonst wuerde der echte SDK
+    # gegen die DeepInfra-URL gehen.
+    from app.services import llm_client as llm_client_mod
+
+    async def _mock_test_connection(self: Any) -> ConnectionTestResult:
+        return ConnectionTestResult(
+            success=True, latency_ms=1, model="deepseek-ai/DeepSeek-V3", error=None
+        )
+
+    async def _mock_aclose(self: Any) -> None:
+        return None
+
+    monkeypatch.setattr(llm_client_mod.LlmClient, "test_connection", _mock_test_connection)
+    monkeypatch.setattr(llm_client_mod.LlmClient, "aclose", _mock_aclose)
+
+    limiter.reset()
+
+    client = db_app.test_client()
+    login(client)
+
+    # 60 erfolgreiche POSTs.
+    for n in range(60):
+        resp = client.post("/settings/llm/test-connection")
+        assert resp.status_code == 200, (n, resp.get_data(as_text=True))
+
+    # Der 61. POST trifft das Limit.
+    resp_over = client.post("/settings/llm/test-connection")
+    assert resp_over.status_code == 429, resp_over.get_data(as_text=True)
+
+
 # Mark unused import for ruff
 _ = AsyncMock

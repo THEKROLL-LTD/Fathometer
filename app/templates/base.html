@@ -74,6 +74,11 @@
      mit X-CSRFToken-Header aus dem oben gesetzten <meta>. #}
   <script defer src="{{ url_for('static', filename='js/bulk_ack.js') }}"></script>
 
+  {# SSE-Live-Update- und Stale-Re-Render-Komponenten (Block H).
+     Stellen `window.dashboardSse(eventsUrl)` und `window.staleTick()` als
+     Alpine-Component-Factories bereit. Nur das Dashboard verdrahtet sie. #}
+  <script defer src="{{ url_for('static', filename='js/sse.js') }}"></script>
+
   {% block head %}{% endblock %}
 </head>
 <body class="min-h-screen bg-base-100 text-base-content antialiased">

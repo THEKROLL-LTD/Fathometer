@@ -47,10 +47,29 @@ log = structlog.get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
-_HTTPS_RE = re.compile(r"^https://[^\s]{1,250}$")
+_HTTPS_RE = re.compile(r"^https://([^/\s:]+)(?::(\d{1,5}))?(/[^\s]*)?$")
 # `http://localhost(:port)?(/path)?` ODER `http://127.0.0.1(:port)?(/path)?`.
-_LOCAL_HTTP_RE = re.compile(r"^http://(?:localhost|127\.0\.0\.1)(?::\d{1,5})?(?:/[^\s]*)?$")
+_LOCAL_HTTP_RE = re.compile(r"^http://(?:localhost|127\.0\.0\.1)(?::(\d{1,5}))?(?:/[^\s]*)?$")
 _BASE_URL_MAX = 256
+_PORT_MIN = 1
+_PORT_MAX = 65535
+
+
+def _check_port_range(port_str: str | None) -> None:
+    """Validiert dass ein Port-String im Range 1..65535 liegt.
+
+    `port_str` ist der Wert aus der Regex-Capture-Group (ohne `:`). Bei
+    `None` (kein Port in der URL) ist nichts zu pruefen — Default-Ports
+    sind erlaubt.
+    """
+    if port_str is None or port_str == "":
+        return
+    try:
+        port = int(port_str)
+    except ValueError as exc:  # pragma: no cover — Regex erlaubt nur Digits
+        raise ValueError(f"llm_base_url has invalid port: {port_str!r}") from exc
+    if not (_PORT_MIN <= port <= _PORT_MAX):
+        raise ValueError(f"llm_base_url port {port} out of range ({_PORT_MIN}..{_PORT_MAX})")
 
 
 def validate_base_url(base_url: str) -> str:
@@ -61,16 +80,24 @@ def validate_base_url(base_url: str) -> str:
     - `http://localhost(:port)?` und `http://127.0.0.1(:port)?` fuer
       lokale Ollama/vLLM-Setups.
 
+    Port (wenn vorhanden) muss im Range 1..65535 liegen — siehe Block-H-
+    Action-Item aus dem Block-G-Security-Audit.
+
     Wirft `ValueError` bei jeder anderen Form (`http://example.com`,
-    `ftp://`, leere Strings, ueberlange Werte, Whitespace).
+    `ftp://`, leere Strings, ueberlange Werte, Whitespace, `:0`,
+    `:99999`).
     """
     if not isinstance(base_url, str):
         raise ValueError("llm_base_url must be a string")
     if not base_url or len(base_url) > _BASE_URL_MAX:
         raise ValueError("llm_base_url has invalid length")
-    if _HTTPS_RE.fullmatch(base_url):
+    m_https = _HTTPS_RE.fullmatch(base_url)
+    if m_https:
+        _check_port_range(m_https.group(2))
         return base_url
-    if _LOCAL_HTTP_RE.fullmatch(base_url):
+    m_local = _LOCAL_HTTP_RE.fullmatch(base_url)
+    if m_local:
+        _check_port_range(m_local.group(1))
         return base_url
     raise ValueError("llm_base_url must use https:// or http://localhost / http://127.0.0.1")
 

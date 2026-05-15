@@ -15,7 +15,11 @@ import structlog
 from structlog.types import EventDict, Processor
 
 # Felder mit diesen Substrings (case-insensitive) werden geredacted.
-_REDACT_PATTERN = re.compile(r"(password|key|token|hash)", re.IGNORECASE)
+# `authorization` (Block H) faengt `Authorization`-Header in
+# Request-Log-Records, falls jemand die jemals als strukturierte Felder
+# durchreicht. Die direkten Code-Pfade loggen keine Bearer-Token, aber
+# der Filter ist Defense-in-Depth.
+_REDACT_PATTERN = re.compile(r"(password|key|token|hash|authorization)", re.IGNORECASE)
 _REDACTED = "***REDACTED***"
 
 

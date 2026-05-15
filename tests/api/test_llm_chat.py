@@ -892,6 +892,60 @@ def test_yesterday_token_usage_does_not_block(db_app: Flask) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Rate-Limit (Block H): GET /chat/<id>/stream ist auf 60/hour begrenzt.
+# ---------------------------------------------------------------------------
+
+
+def test_stream_rate_limit_60_per_hour_returns_429_on_61st(
+    db_app: Flask, mock_llm_stream: None
+) -> None:
+    """61. Request in derselben Stunde -> 429 (flask-limiter "60/hour")."""
+    from app import limiter
+
+    create_admin_user(db_app)
+    _seed_llm_settings_with_api_key(db_app)
+    sid = _seed_server_with_findings(db_app)
+    cid = _make_active_conversation(db_app, sid)
+
+    # Eine User-Message anhaengen damit Stream eine History hat.
+    factory = get_session_factory(db_app)
+    with db_app.app_context():
+        sess = factory()
+        try:
+            sess.add(
+                LlmMessage(
+                    conversation_id=cid,
+                    role=LlmMessageRole.USER,
+                    content="Bewerte bitte.",
+                    created_at=datetime.now(tz=UTC),
+                )
+            )
+            sess.commit()
+        finally:
+            sess.close()
+
+    # Limiter-Storage vor dem Run platt machen — `db_app`-Fixture macht das
+    # vor JEDEM Test schon, aber doppelt haelt besser.
+    limiter.reset()
+
+    client = db_app.test_client()
+    login(client)
+
+    # 60 erfolgreiche GETs.
+    for n in range(60):
+        resp = client.get(f"/chat/{cid}/stream")
+        # Wir konsumieren den Body damit der Generator durchlaeuft (sonst
+        # wuerde die Connection offen bleiben).
+        _ = resp.get_data(as_text=True)
+        assert resp.status_code == 200, (n, resp.status_code, resp.get_data(as_text=True)[:200])
+
+    # Der 61. trifft das Limit.
+    resp_over = client.get(f"/chat/{cid}/stream")
+    _ = resp_over.get_data(as_text=True)
+    assert resp_over.status_code == 429, resp_over.get_data(as_text=True)
+
+
 def test_stream_done_payload_contains_conversation_metadata(
     db_app: Flask, mock_llm_stream: None
 ) -> None:

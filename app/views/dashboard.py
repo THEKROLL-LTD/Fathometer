@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from flask import Blueprint, render_template, request
+from flask import Blueprint, render_template, request, url_for
 from flask_login import login_required
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -161,6 +161,12 @@ def index() -> Any:
     visible = _apply_filters(cards, filt)
     attention = _build_attention(cards)
 
+    # SSE-Endpoint-URL fuer das Frontend. Block H — Live-Updates.
+    try:
+        events_url = url_for("events.stream_events")
+    except Exception:  # pragma: no cover — Endpoint nicht registriert (Tests)
+        events_url = "/events"
+
     return render_template(
         "dashboard/index.html",
         servers=visible,
@@ -169,6 +175,7 @@ def index() -> Any:
         available_tags=available_tags,
         severity_threshold=severity_threshold,
         db_stale_threshold_h=db_stale_h,
+        events_url=events_url,
     )
 
 

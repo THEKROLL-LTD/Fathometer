@@ -68,6 +68,45 @@ def test_validate_base_url_rejects_non_str() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Port-Range (Block H — Block-G-Security-Audit-Action-Item)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:0",
+        "http://127.0.0.1:0",
+        "https://example.com:0",
+        "http://localhost:99999",
+        "https://example.com:99999",
+        "http://localhost:65536",
+        "https://example.com:65536",
+    ],
+)
+def test_validate_base_url_rejects_invalid_ports(url: str) -> None:
+    """Port `0` und Port > 65535 muessen als ungueltig abgelehnt werden."""
+    with pytest.raises(ValueError):
+        validate_base_url(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com:1",
+        "https://example.com:65535",
+        "https://example.com:443",
+        "http://localhost:1",
+        "http://localhost:65535",
+        "http://127.0.0.1:65535",
+    ],
+)
+def test_validate_base_url_accepts_edge_port_values(url: str) -> None:
+    """Ports 1 und 65535 sind die Grenzen — beide muessen akzeptiert werden."""
+    assert validate_base_url(url) == url
+
+
+# ---------------------------------------------------------------------------
 # encrypt/decrypt-Roundtrip
 # ---------------------------------------------------------------------------
 

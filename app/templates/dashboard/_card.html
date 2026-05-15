@@ -21,7 +21,12 @@
        wird `@click.stop` via Alpine genutzt).
 #}
 {% set qs_owner = card.server.id %}
+{# `data-server-id` + `data-last-scan-at` werden vom Dashboard-SSE-Client
+   (Block H) gelesen: das Highlight-Ring-Toggle und der Stale-Tick adressieren
+   die Karte ueber diese Attribute. #}
 <article x-data
+         data-server-id="{{ card.server.id }}"
+         data-last-scan-at="{{ card.server.last_scan_at | iso_or_empty }}"
          class="card bg-base-200 shadow-sm hover:shadow-lg transition-shadow
                 {% if not card.is_active %}opacity-70{% endif %}
                 {% if card.kev_open_count > 0 %}ring-1 ring-error/40{% endif %}">
@@ -121,13 +126,21 @@
       </div>
     {% endif %}
 
-    {# Footer-Zeile: Scan-Alter + Stale-/DB-Stale-Marker. #}
+    {# Footer-Zeile: Scan-Alter + Stale-/DB-Stale-Marker.
+       Das innere `<span data-last-scan-at>` wird von `staleTick()` (Block H)
+       jede Minute aktualisiert und vom SSE-Client beim Scan-Empfang
+       neu beschrieben. #}
     <div class="flex flex-wrap items-center gap-2 text-xs opacity-80">
       <span title="{% if card.server.last_scan_at %}{{ card.server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}{% else %}noch nie{% endif %}">
-        Letzter Scan: {{ card.server.last_scan_at | relative_time }}
+        Letzter Scan:
+        <span data-last-scan-at="{{ card.server.last_scan_at | iso_or_empty }}">{{ card.server.last_scan_at | relative_time }}</span>
       </span>
-      {% if card.is_stale and card.is_active %}
-        <span class="badge badge-warning badge-sm"
+      {% if card.is_active %}
+        {# Stale-Badge: Backend ist Source of Truth fuer den initialen Zustand,
+           `staleTick` togglet `hidden` jede Minute basierend auf
+           `data-stale-threshold-h` und der Karten-`data-last-scan-at`. #}
+        <span class="badge badge-warning badge-sm{% if not card.is_stale %} hidden{% endif %}"
+              data-stale-threshold-h="{{ card.server.expected_scan_interval_h }}"
               title="Letzter Scan aelter als erwarteter Interval ({{ card.server.expected_scan_interval_h }}h).">
           stale
         </span>

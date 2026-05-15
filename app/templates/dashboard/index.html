@@ -28,7 +28,16 @@
 {% block title %}Dashboard · secscan{% endblock %}
 
 {% block content %}
-<section class="space-y-6">
+{# Block H — Live-Updates:
+   - `dashboardSse(eventsUrl)` oeffnet einen EventSource auf `{{ events_url }}`
+     und animiert die betroffene Karte bei `scan.received`.
+   - `staleTick()` re-rendered jede Minute die Relativzeit-Labels und die
+     Stale-Badges (client-seitig, kein Server-Round-Trip).
+   Beide Komponenten liegen in `static/js/sse.js`. #}
+<section class="space-y-6"
+         x-data="dashboardSse({{ events_url | tojson }})"
+         x-init="init()"
+         @beforeunload.window="destroy()">
   {# Header: Titel + Filterhinweis links, Reload + Settings-Link rechts. #}
   <header class="flex flex-wrap items-start justify-between gap-3">
     <div>
@@ -60,12 +69,19 @@
   {% include "dashboard/_tag_filter.html" %}
 
   {# Server-Grid. Empty-State unterscheidet "gar keine Server" vs.
-     "Filter blendet alles aus". #}
+     "Filter blendet alles aus". `staleTick` aktualisiert die Relativzeit-
+     Labels und Stale-Badges jede Minute (Block H) — bewusst als
+     Wrapper-Div, damit das innere Grid-`class`-Attribut stabil bleibt
+     (DOM-Tests pruefen darauf). #}
   {% if servers %}
+    <div x-data="staleTick()"
+         x-init="init()"
+         @beforeunload.window="destroy()">
     <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
       {% for card in servers %}
         {% include "dashboard/_card.html" %}
       {% endfor %}
+    </div>
     </div>
   {% else %}
     <div class="card bg-base-200 shadow-sm">

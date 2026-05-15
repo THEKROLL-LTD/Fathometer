@@ -280,6 +280,27 @@ def ingest_scan() -> Response | tuple[Response, int]:
     except Exception as exc:  # pragma: no cover — Hook darf Ingest nicht killen
         log.warning("api.scans.llm_hook_failed", error=type(exc).__name__)
 
+    # SSE-Live-Update-Hook (Block H): Dashboard-Tabs bekommen ein
+    # `scan.received`-Event und animieren die betroffene Server-Karte.
+    # Niemals den Ingest abreissen — Hook ist Best-Effort.
+    try:
+        from app.services.event_bus import get_event_bus
+
+        bus = get_event_bus(current_app._get_current_object())  # type: ignore[attr-defined]
+        bus.publish(
+            "scan.received",
+            {
+                "server_id": server.id,
+                "server_name": server.name,
+                "new_finding_count": result.findings_inserted,
+                "resolved_count": result.findings_resolved,
+                "updated_count": result.findings_updated,
+                "ingested_at": result.received_at.isoformat(),
+            },
+        )
+    except Exception as exc:  # pragma: no cover — Hook darf Ingest nicht killen
+        log.warning("api.scans.event_bus_hook_failed", error=type(exc).__name__)
+
     sess.commit()
 
     log.info(

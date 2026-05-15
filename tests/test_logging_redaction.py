@@ -36,23 +36,23 @@ def test_master_key_hash_is_redacted() -> None:
 
 
 def test_authorization_header_is_redacted_case_insensitive() -> None:
-    """`Authorization` matched ueber `key`-Substring? Nein — siehe Implementer.
+    """`Authorization`-Felder werden ab Block H ebenfalls redacted.
 
-    Der aktuelle Pattern ist `password|key|token|hash`. `Authorization` matched
-    keines dieser Substrings. Das wird als bekannte Einschraenkung
-    dokumentiert; der Test verifiziert das tatsaechliche Verhalten, damit
-    Aenderungen an der Pattern-Liste auffallen.
+    Pattern: `password|key|token|hash|authorization`. Case-insensitive,
+    Substring-Match. Verifiziert sowohl `key`-Felder als auch
+    `Authorization`-Header.
     """
-    # Verifiziere zumindest: Felder die `key` enthalten matchen case-insensitive.
+    # Felder die `key` enthalten matchen case-insensitive.
     result = _scrub({"API_KEY": "abc"})
     assert result["API_KEY"] == _REDACTED, result
 
-    # Authorization wird vom aktuellen Pattern NICHT erfasst. Wenn ein zukuenftiger
-    # Implementer das aendert, schlaegt dieser Test bewusst um — dann muss die
-    # Auswahl an `_REDACT_PATTERN` erweitert werden.
+    # Authorization wird ab Block H ebenfalls geredacted.
     result_auth = _scrub({"Authorization": "Bearer xyz"})
-    # Bewusst: derzeit NICHT redacted (siehe oben).
-    assert result_auth["Authorization"] == "Bearer xyz", result_auth
+    assert result_auth["Authorization"] == _REDACTED, result_auth
+
+    # Auch klein geschrieben.
+    result_lower = _scrub({"authorization": "Bearer xyz"})
+    assert result_lower["authorization"] == _REDACTED, result_lower
 
 
 def test_nested_dict_redacts_inner_keys() -> None:
@@ -82,3 +82,60 @@ def test_list_of_dicts_is_traversed() -> None:
     assert isinstance(items, list), items
     assert items[0]["token"] == _REDACTED, items
     assert items[1]["name"] == "ok", items
+
+
+# ---------------------------------------------------------------------------
+# Block H — Authorization-Header-Redaction (Case-Permutationen)
+# ---------------------------------------------------------------------------
+
+
+def test_authorization_lowercase_redacted() -> None:
+    """`authorization` (lowercase) ist redacted."""
+    result = _scrub({"authorization": "Bearer xyz123"})
+    assert result["authorization"] == _REDACTED
+
+
+def test_authorization_titlecase_redacted() -> None:
+    """`Authorization` (Title-Case) ist redacted."""
+    result = _scrub({"Authorization": "Bearer xyz123"})
+    assert result["Authorization"] == _REDACTED
+
+
+def test_authorization_uppercase_redacted() -> None:
+    """`AUTHORIZATION` (Uppercase) ist redacted."""
+    result = _scrub({"AUTHORIZATION": "Bearer xyz123"})
+    assert result["AUTHORIZATION"] == _REDACTED
+
+
+def test_authorization_substring_in_key_redacted() -> None:
+    """Substring-Match: `http_authorization` enthaelt `authorization` -> redact."""
+    result = _scrub({"http_authorization": "Bearer xyz123"})
+    assert result["http_authorization"] == _REDACTED
+
+
+def test_bearer_token_value_never_in_rendered_event() -> None:
+    """Der eigentliche Bearer-Wert darf nirgendwo im gerenderten Event-Dict
+    auftauchen — der Filter ueberschreibt das ganze Feld bevor renderer laeuft.
+
+    Wir simulieren genau das was strukturlogs Pipeline tut: Event-Dict an
+    den Redaction-Processor uebergeben, danach JSON-rendern und sicherstellen
+    dass das Geheimnis nicht im Output ist.
+    """
+    import json
+
+    raw = {
+        "method": "POST",
+        "path": "/api/scans",
+        "headers": {"Authorization": "Bearer SUPER_SECRET_TOKEN_123"},
+        "authorization": "Bearer SUPER_SECRET_TOKEN_123",
+    }
+    cleaned = _scrub(raw)
+    rendered = json.dumps(cleaned)
+    assert "SUPER_SECRET_TOKEN_123" not in rendered, rendered
+    assert _REDACTED in rendered, rendered
+    # Top-Level authorization-Feld direkt ueberschrieben.
+    assert cleaned["authorization"] == _REDACTED
+    # Inneres Authorization-Header ebenfalls.
+    headers = cleaned["headers"]
+    assert isinstance(headers, dict)
+    assert headers["Authorization"] == _REDACTED

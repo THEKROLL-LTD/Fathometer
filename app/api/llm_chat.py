@@ -380,6 +380,7 @@ def _sse_payload(event: str, data: str) -> bytes:
 
 @llm_chat_bp.get("/chat/<int:conversation_id>/stream")
 @login_required
+@limiter.limit("60/hour")
 def stream(conversation_id: int) -> Response:
     """SSE-Endpoint — Token-Deltas vom LLM-Provider."""
     cap_check = _check_token_cap()

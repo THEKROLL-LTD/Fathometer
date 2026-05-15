@@ -33,6 +33,7 @@ from flask import Blueprint, flash, jsonify, redirect, render_template, url_for
 from flask_login import login_required
 from sqlalchemy import select
 
+from app import limiter
 from app.audit import log_event
 from app.config import Settings
 from app.db import get_session
@@ -222,6 +223,7 @@ def update() -> Any:
 
 @llm_settings_bp.post("/test-connection")
 @login_required
+@limiter.limit("60/hour")
 def test_connection() -> Any:
     """Probe-Anfrage gegen die aktuell gespeicherten Settings."""
     sess = get_session()

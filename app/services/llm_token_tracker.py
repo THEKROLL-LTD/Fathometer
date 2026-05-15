@@ -11,6 +11,13 @@ ARCHITECTURE.md §9 ("LLM-Endpoint-Schutz"):
 
 Implementierung als reine Funktionen mit `session`-Parameter; kein
 globaler State, damit Tests vorhersagbar funktionieren.
+
+Race-Verhalten (siehe ADR-0014): zwei parallele Streams koennen
+gleichzeitig den Cap-Check passieren und so die Tages-Summe um
+`n * max_completion_tokens` ueberschreiten. Das ist ein bewusst
+akzeptiertes Best-Effort-Verhalten — der Cap ist Kosten-Bremse, kein
+Security-Mechanismus. Eine Pre-Reservation-Mechanik (mit
+`SELECT ... FOR UPDATE` oder Counter-Tabelle) ist out-of-MVP.
 """
 
 from __future__ import annotations

@@ -87,6 +87,20 @@ def _relative_time(value: datetime | None) -> str:
     return f"vor {years} Jahr" + ("" if years == 1 else "en")
 
 
+def _iso_or_empty(value: datetime | None) -> str:
+    """Render einen Zeitstempel als ISO-8601-String, sonst leeren String.
+
+    Wird in `data-*`-Attributen verwendet, damit `static/js/sse.js` die
+    Relativzeit-Labels client-seitig re-rendern kann ohne den Server zu
+    fragen. Naive datetimes werden als UTC behandelt.
+    """
+    if value is None:
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.isoformat()
+
+
 def _is_older_than_h(value: datetime | None, hours: int) -> bool:
     """`True` wenn `value` mehr als `hours` Stunden in der Vergangenheit liegt.
 
@@ -132,6 +146,21 @@ def create_app() -> Flask:
     configure_logging(settings.log_level)
     log = structlog.get_logger(__name__)
 
+    # Block H — ADR-0013: Schwacher Encryption-Key fuehrt zu einer
+    # sichtbaren Warn-Zeile beim Start (kein Abbruch). Trivial-Keys wie
+    # `aaaaaaaaaa…` (1 distinkter Byte-Wert) werden so erkannt; echte
+    # zufaellige Keys (40+ distinkte Bytes) loggen nichts.
+    if settings.encryption_key_has_low_entropy:
+        log.warning(
+            "secscan.weak_encryption_key",
+            message=(
+                "SECSCAN_ENCRYPTION_KEY hat weniger als 16 distinkte Byte-Werte. "
+                "Empfohlen: 'python -c \"import secrets; "
+                "print(secrets.token_urlsafe(48))\"' oder "
+                "'openssl rand -base64 48'."
+            ),
+        )
+
     # 3. Flask-App.
     app = Flask(__name__)
     app.config.update(
@@ -158,6 +187,7 @@ def create_app() -> Flask:
     # rendern koennen. Bei `None` wird "noch nie" geliefert.
     app.jinja_env.filters["relative_time"] = _relative_time
     app.jinja_env.filters["is_older_than_h"] = _is_older_than_h
+    app.jinja_env.filters["iso_or_empty"] = _iso_or_empty
 
     # Markdown-Safe Filter fuer Notizen — `nh3.clean(...)` ist in der
     # Pipeline. Template ruft `{{ note.text | markdown_safe }}` auf, ohne
@@ -196,9 +226,17 @@ def create_app() -> Flask:
 
     init_auth(app)
 
+    # Event-Bus (Block H) — Singleton an die App haengen, damit der
+    # Scan-Ingest-Hook (`POST /api/scans`) und der SSE-Endpoint
+    # (`GET /events`) denselben Dispatcher nutzen.
+    from app.services.event_bus import init_event_bus
+
+    init_event_bus(app)
+
     # 7. Blueprints.
     app.register_blueprint(health_bp)
 
+    from app.api.events import events_bp
     from app.api.llm_chat import llm_chat_bp
     from app.views.audit_view import audit_bp
     from app.views.auth import auth_bp
@@ -222,6 +260,7 @@ def create_app() -> Flask:
     app.register_blueprint(audit_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(llm_chat_bp)
+    app.register_blueprint(events_bp)
 
     # API-Blueprint (Block C). Routes werden in `register_api_routes`
     # importiert (lazy, vermeidet Zirkulaere durch `from app import csrf,

@@ -18,6 +18,8 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0010](0010-deepseek-v3-default.md) | DeepSeek V3 als LLM-Default-Modell | Akzeptiert |
 | [0011](0011-lang-pkgs-target-disambiguation.md) | `package_name@target`-Disambiguation für lang-pkgs | Akzeptiert |
 | [0012](0012-block-i-ui-v2.md) | Block I bringt UI v2 als separate Phase nach MVP-Abschluss | Akzeptiert |
+| [0013](0013-fernet-kdf.md) | Fernet-KDF beibehalten, Schutz via README-Empfehlung + Entropie-Warning | Akzeptiert |
+| [0014](0014-token-cap-best-effort.md) | Token-Cap als Best-Effort, keine Pre-Reservation | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

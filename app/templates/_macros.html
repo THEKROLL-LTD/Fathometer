@@ -30,16 +30,21 @@
 
 {% macro quick_copy(value, label=None, classes="") -%}
   {%- if value -%}
+  {# Block H fix: `tojson` ist `Markup` und wird vom Autoescape uebersprungen —
+     in einem `"`-umschlossenen Attribut wuerden enthaltene `"` das Attribut
+     vorzeitig schliessen und den Rest des Handlers als Body-Text leaken
+     (siehe `docs/blocks/F-evidence/search-cve.png`). `|forceescape` ersetzt
+     die `"` durch `&quot;`, der Browser dekodiert sie beim Attribut-Parsing
+     wieder zurueck zu `"`, bevor Alpine den Ausdruck sieht.
+     Quelle des Werts ist serverseitig (Finding-IDs, Tag-Namen, ...) — keine
+     LLM-/User-Freitext-Eingabe; `tojson` haerten gegen `<`/`>`/Apostrophe
+     reicht, dazu kommt das HTML-Quote-Escaping aus `|forceescape`. #}
   <button type="button"
           class="btn btn-ghost btn-xs px-1 align-middle {{ classes }}"
           aria-label="{{ label or ('Kopieren: ' ~ value) }}"
           title="In Zwischenablage kopieren"
           x-data
-          @click.stop.prevent="
-            navigator.clipboard.writeText({{ value | tojson }})
-              .then(() => $dispatch('toast', {msg: 'Kopiert: ' + {{ value | tojson }}, kind: 'success'}))
-              .catch(() => $dispatch('toast', {msg: 'Kopieren fehlgeschlagen', kind: 'error'}))
-          ">
+          @click.stop.prevent="navigator.clipboard.writeText({{ value | tojson | forceescape }}).then(() => $dispatch('toast', {msg: 'Kopiert: ' + {{ value | tojson | forceescape }}, kind: 'success'})).catch(() => $dispatch('toast', {msg: 'Kopieren fehlgeschlagen', kind: 'error'}))">
     {# Heroicons "clipboard" (outline, 16px). Reines SVG, keine externe Abh. #}
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
          fill="none" stroke="currentColor" stroke-width="1.8"
