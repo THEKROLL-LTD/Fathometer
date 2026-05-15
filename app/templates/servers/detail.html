@@ -53,12 +53,73 @@
           {% endif %}
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          {# LLM-Bewertung anfordern. Backend (`POST /servers/<id>/chat`)
+             liefert JSON {conversation_id, stream_url} zurueck; wir
+             leiten daraufhin per JS auf die Chat-View weiter. Button
+             nur sichtbar wenn LLM ueberhaupt konfiguriert ist (siehe
+             Context-Processor `_inject_llm_configured`). #}
+          {% if llm_configured and is_active %}
+            <div x-data="{
+                  busy: false,
+                  async start() {
+                    if (this.busy) return;
+                    this.busy = true;
+                    try {
+                      const meta = document.querySelector('meta[name=&quot;csrf-token&quot;]');
+                      const csrf = meta ? meta.getAttribute('content') : '';
+                      const res = await fetch({{ url_for('llm_chat.start_conversation', server_id=server.id) | tojson }}, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: {
+                          'X-CSRFToken': csrf,
+                          'Accept': 'application/json'
+                        }
+                      });
+                      const data = await res.json();
+                      if (!res.ok) {
+                        const msg = (data && (data.message || data.error)) || ('Fehler ' + res.status);
+                        this.$dispatch('toast', {msg: msg, kind: 'error'});
+                        this.busy = false;
+                        return;
+                      }
+                      window.location.href = '/chat/' + data.conversation_id;
+                    } catch (e) {
+                      this.$dispatch('toast', {msg: 'Netzwerk-Fehler', kind: 'error'});
+                      this.busy = false;
+                    }
+                  }
+                 }"
+                 class="inline-block">
+              <button type="button"
+                      class="btn btn-primary btn-sm"
+                      @click="start()"
+                      :disabled="busy"
+                      title="LLM-Bewertung anfordern (oder zur aktiven Conversation springen)">
+                <span x-show="!busy">KI-Bewertung anfordern</span>
+                <span x-show="busy" class="flex items-center gap-2">
+                  <span class="loading loading-spinner loading-xs"></span>
+                  startet…
+                </span>
+              </button>
+            </div>
+          {% elif is_active %}
+            <a href="{{ url_for('llm_settings.show') }}"
+               class="btn btn-ghost btn-sm"
+               title="LLM-Provider ist noch nicht konfiguriert.">
+              KI-Bewertung (Provider fehlt)
+            </a>
+          {% endif %}
           <a href="{{ url_for('dashboard.index') }}"
              class="link link-hover text-sm">
             zurueck zum Dashboard
           </a>
         </div>
       </div>
+      {% if llm_configured and is_active %}
+        <p class="text-xs opacity-60 -mt-2">
+          Bewertungen sind Schaetzungen, nicht blind vertrauen.
+        </p>
+      {% endif %}
 
       {# Status-Badge-Reihe. Reihenfolge: schlimmster Marker zuerst. #}
       <div class="flex flex-wrap gap-2">

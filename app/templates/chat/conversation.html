@@ -1,0 +1,206 @@
+{# LLM-Conversation-Layout (Block G).
+
+   Template-Variablen (gesetzt in `app.api.llm_chat.show_conversation`):
+     - `server` (Server)         — Server-Header.
+     - `conversation` (LlmConversation)
+                                  — Felder: id, status, model, started_at,
+                                    last_message_at, findings_snapshot_at.
+     - `messages` (Iterable[LlmMessage])
+                                  — chronologisch sortiert. Renderer nutzt
+                                    `_message.html`-Partial pro Eintrag.
+     - `token_usage` (TokenUsage) — Felder: used, cap, percent,
+                                    warning_threshold, blocked, reset_at.
+     - `stream_url` (str)         — Server-Sent-Events Endpunkt.
+     - `post_message_url` (str)   — POST-Endpunkt fuer Folge-Frage (JSON).
+     - `archive_url` (str)        — POST-Endpunkt fuer Archivierung.
+     - `csrf_token` (callable)    — Jinja-globaler `csrf_token()`.
+
+   Sicherheit:
+     - Assistant-Inhalte laufen ueber `llm_safe`. User/System ueber
+       Jinja-Autoescape. KEIN `|safe`.
+     - Folge-Form schickt JSON via Fetch; CSRF im `X-CSRFToken`-Header.
+     - Archive- und Quick-Copy-Buttons sind ueber `csrf_token()`-Hidden
+       bzw. `navigator.clipboard.writeText` abgesichert (siehe
+       `_macros.html`).
+#}
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+
+{% block title %}LLM-Bewertung · {{ server.name }} · secscan{% endblock %}
+
+{% block head %}
+  <script defer src="{{ url_for('static', filename='js/llm_chat.js') }}"></script>
+{% endblock %}
+
+{% block content %}
+{% set last_msg = messages[-1] if messages else None %}
+{% set last_role = (last_msg.role.value if last_msg and last_msg.role is not string else (last_msg.role if last_msg else '')) %}
+{% set auto_start = last_msg is not none and last_role == 'user' and conversation.status.value == 'active' and not token_usage.blocked %}
+{% set is_active = conversation.status.value == 'active' %}
+{% set input_disabled = (not is_active) or token_usage.blocked %}
+{% set conv_url = url_for('llm_chat.show_conversation', conversation_id=conversation.id, _external=True) %}
+
+<section class="max-w-4xl mx-auto space-y-6"
+         x-data="llmChat({
+           streamUrl: {{ stream_url | tojson }},
+           postMessageUrl: {{ post_message_url | tojson }},
+           autoStart: {{ auto_start | tojson }}
+         })">
+
+  {# ---- Header ---- #}
+  <header class="flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2">
+        <h1 class="text-2xl font-semibold">
+          LLM-Bewertung fuer
+          <a href="{{ url_for('server_detail.show', server_id=server.id) }}"
+             class="link link-hover font-mono">{{ server.name }}</a>
+        </h1>
+        {{ m.quick_copy(conv_url, label="Conversation-Link kopieren") }}
+      </div>
+      <p class="text-sm opacity-70 mt-1">
+        Modell: <code class="font-mono">{{ conversation.model }}</code>
+        ·
+        Status:
+        {% if is_active %}
+          <span class="badge badge-success badge-sm">aktiv</span>
+        {% else %}
+          <span class="badge badge-ghost badge-sm">{{ conversation.status.value }}</span>
+        {% endif %}
+        · Gestartet
+        <time datetime="{{ conversation.started_at.isoformat() }}"
+              title="{{ conversation.started_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+          {{ conversation.started_at | relative_time }}
+        </time>
+        {% if token_usage.cap and not token_usage.blocked and not token_usage.warning_threshold %}
+          · <span class="opacity-70">{{ token_usage.used }}/{{ token_usage.cap }} Token heute</span>
+        {% endif %}
+      </p>
+      <p class="text-xs opacity-60 mt-1">
+        Bewertungen sind Schaetzungen, nicht blind vertrauen.
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <a href="{{ url_for('server_detail.show', server_id=server.id) }}"
+         class="btn btn-ghost btn-sm">Zurueck zum Server</a>
+      {% if is_active %}
+        <form method="post"
+              action="{{ archive_url }}"
+              class="inline"
+              x-data
+              @submit="if (!confirm('Conversation wirklich archivieren?')) $event.preventDefault()">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="submit" class="btn btn-ghost btn-sm text-error">
+            Archivieren
+          </button>
+        </form>
+      {% endif %}
+    </div>
+  </header>
+
+  {# ---- Token-Cap-Banner ---- #}
+  {% if token_usage.blocked %}
+    <div class="alert alert-error" role="alert">
+      <span>
+        Tages-Token-Cap erreicht ({{ token_usage.used }}/{{ token_usage.cap }} Token).
+        Neue Anfragen ab
+        <time datetime="{{ token_usage.reset_at.isoformat() }}">
+          {{ token_usage.reset_at.strftime('%Y-%m-%d %H:%M UTC') }}
+        </time>.
+      </span>
+    </div>
+  {% elif token_usage.warning_threshold %}
+    <div class="alert alert-warning" role="status">
+      <span>
+        Warnung: {{ token_usage.used }}/{{ token_usage.cap }} Token verbraucht
+        ({{ token_usage.percent | round(0) }}%). Neue Anfragen noch moeglich
+        bis zum Cap. Reset um
+        <time datetime="{{ token_usage.reset_at.isoformat() }}">
+          {{ token_usage.reset_at.strftime('%H:%M UTC') }}
+        </time>.
+      </span>
+    </div>
+  {% endif %}
+
+  {# ---- Stream-Fehler-Indikator ---- #}
+  <div x-show="error"
+       x-cloak
+       class="alert alert-error text-sm"
+       role="alert">
+    <span x-text="error"></span>
+  </div>
+
+  {# ---- Messages-Liste ---- #}
+  <div id="message-list" class="space-y-3">
+    {% for message in messages %}
+      {% include "chat/_message.html" %}
+    {% endfor %}
+
+    {# Streaming-Container — wird von `llm_chat.js` befuellt, sobald
+       `connect()` einen EventSource oeffnet. `aria-live="polite"`
+       sorgt dafuer, dass Screenreader die Token nicht abhacken. #}
+    <div id="stream-target"
+         class="chat chat-start"
+         :class="{ 'hidden': !streaming }"
+         data-stream-url="{{ stream_url }}"
+         aria-live="polite"
+         aria-atomic="false">
+      <div class="chat-image avatar placeholder" aria-hidden="true">
+        <div class="bg-base-300 text-base-content rounded-full w-8 h-8 flex items-center justify-center text-base">
+          <span>AI</span>
+        </div>
+      </div>
+      <div class="chat-header text-xs opacity-70 mb-1">
+        Assistent
+        <span class="loading loading-dots loading-xs ml-2"
+              x-show="streaming"
+              aria-hidden="true"></span>
+      </div>
+      <div class="chat-bubble max-w-3xl"
+           data-stream-bubble
+           x-text="streamBuffer"></div>
+    </div>
+  </div>
+
+  {# ---- Input-Form ---- #}
+  {% if is_active %}
+    <form id="followup-form"
+          class="card bg-base-200 shadow-sm"
+          @submit.prevent="submitFollowup()">
+      <div class="card-body space-y-2">
+        <label for="followup-content" class="label">
+          <span class="label-text">Folge-Frage</span>
+          {% if token_usage.blocked %}
+            <span class="label-text-alt text-error">
+              Cap erreicht — Eingabe gesperrt
+            </span>
+          {% endif %}
+        </label>
+        <textarea id="followup-content"
+                  name="content"
+                  x-model="draft"
+                  rows="3"
+                  maxlength="4000"
+                  class="textarea textarea-bordered w-full"
+                  placeholder="Was moechtest du genauer wissen?"
+                  {% if input_disabled %}disabled{% endif %}></textarea>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs opacity-60">
+            <span x-text="draft.length"></span>/4000 Zeichen
+          </span>
+          <button type="submit"
+                  class="btn btn-primary"
+                  :disabled="streaming || draft.trim().length === 0 || {{ 'true' if input_disabled else 'false' }}">
+            <span x-show="!streaming">Senden</span>
+            <span x-show="streaming" class="flex items-center gap-2">
+              <span class="loading loading-spinner loading-xs"></span>
+              Streamt…
+            </span>
+          </button>
+        </div>
+      </div>
+    </form>
+  {% endif %}
+
+</section>
+{% endblock %}

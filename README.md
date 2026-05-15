@@ -97,8 +97,9 @@ Schritt. Stoppe vor dem nächsten Block-Übergang.
 | F | Bulk-Operationen und globale Suche | [`docs/blocks/F-bulk.md`](docs/blocks/F-bulk.md) |
 | G | LLM-Integration mit Streaming-Chat | [`docs/blocks/G-llm.md`](docs/blocks/G-llm.md) |
 | H | SSE-Live-Updates, Polish, Production-Smoke | [`docs/blocks/H-polish.md`](docs/blocks/H-polish.md) |
+| I | UI-Modernisierung — Single-Page-Layout, Heartbeat-Bars, Density (uptime-kuma-Spirit) | [`docs/blocks/I-ui-modernization.md`](docs/blocks/I-ui-modernization.md) |
 
-Aufwandsschätzung: ~8 Wochen Vollzeit oder 12–15 Wochen Teilzeit für einen Solo-Entwickler.
+Aufwandsschätzung: ~8 Wochen Vollzeit für die MVP-Blöcke A–H, plus weitere 1.5–2 Wochen für Block I (UI v2). Block I ist optional für ein erstes Release (v0.1.0 = nach Block H, v0.2.0 = nach Block I) und kann nach MVP-Launch je nach User-Feedback priorisiert werden — siehe ADR-0012.
 
 ## Wenn etwas unklar ist
 

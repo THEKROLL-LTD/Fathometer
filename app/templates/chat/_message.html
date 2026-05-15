@@ -1,0 +1,68 @@
+{# Einzelne Message-Bubble fuer die Conversation-View.
+
+   Template-Variablen:
+     - `message` (LlmMessage)
+         Felder: role (Enum mit `.value`), content, created_at,
+                  prompt_tokens, completion_tokens.
+
+   Sicherheits-Pipeline:
+     - User/System-Inhalte: Jinja-Autoescape (Default) — kein Markdown-Rendering.
+     - Assistant-Inhalte: `message.content | llm_safe` — laeuft durch
+       `app.services.llm_sanitize.clean_llm_html` mit nh3-Allowlist.
+     - **Niemals `|safe`** auf irgendeinen Message-Inhalt.
+
+   DaisyUI-Konventionen:
+     - `chat chat-end`   = User-Bubble rechts.
+     - `chat chat-start` = Assistant/System-Bubble links.
+     - `chat-bubble-*`   = Hintergrund-Variante.
+#}
+{% set role = message.role.value if message.role is not string else message.role %}
+{% set is_user = role == 'user' %}
+{% set is_assistant = role == 'assistant' %}
+{% set is_system = role == 'system' %}
+{% set prompt_t = message.prompt_tokens or 0 %}
+{% set completion_t = message.completion_tokens or 0 %}
+{% set total_t = prompt_t + completion_t %}
+
+<div class="chat {{ 'chat-end' if is_user else 'chat-start' }}"
+     data-message-id="{{ message.id }}"
+     data-role="{{ role }}">
+  <div class="chat-image avatar placeholder">
+    <div class="bg-base-300 text-base-content rounded-full w-8 h-8 flex items-center justify-center text-base"
+         aria-hidden="true">
+      {% if is_user %}
+        <span>You</span>
+      {% elif is_assistant %}
+        <span>AI</span>
+      {% else %}
+        <span>Sys</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="chat-header text-xs opacity-70 mb-1">
+    {% if is_user %}Du
+    {% elif is_assistant %}Assistent
+    {% else %}System{% endif %}
+    <time class="ml-1"
+          datetime="{{ message.created_at.isoformat() }}"
+          title="{{ message.created_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+      {{ message.created_at | relative_time }}
+    </time>
+  </div>
+  <div class="chat-bubble {% if is_user %}chat-bubble-primary{% elif is_system %}chat-bubble-warning text-sm{% endif %} max-w-3xl prose prose-sm dark:prose-invert">
+    {% if is_assistant %}
+      {# nh3-gesaeuberter HTML-Output. Der `llm_safe`-Filter liefert
+         `Markup(...)` zurueck — Autoescape laesst das passieren. #}
+      {{ message.content | llm_safe }}
+    {% else %}
+      {# User/System: Plain-Text, Jinja-Autoescape genuegt.
+         `whitespace-pre-wrap` erhaelt Zeilenumbrueche. #}
+      <span class="whitespace-pre-wrap break-words">{{ message.content }}</span>
+    {% endif %}
+  </div>
+  {% if total_t > 0 %}
+    <div class="chat-footer text-xs opacity-60 mt-1 font-mono">
+      prompt {{ prompt_t }} + completion {{ completion_t }} = {{ total_t }} Token
+    </div>
+  {% endif %}
+</div>

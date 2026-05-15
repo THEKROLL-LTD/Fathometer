@@ -261,6 +261,25 @@ def ingest_scan() -> Response | tuple[Response, int]:
         actor=server.name,
         session=sess,
     )
+
+    # LLM-Update-Hook (Block G): aktive Conversations bekommen eine
+    # System-Message angehaengt, wenn dieser Scan Delta brachte. Wir
+    # nehmen `findings_inserted` als Proxy fuer "neue" und
+    # `findings_resolved` direkt. `changed_count` ist im MVP immer 0
+    # (Block-E-Limitation).
+    from app.services.llm_update_hook import notify_conversations_for_scan
+
+    try:
+        notify_conversations_for_scan(
+            sess,
+            server.id,
+            new_count=result.findings_inserted,
+            resolved_count=result.findings_resolved,
+            changed_count=0,
+        )
+    except Exception as exc:  # pragma: no cover — Hook darf Ingest nicht killen
+        log.warning("api.scans.llm_hook_failed", error=type(exc).__name__)
+
     sess.commit()
 
     log.info(

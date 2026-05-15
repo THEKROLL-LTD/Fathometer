@@ -1,0 +1,234 @@
+{# LLM-Provider-Settings unter /settings/llm.
+
+   Template-Variablen:
+     - `form` (LlmSettingsForm)
+         Felder: provider_name, base_url, api_key, model, daily_token_cap.
+     - `has_existing_key` (bool)
+         True = Placeholder "•••• gesetzt" zeigen.
+     - `presets` (list[dict])
+         Each: {name, base_url, model}. Frontend-Dropdown befuellt
+         `base_url`/`model` mit dem ausgewaehlten Preset.
+     - `active_conversation_count` (int)
+         Wird im Provider-Wechsel-Warn-Modal verwendet.
+
+   Sicherheit:
+     - api_key wird NIE im Klartext gerendert (Form-Feld ist immer leer).
+     - CSRF-Token ueber `form.csrf_token` (Flask-WTF) bzw.
+       `<meta name="csrf-token">` fuer den Test-Verbindung-Fetch.
+
+   UX-Details:
+     - Preset-Dropdown fuellt `base_url`+`model` per Alpine.
+     - "Verbindung testen" ruft `/settings/llm/test-connection` (POST).
+       Achtung: Backend testet die **gespeicherten** Settings, nicht die
+       aktuell editierten Formwerte — wir zeigen den Hinweis explizit.
+     - Wenn `active_conversation_count > 0` UND der User die `base_url`
+       oder `model` aendert, blocken wir den Submit per Alpine und
+       zeigen einen Confirm-Dialog mit der Archivierungs-Warnung.
+#}
+{% extends "base.html" %}
+
+{% block title %}LLM-Provider · secscan{% endblock %}
+
+{% block head %}
+  <script defer src="{{ url_for('static', filename='js/llm_settings.js') }}"></script>
+{% endblock %}
+
+{% block content %}
+<section class="max-w-3xl mx-auto space-y-6">
+  <header>
+    <h1 class="text-2xl font-semibold">LLM-Provider</h1>
+    <p class="text-sm opacity-70 mt-1">
+      Konfiguration fuer die "Bewertung anfordern"-Funktion auf der
+      Server-Detail-Seite. Wechsel von Provider oder Modell archiviert
+      alle aktiven Bewertungen.
+    </p>
+  </header>
+
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body">
+      <form method="post"
+            action="{{ url_for('llm_settings.update') }}"
+            class="space-y-4"
+            x-data="llmProviderForm({
+              presets: {{ presets | tojson }},
+              initialBaseUrl: {{ (form.base_url.data or '') | tojson }},
+              initialModel: {{ (form.model.data or '') | tojson }},
+              activeConvCount: {{ active_conversation_count | tojson }},
+              testConnectionUrl: {{ url_for('llm_settings.test_connection') | tojson }}
+            })"
+            @submit="onSubmit($event)">
+        {{ form.csrf_token }}
+
+        {# Preset-Dropdown — befuellt base_url+model. #}
+        <div class="form-control">
+          <label class="label" for="llm-preset">
+            <span class="label-text">Preset</span>
+          </label>
+          <select id="llm-preset"
+                  class="select select-bordered w-full"
+                  @change="applyPreset($event.target.value)">
+            <option value="">— frei waehlen —</option>
+            {% for p in presets %}
+              <option value="{{ loop.index0 }}">{{ p.name }}</option>
+            {% endfor %}
+          </select>
+          <span class="label-text-alt mt-1 opacity-70">
+            Setzt Base-URL und Modell. API-Key musst du selbst eintragen.
+          </span>
+        </div>
+
+        <div class="form-control">
+          {{ form.provider_name.label(class="label label-text") }}
+          {{ form.provider_name(class="input input-bordered w-full",
+                                placeholder="z.B. deepinfra-prod") }}
+          {% for err in form.provider_name.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        <div class="form-control">
+          {{ form.base_url.label(class="label label-text") }}
+          {# WTForms transformiert keine Underscores zu Dashes — Alpine
+             braucht aber `x-model`. Wir nutzen dict-unpacking. #}
+          {{ form.base_url(**{
+              "class": "input input-bordered w-full font-mono text-sm",
+              "x-model": "baseUrl"
+          }) }}
+          <span class="label-text-alt mt-1 opacity-70">
+            HTTPS oder http://localhost / http://127.0.0.1.
+          </span>
+          {% for err in form.base_url.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        <div class="form-control">
+          {{ form.model.label(class="label label-text") }}
+          {{ form.model(**{
+              "class": "input input-bordered w-full font-mono text-sm",
+              "x-model": "model"
+          }) }}
+          {% for err in form.model.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        <div class="form-control">
+          {{ form.api_key.label(class="label label-text") }}
+          {{ form.api_key(class="input input-bordered w-full",
+                          autocomplete="off",
+                          placeholder="•••• gesetzt — leer lassen zum Behalten" if has_existing_key else "API-Key (Klartext)") }}
+          {% if has_existing_key %}
+            <span class="label-text-alt mt-1 opacity-70">
+              Bereits gesetzt. Leer lassen, um den bestehenden Key zu
+              behalten. Neuen Wert eintragen, um ihn zu ersetzen.
+            </span>
+          {% endif %}
+          {% for err in form.api_key.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        <div class="form-control">
+          {{ form.daily_token_cap.label(class="label label-text") }}
+          {{ form.daily_token_cap(class="input input-bordered w-full") }}
+          <span class="label-text-alt mt-1 opacity-70">
+            Cap pro Tag, Reset 00:00 UTC. Bei 80% Warn-Banner, bei 100%
+            hartes 429.
+          </span>
+          {% for err in form.daily_token_cap.errors %}
+            <p class="text-error text-sm mt-1">{{ err }}</p>
+          {% endfor %}
+        </div>
+
+        {% if active_conversation_count > 0 %}
+          <div class="alert alert-info text-sm" role="status">
+            <span>
+              {{ active_conversation_count }} aktive Bewertung{{ '' if active_conversation_count == 1 else 'en' }}
+              werden archiviert, wenn Base-URL oder Modell geaendert werden.
+            </span>
+          </div>
+        {% endif %}
+
+        <div class="flex flex-wrap gap-2 justify-end">
+          <button type="button"
+                  class="btn btn-ghost"
+                  @click="testConnection()"
+                  :disabled="testing">
+            <span x-show="!testing">Verbindung testen</span>
+            <span x-show="testing" class="flex items-center gap-2">
+              <span class="loading loading-spinner loading-xs"></span>
+              Probiere…
+            </span>
+          </button>
+          <button type="submit" class="btn btn-primary">Speichern</button>
+        </div>
+
+        <p class="text-xs opacity-60">
+          "Verbindung testen" probiert den aktuell **gespeicherten**
+          Provider — nicht die hier editierten Formwerte. Erst speichern,
+          dann testen.
+        </p>
+
+        <div x-show="testResult"
+             x-cloak
+             class="alert text-sm"
+             :class="testResult && testResult.success ? 'alert-success' : 'alert-error'"
+             role="status">
+          <template x-if="testResult && testResult.success">
+            <span>
+              OK — Latenz <span x-text="testResult.latency_ms"></span> ms,
+              Modell <code class="font-mono" x-text="testResult.model"></code>.
+            </span>
+          </template>
+          <template x-if="testResult && !testResult.success">
+            <span>
+              Fehler:
+              <span x-text="testResult.error || testResult.message || 'unbekannt'"></span>
+            </span>
+          </template>
+        </div>
+
+        {# ---- Provider-Wechsel-Confirm-Modal ----
+           Sichtbar wenn `confirmOpen` true ist (gesetzt in `onSubmit()`
+           bei `provider_changed` AND `activeConvCount > 0`). #}
+        <dialog class="modal"
+                :class="{'modal-open': confirmOpen}"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="provider-switch-title"
+                @keydown.escape.window="confirmOpen = false">
+          <div class="modal-box max-w-lg" x-cloak>
+            <h3 id="provider-switch-title" class="text-lg font-semibold">
+              Provider-Wechsel bestaetigen
+            </h3>
+            <p class="py-3 text-sm">
+              Du wechselst Provider/Modell.
+              <span class="font-semibold" x-text="activeConvCount"></span>
+              aktive Bewertung<span x-text="activeConvCount === 1 ? '' : 'en'"></span>
+              werden archiviert. Fortfahren?
+            </p>
+            <div class="modal-action">
+              <button type="button"
+                      class="btn btn-ghost btn-sm"
+                      @click="confirmOpen = false">
+                Abbrechen
+              </button>
+              <button type="button"
+                      class="btn btn-primary btn-sm"
+                      @click="confirmSubmit()">
+                Archivieren und speichern
+              </button>
+            </div>
+          </div>
+          <div class="modal-backdrop bg-black/40" @click="confirmOpen = false"></div>
+        </dialog>
+      </form>
+    </div>
+  </div>
+</section>
+
+{# Alpine-Komponente `llmProviderForm()` lebt in
+   `static/js/llm_settings.js` (oben im `head`-Block mit `defer`
+   eingebunden). #}
+{% endblock %}
