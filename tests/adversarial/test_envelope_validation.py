@@ -238,6 +238,35 @@ def test_host_architecture_whitelist() -> None:
         Envelope.model_validate(env)
 
 
+@pytest.mark.parametrize(
+    "alias,canonical",
+    [
+        ("arm64", "aarch64"),  # macOS, FreeBSD
+        ("amd64", "x86_64"),  # Go-Style, Docker
+        ("x86", "i686"),
+        ("i386", "i686"),
+        ("aarch64_be", "aarch64"),
+        # Case-insensitive Eingabe
+        ("ARM64", "aarch64"),
+        ("AMD64", "x86_64"),
+    ],
+)
+def test_host_architecture_alias_normalized_to_canonical(alias: str, canonical: str) -> None:
+    """macOS/FreeBSD/Go-Aliase werden zur Linux-Canonical-Form normalisiert."""
+    env = _minimal_envelope()
+    env["host"]["architecture"] = alias
+    parsed = Envelope.model_validate(env)
+    assert parsed.host.architecture == canonical
+
+
+def test_host_architecture_unknown_alias_still_rejected() -> None:
+    """wasm32, mips u.ae. landen nicht in der Whitelist und werden 422."""
+    env = _minimal_envelope()
+    env["host"]["architecture"] = "wasm32"
+    with pytest.raises(ValidationError):
+        Envelope.model_validate(env)
+
+
 def test_agent_version_strict_semver() -> None:
     env = _minimal_envelope()
     env["agent_version"] = "not-a-version"

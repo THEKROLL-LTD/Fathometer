@@ -71,7 +71,10 @@
                     try {
                       const meta = document.querySelector('meta[name=&quot;csrf-token&quot;]');
                       const csrf = meta ? meta.getAttribute('content') : '';
-                      const res = await fetch({{ url_for('llm_chat.start_conversation', server_id=server.id) | tojson }}, {
+                      {# `| forceescape`: tojson laesst `"` als Literal stehen,
+                         was hier den x-data-Attribut-Wert vorzeitig schliesst
+                         (siehe _macros.html · `quick_copy` fuer Kontext). #}
+                      const res = await fetch({{ url_for('llm_chat.start_conversation', server_id=server.id) | tojson | forceescape }}, {
                         method: 'POST',
                         credentials: 'same-origin',
                         headers: {

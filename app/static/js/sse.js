@@ -96,11 +96,20 @@
           }, 1500);
 
           // Last-Scan-Label sofort auf "gerade eben" setzen, falls vorhanden.
+          // WICHTIG: nur spans aktualisieren, NICHT das Karten-Container-
+          // Element (das hat zwar auch `data-last-scan-at` fuer die
+          // Stale-Tick-Logik, aber `el.textContent = ...` wuerde alle
+          // Kind-Nodes der Karte ersetzen und sie damit zerstoeren).
           if (payload.ingested_at) {
-            card.querySelectorAll("[data-last-scan-at]").forEach((el) => {
+            card.querySelectorAll("span[data-last-scan-at]").forEach((el) => {
               el.dataset.lastScanAt = payload.ingested_at;
               el.textContent = relativeTime(payload.ingested_at);
             });
+            // Stale-Threshold-Check liest weiterhin vom Karten-Container —
+            // also auch dort das Datum aktuell halten.
+            if (card.dataset && "lastScanAt" in card.dataset) {
+              card.dataset.lastScanAt = payload.ingested_at;
+            }
           }
         }
 
@@ -136,7 +145,11 @@
       },
 
       tick() {
-        document.querySelectorAll("[data-last-scan-at]").forEach((el) => {
+        // Nur span-Elemente bekommen ein neues `textContent`. Container-
+        // Elemente (z.B. die Server-Karte selbst, die `data-last-scan-at`
+        // fuer die Stale-Threshold-Logik traegt) duerfen NIEMALS hier
+        // beruehrt werden — `textContent = ...` zerstoert deren Kinder.
+        document.querySelectorAll("span[data-last-scan-at]").forEach((el) => {
           const ts = el.dataset.lastScanAt;
           if (ts) el.textContent = relativeTime(ts);
         });

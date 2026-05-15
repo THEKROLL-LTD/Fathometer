@@ -165,7 +165,8 @@
           </div>
 
           {# Detail-Modal (Alpine-controlled). Volle CVE-Info + Notes-Thread. #}
-          <dialog class="modal" :class="{'modal-open': detailOpen}"
+          <dialog class="modal" x-show="detailOpen" x-cloak
+                  :class="{'modal-open': detailOpen}"
                   @keydown.escape.window="detailOpen = false"
                   role="dialog"
                   aria-modal="true"
@@ -187,7 +188,8 @@
 
           {# Ack-Modal (Alpine-controlled). Inline weil Form-State pro Zeile. #}
           {% if f.status.value == 'open' %}
-            <dialog class="modal" :class="{'modal-open': ackOpen}"
+            <dialog class="modal" x-show="ackOpen" x-cloak
+                    :class="{'modal-open': ackOpen}"
                     @keydown.escape.window="ackOpen = false"
                     role="dialog"
                     aria-modal="true"
@@ -203,7 +205,8 @@
               </form>
             </dialog>
           {% elif f.status.value == 'acknowledged' %}
-            <dialog class="modal" :class="{'modal-open': reopenOpen}"
+            <dialog class="modal" x-show="reopenOpen" x-cloak
+                    :class="{'modal-open': reopenOpen}"
                     @keydown.escape.window="reopenOpen = false"
                     role="dialog"
                     aria-modal="true"

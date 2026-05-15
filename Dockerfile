@@ -113,8 +113,10 @@ WORKDIR /app
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
+COPY scripts/entrypoint.sh /usr/local/bin/secscan-entrypoint
 
-RUN chown -R secscan:secscan /app
+RUN chmod +x /usr/local/bin/secscan-entrypoint && \
+    chown -R secscan:secscan /app
 
 # ---------------------------------------------------------------------------
 # Stage 3 — Flat Runtime
@@ -143,8 +145,26 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/readyz || exit 1
 
-# Gunicorn als Entrypoint. Worker- und Timeout-Werte ueber Env steuerbar.
+# Entrypoint-Skript fuehrt `alembic upgrade head` aus (mit DB-Wait-Retry)
+# und ersetzt sich dann mit Gunicorn. Worker-, Thread- und Timeout-Werte
+# ueber Env steuerbar.
+#
+# `--worker-class gthread` ist Pflicht (nicht `sync`): die App hat zwei
+# Long-lived-SSE-Endpoints (`GET /events` fuers Dashboard, `GET /chat/.../
+# stream` fuer LLM-Chat). Eine offene SSE-Connection bindet einen
+# Sync-Worker-Slot dauerhaft — schon ein einziger Browser-Tab plus ein
+# zweiter Request laesst den Server bei 2 Sync-Workern komplett haengen.
+# Mit `gthread` halten Threads die Streams offen, andere Threads
+# bedienen normale Requests parallel.
+#
+# Default 2 Workers x 8 Threads = 16 gleichzeitige Connections. Reicht
+# fuer Single-User-Self-Hosting mit ein paar offenen Tabs locker; gibt
+# kaum Memory-Overhead, weil Threads sich den Prozess teilen.
+# Thread-Safety: SQLAlchemy nutzt scoped sessions, structlog ist
+# thread-safe, der EventBus baut auf `queue.Queue` — alles thread-safe.
+# Siehe ADR-0015.
 ENV SECSCAN_GUNICORN_WORKERS=2 \
+    SECSCAN_GUNICORN_THREADS=8 \
     SECSCAN_GUNICORN_TIMEOUT=120
 
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:8000 --workers ${SECSCAN_GUNICORN_WORKERS} --timeout ${SECSCAN_GUNICORN_TIMEOUT} --worker-tmp-dir /dev/shm --access-logfile - --error-logfile - 'app:create_app()'"]
+CMD ["secscan-entrypoint"]

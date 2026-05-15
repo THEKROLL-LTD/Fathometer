@@ -86,7 +86,8 @@
               {{ status_badge(f.status) }}
             </span>
 
-            <dialog class="modal" :class="{'modal-open': detailOpen}"
+            <dialog class="modal" x-show="detailOpen" x-cloak
+                    :class="{'modal-open': detailOpen}"
                     @keydown.escape.window="detailOpen = false"
                     role="dialog" aria-modal="true">
               <div class="modal-box max-w-3xl text-left" @click.stop>
@@ -110,7 +111,8 @@
 
       {# Bulk-Acknowledge-Modal fuer dieses Paket. #}
       {% if g.count_open > 0 %}
-      <dialog class="modal" :class="{'modal-open': bulkOpen}"
+      <dialog class="modal" x-show="bulkOpen" x-cloak
+              :class="{'modal-open': bulkOpen}"
               @keydown.escape.window="bulkOpen = false"
               role="dialog" aria-modal="true"
               aria-labelledby="bulk-title-{{ loop.index }}">

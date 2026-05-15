@@ -67,27 +67,47 @@
 
     {# Untere Zeile: Mode, Severity, KEV-/Stale-Switch, Submit. #}
     <div class="flex flex-wrap items-center gap-4 text-xs">
-      {# Tag-Modus als Radio-Toggle (klarer als Select). #}
-      <fieldset class="flex items-center gap-2">
-        <legend class="opacity-70">Tag-Modus:</legend>
+      {# Tag-Modus als Radio-Toggle (klarer als Select).
+         Implementierung:
+           - `<label>` umschliesst das versteckte Radio mit sichtbarem Text.
+             Klick auf das Label setzt das Radio (natives `for`-aequivalent
+             via Wrapping). Das Radio selbst ist `sr-only`, weil DaisyUIs
+             "aria-label als Button-Content"-Pattern Pseudo-Elemente auf
+             `<input>` voraussetzt und sich in der Praxis als unzuverlaessig
+             erwiesen hat (Layout-Bruch im Browser).
+           - Alpine liefert das visuelle Feedback (`btn-primary`-Toggle).
+             Initialisierung aus `filter.tags_mode`; Default ist `or`.
+           - `aria-labelledby` ersetzt die Fieldset/Legend-Semantik ohne
+             den Flex-Layout-Bruch, den `<legend>` im Flex-Container
+             ausloest.
+      #}
+      <div class="flex items-center gap-2"
+           role="radiogroup"
+           aria-labelledby="tags-mode-label"
+           x-data="{ mode: {{ (filter.tags_mode or 'or') | tojson | forceescape }} }">
+        <span id="tags-mode-label" class="opacity-70">Tag-Modus:</span>
         <div class="join">
-          <input type="radio" name="tags_mode" value="or"
-                 id="tags_mode_or"
-                 class="join-item btn btn-xs"
-                 aria-label="ODER"
-                 {% if filter.tags_mode == 'or' %}checked{% endif %} />
-          <label for="tags_mode_or" class="sr-only">ODER</label>
-          <input type="radio" name="tags_mode" value="and"
-                 id="tags_mode_and"
-                 class="join-item btn btn-xs"
-                 aria-label="UND"
-                 {% if filter.tags_mode == 'and' %}checked{% endif %} />
-          <label for="tags_mode_and" class="sr-only">UND</label>
+          <label class="join-item btn btn-xs cursor-pointer"
+                 :class="mode === 'or' ? 'btn-primary' : 'btn-ghost'">
+            <input type="radio" name="tags_mode" value="or"
+                   class="sr-only"
+                   x-model="mode" />
+            ODER
+          </label>
+          <label class="join-item btn btn-xs cursor-pointer"
+                 :class="mode === 'and' ? 'btn-primary' : 'btn-ghost'">
+            <input type="radio" name="tags_mode" value="and"
+                   class="sr-only"
+                   x-model="mode" />
+            UND
+          </label>
         </div>
-        <span class="opacity-60">
+        <span class="opacity-60"
+              x-text="mode === 'and' ? 'alle Tags' : 'mindestens einer'">
+          {# Fallback fuer no-JS: serverseitig gerenderter Initialtext. #}
           {% if filter.tags_mode == 'and' %}alle Tags{% else %}mindestens einer{% endif %}
         </span>
-      </fieldset>
+      </div>
 
       <label class="flex items-center gap-2" for="filter-severity">
         <span class="opacity-70">Severity ab:</span>

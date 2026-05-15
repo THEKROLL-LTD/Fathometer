@@ -83,6 +83,16 @@ _PRINTABLE_ASCII_RE = re.compile(r"^[\x20-\x7e]+$")
 _CWE_ID_RE = re.compile(r"^CWE-\d{1,7}$")
 # Architectures (aus §10: Whitelist).
 _ARCH_WHITELIST = frozenset({"x86_64", "aarch64", "armv7l", "i686", "ppc64le", "s390x"})
+# Bekannte Aliase werden vor dem Whitelist-Check kanonisiert. Reine
+# Normalisierung an der Grenze — wir akzeptieren keine unbekannten Werte,
+# nur dokumentierte Synonyme aus macOS, FreeBSD und Go-Toolchains.
+_ARCH_ALIASES = {
+    "arm64": "aarch64",  # macOS, FreeBSD, Docker (Go-Style)
+    "amd64": "x86_64",  # Go-Style, Docker, FreeBSD
+    "x86": "i686",
+    "i386": "i686",
+    "aarch64_be": "aarch64",  # Big-Endian-Variante, selten aber real
+}
 # Agent-Version (semver-light, §10).
 _AGENT_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
 # OS-Family (§10).
@@ -518,7 +528,11 @@ class HostBlock(BaseModel):
     @field_validator("architecture")
     @classmethod
     def _validate_arch(cls, v: str) -> str:
-        v = _no_nul_bytes(v) or v
+        v = (_no_nul_bytes(v) or v).strip().lower()
+        # Alias-Normalisierung: macOS `arm64`, Go `amd64` etc. werden auf die
+        # Linux-Canonical-Form gemappt, BEVOR die Whitelist greift. Damit
+        # bleibt die persistierte Form einheitlich (`aarch64`/`x86_64`).
+        v = _ARCH_ALIASES.get(v, v)
         if v not in _ARCH_WHITELIST:
             raise ValueError(f"architecture muss eine von {sorted(_ARCH_WHITELIST)} sein")
         return v

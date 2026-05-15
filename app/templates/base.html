@@ -58,16 +58,28 @@
     type="text/css"
   />
 
+  {# Alpine-`x-cloak`-Pattern: Elemente mit `x-cloak` bleiben hidden bis
+     Alpine die Direktive entfernt (= Komponente initialisiert). Verhindert
+     Flash-of-Content fuer Modals, Dropdowns etc. Ohne diese Regel ist
+     `x-cloak` ein No-Op. #}
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+
+  {# Reihenfolge ist wichtig: Alle App-eigenen Skripte, die globale
+     Alpine-Komponenten-Factories an `window.*` haengen (themeToggle,
+     bulkAckIds/bulkAckMatch, dashboardSse/staleTick, llmChat,
+     llmProviderForm, ...), MUESSEN vor `alpinejs.cdn.min.js` stehen.
+     Mit `defer` werden Scripts in DOM-Reihenfolge ausgefuehrt — wenn
+     Alpine zuerst laeuft, scannt es den DOM nach `x-data` und ruft die
+     Factory-Namen sofort auf; sind sie zu dem Zeitpunkt noch nicht
+     definiert, gibt es `ReferenceError`s und das Dashboard bleibt tot.
+     (Alternative waere `document.addEventListener("alpine:init", ...)` —
+     hier ist die Reihenfolge die kleinere Aenderung.) #}
+
   {# Theme-Toggle-Logic (Alpine-Komponente + Cookie/Media-Query-Wiring).
-     Defer-loaded — Alpine ist ebenfalls defer und initialisiert spaeter.
      Inline-No-Flash-Resolver oben hat das `data-theme` schon gesetzt. #}
   <script defer src="{{ url_for('static', filename='js/theme.js') }}"></script>
-
-  {# Alpine.js (defer) — siehe ADR-0001. #}
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.7/dist/cdn.min.js"></script>
-
-  {# HTMX (lazy, aber generell verfuegbar fuer spaetere Blocks). #}
-  <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
 
   {# Bulk-Acknowledge-Komponenten (Alpine `bulkAckIds` / `bulkAckMatch`).
      Reine Frontend-Logik — POSTs gehen an /api/findings/bulk-acknowledge
@@ -79,7 +91,20 @@
      Alpine-Component-Factories bereit. Nur das Dashboard verdrahtet sie. #}
   <script defer src="{{ url_for('static', filename='js/sse.js') }}"></script>
 
+  {# Page-spezifische Komponenten-Skripte (z.B. `llm_chat.js`,
+     `llm_settings.js`). Stehen bewusst VOR Alpine — sie registrieren
+     `window.llmChat`, `window.llmProviderForm`, ... als Komponenten-
+     Factories und muessen verfuegbar sein, bevor Alpine den DOM scannt
+     (siehe Kommentar oben). #}
   {% block head %}{% endblock %}
+
+  {# Alpine.js (defer) — siehe ADR-0001. MUSS nach den App-Skripten oben
+     UND nach `{% block head %}` stehen, damit alle Komponenten-Factories
+     beim ersten DOM-Scan bereits definiert sind. #}
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.7/dist/cdn.min.js"></script>
+
+  {# HTMX (lazy, aber generell verfuegbar fuer spaetere Blocks). #}
+  <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
 </head>
 <body class="min-h-screen bg-base-100 text-base-content antialiased">
   {# Topbar — App-Name links, Nav rechts. Theme-Toggle immer sichtbar. #}
@@ -102,7 +127,11 @@
     <div class="flex-none flex items-center gap-2">
       {# Theme-Toggle (Light/Dark/Auto). Schreibt Cookie und passt das
          `data-theme`-Attribut live an. Kompakt, daher hier inline (~25 LOC). #}
-      <div x-data="themeToggle({{ theme | tojson }})" class="dropdown dropdown-end">
+      {# `| forceescape` ist Pflicht: `tojson` laesst `"` als Literal in einem
+         `"`-umschlossenen Attribut stehen und beendet das x-data-Attribut
+         vorzeitig (siehe _macros.html · `quick_copy` fuer den ausfuehrlichen
+         Kontext zu dem Bug). #}
+      <div x-data="themeToggle({{ theme | tojson | forceescape }})" class="dropdown dropdown-end">
         <button tabindex="0"
                 class="btn btn-ghost btn-sm"
                 aria-label="Theme auswaehlen">

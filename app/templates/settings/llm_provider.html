@@ -48,15 +48,18 @@
 
   <div class="card bg-base-200 shadow-sm">
     <div class="card-body">
+      {# `| forceescape` neben `tojson` ist Pflicht: ohne wuerden enthaltene
+         `"` das `x-data`-Attribut vorzeitig schliessen, der Alpine-Ausdruck
+         koennte nicht parsen (siehe _macros.html · `quick_copy`). #}
       <form method="post"
             action="{{ url_for('llm_settings.update') }}"
             class="space-y-4"
             x-data="llmProviderForm({
-              presets: {{ presets | tojson }},
-              initialBaseUrl: {{ (form.base_url.data or '') | tojson }},
-              initialModel: {{ (form.model.data or '') | tojson }},
-              activeConvCount: {{ active_conversation_count | tojson }},
-              testConnectionUrl: {{ url_for('llm_settings.test_connection') | tojson }}
+              presets: {{ presets | tojson | forceescape }},
+              initialBaseUrl: {{ (form.base_url.data or '') | tojson | forceescape }},
+              initialModel: {{ (form.model.data or '') | tojson | forceescape }},
+              activeConvCount: {{ active_conversation_count | tojson | forceescape }},
+              testConnectionUrl: {{ url_for('llm_settings.test_connection') | tojson | forceescape }}
             })"
             @submit="onSubmit($event)">
         {{ form.csrf_token }}
@@ -195,12 +198,14 @@
            Sichtbar wenn `confirmOpen` true ist (gesetzt in `onSubmit()`
            bei `provider_changed` AND `activeConvCount > 0`). #}
         <dialog class="modal"
+                x-show="confirmOpen"
+                x-cloak
                 :class="{'modal-open': confirmOpen}"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="provider-switch-title"
                 @keydown.escape.window="confirmOpen = false">
-          <div class="modal-box max-w-lg" x-cloak>
+          <div class="modal-box max-w-lg">
             <h3 id="provider-switch-title" class="text-lg font-semibold">
               Provider-Wechsel bestaetigen
             </h3>

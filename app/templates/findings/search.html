@@ -34,10 +34,13 @@
    Auch wenn keine Aggregation gerendert wird, ist der Scope leichtgewichtig
    und stoert nichts. `criterion` wird unten dynamisch aus dem Backend-State
    gebaut. #}
+{# `| forceescape` neben `tojson` ist Pflicht: ohne wuerden enthaltene `"`
+   das `x-data`-Attribut vorzeitig schliessen (siehe _macros.html ·
+   `quick_copy`). #}
 <section class="space-y-4"
          x-data="bulkAckMatch({
-           cve_id: {{ (aggregation.cve_id if aggregation else None) | tojson }},
-           tag: {{ (tag | join(',') if tag else None) | tojson }},
+           cve_id: {{ (aggregation.cve_id if aggregation else None) | tojson | forceescape }},
+           tag: {{ (tag | join(',') if tag else None) | tojson | forceescape }},
            status: 'open'
          })">
 

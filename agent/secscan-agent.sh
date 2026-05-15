@@ -58,12 +58,27 @@ if [[ -r /etc/os-release ]]; then
   os_version="${VERSION_ID:-unknown}"
   os_pretty="${PRETTY_NAME:-${NAME:-unknown}}"
 else
-  os_family="unknown"
-  os_version="unknown"
-  os_pretty="$(uname -s)"
+  # Non-Linux (z.B. macOS, FreeBSD): kein /etc/os-release. Wir mappen
+  # `uname -s` auf eine sinnvolle os_family.
+  uname_s="$(uname -s)"
+  case "$uname_s" in
+    Darwin)      os_family="darwin" ;;
+    FreeBSD)     os_family="freebsd" ;;
+    OpenBSD)     os_family="openbsd" ;;
+    NetBSD)      os_family="netbsd" ;;
+    *)           os_family="$(printf '%s' "$uname_s" | tr '[:upper:]' '[:lower:]')" ;;
+  esac
+  os_version="$(uname -r)"
+  if [[ "$uname_s" == "Darwin" ]] && command -v sw_vers >/dev/null 2>&1; then
+    os_pretty="macOS $(sw_vers -productVersion 2>/dev/null) ($uname_s $os_version)"
+  else
+    os_pretty="$uname_s $os_version"
+  fi
 fi
 kernel_version="$(uname -r)"
 arch="$(uname -m)"
+# Backend normalisiert `arm64`/`amd64`/`x86`/`i386` automatisch zu den
+# Linux-Canonical-Formen; keine Client-seitige Normalisierung noetig.
 
 log "Host: ${os_pretty} (kernel ${kernel_version}, ${arch})"
 

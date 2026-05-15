@@ -20,6 +20,8 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0012](0012-block-i-ui-v2.md) | Block I bringt UI v2 als separate Phase nach MVP-Abschluss | Akzeptiert |
 | [0013](0013-fernet-kdf.md) | Fernet-KDF beibehalten, Schutz via README-Empfehlung + Entropie-Warning | Akzeptiert |
 | [0014](0014-token-cap-best-effort.md) | Token-Cap als Best-Effort, keine Pre-Reservation | Akzeptiert |
+| [0015](0015-gunicorn-gthread-for-sse.md) | Gunicorn `gthread`-Worker-Class für SSE-Endpoints | Akzeptiert |
+| [0016](0016-header-and-profile-dropdown.md) | Header-Navigation kompakt, Settings und Audit ins Profile-Dropdown (Block-I-Refinement) | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

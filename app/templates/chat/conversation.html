@@ -43,11 +43,14 @@
 {% set input_disabled = (not is_active) or token_usage.blocked %}
 {% set conv_url = url_for('llm_chat.show_conversation', conversation_id=conversation.id, _external=True) %}
 
+{# `| forceescape` neben `tojson` ist Pflicht, weil `tojson` `"` als Literal
+   stehen laesst — in einem `"`-Attribut bricht das den Ausdruck (siehe
+   _macros.html · `quick_copy` fuer Details). #}
 <section class="max-w-4xl mx-auto space-y-6"
          x-data="llmChat({
-           streamUrl: {{ stream_url | tojson }},
-           postMessageUrl: {{ post_message_url | tojson }},
-           autoStart: {{ auto_start | tojson }}
+           streamUrl: {{ stream_url | tojson | forceescape }},
+           postMessageUrl: {{ post_message_url | tojson | forceescape }},
+           autoStart: {{ auto_start | tojson | forceescape }}
          })">
 
   {# ---- Header ---- #}

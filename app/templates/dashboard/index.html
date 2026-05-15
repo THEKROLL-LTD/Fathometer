@@ -39,8 +39,12 @@
    - `staleTick()` re-rendered jede Minute die Relativzeit-Labels und die
      Stale-Badges (client-seitig, kein Server-Round-Trip).
    Beide Komponenten liegen in `static/js/sse.js`. #}
+{# `| forceescape` ist Pflicht: `tojson` laesst `"` als Literal stehen und
+   beendet das `x-data`-Attribut vorzeitig — `dashboardSse(` parst dann als
+   leerer Ausdruck, `init` und `destroy` sind in Folge undefined (siehe
+   _macros.html · `quick_copy` fuer den vollen Kontext). #}
 <section class="space-y-6"
-         x-data="dashboardSse({{ events_url | tojson }})"
+         x-data="dashboardSse({{ events_url | tojson | forceescape }})"
          x-init="init()"
          @beforeunload.window="destroy()">
   {# Header: Titel + Filterhinweis links, Reload + Settings-Link rechts. #}
