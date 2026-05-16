@@ -8,8 +8,10 @@ Erweitert den Block-D-Header um die Findings-Sektion mit drei View-Modi:
 URL-Filter (alle optional, Defaults sicher): `mode`, `status`, `class`,
 `severity`, `kev_only`, `q`.
 
-HTMX-Pattern: bei `HX-Request: true` rendert der Endpoint *nur* das
-Findings-Fragment (`servers/_findings_section.html`), nicht die ganze Seite.
+HTMX-Pattern: bei `HX-Request: true` rendert der Endpoint die Detail-
+Pane-Fragment-Variante von `servers/detail.html` (Server-Header +
+Findings-Sektion) via `_partial_shell.html`, nicht die ganze Seite mit
+Sidebar.
 """
 
 from __future__ import annotations
@@ -143,24 +145,19 @@ def show(server_id: int) -> Any:
     view_filter = FindingsViewFilter.from_request(request.args)
     section_ctx = _render_findings_section(server, view_filter)
 
-    # HTMX-Partial: nur die Findings-Sektion.
-    if request.headers.get("HX-Request") == "true":
-        return render_template("servers/_findings_section.html", **section_ctx)
-
-    # `section_ctx` enthaelt bereits `server` und Form-Instanzen; wir mergen
-    # nur die Header-spezifischen Variablen (Tag-Editor) hinzu.
-    #
     # Block I: `active_server_id` markiert die Sidebar-Zeile, `hx_partial`
-    # signalisiert dem Template ob es im Fragment- oder Vollseiten-Modus
-    # gerendert wird. Der HX-Pfad oben hat bereits returned, deshalb hier
-    # immer `False`.
+    # entscheidet zwischen Vollseite (`base_app.html`) und Fragment-Shell
+    # (`_partial_shell.html`). Der Fragment-Pfad liefert den kompletten
+    # Detail-Pane (Server-Header + Findings-Sektion + Bulk-Modal usw.), damit
+    # die Sidebar-Navigation den Header nicht verschluckt.
+    is_hx = request.headers.get("HX-Request") == "true"
     return render_template(
         "servers/detail.html",
         available_tags=_all_tags(),
         add_form=CSRFOnlyForm(),
         remove_form=CSRFOnlyForm(),
         active_server_id=server.id,
-        hx_partial=False,
+        hx_partial=is_hx,
         **section_ctx,
     )
 

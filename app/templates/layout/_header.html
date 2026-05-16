@@ -48,8 +48,14 @@
   <div class="flex-none flex items-center gap-1">
     {# Theme-Toggle als Sun/Moon-Icon. Globale `themeToggle`-Komponente
        lebt in `static/js/theme.js`. Wir reichen den initialen Cookie-Wert
-       als Argument; Alpine spiegelt das in `current`. #}
-    <div x-data="themeToggle({{ theme | tojson }})" class="flex items-center">
+       als Argument; Alpine spiegelt das in `current`.
+
+       `| forceescape` ist Pflicht: `tojson` laesst `"` als Literal stehen,
+       was in einem `"`-umschlossenen Attribut das `x-data` vorzeitig
+       schliesst. Folge: `themeToggle("` parst, `auto")"` wird zu Garbage,
+       `resolvedDark`/`cycle` sind nicht im Scope (siehe Erklaerung in
+       _macros.html · quick_copy und base.html · themeToggle). #}
+    <div x-data="themeToggle({{ theme | tojson | forceescape }})" class="flex items-center">
       <button type="button"
               @click="cycle()"
               class="btn btn-ghost btn-sm btn-circle"

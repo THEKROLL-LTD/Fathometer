@@ -186,7 +186,14 @@ def test_server_detail_hx_request_returns_fragment_only(db_app: Flask) -> None:
     resp = client.get(f"/servers/{sid}", headers={"HX-Request": "true"})
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    # HX-Variante liefert nur die Findings-Sektion (kein Sidebar/HTML-Wrapper).
+    # HX-Variante liefert das Detail-Pane ohne Sidebar/HTML-Wrapper, aber
+    # MIT Server-Header + Findings-Sektion (vorher fehlte der Header).
     assert "<html" not in body.lower()
     assert "<aside" not in body.lower()
     assert 'id="sidebar-root"' not in body
+    # Wrapper-Div aus _partial_shell.html.
+    assert 'id="detail-pane-content"' in body
+    # Server-Header-Marker: Server-Name als <h1> in detail.html.
+    assert "hx-active-srv" in body
+    # Findings-Sektion bleibt enthalten.
+    assert 'id="findings-section"' in body

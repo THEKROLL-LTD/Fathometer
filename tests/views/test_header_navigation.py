@@ -209,3 +209,14 @@ def test_header_theme_toggle_present_with_sun_and_moon(
     assert "M21 12.79" in header, "Moon-SVG-Path fehlt"
     # Button mit aria-label.
     assert "aria-label" in header
+    # `tojson | forceescape`: `"` muss als `&#34;` escaped sein, sonst
+    # bricht der Attribut-Wert vorzeitig auf und Alpine wirft
+    # `resolvedDark is not defined` (siehe Regression in v0.3.0).
+    assert 'x-data="themeToggle(&#34;' in header, (
+        "themeToggle-Argument muss HTML-escaped sein (`| forceescape`), "
+        "sonst schliesst das eingebettete `\"` das x-data-Attribut."
+    )
+    assert 'x-data="themeToggle("' not in header, (
+        "Ungescaptes `\"` im x-data-Attribut bricht das Parsing — "
+        "`| forceescape` fehlt im Template."
+    )
