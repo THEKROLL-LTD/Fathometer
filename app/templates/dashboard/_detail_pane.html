@@ -1,83 +1,70 @@
 {# Dashboard-Detail-Pane — die EINZIGE Quelle fuer den Dashboard-Inhalt
-   (ADR-0016 / ADR-0017).
+   (ADR-0016 / ADR-0017 / ADR-0020).
 
-   Wird von zwei Pfaden konsumiert:
+   Block M (ADR-0020) hat den Pane komplett umgebaut:
+     - Quick-Stats werden zu KPI-Cards mit Sparklines (Block-K-`_kpi_card`-
+       Partial mit `link_url`-Parameter, Task #9a).
+     - Filter-Bar wandert in die Findings-Section (Hybrid-Auto-Submit).
+     - Aufmerksamkeits-Sektion und Platzhalter entfallen ersatzlos.
+     - Neue Cross-Server-Findings-Tabelle als Triage-Surface (ersetzt die
+       entfernte `/findings/search`-View).
+
+   Wird von zwei Pfaden konsumiert (ADR-0017):
      1. `dashboard/index.html` (Full-Page-Render) inkludiert dieses Partial
         im `{% block detail_pane %}`.
      2. `app/views/dashboard.py` (HX-Pfad) rendert dieses Partial direkt
         via `render_template("dashboard/_detail_pane.html", **ctx)`.
 
    Damit beide Pfade dasselbe Markup liefern, MUSS der Variablen-Vertrag
-   unten in beiden Fällen vollstaendig erfuellt sein.
+   unten in beiden Faellen vollstaendig erfuellt sein.
 
-   Variablen-Vertrag (gesetzt in app/views/dashboard.py:_build_pane_context):
-     - `servers`              : list[ServerCardData] — fuer den Server-Count.
-     - `filter`               : DashboardFilter — fuer `filter.is_active`-Badge.
-     - `quick_stats`          : QuickStats — fuer `_quick_stats.html`.
-     - `available_tags`       : list[Tag] — fuer `_filter_bar.html`.
-     - `filter_tags`          : list[str] — fuer `_filter_bar.html`.
-     - `severity_threshold`   : Severity — fuer `_filter_bar.html`.
-     - `db_stale_threshold_h` : int — fuer `_attention.html`.
-     - `attention`            : AttentionSection — fuer `_attention.html`.
+   Variablen-Vertrag (gesetzt in `app/views/dashboard.py:_build_pane_context`):
+     - `servers`         : list[ServerCardData] — fuer den Server-Count-Badge
+                           im Header (Anzahl gefilterter Server).
+     - `filter`          : DashboardFilter — fuer `filter.is_active`-Badge.
+     - `quick_stats`     : QuickStats — Filter-unabhaengige OPEN-Counter
+                           fuer die KPI-Cards (Sparkline-Semantik ADR-0020).
+     - `kpi_sparklines`  : dict[str, list[int]] — Keys total/kev/critical/high.
+     - `stale_sparkline` : list[int] — 50 Daily-Stale-Server-Counts.
+     - `view_filter`     : DashboardFilter — alias fuer die Findings-Section.
+     - `findings`        : list[Finding] — gefiltert + limited (max 200).
+     - `findings_total`  : int — exakter Pre-Limit-Count fuer Truncation.
+     - `available_tags`  : list[Tag] — fuer die Filter-Bar.
+     - `severity_threshold` : Severity — Settings-Default fuer Filter-Echo.
+     - `bulk_form`       : BulkActionForm — CSRF-Halter fuer Bulk-Ack.
+     - `csrf_form`       : CSRFOnlyForm.
+
+   Polling-Wrapper-Attribute sind PRIVAT fuer diesen Container.
+   `hx-disinherit="*"` verhindert dass innere `<a hx-get>`-Klicks
+   (KPI-Cards mit `hx-target="#detail-pane"`, Filter-Bar mit
+   `hx-target="#findings-section"`, etc.) das `hx-target="this"` und
+   `hx-swap="outerHTML"` erben — sonst wuerde der Klick `<div id="dashboard-
+   pane">` mit der Antwort der Sub-Route ueberschreiben und die KPI-Card-
+   Selektion ginge verloren (Block-L-Fix `c18352f`).
 
    Sicherheit: kein `|safe` auf Variablen — alles autoescaped.
 #}
-{# Polling-Attribute sind PRIVAT fuer diesen Container. `hx-disinherit="*"`
-   verhindert dass innere `<a hx-get>`-Klicks (z. B. Quick-Stats-Counter mit
-   `hx-target="#detail-pane"`) das `hx-target="this"` und `hx-swap="outerHTML"`
-   erben — sonst wuerde der Klick `<main id="detail-pane">` komplett ersetzen
-   statt dessen `innerHTML` zu swappen, der Scroll-Container ginge verloren. #}
 <div id="dashboard-pane"
-     class="p-6"
+     class="max-w-[1600px] mx-auto px-6 py-6 space-y-8"
      hx-get="{{ request.path }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}"
      hx-trigger="every 10s [document.visibilityState === 'visible']"
      hx-target="this"
      hx-swap="outerHTML"
      hx-headers='{"HX-Request": "true"}'
      hx-disinherit="*">
-{# ADR-0016: Dashboard-Default-Detail-Pane besteht aus Quick-Stats +
-   Filter-Bar + Platzhalter-Bereich. Das alte Server-Karten-Grid (Block D)
-   ist weggefallen — die Server-Liste lebt jetzt in der Sidebar.
 
-   ADR-0019: Pane ist HTMX-Polling-Container — alle 10s (nur bei
-   sichtbarem Tab) zieht er sich selbst per `hx-get`/`outerHTML` neu;
-   `id="dashboard-pane"` ist Pflicht, sonst frisst HTMX den Trigger nach
-   dem ersten Swap. `staleTick` (lokaler Re-Render der Relativzeit-Labels)
-   bleibt unten am Attention-Wrapper aktiv. #}
-
-  <header class="flex flex-wrap items-baseline justify-between gap-3 mb-4">
-    <h1 class="text-lg font-semibold">Dashboard</h1>
-    <span class="text-xs opacity-60">
+  <header class="flex items-end justify-between gap-3 flex-wrap">
+    <div>
+      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">DASHBOARD</div>
+      <h1 class="font-mono text-2xl lg:text-3xl mt-1">Alle Findings</h1>
+    </div>
+    <div class="text-xs opacity-60" data-test="dashboard-server-count">
       {{ servers | length }} Server sichtbar
-      {% if filter.is_active %}<span class="badge badge-ghost badge-sm ml-1">gefiltert</span>{% endif %}
-    </span>
+      {% if filter.is_active %}<span class="badge badge-ghost badge-sm ml-1" data-test="dashboard-filter-active-badge">gefiltert</span>{% endif %}
+    </div>
   </header>
 
-  {# Quick-Stats-Header (5 Counter). #}
-  {% include "dashboard/_quick_stats.html" %}
+  {% include "dashboard/_kpi_cards.html" %}
 
-  {# Filter-Bar. #}
-  {% include "dashboard/_filter_bar.html" %}
-
-  {# "Aufmerksamkeit noetig" — falls aktiv, sehr knapp ueber dem
-     Platzhalter darstellen. Bleibt funktional gleich zu Block D. #}
-  {% if not attention.is_empty %}
-    <div x-data="staleTick()"
-         x-init="init()"
-         @beforeunload.window="destroy()"
-         class="mb-6">
-      {% include "dashboard/_attention.html" %}
-    </div>
-  {% endif %}
-
-  {# Platzhalter-Bereich gemaess ADR-0016 — Reviewer-Hinweis: bewusst leer. #}
-  <div class="border-2 border-dashed border-base-300 rounded-box p-12 text-center">
-    <p class="text-lg font-medium opacity-60 mb-2">Platzhalter</p>
-    <p class="text-sm opacity-50 mb-2">
-      Hier kommt später ein Widget-Bereich (Trends, letzte Aktivitäten, …).
-    </p>
-    <p class="text-xs opacity-40 italic">
-      Bewusst leer gelassen gemäß ADR-0016 — Inhalt in einem späteren Block.
-    </p>
-  </div>
+  {% include "dashboard/_findings_section.html" %}
 </div>

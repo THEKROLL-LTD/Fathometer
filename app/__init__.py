@@ -236,7 +236,6 @@ def create_app() -> Flask:
     from app.views.dashboard import dashboard_bp
     from app.views.findings import findings_bp
     from app.views.llm_settings import llm_settings_bp
-    from app.views.search import search_bp
     from app.views.server_detail import server_detail_bp
     from app.views.servers import servers_bp
     from app.views.settings import settings_bp
@@ -249,7 +248,6 @@ def create_app() -> Flask:
     app.register_blueprint(servers_bp)
     app.register_blueprint(server_detail_bp)
     app.register_blueprint(findings_bp)
-    app.register_blueprint(search_bp)
     app.register_blueprint(audit_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(llm_chat_bp)

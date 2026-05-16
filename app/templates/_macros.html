@@ -236,33 +236,46 @@
 {%- endmacro %}
 
 
-{# Sortierbarer Spaltenheader (Block K, ADR-0018).
+{# Sortierbarer Spaltenheader (Block K, ADR-0018; Block M, ADR-0020).
 
-   `field`        — Sort-Key (Whitelist in FindingsViewFilter._VALID_SORTS).
+   `field`        — Sort-Key (Whitelist im jeweiligen Filter-Schema).
    `label`        — User-sichtbares Label, lowercased gerendert.
    `current_sort` — `view_filter.sort` (aktuelle Sortier-Spalte).
    `current_dir`  — `view_filter.dir` ('asc'|'desc').
-   `server_id`    — fuer den HTMX-`hx-get`-URL-Build.
+   `server_id`    — fuer den HTMX-`hx-get`-URL-Build (nur fuer Block-K-
+                    Aufrufer relevant; Block M nutzt `route_kwargs={}`).
    `view_filter`  — optional, fuer `to_query_string()`-Propagation; wenn None
-                    wird ein minimaler Query-String mit `mode` + sort/dir gebaut.
+                    wird ein minimaler Query-String mit sort/dir gebaut.
+   `route`        — Flask-Endpoint fuer `url_for`. Default `server_detail.show`
+                    (Block K). Block M (ADR-0020) ruft mit `route='dashboard.index'`
+                    + `route_kwargs={}` auf.
+   `route_kwargs` — dict mit `url_for`-Argumenten (z.B. `{'server_id': 7}`).
+                    Default leer. Block-K-`_view_list.html` reicht sein
+                    `server_id` jetzt ueber diesen Weg durch.
 
    Klick togglet die Richtung wenn man dieselbe Spalte erneut waehlt,
    sonst springt der Sort auf das Feld mit sinnvoller Default-Richtung
-   (cve/pkg/first_seen -> asc, sonst desc — gleiche Heuristik wie das
-   Mockup, siehe `docs/blocks/K-mockup-prototype.html`).
+   (cve/pkg/first_seen/server -> asc, sonst desc — gleiche Heuristik wie das
+   Mockup, siehe `docs/blocks/K-mockup-prototype.html`; `server` neu in M).
 
    HTMX: `hx-get` swap das `#findings-section`-Fragment, `hx-push-url`
    haelt die URL fuer Bookmarks aktuell. Bei JS-disabled bleibt das `<a>`
    regulaerer Link (Form-of-Progressive-Enhancement).
+
+   Rueckwaerts-Kompat: alte Aufrufer ohne `route`/`route_kwargs` (Block K
+   uebergibt `server_id` als Positional und faellt auf die Defaults zurueck)
+   werden weiter korrekt bedient — `server_detail.show` braucht `server_id`,
+   das wir aus dem Positional-Arg in die kwargs spiegeln, wenn `route_kwargs`
+   leer ist und `server_id` gesetzt wurde.
 #}
-{% macro sort_header(field, label, current_sort, current_dir, server_id, view_filter=None) -%}
+{% macro sort_header(field, label, current_sort, current_dir, server_id=None, view_filter=None, route='server_detail.show', route_kwargs=None) -%}
   {%- if current_sort == field -%}
     {%- set next_dir = 'asc' if current_dir == 'desc' else 'desc' -%}
     {%- set indicator = '↑' if current_dir == 'asc' else '↓' -%}
     {%- set is_active = true -%}
     {%- set aria_sort = 'ascending' if current_dir == 'asc' else 'descending' -%}
   {%- else -%}
-    {%- set next_dir = 'asc' if field in ('cve', 'pkg', 'first_seen') else 'desc' -%}
+    {%- set next_dir = 'asc' if field in ('cve', 'pkg', 'first_seen', 'server') else 'desc' -%}
     {%- set indicator = '↕' -%}
     {%- set is_active = false -%}
     {%- set aria_sort = 'none' -%}
@@ -272,10 +285,22 @@
   {%- else -%}
     {%- set qs = 'sort=' ~ field ~ '&dir=' ~ next_dir -%}
   {%- endif -%}
-  <th scope="col" aria-sort="{{ aria_sort }}" class="select-none">
-    <a href="{{ url_for('server_detail.show', server_id=server_id) }}?{{ qs }}"
+  {# Rueckwaerts-Kompat: Block-K-Aufrufer geben `server_id` als Positional,
+     ohne `route_kwargs` zu setzen. In dem Fall mappen wir es in die kwargs. #}
+  {%- if route_kwargs is none -%}
+    {%- if server_id is not none and route == 'server_detail.show' -%}
+      {%- set _route_kwargs = {'server_id': server_id} -%}
+    {%- else -%}
+      {%- set _route_kwargs = {} -%}
+    {%- endif -%}
+  {%- else -%}
+    {%- set _route_kwargs = route_kwargs -%}
+  {%- endif -%}
+  {%- set _target_url = url_for(route, **_route_kwargs) -%}
+  <th scope="col" aria-sort="{{ aria_sort }}" class="select-none" data-test="sort-header-{{ field }}">
+    <a href="{{ _target_url }}?{{ qs }}"
        class="inline-flex items-center gap-1 group"
-       hx-get="{{ url_for('server_detail.show', server_id=server_id) }}?{{ qs }}"
+       hx-get="{{ _target_url }}?{{ qs }}"
        hx-target="#findings-section"
        hx-select="#findings-section"
        hx-swap="outerHTML"

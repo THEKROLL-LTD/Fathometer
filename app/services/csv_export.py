@@ -35,13 +35,19 @@ from sqlalchemy import nulls_last, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import AuditEvent, Finding, Server
+from app.schemas.dashboard_filter import DashboardFilter
 from app.services.diff_view import compute_diff
 from app.services.findings_query import (
+    _SEVERITY_THRESHOLD_VALUES,
     _SORT_COLUMNS,
+    _SORT_COLUMNS_CROSS,
+    _STATUS_VALUES_BY_FILTER,
+    FindingsCrossSortKey,
     FindingsFilter,
     FindingsSortDir,
     FindingsSortKey,
     _apply_filters,
+    _apply_tag_filter_cross,
     _order_clauses,
 )
 
@@ -392,13 +398,146 @@ def _finding_row(f: Finding) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Block M (ADR-0020) — Cross-Server-CSV-Export aus dem Dashboard
+# ---------------------------------------------------------------------------
+
+
+# Erste Spalte explizit `Server` (Title-Case, vom Block-Plan vorgegeben), dann
+# der bisherige Spalten-Satz **ohne** `server_name` — das alte Feld waere
+# redundant zu `Server`. Format-Stabilitaet ist hier kein Argument, der
+# Cross-Server-Endpoint ist mit Block M neu.
+FINDINGS_CSV_COLUMNS_CROSS: list[str] = [
+    "Server",
+    "cve_id",
+    "package_name",
+    "installed_version",
+    "fixed_version",
+    "severity",
+    "cvss_v3_score",
+    "epss_score",
+    "is_kev",
+    "status",
+    "first_seen_at",
+    "title",
+]
+
+
+def stream_findings_csv_cross_server(
+    session: Session,
+    filt: DashboardFilter,
+    *,
+    sort: FindingsCrossSortKey = "sev",
+    dir: FindingsSortDir = "desc",
+    now: datetime | None = None,
+) -> Generator[bytes]:
+    """Streamt Cross-Server-Findings als CSV (Dashboard-Export, ADR-0020).
+
+    Filter-Felder kommen aus `DashboardFilter` (`q`, `tags`, `severity`,
+    `status`, `kev_only`, `stale_only`, `sort`, `dir`). KEIN Limit — alle
+    Treffer landen im Export (CSV ist die Eskalations-Ebene wenn die 200-
+    Truncation zu eng wird).
+
+    Spalten: `Server` zuerst (= `finding.server.name`), gefolgt von der
+    Block-K-Findings-Spalten-Palette. Die `Server`-Spalte unterliegt
+    derselben OWASP-Formula-Injection-Mitigation aus `_harden_against_formula`.
+    """
+    from app.services.stale_detection import is_stale
+
+    stmt = select(Finding).options(selectinload(Finding.server))
+    stmt = stmt.join(Server, Server.id == Finding.server_id)
+
+    # Tags (OR-Set).
+    stmt = _apply_tag_filter_cross(stmt, filt.tags)
+
+    # Severity-Threshold.
+    if filt.severity is not None:
+        sev_values = _SEVERITY_THRESHOLD_VALUES[filt.severity]
+        stmt = stmt.where(Finding.severity.in_(sev_values))
+
+    # Status (Default open).
+    status_values = _STATUS_VALUES_BY_FILTER[filt.status]
+    if status_values is not None:
+        stmt = stmt.where(Finding.status.in_(status_values))
+
+    # KEV-Only.
+    if filt.kev_only:
+        stmt = stmt.where(Finding.is_kev.is_(True))
+
+    # Such-String (gebindet via `ilike`).
+    if filt.q:
+        from sqlalchemy import or_
+
+        pattern = f"%{filt.q}%"
+        stmt = stmt.where(
+            or_(
+                Finding.identifier_key.ilike(pattern),
+                Finding.package_name.ilike(pattern),
+                Finding.title.ilike(pattern),
+                Server.name.ilike(pattern),
+            )
+        )
+
+    # Stale-Only — Python-side wie in `list_findings_cross_server`.
+    if filt.stale_only:
+        srv_stmt = select(Server).where(Server.retired_at.is_(None))
+        all_servers = list(session.execute(srv_stmt).scalars().all())
+        stale_ids = [srv.id for srv in all_servers if is_stale(srv, now=now)]
+        if not stale_ids:
+            return stream_csv(iter([]), FINDINGS_CSV_COLUMNS_CROSS)
+        stmt = stmt.where(Finding.server_id.in_(stale_ids))
+
+    # Sortierung — Whitelist + sekundaerer Tiebreak.
+    sort_col = _SORT_COLUMNS_CROSS.get(sort)
+    if sort_col is None:
+        sort_col = _SORT_COLUMNS_CROSS["sev"]
+        dir = "desc"
+    primary_clause = sort_col.asc() if dir == "asc" else sort_col.desc()
+    primary_clause = nulls_last(primary_clause)
+    stmt = stmt.order_by(primary_clause, Finding.identifier_key.asc())
+
+    def _row_iter() -> Iterator[dict[str, Any]]:
+        # ORM-`yield_per` ist mit `unique()` inkompatibel — wir brauchen
+        # `unique()`, weil das JOIN auf Server fuer den `q`-Filter mehrere
+        # Finding-Rows produzieren koennte (selectinload-Eager-Load + JOIN).
+        # Loesung: explizite `.unique().all()`-Materialisierung. CSV bleibt
+        # streamend per Zeile dank `stream_csv`-Generator unten; ein einmaliger
+        # All-Buffer in Python ist akzeptabel — die 200-Truncation gilt fuer
+        # CSV bewusst nicht (ADR-0020), aber realistische Fleet-Volumes sind
+        # < 50k Rows.
+        result = session.execute(stmt)
+        for f in result.scalars().unique().all():
+            server_name = ""
+            server_attr: Server | None = getattr(f, "server", None)
+            if server_attr is not None:
+                server_name = server_attr.name
+            yield {
+                "Server": server_name,
+                "cve_id": f.identifier_key,
+                "package_name": f.package_name,
+                "installed_version": f.installed_version or "",
+                "fixed_version": f.fixed_version or "",
+                "severity": f.severity.value,
+                "cvss_v3_score": f.cvss_v3_score if f.cvss_v3_score is not None else "",
+                "epss_score": f.epss_score if f.epss_score is not None else "",
+                "is_kev": "true" if f.is_kev else "false",
+                "status": f.status.value,
+                "first_seen_at": f.first_seen_at,
+                "title": f.title or "",
+            }
+
+    return stream_csv(_row_iter(), FINDINGS_CSV_COLUMNS_CROSS)
+
+
 __all__ = [
     "AUDIT_CSV_COLUMNS",
     "FINDINGS_CSV_COLUMNS",
+    "FINDINGS_CSV_COLUMNS_CROSS",
     "FINDINGS_CSV_COLUMNS_DIFF",
     "FINDINGS_CSV_COLUMNS_GROUPED",
     "CsvExportMode",
     "stream_audit_csv",
     "stream_csv",
     "stream_findings_csv",
+    "stream_findings_csv_cross_server",
 ]

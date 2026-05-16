@@ -1,13 +1,26 @@
 {# KPI-Karte mit grossem Wert + 50-Tage-Sparkline (Block K, ADR-0018).
 
+   Block M (ADR-0020) ergaenzt den optionalen `link_url`-Parameter, damit die
+   Karte sich als HTMX-Link rendert (Dashboard-Quick-Filter). Wenn `link_url`
+   gesetzt ist, wird das aeussere `<div>` zu einem `<a>` mit `hx-get`/
+   `hx-target="#detail-pane"` — ein Klick swappt das Dashboard-Pane mit dem
+   passenden Filter. Wenn `link_url=None` (Default) bleibt das Block-K-Server-
+   Detail-Verhalten unveraendert (statisches `<div>`).
+
    Variablen-Vertrag:
      - `label`         : str — kurzes Eyebrow-Label (z.B. "KEV", "Critical").
      - `value`         : int — der grosse Counter-Wert.
-     - `tone`          : str — eine von {error, warning, accent, info}, steuert
-                         die Tailwind-Farbklassen-Variable.
+     - `tone`          : str — eine von {base, error, warning, accent, info};
+                         steuert die Tailwind-Text-Farbklasse und die SVG-
+                         Stroke-Color. `base` (Default-Else) rendert
+                         `text-base-content` mit grauer Stroke (#6b7280).
      - `sparkline`     : list[int] — 50 OPEN-Snapshot-Werte (aelteste zuerst).
      - `kev_indicator` : bool (optional) — pulsierender roter Dot rechts oben,
                          wenn `value > 0`. Default `False`.
+     - `link_url`      : str | None (optional, Block M) — wenn gesetzt wird
+                         die Karte als `<a href hx-get hx-target="#detail-pane"
+                         hx-swap="outerHTML" hx-push-url="true">` gerendert
+                         und bekommt `hover:bg-base-300 transition-colors`.
 
    Layout: 180px breite Kachel mit DaisyUI-Background, oberer Zeile (Eyebrow +
    optionaler KEV-Dot), grossem `text-2xl`-Wert in `text-{tone}`-Farbe und
@@ -15,9 +28,15 @@
    gedaempfte horizontale Mittellinie (kein leeres SVG-Loch).
 
    Inline-SVG, keine externen Libraries — ADR-0001.
+
+   HTMX-Inheritance-Hinweis (ADR-0019 Block-L-Polling): das Dashboard-Pane-
+   `<div id="dashboard-pane">` setzt `hx-disinherit="*"`. Daher koennen die
+   KPI-Karten ihre eigenen `hx-target`/`hx-swap`-Attribute setzen, ohne dass
+   sie vom Polling-Wrapper „this/outerHTML" geerbt bekommen.
 #}
 {# Tone -> Tailwind-Farbe + SVG-Stroke-Color. Statisches Mapping, damit Tailwind
-   die Klassen im JIT-Pass purgen kann. #}
+   die Klassen im JIT-Pass purgen kann. Block M (ADR-0020) whitelisted `base`
+   explizit (vorher implicit Else). #}
 {%- if tone == 'error' -%}
   {%- set text_class = 'text-error' -%}
   {%- set stroke_color = '#ef4444' -%}
@@ -30,15 +49,30 @@
 {%- elif tone == 'info' -%}
   {%- set text_class = 'text-info' -%}
   {%- set stroke_color = '#38bdf8' -%}
+{%- elif tone == 'base' -%}
+  {%- set text_class = 'text-base-content' -%}
+  {%- set stroke_color = '#6b7280' -%}
 {%- else -%}
+  {# Unbekannter Tone -> wie `base`, kein Crash. #}
   {%- set text_class = 'text-base-content' -%}
   {%- set stroke_color = '#6b7280' -%}
 {%- endif -%}
 {%- set show_pulse = kev_indicator | default(false) and value and value > 0 -%}
 {%- set data = sparkline or [] -%}
 {%- set data_len = data | length -%}
+{%- set _link_url = link_url | default(None) -%}
 
+{%- if _link_url -%}
+<a href="{{ _link_url }}"
+   hx-get="{{ _link_url }}"
+   hx-target="#detail-pane"
+   hx-swap="outerHTML"
+   hx-push-url="true"
+   class="rounded-box bg-base-200/60 border border-base-300 px-4 pt-3 pb-2 flex flex-col gap-1.5 w-[180px] min-w-0 no-underline text-base-content hover:bg-base-300 transition-colors"
+   data-test="kpi-card-{{ label | lower | replace(' ', '-') | replace('-', '_') }}">
+{%- else -%}
 <div class="rounded-box bg-base-200/60 border border-base-300 px-4 pt-3 pb-2 flex flex-col gap-1.5 w-[180px] min-w-0">
+{%- endif %}
   <div class="flex items-center justify-between">
     <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">{{ label }}</div>
     {%- if show_pulse %}
@@ -78,4 +112,8 @@
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block" role="img" aria-label="{{ label }} keine History"></svg>
     {%- endif -%}
   </div>
+{%- if _link_url -%}
+</a>
+{%- else -%}
 </div>
+{%- endif %}

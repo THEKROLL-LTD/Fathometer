@@ -1,0 +1,75 @@
+{# Dashboard-KPI-Cards-Grid (Block M, ADR-0020).
+
+   Fuenf Karten in einem responsiven Grid. Jede Karte ist ein Include von
+   `servers/_kpi_card.html` — derselbe Partial wie auf dem Server-Detail-View
+   (Block K, ADR-0018), erweitert um den optionalen `link_url`-Parameter aus
+   Task #9a. Klick auf eine Karte setzt den entsprechenden URL-Filter und
+   HTMX-swappt das Dashboard-Pane.
+
+   Variablen-Vertrag:
+     - `quick_stats`     : QuickStats  — total_open / kev_open / critical_open
+                           / high_open / stale_servers (filter-unabhaengige
+                           OPEN-Counter, siehe ADR-0020 „Sparkline-Semantik").
+     - `kpi_sparklines`  : dict[str, list[int]] — Keys total/kev/critical/high,
+                           jeweils 50 OPEN-Snapshots aelteste zuerst.
+     - `stale_sparkline` : list[int] — 50 Daily-Stale-Server-Counts.
+
+   Implementierungs-Entscheidung (gegenueber Block-M-Brief): wir nutzen
+   `{% with %}…{% endwith %}` statt `{% include … with context only ... %}`.
+   Jinja2 unterstuetzt `with context` als Modifier, aber keine inline-Key-
+   Value-Parameter-Liste auf `{% include %}`. `{% with %}` ist die portable
+   Variante und exakt das Pattern, das `servers/detail.html` (Block K)
+   bereits fuer dieselben KPI-Card-Includes nutzt — kein Refactor des
+   Card-Partials noetig.
+#}
+<section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+  {# Total Open — tone=base, link auf Dashboard ohne Filter (Reset). #}
+  {% with label='TOTAL OPEN',
+          value=quick_stats.total_open | default(0),
+          tone='base',
+          sparkline=kpi_sparklines.total | default([]),
+          kev_indicator=false,
+          link_url=url_for('dashboard.index') ~ '#findings-section' %}
+    {% include "servers/_kpi_card.html" %}
+  {% endwith %}
+
+  {# KEV — pulsierender Dot wenn kev_open > 0. #}
+  {% with label='KEV',
+          value=quick_stats.kev_open | default(0),
+          tone='error',
+          sparkline=kpi_sparklines.kev | default([]),
+          kev_indicator=true,
+          link_url=url_for('dashboard.index') ~ '?kev_only=1#findings-section' %}
+    {% include "servers/_kpi_card.html" %}
+  {% endwith %}
+
+  {# Critical-Findings. #}
+  {% with label='CRITICAL',
+          value=quick_stats.critical_open | default(0),
+          tone='error',
+          sparkline=kpi_sparklines.critical | default([]),
+          kev_indicator=false,
+          link_url=url_for('dashboard.index') ~ '?severity=critical#findings-section' %}
+    {% include "servers/_kpi_card.html" %}
+  {% endwith %}
+
+  {# High-Findings. #}
+  {% with label='HIGH',
+          value=quick_stats.high_open | default(0),
+          tone='warning',
+          sparkline=kpi_sparklines.high | default([]),
+          kev_indicator=false,
+          link_url=url_for('dashboard.index') ~ '?severity=high#findings-section' %}
+    {% include "servers/_kpi_card.html" %}
+  {% endwith %}
+
+  {# Stale-Server. tone=base wie im ADR (gedaempfter Indikator). #}
+  {% with label='STALE-SERVER',
+          value=quick_stats.stale_servers | default(0),
+          tone='base',
+          sparkline=stale_sparkline | default([]),
+          kev_indicator=false,
+          link_url=url_for('dashboard.index') ~ '?stale_only=1#findings-section' %}
+    {% include "servers/_kpi_card.html" %}
+  {% endwith %}
+</section>

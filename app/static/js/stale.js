@@ -1,8 +1,11 @@
 /**
  * Stale-Re-Render-Timer fuer relative Zeit-Labels und Stale-Badges.
  *
- * Konsumiert von `dashboard/index.html` (und `_attention.html`) als
- * Alpine-Komponente `staleTick()`. Self-contained, kein Server-Round-Trip.
+ * Konsumiert von `dashboard/index.html` und der Sidebar-Server-Liste
+ * als Alpine-Komponente `staleTick()`. Self-contained, kein Server-
+ * Round-Trip. Die `_attention.html`-Sektion wurde mit Block M (ADR-0020)
+ * ersatzlos entfernt; der Stale-Trigger lebt jetzt in der KPI-Card
+ * `Stale-Server` mit Sparkline.
  *
  * Verhalten (siehe ARCHITECTURE §7 + §15):
  *   - `staleTick` re-rendered alle 60 Sekunden die Relativzeit-Labels

@@ -115,7 +115,7 @@
       {% if current_user is defined and current_user.is_authenticated %}
         <nav class="hidden sm:flex items-center gap-1 text-sm" aria-label="Hauptnavigation">
           <a href="{{ url_for('dashboard.index') }}" class="btn btn-ghost btn-sm">Dashboard</a>
-          <a href="{{ url_for('search.search') }}" class="btn btn-ghost btn-sm">Suche</a>
+          {# ADR-0020: Suche-Nav entfernt; Such-Feld lebt in der Dashboard-Filter-Bar. #}
           <a href="{{ url_for('audit.list_events') }}" class="btn btn-ghost btn-sm">Audit</a>
           <a href="{{ url_for('settings.tags_list') }}" class="btn btn-ghost btn-sm">Settings</a>
           <a href="{{ url_for('llm_settings.show') }}"

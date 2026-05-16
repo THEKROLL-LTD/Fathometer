@@ -12,7 +12,6 @@
 #}
 {% set p = request.path or "/" %}
 {% set is_dashboard_active = (p == "/" or p.startswith("/dashboard")) %}
-{% set is_search_active = p.startswith("/findings/search") or p.startswith("/search") %}
 <header class="navbar bg-base-200 border-b border-base-300 px-4 min-h-14 shrink-0"
         role="banner">
   <div class="flex-1 flex items-center gap-2 min-w-0">
@@ -34,13 +33,8 @@
            class="btn btn-ghost btn-sm {% if is_dashboard_active %}btn-active{% endif %}">
           Dashboard
         </a>
-        <a href="{{ url_for('search.search') }}"
-           hx-get="{{ url_for('search.search') }}"
-           hx-target="#detail-pane"
-           hx-push-url="true"
-           class="btn btn-ghost btn-sm {% if is_search_active %}btn-active{% endif %}">
-          Suche
-        </a>
+        {# ADR-0020: dedizierte Suche-Nav entfernt. Suche ist jetzt Teil der
+           Dashboard-Filter-Bar (Such-Feld `q`). #}
       </nav>
     {% endif %}
   </div>

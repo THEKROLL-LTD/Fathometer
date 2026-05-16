@@ -32,8 +32,10 @@ ohne Index-Spielereien.
 
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from typing import Literal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -358,9 +360,148 @@ def count_kev_events_50d(
     return int(session.execute(stmt).scalar() or 0)
 
 
+# ---------------------------------------------------------------------------
+# Public API #4 — Block M (ADR-0020): Flotten-Daily-Severity-Snapshots
+# ---------------------------------------------------------------------------
+
+
+FleetSparklineKey = Literal["total", "kev", "critical", "high"]
+
+
+def daily_severity_counts_fleet(
+    session: Session,
+    *,
+    days: int = 50,
+    now: datetime | None = None,
+) -> dict[FleetSparklineKey, list[int]]:
+    """Flotten-weite Daily-OPEN-Counts fuer die Dashboard-KPI-Sparklines.
+
+    Returns:
+        Ein Dict mit den Keys `"total"`, `"kev"`, `"critical"`, `"high"`.
+        Jeder Wert ist eine Liste von `days` ints — aelteste-zuerst — mit
+        dem OPEN-Count am Tagesende (Definition wie
+        `severity_snapshots_for_server`):
+
+            first_seen_at <= end_of_day(T)
+            AND (acknowledged_at IS NULL OR acknowledged_at > end_of_day(T))
+            AND (resolved_at IS NULL OR resolved_at > end_of_day(T))
+
+        Buckets:
+        - `"total"`    : alle OPEN-Findings (severity-agnostisch).
+        - `"kev"`      : OPEN + `is_kev = True`.
+        - `"critical"` : OPEN + `severity = CRITICAL`.
+        - `"high"`     : OPEN + `severity = HIGH`.
+
+        Bei leerer Flotte liefert jede Liste `days` Nullen — kein Crash,
+        kein NaN. ADR-0020 spezifiziert filter-unabhaengige Sparklines, daher
+        kein Tag-/Severity-Filter-Parameter.
+
+    Performance: eine einzige Findings-Query, Python-side O(F * D)-Bucket-
+    Walk. Bei 50k Findings * 50 Tage = 2.5M Iterationen — unter 200 ms auf
+    moderner Hardware (Mini-Bench in `tests/services/test_severity_history_fleet.py`).
+    Re-Open-Trigger bei realer Drift siehe ADR-0020.
+    """
+    current = _resolve_now(now)
+    end_day = current.date()
+    start_day = end_day - timedelta(days=days - 1)
+    window_start = _start_of_day(start_day)
+    day_list = _day_range(end_day, days)
+
+    # Eine flache Findings-Query (kein server_id-Filter) — wir holen alle
+    # Findings die im Fenster offen gewesen sein KOENNTEN.
+    stmt = (
+        select(
+            Finding.severity,
+            Finding.first_seen_at,
+            Finding.acknowledged_at,
+            Finding.resolved_at,
+            Finding.is_kev,
+        )
+        .where(
+            or_(
+                Finding.acknowledged_at.is_(None),
+                Finding.acknowledged_at >= window_start,
+            )
+        )
+        .where(
+            or_(
+                Finding.resolved_at.is_(None),
+                Finding.resolved_at >= window_start,
+            )
+        )
+    )
+
+    # Tagesende-Liste vorrechnen — einmaliger UTC-`combine` pro Tag, dann
+    # binsearch auf datetime-Vergleichen.
+    eods: list[datetime] = [_end_of_day(d) for d in day_list]
+
+    # Differenz-Arrays: `arr[a] += 1, arr[b+1] -= 1` markiert das Inkrement-
+    # Range [a, b]; Prefix-Summe am Ende rekonstruiert die OPEN-Counts pro
+    # Tag. O(F) statt O(F * D-Span) — entscheidend fuer den 50k-Bench.
+    n = days + 1  # extra Slot fuer den "schliessenden" Decrement-Index.
+    d_total = [0] * n
+    d_kev = [0] * n
+    d_crit = [0] * n
+    d_high = [0] * n
+
+    for sev, first_seen, ack, res, is_kev in session.execute(stmt).all():
+        first_seen_utc = _as_utc(first_seen) if first_seen.tzinfo is None else first_seen
+        # `bisect_left(eods, first_seen)` liefert den ersten Index i mit
+        # eods[i] >= first_seen — genau der erste Tag, an dem das Finding
+        # `first_seen <= end_of_day(T)` erfuellt.
+        start_idx = bisect.bisect_left(eods, first_seen_utc)
+        if start_idx >= days:
+            continue
+        # End-Index analog zur naiven OPEN-Bedingung: closer > end_of_day(T)
+        # heisst der erste Tag mit closer <= eods[i] ist der erste *nicht*-
+        # OPEN-Tag. b+1 (Decrement-Position) ist genau dieser Index.
+        close_decr = days
+        if ack is not None:
+            ack_utc = _as_utc(ack) if ack.tzinfo is None else ack
+            close_decr = min(close_decr, bisect.bisect_left(eods, ack_utc))
+        if res is not None:
+            res_utc = _as_utc(res) if res.tzinfo is None else res
+            close_decr = min(close_decr, bisect.bisect_left(eods, res_utc))
+        if close_decr <= start_idx:
+            continue
+        d_total[start_idx] += 1
+        d_total[close_decr] -= 1
+        if is_kev:
+            d_kev[start_idx] += 1
+            d_kev[close_decr] -= 1
+        if sev is Severity.CRITICAL:
+            d_crit[start_idx] += 1
+            d_crit[close_decr] -= 1
+        elif sev is Severity.HIGH:
+            d_high[start_idx] += 1
+            d_high[close_decr] -= 1
+
+    # Prefix-Summe.
+    out: dict[FleetSparklineKey, list[int]] = {
+        "total": [0] * days,
+        "kev": [0] * days,
+        "critical": [0] * days,
+        "high": [0] * days,
+    }
+    accum_total = accum_kev = accum_crit = accum_high = 0
+    for i in range(days):
+        accum_total += d_total[i]
+        accum_kev += d_kev[i]
+        accum_crit += d_crit[i]
+        accum_high += d_high[i]
+        out["total"][i] = accum_total
+        out["kev"][i] = accum_kev
+        out["critical"][i] = accum_crit
+        out["high"][i] = accum_high
+
+    return out
+
+
 __all__ = [
     "DailySeverityCount",
+    "FleetSparklineKey",
     "count_kev_events_50d",
+    "daily_severity_counts_fleet",
     "daily_severity_counts_for_server",
     "severity_snapshots_for_server",
 ]

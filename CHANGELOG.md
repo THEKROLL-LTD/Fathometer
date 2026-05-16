@@ -4,6 +4,116 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.6.0] — 2026-05-16
+
+Dashboard-Redesign aus [ADR-0020](docs/decisions/0020-dashboard-cross-server-findings.md).
+Das Dashboard-Pane bekommt KPI-Cards mit 50-Tage-Sparklines (analog
+Block K Server-Detail) und eine cross-server Findings-Triage-Tabelle mit
+Hybrid-Auto-Submit-Filter. Die separate Such-View `/findings/search` faellt
+ersatzlos weg — der Sticky-Sidebar-Such-Slot zeigt jetzt auf
+`dashboard.index?q=...`. Funktional ein groesseres UX-Update gegenueber
+v0.5.0; kein DB-Schema-Bruch, keine API-Compat-Bruchstelle (der entfernte
+Endpoint war nicht extern dokumentiert).
+
+### Geaendert — Block M (ADR-0020)
+
+- Dashboard-Pane (`app/templates/dashboard/_detail_pane.html`) komplett
+  umgebaut: Header (Eyebrow `DASHBOARD` + Title `Alle Findings`) + KPI-Card-
+  Grid (`_kpi_cards.html`) + Findings-Section (`_findings_section.html`).
+- Fuenf KPI-Cards (`Total Open`, `KEV`, `Critical`, `High`, `Stale-Server`)
+  mit grossem Counter, Eyebrow-Label und filter-unabhaengiger 50-Tage-
+  Sparkline. Cards sind klickbar und setzen den passenden Quick-Filter
+  (`/?kev_only=1`, `/?severity=critical`, `/?severity=high`, `/?stale_only=1`;
+  Total-Card resettet den Filter). Reuse von `servers/_kpi_card.html` mit
+  neuem `link_url`-Parameter.
+- Findings-Section mit Hybrid-Auto-Submit-Filter (`q`, `tag`, `severity`,
+  `status`, `kev_only`, `stale_only`), debounced `q`-Input (400 ms keyup),
+  sortierbare Spaltenheader inkl. neuem Sort-Key `server`, Bulk-Select-
+  Toolbar (Reuse Block-F-Endpoint cross-server), Truncation-Notice unter
+  der Tabelle bei `total > 200`.
+- CSV-Export `/findings/export.csv` erweitert: ohne `server_id` cross-server-
+  Modus mit `Server`-Spalte und Dashboard-Filter (`q`/`tag`/`severity`/
+  `status`/`kev_only`/`stale_only`/`sort`/`dir`). Kein Row-Limit fuer CSV.
+- `DashboardFilter` (`app/schemas/dashboard_filter.py`) um `q`, `status`,
+  `sort`, `dir` erweitert. Whitelist-Validierung mit `log.debug`-Reject +
+  Default-Fallback. Neue Methode `to_query_string(override=...)` fuer
+  Re-Build von Filter-URLs.
+- `app/services/findings_query.py`: neue Public-Funktion
+  `list_findings_cross_server(...)` (eager Server/Tags, OR-`q`-Filter via
+  JOIN, stale Python-Post-Filter, ORM-Whitelist-Sort, exakter Pre-Limit-
+  COUNT). `_apply_tag_filter_cross` aus dem entfernten Search-View
+  hierherportiert.
+- `app/services/severity_history.py`: neue Public-Funktion
+  `daily_severity_counts_fleet(...)` (Total/KEV/Critical/High Sparklines
+  ueber 50 Tage; Differenz-Array-Optimierung, Bench 50k×50d < 200 ms).
+- `app/services/stale_history.py` (NEU): `daily_stale_server_counts(...)`
+  rekonstruiert die Stale-Server-Reihe aus `Scan.received_at` × `Server.
+  expected_scan_interval_h` (Faktor 2, analog `is_stale()`). Bench
+  200×50d < 100 ms.
+- `_macros.html:sort_header()` um optionale Parameter `route` und
+  `route_kwargs` erweitert — gleiche Macro fuer Server-Detail (Block K)
+  und Dashboard (Block M).
+- ARCHITECTURE §7 + §15 auf die Block-M-Realitaet aktualisiert; ADR-0016
+  als „Teilweise abgeloest durch ADR-0020" markiert (Dashboard-Pane-Layout-
+  Sektionen — Header/Profile-Dropdown bleiben gueltig).
+- Polling-Wrapper aus Block L (`hx-disinherit="*"`) bleibt unveraendert
+  auf dem Pane-Container; alle KPI-Card-/Filter-Klicks setzen ihre eigenen
+  HTMX-Attribute explizit.
+
+### Entfernt — Block M (ADR-0020)
+
+- `GET /findings/search` (kein extern dokumentierter Endpoint, kein
+  Kompatibilitaets-Bruch).
+- `app/views/search.py` (≈350 LoC), `app/templates/findings/search.html`,
+  `app/templates/_empty/no_search_results.html`.
+- `app/templates/dashboard/_quick_stats.html`, `_filter_bar.html`,
+  `_attention.html` (durch KPI-Cards + Filter-in-Findings-Section
+  abgeloest).
+- `AttentionSection`-Dataclass und `_build_attention()` aus
+  `app/views/dashboard.py` (Dead-Code nach Template-Entfernung).
+- Sidebar-Such-Form-CVE-Auto-Detect-JS und `kind`-Switch in
+  `app/static/js/sidebar.js`.
+
+### Tests
+
+- 869 passed, 5 skipped (E2E ohne Backend), Coverage 91.78 % (Threshold
+  85 %). 224 adversarial Tests passed.
+- Neue Service-Tests: `tests/services/test_findings_query_cross.py`,
+  `tests/services/test_severity_history_fleet.py`,
+  `tests/services/test_stale_history.py`,
+  `tests/services/test_csv_export_cross.py` (inkl. zwei `@pytest.mark.
+  bench`-Cases hinter Default-Filter `-m "not bench"`).
+- Neue View-Tests in `tests/views/test_dashboard.py` (21 Tests: KPI-
+  Cards, Findings-Tabelle, q-/status-/sort-Filter, KPI-Card-Klicks,
+  Truncation, HX-Sub-Tree-Swap, /findings/search-404, CSV-Cross-Server,
+  Bulk-Ack-Cross-Server, Context-Vertrag).
+- Neue Adversarial-Tests: `test_dashboard_sort_param_injection.py`,
+  `test_dashboard_q_xss.py`, `test_dashboard_q_sql_injection.py`,
+  `test_dashboard_csv_formula_injection_server_name.py`.
+- Geloescht: `tests/views/test_search.py` (gesamtes Such-Test-Modul).
+- Angepasst: `tests/views/test_header_navigation.py`,
+  `tests/views/test_sidebar_layout.py`,
+  `tests/views/test_dashboard_pane_consistency.py` (Markup-Drift auf
+  Block-M-Marker).
+
+### Security
+
+- Security-Auditor: **ACCEPTABLE WITH NOTES** — alle fuenf Block-M-Audit-
+  Punkte PASS (q-SQL via ORM-Bind, q-XSS-Escape im Filter-Echo,
+  sort/dir-Whitelist im ORM, CSV-Formula-Injection-Mitigation auf
+  Server-Spalte, Bulk-Ack cross-server bleibt `@login_required` + CSRF).
+- Zwei kosmetische NOTES adressiert: Doc-Korrektur in `app/api/__init__.
+  py` (CSRF ist NICHT global ausgeschaltet, nur einzelne Agent-Endpoints
+  per `@csrf.exempt`); ilike-Metachar-Escape fuer `q` als optionaler
+  Re-Open-Trigger dokumentiert (`q="%%%"` matched alles, durch 128-Char-
+  Cap + 200-Row-Limit kontrolliert).
+
+### Migrationen / Operations
+
+- Keine Alembic-Migration. Roundtrip `upgrade head ↔ downgrade -1 ↔
+  upgrade head` PASS.
+- Docker-Image 191 MB (< 200 MB).
+
 ## [v0.5.0] — 2026-05-16
 
 Stabilitaets-Release aus [ADR-0019](docs/decisions/0019-dashboard-polling-not-sse.md).

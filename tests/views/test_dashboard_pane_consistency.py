@@ -47,18 +47,21 @@ def _create_server(app: Flask, name: str = "pane-srv-1") -> int:
 # Pane-Marker — beide Responses muessen sie enthalten.
 # ---------------------------------------------------------------------------
 
-# Marker, die nach ADR-0016 zum Dashboard-Pane gehoeren. Bewusst keine
-# tiefen CSS-Klassen-Strings — die Marker sollen Layout-Refactors ueber-
-# leben, aber Template-Austausch sofort erkennen.
+# Marker, die nach ADR-0020 (Block M) zum Dashboard-Pane gehoeren. Bewusst
+# keine tiefen CSS-Klassen-Strings — die Marker sollen Layout-Refactors
+# ueberleben, aber Template-Austausch sofort erkennen. Block M hat die
+# alte `Dashboard</h1>`-Headline auf `Alle Findings</h1>` umgestellt,
+# Quick-Stats-Container durch KPI-Cards (`data-test="kpi-card-…"`) ersetzt
+# und den Platzhalter ersatzlos entfernt.
 PANE_MARKERS = (
-    # Headline aus _detail_pane.html.
-    "Dashboard</h1>",
+    # Headline aus _detail_pane.html (Block M).
+    "Alle Findings</h1>",
     # Server-Count-Indikator.
     "Server sichtbar",
-    # Quick-Stats-Container (Marker aus dashboard/_quick_stats.html).
-    'id="quick-stats"',
-    # Platzhalter-Block (ADR-0016).
-    "Platzhalter",
+    # KPI-Card-Marker (Block M, ADR-0020) — mindestens die TOTAL-OPEN-Card.
+    'data-test="kpi-card-total_open"',
+    # Findings-Section-Container (Triage-Queue).
+    'data-test="dashboard-findings-section"',
 )
 
 

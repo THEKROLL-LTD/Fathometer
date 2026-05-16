@@ -1,4 +1,4 @@
-{# Sidebar Sticky-Search-Input (Block I, §7a, Aufgabe 6).
+{# Sidebar Sticky-Search-Input (Block I, §7a, Aufgabe 6; ADR-0020 update).
 
    Verhalten (siehe `static/js/sidebar.js`, Alpine-Component `sidebarSearch`,
    gehostet auf `#sidebar-root` als Wrapper):
@@ -7,8 +7,9 @@
      - `/`-Shortcut global fokussiert dieses Input (falls kein Input/Textarea
        gerade fokussiert ist).
      - `Esc` leert das Feld und entfokussiert.
-     - `Enter` mit nicht-leerem Wert navigiert zur globalen Suche im
-       Detail-Pane (`/findings/search?q=...`).
+     - `Enter` mit nicht-leerem Wert navigiert zum Dashboard mit aktivem
+       `?q=`-Filter (ADR-0020 — Dashboard hat die Cross-Server-Findings-
+       Tabelle uebernommen). Phase B/Task #16 stellt das JS final um.
 
    Wir verlassen sticky-Top am Sidebar-Scroll-Container — `position: sticky`
    plus `top-0` rastert oben ein wenn die Sidebar gescrollt wird.

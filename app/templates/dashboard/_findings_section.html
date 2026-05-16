@@ -1,0 +1,269 @@
+{# Cross-Server-Findings-Section fuer das Dashboard (Block M, ADR-0020).
+
+   Layout-Spiegel zu `servers/_findings_section.html` (Block K), aber:
+     - Section-ID `findings-section` (gleicher ID-Name, weil pro Page nur
+       eine existiert; HTMX-`hx-select="#findings-section"` adressiert
+       beide Views konsistent).
+     - Eyebrow `TRIAGE QUEUE · ALLE SERVER`.
+     - Toolbar nur mit CSV-Dropdown (kein Mode-Toggle — Mode ist server-
+       detail-spezifisch).
+     - Server-Spalte als erste Daten-Spalte mit Tag-Pills.
+     - Bulk-Toolbar erscheint conditional, sobald Selection > 0.
+     - Truncation-Notice unterhalb der Tabelle bei `findings_total > limit`.
+
+   Variablen-Vertrag (gesetzt in `app/views/dashboard.py:_build_pane_context`):
+     - `view_filter`    : DashboardFilter  — sort/dir/q/status/...
+     - `filter`         : DashboardFilter  — alias.
+     - `findings`       : list[Finding]    — gefiltert + limited (max 200).
+     - `findings_total` : int              — exakter Pre-Limit-Count.
+     - `available_tags` : list[Tag]        — fuer Filter-Bar.
+     - `bulk_form`      : BulkActionForm   — CSRF.
+     - `csrf_form`      : CSRFOnlyForm.
+
+   Filter-Bar (`_findings_filter_bar.html`) sitzt zwischen Section-Header
+   und Tabelle (eigene Zeile). Polling-Wrapper bleibt unangetastet — die
+   Filter-Bar haengt nicht an `#dashboard-pane`, sondern an `#findings-section`.
+#}
+{% from "_macros.html" import sort_header, severity_badge, kev_badge, epss_pill, cvss_pill, package_cell, status_badge, quick_copy, bulk_ack_modal %}
+
+<section class="space-y-3" id="findings-section" data-test="dashboard-findings-section">
+  <header class="flex items-end justify-between gap-3 flex-wrap">
+    <div>
+      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">
+        TRIAGE QUEUE · ALLE SERVER · {{ findings_total | default(findings | length) }} Findings
+      </div>
+      <h2 class="font-mono text-base font-medium mt-1">Findings</h2>
+    </div>
+    <div class="flex items-center gap-2 flex-wrap">
+      {# Bulk-Ack-Button — sichtbar wenn Selection > 0. Selection-State wird
+         im aeusseren `bulkSelection`-Alpine-Scope (siehe unten) verwaltet
+         und an `window.__dashboardSelected` gespiegelt, damit der Toolbar-
+         Button ohne Cross-Scope-Magie die aktuellen IDs liest. #}
+      <div x-data="bulkAckIds(() => (window.__dashboardSelected || []))" class="inline-flex">
+        <button type="button"
+                class="btn btn-xs btn-primary gap-1"
+                x-show="(window.__dashboardSelected || []).length > 0"
+                x-cloak
+                @click="openModal()"
+                data-test="bulk-ack-toolbar">
+          auswahl ack
+          <span class="font-mono opacity-80"
+                x-text="'·' + (window.__dashboardSelected || []).length"></span>
+        </button>
+        {{ bulk_ack_modal(id='bulk-ack-modal-dashboard',
+                          title='Ausgewaehlte Findings abhaken') }}
+      </div>
+
+      {# CSV-Export — Cross-Server-Modus. `findings.export_csv` ohne
+         `server_id` rendert die Cross-Server-Variante mit zusaetzlicher
+         Server-Spalte (Block-A Backend-Task #6). `view_filter.to_query_string()`
+         traegt alle aktiven Filter mit; Sort/Dir werden serverseitig auf
+         Whitelist gepruefet. `download`-Attr triggert den Browser-Download. #}
+      <a href="{{ url_for('findings.export_csv') }}?{{ view_filter.to_query_string() }}"
+         class="btn btn-xs btn-ghost gap-1.5"
+         download
+         data-test="findings-csv-export">
+        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+             aria-hidden="true">
+          <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+        </svg>
+        csv exportieren
+      </a>
+    </div>
+  </header>
+
+  {# Filter-Bar als eigene Zeile direkt unter dem Section-Header. #}
+  {% include "dashboard/_findings_filter_bar.html" %}
+
+  {% if not findings %}
+    <div class="card bg-base-200">
+      <div class="card-body items-center text-center py-10">
+        <p class="opacity-60" data-test="findings-empty">Keine Findings fuer diesen Filter.</p>
+        <p class="text-xs opacity-50">
+          Filter zuruecksetzen oder andere Werte waehlen.
+        </p>
+      </div>
+    </div>
+  {% else %}
+  {# Selection-State im umgebenden Alpine-Scope. Gespiegelt an
+     `window.__dashboardSelected`, damit der Toolbar-Button (im Header oben)
+     ohne Alpine-Cross-Scope auf die aktuelle Auswahl zugreifen kann.
+     `bulkAckIds(...)` im Toolbar-Header liest dieses Window-Property. #}
+  <div x-data="{
+         selected: [],
+         allIds() {
+           return Array.from(document.querySelectorAll('input[data-bulk-id-dashboard]'))
+             .map(i => parseInt(i.value, 10));
+         },
+         toggleAll(checked) {
+           this.selected = checked ? this.allIds() : [];
+         },
+         get allSelected() {
+           const ids = this.allIds();
+           return ids.length > 0 && ids.every(id => this.selected.includes(id));
+         },
+         get someSelected() {
+           return this.selected.length > 0 && !this.allSelected;
+         }
+       }"
+       x-effect="window.__dashboardSelected = selected">
+
+    {# Optionale Bulk-Toolbar (Clear-Button) - sichtbar bei Selection > 0.
+       Bulk-Ack-Button selbst sitzt oben in der Section-Toolbar (Header). #}
+    <div x-show="selected.length > 0"
+         x-cloak
+         x-transition.opacity
+         class="flex items-center gap-3 px-3 py-1.5 mb-2 text-xs bg-base-200/40 rounded-box"
+         role="region"
+         aria-label="Bulk-Auswahl-Zaehler"
+         data-test="dashboard-bulk-bar">
+      <span>
+        <span x-text="selected.length" class="font-semibold"></span> ausgewaehlt
+      </span>
+      <button type="button"
+              class="btn btn-ghost btn-xs"
+              @click="selected = []"
+              data-test="dashboard-bulk-clear">
+        Auswahl leeren
+      </button>
+    </div>
+
+    <div class="overflow-x-auto rounded-box bg-base-200/40 border border-base-300">
+      <table class="table table-sm align-middle w-full">
+        <thead class="border-b border-base-300">
+          <tr>
+            {# Checkbox-Spalte fuer Bulk-Auswahl. #}
+            <th class="w-10 pr-0">
+              <input type="checkbox"
+                     class="checkbox checkbox-sm"
+                     aria-label="Alle in dieser Liste auswaehlen"
+                     :checked="allSelected"
+                     :indeterminate.prop="someSelected"
+                     @change="toggleAll($event.target.checked)"
+                     data-test="dashboard-bulk-select-all">
+            </th>
+            {{ sort_header('server', 'Server', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
+            {{ sort_header('cve', 'CVE / Titel', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
+            {{ sort_header('pkg', 'Paket', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
+            {{ sort_header('epss', 'EPSS', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
+            {{ sort_header('cvss', 'CVSS', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
+            {{ sort_header('sev', 'Severity', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
+            {{ sort_header('status', 'Status', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
+            {{ sort_header('first_seen', 'Erstmals', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in findings %}
+          <tr class="hover {% if f.is_kev %}bg-error/5{% endif %}"
+              :class="{ 'bg-primary/10': selected.includes({{ f.id }}) }"
+              data-finding-id="{{ f.id }}"
+              data-server-id="{{ f.server.id }}">
+            <td class="pr-0" @click.stop>
+              <input type="checkbox"
+                     class="checkbox checkbox-sm"
+                     data-bulk-id-dashboard="true"
+                     value="{{ f.id }}"
+                     aria-label="Finding {{ f.identifier_key }} fuer Bulk auswaehlen"
+                     :checked="selected.includes({{ f.id }})"
+                     @change="selected = $event.target.checked
+                                         ? [...selected, {{ f.id }}]
+                                         : selected.filter(id => id !== {{ f.id }})">
+            </td>
+
+            {# Server-Spalte: Name als Link auf Server-Detail, darunter Tag-
+               Pills (Block-K-`_card.html`-Style — Border in Tag-Farbe). #}
+            <td class="min-w-[12ch] max-w-[22ch]">
+              <div class="flex flex-col gap-1 min-w-0">
+                <a href="{{ url_for('server_detail.show', server_id=f.server.id) }}"
+                   hx-get="{{ url_for('server_detail.show', server_id=f.server.id) }}"
+                   hx-target="#detail-pane"
+                   hx-swap="outerHTML"
+                   hx-push-url="true"
+                   class="link link-hover font-mono text-xs font-semibold truncate"
+                   title="{{ f.server.name }}">
+                  {{ f.server.name }}
+                </a>
+                {% if f.server.tag_links %}
+                  <div class="flex flex-wrap gap-1">
+                    {% for link in f.server.tag_links %}
+                      <a href="{{ url_for('dashboard.index') }}?tag={{ link.tag.name | urlencode }}"
+                         @click.stop
+                         class="badge badge-outline badge-xs font-mono opacity-70 hover:opacity-100"
+                         style="border-color: {{ link.tag.color }}; color: {{ link.tag.color }};"
+                         title="Nach Tag filtern: {{ link.tag.name }}">
+                        #{{ link.tag.name }}
+                      </a>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </div>
+            </td>
+
+            {# CVE/Titel-Spalte. #}
+            <td>
+              <div class="flex items-center gap-2 flex-wrap min-w-0">
+                <span class="font-mono text-xs font-semibold">
+                  {{ f.identifier_key }}
+                </span>
+                {{ kev_badge(f.is_kev, size='xs') }}
+                {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+              </div>
+              {% if f.title %}
+                <div class="text-xs opacity-70 truncate max-w-[44ch] mt-0.5"
+                     title="{{ f.title }}">
+                  {{ f.title }}
+                </div>
+              {% endif %}
+            </td>
+
+            {# Paket-Spalte. #}
+            <td class="max-w-[28ch]">
+              <div class="flex items-center gap-1 min-w-0">
+                {{ package_cell(f.package_name, f.finding_class) }}
+                {{ quick_copy(f.package_name, label='Paket-Name kopieren') }}
+              </div>
+            </td>
+
+            <td>{{ epss_pill(f.epss_score) }}</td>
+            <td>{{ cvss_pill(f.cvss_v3_score) }}</td>
+            <td>{{ severity_badge(f.severity) }}</td>
+            <td>{{ status_badge(f.status) }}</td>
+
+            <td class="text-xs whitespace-nowrap">
+              <time datetime="{{ f.first_seen_at.isoformat() }}"
+                    title="{{ f.first_seen_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+                {{ f.first_seen_at.strftime('%Y-%m-%d') }}
+              </time>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# Truncation-Notice (Task #13). Erscheint nur wenn der gefilterte
+       Pre-Limit-Count das Limit ueberschreitet. CSV-Link nutzt denselben
+       Filter-Query — kein Limit auf dem Export. #}
+    {% if findings_total > findings | length %}
+      <div class="text-xs opacity-70 text-center py-3 bg-base-200/40 rounded-box mt-2"
+           data-test="truncation-notice">
+        Anzeige auf {{ findings | length }} begrenzt — {{ findings_total - (findings | length) }} weitere Treffer.
+        Filter verfeinern oder
+        <a class="link"
+           href="{{ url_for('findings.export_csv') }}?{{ view_filter.to_query_string() }}"
+           download
+           data-test="truncation-csv-link">CSV exportieren</a>.
+      </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>

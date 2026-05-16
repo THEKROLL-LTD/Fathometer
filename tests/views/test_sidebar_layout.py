@@ -77,23 +77,24 @@ def test_dashboard_full_page_renders_sidebar(db_app: Flask) -> None:
     # Sidebar-<aside> + IDs aus base_app.html.
     assert "<aside" in body, body[:600]
     assert 'id="sidebar-root"' in body
-    assert 'id="quick-stats"' in body
     assert 'id="server-list"' in body
     assert 'id="detail-pane"' in body
     # Server-Name in Sidebar.
     assert "vis-srv-1" in body
 
 
-def test_dashboard_full_page_renders_quick_stats_counters(db_app: Flask) -> None:
+def test_dashboard_full_page_renders_kpi_cards_in_pane(db_app: Flask) -> None:
+    """Block M (ADR-0020): Der Dashboard-Pane rendert fuenf KPI-Cards
+    statt der frueheren Quick-Stats-Counter-Reihe."""
     create_admin_user(db_app)
     _create_server(db_app, name="qs-srv-1")
     client = db_app.test_client()
     login(client)
     resp = client.get("/")
     body = resp.get_data(as_text=True)
-    # 5 Quick-Stats-Marker (data-stat-Attribute) aus _quick_stats.html.
-    for stat in ("total_open", "kev_open", "critical_open", "high_open", "stale_servers"):
-        assert f'data-stat="{stat}"' in body, stat
+    # 5 KPI-Card-Marker aus `dashboard/_kpi_cards.html` (Block M).
+    for label in ("total_open", "kev", "critical", "high", "stale_server"):
+        assert f'data-test="kpi-card-{label}"' in body, label
 
 
 def test_dashboard_full_page_dashboard_template_renders(db_app: Flask) -> None:
@@ -116,8 +117,10 @@ def test_dashboard_hx_request_renders_pane_fragment(db_app: Flask) -> None:
 
     Nach ADR-0017 ist der Pane-Inhalt fuer HX und Full-Page identisch — der
     konkrete Markup-Vergleich liegt in `test_dashboard_pane_consistency.py`.
-    Hier verifizieren wir nur, dass der HX-Response ueberhaupt Pane-Marker
-    enthaelt (`Dashboard`-Headline und Quick-Stats-Container).
+    Block M (ADR-0020) hat die Dashboard-Headline von `Dashboard</h1>` auf
+    `Alle Findings</h1>` umgestellt und Quick-Stats durch KPI-Cards ersetzt
+    (Markup-Marker `data-test="dashboard-server-count"` und
+    `data-test="dashboard-findings-section"`).
     """
     create_admin_user(db_app)
     client = db_app.test_client()
@@ -125,8 +128,9 @@ def test_dashboard_hx_request_renders_pane_fragment(db_app: Flask) -> None:
     resp = client.get("/", headers={"HX-Request": "true"})
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "Dashboard</h1>" in body
-    assert 'id="quick-stats"' in body
+    assert "Alle Findings</h1>" in body, body[:400]
+    # KPI-Card-Marker statt Quick-Stats-Container.
+    assert 'data-test="kpi-card-total_open"' in body, body[:600]
 
 
 def test_dashboard_hx_request_returns_fragment_only(db_app: Flask) -> None:
@@ -140,8 +144,8 @@ def test_dashboard_hx_request_returns_fragment_only(db_app: Flask) -> None:
     # Fragment hat kein <html> und kein <aside>.
     assert "<html" not in body.lower(), body[:300]
     assert "<aside" not in body.lower(), body[:300]
-    # Pane-Inhalt (Headline) vorhanden.
-    assert "Dashboard</h1>" in body
+    # Pane-Inhalt (neue Block-M-Headline) vorhanden.
+    assert "Alle Findings</h1>" in body
 
 
 # ---------------------------------------------------------------------------

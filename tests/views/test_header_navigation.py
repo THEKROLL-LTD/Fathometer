@@ -1,8 +1,9 @@
-"""Tests fuer den Header (ADR-0016, `app/templates/layout/_header.html`).
+"""Tests fuer den Header (ADR-0016 / ADR-0020, `app/templates/layout/_header.html`).
 
-DoD aus dem Block-I-Addendum §164:
+DoD aus dem Block-I-Addendum §164, aktualisiert fuer Block M (ADR-0020):
   - Dashboard-Button auf `/` aktiv.
-  - Suche-Button auf `/findings/search` aktiv.
+  - Kein dedizierter Suche-Nav-Anker mehr — Suche ist Teil der Dashboard-
+    Filter-Bar (Block M, ADR-0020). `/findings/search` ist 404.
   - Logo-Link fuehrt auf `/` (gleicher Pfad wie Dashboard-Button).
   - Profile-Dropdown enthaelt "Settings", "Audit", "Logout"
     sowie den Avatar mit Initial.
@@ -61,40 +62,31 @@ def test_header_dashboard_button_active_on_root(
     assert dashboard_match is not None, f"Dashboard-Button nicht aktiv: {header[:600]}"
 
 
-def test_header_search_button_active_on_search(
+def test_header_no_search_nav_anchor(
     logged_in_client: FlaskClient,
 ) -> None:
-    resp = logged_in_client.get("/findings/search")
-    assert resp.status_code == 200
+    """ADR-0020: dedizierter Suche-Anker im Header wurde entfernt — die
+    Suche wandert in die Dashboard-Filter-Bar (`q`-Feld). Das alte
+    `<a>Suche</a>` darf nicht mehr auftauchen."""
+    resp = logged_in_client.get("/")
     body = resp.get_data(as_text=True)
     header = _header_section(body)
     assert header
 
     suche_match = re.search(
-        r'<a[^>]*class="[^"]*btn-active[^"]*"[^>]*>\s*Suche\s*</a>',
+        r"<a[^>]*>\s*Suche\s*</a>",
         header,
         re.DOTALL,
     )
-    assert suche_match is not None, f"Suche-Button nicht aktiv: {header[:600]}"
+    assert suche_match is None, f"Suche-Anker existiert noch im Header: {header[:600]}"
 
 
-def test_header_dashboard_button_not_active_on_search(
+def test_findings_search_route_returns_404(
     logged_in_client: FlaskClient,
 ) -> None:
-    """Auf `/findings/search` ist NUR der Suche-Button aktiv."""
+    """`/findings/search` ist mit Block M (ADR-0020) ersatzlos entfernt."""
     resp = logged_in_client.get("/findings/search")
-    body = resp.get_data(as_text=True)
-    header = _header_section(body)
-
-    # Suche-Button: `btn-active` direkt vor `Suche`-Text vorhanden.
-    # Dashboard-Button: `btn-active` darf NICHT direkt vor `Dashboard`-
-    # Text stehen.
-    dashboard_match = re.search(
-        r'<a[^>]*class="[^"]*btn-active[^"]*"[^>]*>\s*Dashboard\s*</a>',
-        header,
-        re.DOTALL,
-    )
-    assert dashboard_match is None, "Dashboard-Button ist auf /findings/search aktiv"
+    assert resp.status_code == 404, resp.status_code
 
 
 # ---------------------------------------------------------------------------

@@ -30,13 +30,17 @@ darunter. So sieht der Operator zuerst die System-Paket-Findings.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import case, func, nulls_last, or_, select
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.sql import ColumnElement
 
-from app.models import Finding, FindingClass, FindingStatus, Severity
+from app.models import Finding, FindingClass, FindingStatus, Server, ServerTag, Severity, Tag
+
+if TYPE_CHECKING:
+    from app.schemas.dashboard_filter import DashboardFilter
 
 # ---------------------------------------------------------------------------
 # Filter-Dataclass
@@ -52,6 +56,12 @@ FindingsClassFilter = Literal["os-pkgs", "lang-pkgs", "both"]
 # dem Mapping, NIE eine User-Eingabe — kein SQL-Injection-Surface.
 FindingsSortKey = Literal["cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"]
 FindingsSortDir = Literal["asc", "desc"]
+
+# Block M (ADR-0020): Cross-Server-Sort enthaelt zusaetzlich `"server"`
+# (Sortierung nach `Server.name`).
+FindingsCrossSortKey = Literal[
+    "server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +183,16 @@ _SORT_COLUMNS: dict[str, Any] = {
     "sev": _severity_rank_expr(),
     "status": _status_rank_expr(),
     "first_seen": Finding.first_seen_at,
+}
+
+
+# Block M (ADR-0020): Cross-Server-Mapping erbt alle Eintraege aus dem
+# Block-K-Mapping und ergaenzt `"server" -> Server.name`. Selbe Whitelist-
+# Disziplin: nur Werte aus diesem Dict landen je im ORDER BY, der User-
+# Eingabe-String ist immer ein Literal-Lookup.
+_SORT_COLUMNS_CROSS: dict[str, Any] = {
+    "server": Server.name,
+    **_SORT_COLUMNS,
 }
 
 
@@ -436,8 +456,144 @@ def count_findings(
     return counts
 
 
+# ---------------------------------------------------------------------------
+# Block M (ADR-0020) — Cross-Server-Findings-Query fuer die Dashboard-Tabelle
+# ---------------------------------------------------------------------------
+
+
+def _apply_tag_filter_cross(stmt: Any, tags: list[str]) -> Any:
+    """Filtert Findings auf Server, die mindestens eines der Tags tragen (OR).
+
+    1:1 portiert aus dem geloeschten `app/views/search.py:_apply_tag_filter`.
+    Der Tag-Mode ist hier hartkodiert OR — die Dashboard-Filter-Bar nutzt
+    Single-Select, Multi-Tag-Power-User-Modus kommt ueber wiederholte
+    `?tag=`-Params; AND-Semantik ist bewusst nicht implementiert.
+    """
+    if not tags:
+        return stmt
+    server_ids_sq = (
+        select(ServerTag.server_id)
+        .join(Tag, Tag.id == ServerTag.tag_id)
+        .where(Tag.name.in_(tags))
+        .scalar_subquery()
+    )
+    return stmt.where(Finding.server_id.in_(server_ids_sq))
+
+
+def list_findings_cross_server(
+    session: Session,
+    filt: DashboardFilter,
+    *,
+    limit: int = 200,
+    sort: FindingsCrossSortKey = "sev",
+    dir: FindingsSortDir = "desc",
+    now: datetime | None = None,
+) -> tuple[list[Finding], int]:
+    """Liefert (results, total_count) der Cross-Server-Findings-Tabelle.
+
+    ADR-0020: Eager-Load der Server-Relation (inkl. Tag-Pills) per
+    `selectinload(Finding.server).selectinload(Server.tag_links).selectinload(
+    ServerTag.tag)`. `total_count` ist ein separater `COUNT(*)` ueber das
+    *gefilterte* Subselect — exakt, vor dem Limit, damit der Truncation-
+    Hinweis stimmt.
+
+    Filter-Anwendung (jeweils gebindet, kein f-String-SQL):
+    - `q`: case-insensitive OR-Substring auf `Finding.identifier_key`,
+      `Finding.package_name`, `Finding.title` und `Server.name`. Letzteres
+      via JOIN.
+    - `tags`: OR-Subset via `_apply_tag_filter_cross`.
+    - `severity`: Threshold via `_SEVERITY_THRESHOLD_VALUES`.
+    - `status`: via `_STATUS_VALUES_BY_FILTER` (Default `open`).
+    - `kev_only`: `Finding.is_kev.is_(True)`.
+    - `stale_only`: Python-side via `is_stale(srv, now)`-Iteration ueber
+      eine Server-Subset-Query — `is_stale` referenziert
+      `Server.expected_scan_interval_h` und `Server.last_scan_at`, was sich
+      nicht als einzelne ORM-WHERE-Klausel ausdruecken laesst (Schwelle
+      ist server-spezifisch). Wenn `stale_ids` leer ist, geben wir direkt
+      `([], 0)` zurueck — kein wasted COUNT-Query.
+
+    Sortierung: `_SORT_COLUMNS_CROSS[sort]` mit `.asc()`/`.desc()` +
+    `nulls_last`; sekundaerer Tiebreak `Finding.identifier_key.asc()` fuer
+    deterministische Reihenfolge bei Ties. Wenn `sort` nicht in der
+    Whitelist ist, faellt die Funktion auf `sev/desc` zurueck.
+
+    `limit` greift nur auf das Listen-Ergebnis, nicht auf `total_count`.
+    """
+    from app.services.stale_detection import is_stale
+
+    # Tag-Filter braucht JOIN nur wenn `q` Server.name matchen soll oder
+    # `sort == "server"` gewaehlt ist. Wir JOINen defensiv immer (selectinload
+    # waere keine Alternative — die WHERE-/ORDER-BY-Klausel braucht den JOIN
+    # in derselben Statement-Scope).
+    base_stmt = select(Finding).join(Server, Server.id == Finding.server_id)
+    base_stmt = base_stmt.options(
+        selectinload(Finding.server).selectinload(Server.tag_links).selectinload(ServerTag.tag)
+    )
+
+    # Tag-Filter (OR).
+    base_stmt = _apply_tag_filter_cross(base_stmt, filt.tags)
+
+    # Severity-Threshold.
+    if filt.severity is not None:
+        sev_values = _SEVERITY_THRESHOLD_VALUES[filt.severity]
+        base_stmt = base_stmt.where(Finding.severity.in_(sev_values))
+
+    # Status (Default open).
+    status_values = _STATUS_VALUES_BY_FILTER[filt.status]
+    if status_values is not None:
+        base_stmt = base_stmt.where(Finding.status.in_(status_values))
+
+    # KEV-Only.
+    if filt.kev_only:
+        base_stmt = base_stmt.where(Finding.is_kev.is_(True))
+
+    # Such-String — `ilike` bindet die Werte, kein SQL-Injection-Risiko.
+    if filt.q:
+        pattern = f"%{filt.q}%"
+        base_stmt = base_stmt.where(
+            or_(
+                Finding.identifier_key.ilike(pattern),
+                Finding.package_name.ilike(pattern),
+                Finding.title.ilike(pattern),
+                Server.name.ilike(pattern),
+            )
+        )
+
+    # Stale-Only — Python-side, weil `is_stale` server-spezifische Schwelle
+    # liest. Server-Subset-Query ueber die *Roh-Server-Tabelle* (nicht ueber
+    # die Findings-Query), damit der Stale-Status nicht von den anderen
+    # Filtern abhaengt.
+    if filt.stale_only:
+        srv_stmt = select(Server).where(
+            Server.retired_at.is_(None),
+        )
+        all_servers = list(session.execute(srv_stmt).scalars().all())
+        stale_ids = [srv.id for srv in all_servers if is_stale(srv, now=now)]
+        if not stale_ids:
+            return [], 0
+        base_stmt = base_stmt.where(Finding.server_id.in_(stale_ids))
+
+    # `total_count` — exakter COUNT(*) ueber das gefilterte Subselect. Wir
+    # bauen das Subselect aus dem aktuellen Statement ohne ORDER BY/LIMIT
+    # (SQL-Standard akzeptiert beides in Subqueries, aber unnoetig).
+    count_subq = base_stmt.with_only_columns(Finding.id).order_by(None).subquery()
+    total_count = int(session.execute(select(func.count()).select_from(count_subq)).scalar() or 0)
+
+    # Sortier-Klauseln aufbauen — Whitelist-Lookup, sonst Default sev/desc.
+    sort_col = _SORT_COLUMNS_CROSS.get(sort)
+    if sort_col is None:
+        sort_col = _SORT_COLUMNS_CROSS["sev"]
+        dir = "desc"
+    primary_clause = sort_col.asc() if dir == "asc" else sort_col.desc()
+    primary_clause = nulls_last(primary_clause)
+    list_stmt = base_stmt.order_by(primary_clause, Finding.identifier_key.asc()).limit(limit)
+    results = list(session.execute(list_stmt).scalars().unique().all())
+    return results, total_count
+
+
 __all__ = [
     "FindingsClassFilter",
+    "FindingsCrossSortKey",
     "FindingsFilter",
     "FindingsSortDir",
     "FindingsSortKey",
@@ -446,4 +602,5 @@ __all__ = [
     "count_findings",
     "group_findings_by_package",
     "list_findings",
+    "list_findings_cross_server",
 ]

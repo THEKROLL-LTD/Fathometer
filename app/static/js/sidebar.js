@@ -7,8 +7,11 @@
  *       - `/`-Shortcut global: fokussiert das Such-Input wenn kein
  *         Input/Textarea aktiv ist.
  *       - `Esc` leert das Feld und entfokussiert.
- *       - `Enter` mit nicht-leerem Wert navigiert zur globalen Suche im
- *         Detail-Pane (`/findings/search?q=<query>`) via HTMX.
+ *       - `Enter` mit nicht-leerem Wert navigiert zum Dashboard mit
+ *         aktivem `?q=<query>`-Filter (Block M, ADR-0020) via HTMX.
+ *         Das Dashboard hat die Cross-Server-Findings-Suche uebernommen;
+ *         der frueher hier verlinkte `/findings/search`-Endpoint wurde
+ *         in Block-M Phase A ersatzlos entfernt.
  *   - Heartbeat-Tooltip: delegated Hover-Handler auf `#server-list` mit
  *     300ms Delay. Tooltip wird absolut positioniert und nach Mouseleave
  *     wieder entfernt. Reines DOM (kein Alpine-State), damit es auch
@@ -63,8 +66,12 @@
       submit: function () {
         var q = normalize(this.query);
         if (!q) return;
-        // HTMX-Navigation: Detail-Pane swappen ohne Page-Reload.
-        var url = "/findings/search?q=" + encodeURIComponent(q);
+        // Block M (ADR-0020): Dashboard hat die Cross-Server-Such-Surface
+        // uebernommen. `/findings/search` ist weg — wir navigieren zur
+        // Dashboard-Route mit `?q=<query>`. Der Dashboard-View parsed `q`
+        // via DashboardFilter.from_request() und filtert die Findings-
+        // Tabelle entsprechend.
+        var url = "/?q=" + encodeURIComponent(q);
         if (window.htmx && typeof window.htmx.ajax === "function") {
           window.htmx.ajax("GET", url, {
             target: "#detail-pane",

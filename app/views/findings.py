@@ -45,8 +45,13 @@ from app.audit import log_event
 from app.db import get_session
 from app.forms import AcknowledgeForm, CSRFOnlyForm, GroupAcknowledgeForm, NoteForm, ReopenForm
 from app.models import Finding, FindingNote, FindingStatus
+from app.schemas.dashboard_filter import DashboardFilter
 from app.schemas.findings_view_filter import FindingsViewFilter
-from app.services.csv_export import CsvExportMode, stream_findings_csv
+from app.services.csv_export import (
+    CsvExportMode,
+    stream_findings_csv,
+    stream_findings_csv_cross_server,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -443,8 +448,6 @@ def export_csv() -> Response:
                       Scan) plus Spalte `DiffStatus`. Braucht `server_id`.
     """
     sess = get_session()
-    view_filter = FindingsViewFilter.from_request(request.args)
-    findings_filter = view_filter.to_findings_filter()
 
     server_id_raw = (request.args.get("server_id") or "").strip()
     server_id: int | None
@@ -452,6 +455,38 @@ def export_csv() -> Response:
         server_id = int(server_id_raw) if server_id_raw else None
     except ValueError:
         server_id = None
+
+    # Block M (ADR-0020): Cross-Server-CSV-Export, wenn kein `server_id`
+    # gegeben ist. Filter kommen aus `DashboardFilter`, nicht aus dem
+    # Server-Detail-`FindingsViewFilter` (verschiedene Sort-Whitelists, q-
+    # Semantik inkl. Server-Name, Status-Default `open` statt `all`).
+    if server_id is None:
+        dash_filt = DashboardFilter.from_request(request.args)
+        log.info(
+            "findings.csv_export",
+            server_id=None,
+            cross_server=True,
+            q=dash_filt.q,
+            status=dash_filt.status,
+            kev_only=dash_filt.kev_only,
+            stale_only=dash_filt.stale_only,
+            sort=dash_filt.sort,
+            dir=dash_filt.dir,
+        )
+        response = Response(
+            stream_findings_csv_cross_server(
+                sess,
+                dash_filt,
+                sort=dash_filt.sort,
+                dir=dash_filt.dir,
+            ),
+            mimetype="text/csv; charset=utf-8",
+        )
+        response.headers["Content-Disposition"] = 'attachment; filename="findings.csv"'
+        return response
+
+    view_filter = FindingsViewFilter.from_request(request.args)
+    findings_filter = view_filter.to_findings_filter()
 
     mode_raw = (request.args.get("mode") or "flach").strip().lower()
     # `mode` aus dem FindingsViewFilter ist "list/group/diff" (Block E) —

@@ -1,0 +1,152 @@
+{# Dashboard-Findings-Filter-Bar (Block M, ADR-0020).
+
+   Hybrid-Auto-Submit:
+     - `<input name="q">` mit `keyup changed delay:400ms` (Debounce).
+     - `<select>` und `<input type=checkbox>` mit `change`.
+     - Kein „Anwenden"-Button.
+
+   Target ist immer das `#findings-section`-Sub-Tree des Pane-Responses
+   (`hx-select="#findings-section"`). Der Polling-Wrapper auf `#dashboard-pane`
+   (Block L, ADR-0019) bleibt unangetastet — wir hoehlen ihn nicht aus, weil
+   wir das Sub-Tree extrahieren, nicht den ganzen Pane swappen.
+
+   `hx-include="closest form"` auf JEDEM Trigger sorgt dafuer, dass alle
+   Filter-Felder mitgehen, egal welcher Input gerade auslöst.
+
+   Sicherheit:
+     - `view_filter.q` wird in `value="…"` autoescaped (kein `|safe`).
+     - Tag-Namen sind serverseitig per Regex validiert; trotzdem
+       Standard-Jinja-Escape.
+     - Form-Method bleibt `get` (Form-fallback ohne JS), `action` zeigt
+       auf `dashboard.index` mit den aktuellen Werten.
+
+   Variablen-Vertrag:
+     - `view_filter`    : DashboardFilter — fuer Echo aller aktiven Werte.
+     - `filter`         : DashboardFilter (alias) — fuer `is_active`-Check
+                          beim Reset-Button.
+     - `available_tags` : list[Tag].
+#}
+{%- set _hx_target = '#findings-section' -%}
+{%- set _hx_url = url_for('dashboard.index') -%}
+<form method="get"
+      action="{{ _hx_url }}"
+      class="bg-base-200/60 rounded-box p-3 flex items-center gap-3 flex-wrap text-sm"
+      aria-label="Findings-Filter"
+      data-test="findings-filter-bar">
+  <span class="opacity-60 font-medium">Filter:</span>
+
+  {# Volltext-Such-Input — debounced HTMX-Trigger. `value` echoed `view_filter.q`
+     autoescaped (kein |safe — Adversarial-Test deckt ?q=<script>...). #}
+  <input type="search" name="q"
+         value="{{ view_filter.q or '' }}"
+         placeholder="Server, CVE, Paket, Titel…"
+         maxlength="128"
+         class="input input-bordered input-sm w-56"
+         hx-get="{{ _hx_url }}"
+         hx-trigger="keyup changed delay:400ms"
+         hx-target="{{ _hx_target }}"
+         hx-select="{{ _hx_target }}"
+         hx-swap="outerHTML"
+         hx-include="closest form"
+         hx-push-url="true"
+         autocomplete="off"
+         data-test="filter-q" />
+
+  {# Tag-Single-Select. Power-User koennen via URL `?tag=a&tag=b` Multi-Werte
+     setzen — `DashboardFilter.from_request()` akzeptiert beide Formen. #}
+  <select name="tag"
+          class="select select-bordered select-sm"
+          aria-label="Tag-Filter"
+          hx-get="{{ _hx_url }}"
+          hx-trigger="change"
+          hx-target="{{ _hx_target }}"
+          hx-select="{{ _hx_target }}"
+          hx-swap="outerHTML"
+          hx-include="closest form"
+          hx-push-url="true"
+          data-test="filter-tag">
+    <option value="">Tag: alle</option>
+    {% for tag in available_tags %}
+      <option value="{{ tag.name }}"
+              {% if tag.name in view_filter.tags %}selected{% endif %}>
+        {{ tag.name }}
+      </option>
+    {% endfor %}
+  </select>
+
+  {# Severity-Threshold. #}
+  <select name="severity"
+          class="select select-bordered select-sm"
+          aria-label="Severity-Filter"
+          hx-get="{{ _hx_url }}"
+          hx-trigger="change"
+          hx-target="{{ _hx_target }}"
+          hx-select="{{ _hx_target }}"
+          hx-swap="outerHTML"
+          hx-include="closest form"
+          hx-push-url="true"
+          data-test="filter-severity">
+    <option value="">Severity: alle</option>
+    <option value="critical" {% if view_filter.severity and view_filter.severity.value == 'critical' %}selected{% endif %}>Severity: critical+</option>
+    <option value="high"     {% if view_filter.severity and view_filter.severity.value == 'high' %}selected{% endif %}>Severity: high+</option>
+    <option value="medium"   {% if view_filter.severity and view_filter.severity.value == 'medium' %}selected{% endif %}>Severity: medium+</option>
+    <option value="low"      {% if view_filter.severity and view_filter.severity.value == 'low' %}selected{% endif %}>Severity: low+</option>
+  </select>
+
+  {# Status-Filter (Block M neu). #}
+  <select name="status"
+          class="select select-bordered select-sm"
+          aria-label="Status-Filter"
+          hx-get="{{ _hx_url }}"
+          hx-trigger="change"
+          hx-target="{{ _hx_target }}"
+          hx-select="{{ _hx_target }}"
+          hx-swap="outerHTML"
+          hx-include="closest form"
+          hx-push-url="true"
+          data-test="filter-status">
+    <option value="open"         {% if view_filter.status == 'open' %}selected{% endif %}>Status: offen</option>
+    <option value="acknowledged" {% if view_filter.status == 'acknowledged' %}selected{% endif %}>Status: acknowledged</option>
+    <option value="resolved"     {% if view_filter.status == 'resolved' %}selected{% endif %}>Status: resolved</option>
+    <option value="all"          {% if view_filter.status == 'all' %}selected{% endif %}>Status: alle</option>
+  </select>
+
+  <label class="label cursor-pointer gap-1 py-0">
+    <input type="checkbox" name="kev_only" value="1"
+           class="checkbox checkbox-sm checkbox-error"
+           {% if view_filter.kev_only %}checked{% endif %}
+           hx-get="{{ _hx_url }}"
+           hx-trigger="change"
+           hx-target="{{ _hx_target }}"
+           hx-select="{{ _hx_target }}"
+           hx-swap="outerHTML"
+           hx-include="closest form"
+           hx-push-url="true"
+           data-test="filter-kev-only" />
+    <span>nur KEV</span>
+  </label>
+
+  <label class="label cursor-pointer gap-1 py-0">
+    <input type="checkbox" name="stale_only" value="1"
+           class="checkbox checkbox-sm checkbox-warning"
+           {% if view_filter.stale_only %}checked{% endif %}
+           hx-get="{{ _hx_url }}"
+           hx-trigger="change"
+           hx-target="{{ _hx_target }}"
+           hx-select="{{ _hx_target }}"
+           hx-swap="outerHTML"
+           hx-include="closest form"
+           hx-push-url="true"
+           data-test="filter-stale-only" />
+    <span>nur stale</span>
+  </label>
+
+  <div class="ml-auto flex items-center gap-2">
+    {% if filter.is_active %}
+      <a href="{{ url_for('dashboard.index') }}"
+         class="btn btn-ghost btn-xs"
+         data-test="filter-reset">Reset</a>
+    {% endif %}
+    {# CSV-Dropdown lebt in der Section-Toolbar (`_findings_section.html`). #}
+  </div>
+</form>

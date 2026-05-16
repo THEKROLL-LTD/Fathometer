@@ -30,13 +30,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_session
+from app.forms import BulkActionForm, CSRFOnlyForm
 from app.models import Finding, FindingStatus, Server, ServerTag, Severity, Tag
 from app.schemas.dashboard_filter import DashboardFilter
+from app.services.findings_query import list_findings_cross_server
+from app.services.severity_history import daily_severity_counts_fleet
 from app.services.stale_detection import (
     get_db_stale_threshold_h,
     is_db_stale,
     is_stale,
 )
+from app.services.stale_history import daily_stale_server_counts
 from app.settings_service import get_settings_row
 from app.views._sidebar_context import is_hx_request
 
@@ -105,25 +109,6 @@ class ServerCardData:
         return self.is_stale or self.is_db_stale or self.kev_open_count > 0
 
 
-@dataclass
-class AttentionSection:
-    """Drei Buckets fuer die "Aufmerksamkeit noetig"-Sektion.
-
-    Ein Server kann in mehreren Buckets erscheinen — das Template entscheidet
-    ueber die Darstellung. `all_cards` ist die deduplizierte Liste aller
-    Karten die mindestens einen Marker tragen.
-    """
-
-    stale_servers: list[ServerCardData] = field(default_factory=list)
-    kev_servers: list[ServerCardData] = field(default_factory=list)
-    db_stale_servers: list[ServerCardData] = field(default_factory=list)
-    all_cards: list[ServerCardData] = field(default_factory=list)
-
-    @property
-    def is_empty(self) -> bool:
-        return not self.all_cards
-
-
 # ---------------------------------------------------------------------------
 # Route
 # ---------------------------------------------------------------------------
@@ -167,7 +152,6 @@ def _build_pane_context(
         cards.append(card)
 
     visible = _apply_filters(cards, filt)
-    attention = _build_attention(cards)
 
     # Sidebar-Variablen werden via Context-Processor injiziert
     # (`_inject_sidebar_context` in app/__init__.py). Damit der Tag-Filter
@@ -175,15 +159,37 @@ def _build_pane_context(
     # schreiben wir `quick_stats` und `filter_tags` hier explizit.
     quick_stats = get_quick_stats(sess, filter_tags=filt.tags or None, now=now)
 
+    # Block M (ADR-0020): Cross-Server-Findings-Tabelle, KPI-Sparklines,
+    # Stale-Sparkline. Findings-Limit hart auf 200 (Truncation-Hinweis im
+    # Template). KPI-Counter bleiben filter-unabhaengig OPEN — Sparklines
+    # auch flotten-weit (siehe ADR-0020 "Sparkline-Semantik").
+    findings_results, findings_total = list_findings_cross_server(
+        sess,
+        filt,
+        limit=200,
+        sort=filt.sort,
+        dir=filt.dir,
+        now=now,
+    )
+    kpi_sparklines = daily_severity_counts_fleet(sess, days=50, now=now)
+    stale_sparkline = daily_stale_server_counts(sess, days=50, now=now)
+
     return {
         "servers": visible,
-        "attention": attention,
         "filter": filt,
+        "view_filter": filt,
         "available_tags": available_tags,
         "severity_threshold": severity_threshold,
         "db_stale_threshold_h": db_stale_h,
         "quick_stats": quick_stats,
         "filter_tags": filt.tags,
+        # Block M (ADR-0020).
+        "findings": findings_results,
+        "findings_total": findings_total,
+        "kpi_sparklines": kpi_sparklines,
+        "stale_sparkline": stale_sparkline,
+        "bulk_form": BulkActionForm(),
+        "csrf_form": CSRFOnlyForm(),
     }
 
 
@@ -299,30 +305,7 @@ def _card_tag_names(card: ServerCardData) -> set[str]:
     return {link.tag.name for link in card.server.tag_links}
 
 
-def _build_attention(cards: list[ServerCardData]) -> AttentionSection:
-    section = AttentionSection()
-    seen: set[int] = set()
-    for card in cards:
-        if not card.is_active:
-            continue
-        any_marker = False
-        if card.is_stale:
-            section.stale_servers.append(card)
-            any_marker = True
-        if card.kev_open_count > 0:
-            section.kev_servers.append(card)
-            any_marker = True
-        if card.is_db_stale:
-            section.db_stale_servers.append(card)
-            any_marker = True
-        if any_marker and card.server.id not in seen:
-            section.all_cards.append(card)
-            seen.add(card.server.id)
-    return section
-
-
 __all__ = [
-    "AttentionSection",
     "ServerCardData",
     "SeverityCounts",
     "dashboard_bp",
