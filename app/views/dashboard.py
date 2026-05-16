@@ -129,13 +129,20 @@ class AttentionSection:
 # ---------------------------------------------------------------------------
 
 
-@dashboard_bp.get("/")
-@login_required
-def index() -> Any:
-    sess = get_session()
-    now = datetime.now(tz=UTC)
+def _build_pane_context(
+    sess: Session,
+    filt: DashboardFilter,
+    now: datetime,
+) -> dict[str, Any]:
+    """Sammelt alle Variablen die `dashboard/_detail_pane.html` braucht.
 
-    filt = DashboardFilter.from_request(request.args)
+    ADR-0017: HX-Pfad und Full-Page-Pfad konsumieren denselben Context-Dict,
+    damit das Pane-Markup identisch ist. Beide Pfade rufen diesen Helper auf
+    und rendern dann jeweils ihr Outer-Template (`_detail_pane.html` direkt
+    fuer HX, `index.html` mit `{% extends base_app.html %}` fuer Full-Page).
+    """
+    from app.services.quick_stats import get_quick_stats
+
     settings_row = get_settings_row(sess)
     severity_threshold = filt.severity or settings_row.severity_threshold
     db_stale_h = get_db_stale_threshold_h()
@@ -168,34 +175,41 @@ def index() -> Any:
     except Exception:  # pragma: no cover — Endpoint nicht registriert (Tests)
         events_url = "/events"
 
-    # Block I: bei HX-Request liefern wir nur die Welcome-Card (Detail-Pane-
-    # Fragment fuer die Sidebar-Klicks auf "Home"). Bei vollem Request
-    # rendern wir die Block-D-Vorlage weiterhin — die Tests des Blocks D
-    # erwarten das.
-    from app.services.quick_stats import get_quick_stats
-
-    if is_hx_request(request):
-        qs = get_quick_stats(sess, filter_tags=filt.tags or None, now=now)
-        return render_template("_pane/welcome.html", quick_stats=qs)
-
     # Sidebar-Variablen werden via Context-Processor injiziert
     # (`_inject_sidebar_context` in app/__init__.py). Damit der Tag-Filter
     # `?tag=prod` auch die QuickStats in der Sidebar mitfiltert, ueber-
     # schreiben wir `quick_stats` und `filter_tags` hier explizit.
     quick_stats = get_quick_stats(sess, filter_tags=filt.tags or None, now=now)
 
-    return render_template(
-        "dashboard/index.html",
-        servers=visible,
-        attention=attention,
-        filter=filt,
-        available_tags=available_tags,
-        severity_threshold=severity_threshold,
-        db_stale_threshold_h=db_stale_h,
-        events_url=events_url,
-        quick_stats=quick_stats,
-        filter_tags=filt.tags,
-    )
+    return {
+        "servers": visible,
+        "attention": attention,
+        "filter": filt,
+        "available_tags": available_tags,
+        "severity_threshold": severity_threshold,
+        "db_stale_threshold_h": db_stale_h,
+        "events_url": events_url,
+        "quick_stats": quick_stats,
+        "filter_tags": filt.tags,
+    }
+
+
+@dashboard_bp.get("/")
+@login_required
+def index() -> Any:
+    sess = get_session()
+    now = datetime.now(tz=UTC)
+
+    filt = DashboardFilter.from_request(request.args)
+    ctx = _build_pane_context(sess, filt, now)
+
+    # ADR-0017: beide Pfade rendern denselben Pane-Inhalt. Der HX-Pfad
+    # liefert nur das Pane-Fragment (fuer `hx-target="#detail-pane"`); der
+    # Full-Page-Pfad rendert `dashboard/index.html`, das via
+    # `{% extends "base_app.html" %}` Sidebar/Header drumherum legt und im
+    # `{% block detail_pane %}` dasselbe Partial inkludiert.
+    template = "dashboard/_detail_pane.html" if is_hx_request(request) else "dashboard/index.html"
+    return render_template(template, **ctx)
 
 
 # ---------------------------------------------------------------------------

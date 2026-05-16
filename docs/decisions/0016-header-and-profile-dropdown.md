@@ -1,6 +1,6 @@
 # ADR-0016 — Header-Navigation kompakt, Settings und Audit ins Profile-Dropdown
 
-**Status:** Akzeptiert · **Datum:** 2026-05-15 · **Refined:** Block-I-Plan (`docs/blocks/I-ui-modernization.md`) und `ARCHITECTURE.md §7a`. Block-I-Plan bleibt unverändert; Abweichungen sind im Addendum `docs/blocks/I-addendum-header-layout.md` ausgewiesen.
+**Status:** Akzeptiert · **Datum:** 2026-05-15 · **Refined:** Block-I-Plan (`docs/blocks/I-ui-modernization.md`) und `ARCHITECTURE.md §7a`. Block-I-Plan bleibt unverändert; Abweichungen sind im Addendum `docs/blocks/I-addendum-header-layout.md` ausgewiesen. **Render-Pattern (2026-05-16):** Dashboard-Detail-Pane wird nach [ADR-0017](0017-dashboard-pane-single-partial.md) aus einem gemeinsamen Jinja-Partial gerendert; HX-Pfad und Full-Page-Pfad konsumieren dasselbe `dashboard/_detail_pane.html`.
 
 ## Kontext
 
