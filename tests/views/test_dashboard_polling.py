@@ -180,3 +180,29 @@ def test_hx_pane_does_not_bootstrap_legacy_sse_component(db_app: Flask) -> None:
     resp = client.get("/", headers={"HX-Request": "true"})
     body = resp.get_data(as_text=True)
     assert "dashboardSse" not in body, body[:400]
+
+
+# ---------------------------------------------------------------------------
+# hx-disinherit-Regression: Polling-Attribute duerfen NICHT an Klick-Kinder leaken
+# ---------------------------------------------------------------------------
+
+
+def test_hx_pane_disinherits_polling_attrs(db_app: Flask) -> None:
+    """`hx-disinherit="*"` ist Pflicht auf dem Polling-Container.
+
+    Ohne diese Direktive erben alle `<a hx-get>`-Klicks im Pane-Inneren
+    (z. B. Quick-Stats-Counter mit `hx-target="#detail-pane"`) das
+    `hx-target="this"` und `hx-swap="outerHTML"` des Polling-Wrappers.
+    Folge: der Klick-Response wuerde nicht in `#detail-pane`
+    innerHTML-gesetzt, sondern `<main id="detail-pane">` komplett
+    via `outerHTML` ersetzen — der Scroll-Container (`overflow-y-auto`)
+    ginge verloren und die Findings-Sektion landet unterhalb des
+    sichtbaren Bereichs ohne Scroll-Moeglichkeit."""
+    create_admin_user(db_app)
+    client = db_app.test_client()
+    login(client)
+
+    resp = client.get("/", headers={"HX-Request": "true"})
+    pane_tag = _extract_pane_open_tag(resp.get_data(as_text=True))
+
+    assert 'hx-disinherit="*"' in pane_tag, pane_tag

@@ -17,13 +17,20 @@
    Sicherheit: kein `|safe` — Server-/Tag-Namen sind server-seitig
    validiert und werden autoescaped gerendert.
 #}
+{# Polling-Attribute sind PRIVAT fuer diesen Container. Ohne
+   `hx-disinherit="*"` erben alle `<a hx-get>`-Klicks in den `<li>`-Zeilen
+   das `hx-target="this"` und `hx-swap="outerHTML"` der `<ul>` — der
+   Klick-Response wuerde dann nicht in `#detail-pane` landen, sondern
+   `<main id="detail-pane">` komplett ersetzen und damit den Scroll-
+   Container (`overflow-y-auto`) zerstoeren. #}
 <ul id="server-list"
     role="list"
     class="divide-y divide-base-300 flex-1"
     hx-get="{{ url_for('sidebar_partials.sidebar_partial') }}{% if filter_tags %}?{% for t in filter_tags %}tag={{ t | urlencode }}{% if not loop.last %}&{% endif %}{% endfor %}{% endif %}"
     hx-trigger="every 10s [document.visibilityState === 'visible']"
     hx-target="this"
-    hx-swap="outerHTML">
+    hx-swap="outerHTML"
+    hx-disinherit="*">
   {% for srv in (sidebar_servers or []) %}
     {% with server=srv,
             cells=(sidebar_heartbeats or {}).get(srv.id, []),

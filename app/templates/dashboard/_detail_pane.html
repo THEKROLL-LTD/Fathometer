@@ -22,13 +22,19 @@
 
    Sicherheit: kein `|safe` auf Variablen — alles autoescaped.
 #}
+{# Polling-Attribute sind PRIVAT fuer diesen Container. `hx-disinherit="*"`
+   verhindert dass innere `<a hx-get>`-Klicks (z. B. Quick-Stats-Counter mit
+   `hx-target="#detail-pane"`) das `hx-target="this"` und `hx-swap="outerHTML"`
+   erben — sonst wuerde der Klick `<main id="detail-pane">` komplett ersetzen
+   statt dessen `innerHTML` zu swappen, der Scroll-Container ginge verloren. #}
 <div id="dashboard-pane"
      class="p-6"
      hx-get="{{ request.path }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}"
      hx-trigger="every 10s [document.visibilityState === 'visible']"
      hx-target="this"
      hx-swap="outerHTML"
-     hx-headers='{"HX-Request": "true"}'>
+     hx-headers='{"HX-Request": "true"}'
+     hx-disinherit="*">
 {# ADR-0016: Dashboard-Default-Detail-Pane besteht aus Quick-Stats +
    Filter-Bar + Platzhalter-Bereich. Das alte Server-Karten-Grid (Block D)
    ist weggefallen — die Server-Liste lebt jetzt in der Sidebar.

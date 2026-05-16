@@ -124,6 +124,27 @@ def test_sidebar_partial_has_polling_trigger(db_app: Flask) -> None:
     assert 'hx-swap="outerHTML"' in list_tag, list_tag
 
 
+def test_sidebar_partial_disinherits_polling_attrs(db_app: Flask) -> None:
+    """`hx-disinherit="*"` ist Pflicht auf dem `<ul id="server-list">`.
+
+    Die Polling-Attribute (`hx-target="this"`, `hx-swap="outerHTML"`) sind
+    PRIVAT fuer den Container — ohne `hx-disinherit="*"` erben alle
+    `<a hx-get>`-Klicks in den `<li>`-Zeilen das `hx-swap="outerHTML"`
+    und ersetzen den Klick-Ziel-Container (`#detail-pane`) komplett,
+    statt nur dessen `innerHTML` zu swappen. Folge: `<main id="detail-pane">`
+    verschwindet aus dem DOM, der Scroll-Container fehlt und die
+    Server-Detail-Sektion (Findings-Tabelle) landet unterhalb des
+    sichtbaren Bereichs ohne Scroll-Moeglichkeit."""
+    create_admin_user(db_app)
+    _create_server(db_app, name="srv-sidebar-disinherit")
+    client = db_app.test_client()
+    login(client)
+
+    resp = client.get("/_partials/sidebar")
+    list_tag = _extract_list_open_tag(resp.get_data(as_text=True))
+    assert 'hx-disinherit="*"' in list_tag, list_tag
+
+
 def test_sidebar_partial_renders_existing_servers(db_app: Flask) -> None:
     """Sanity: ein vorhandener Server taucht in der Liste auf."""
     create_admin_user(db_app)
