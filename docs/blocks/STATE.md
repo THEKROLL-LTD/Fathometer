@@ -4,7 +4,7 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
-**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling — v0.5.0 (2026-05-16).**
+**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling — v0.5.0 (2026-05-16). Block M (ADR-0020 Dashboard-Redesign) vorbereitet und planungsfertig; Brief und ADR liegen.**
 
 Block L (ADR-0019) abgeschlossen: Dashboard-Live-Updates laufen jetzt
 über HTMX-Polling statt SSE. `GET /events`, `EventBus` und der
@@ -41,7 +41,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Aktueller Block
 
-(keiner — Block L abgeschlossen 2026-05-16, nächster Block per User-Entscheidung)
+**Block M — Dashboard-Redesign: Cross-Server-Findings + KPI-Sparklines + /findings/search-Entfernung (ADR-0020)** · Status: vorbereitet, noch nicht gestartet. Branch-Vorschlag `feat/block-m-dashboard-findings`. Brief und DoD in [`M-dashboard-findings.md`](M-dashboard-findings.md). Hintergrund: Cowork-Design-Bundle vom 2026-05-16 fordert KPI-Cards mit 50-Tage-Sparklines (analog Block K), eine cross-server Findings-Tabelle mit erweiterter Filter-Bar (q, status, kev_only, stale_only, sort/dir) und ersetzt damit den Platzhalter, die alte Filter-Bar, die Attention-Sektion sowie die globale `/findings/search`-View. Block M baut auf Block L (Polling-Wrapper) und Block K (KPI-Card-Partial, sort_header-Macro, Bulk-Ack-Pattern) auf — beide Phasen abgeschlossen.
 
 ## Completed
 
@@ -77,6 +77,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 | J | [J-dashboard-pane-consolidation.md](J-dashboard-pane-consolidation.md) | completed 2026-05-16 — ADR-0017 (Dashboard-Pane-Konsolidierung) |
 | K | [K-server-detail-visual.md](K-server-detail-visual.md) | completed 2026-05-16 — **v0.4.0** (ADR-0018 Server-Detail-Redesign) |
 | L | [L-dashboard-polling.md](L-dashboard-polling.md) | completed 2026-05-16 — **v0.5.0** (ADR-0019 Dashboard-SSE → HTMX-Polling, LLM-Stream-SSE bleibt) |
+| M | [M-dashboard-findings.md](M-dashboard-findings.md) | vorbereitet 2026-05-16 — ADR-0020 (Cross-Server-Findings + KPI-Sparklines, /findings/search-Removal) |
 
 ## Aktive Blocker
 
@@ -84,7 +85,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Offene ADR-Wünsche
 
-(keine — ADR-0019 deckt Block L ab; wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird)
+(keine — ADR-0020 deckt Block M ab. ADR-0016 wird im Zuge von Block M auf „Superseded by 0020" gesetzt, partiell für die Dashboard-Pane-Layout-Sektionen; Header- und Profile-Dropdown-Teile bleiben gültig. Wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird.)
 
 ## Update-Konvention
 
