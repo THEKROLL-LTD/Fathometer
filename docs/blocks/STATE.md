@@ -4,7 +4,7 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
-**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign — v0.4.0 (2026-05-16).**
+**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign — v0.4.0 (2026-05-16). Block L (ADR-0019 SSE→Polling) als nächster Block geplant.**
 
 Block K (ADR-0018) abgeschlossen: Server-Detail-View vollständig nach
 dem dritten Design-Bundle (`S5lepfeL8MeibyHP1ojRbw`) umgebaut. Header
@@ -25,7 +25,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Aktueller Block
 
-(keiner — Block K abgeschlossen 2026-05-16, nächster Block per User-Entscheidung)
+**Block L — Dashboard-Polling statt SSE (ADR-0019)** · Status: vorbereitet, noch nicht gestartet. Branch-Vorschlag `feat/block-l-dashboard-polling`. Brief und DoD in [`L-dashboard-polling.md`](L-dashboard-polling.md). Hintergrund: beobachtete Hänger im `docker compose`-Stack durch HTTP/1.1-Slot-Limit + Thread-Pin + EventBus-Worker-Affinity (ADR-0019 Kontext-Sektion). SSE bleibt ausschließlich für `GET /chat/{cid}/stream` (LLM-Token-Streaming).
 
 ## Completed
 
@@ -58,6 +58,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 | I-Refinement | [I-addendum-header-layout.md](I-addendum-header-layout.md) | completed 2026-05-15 — **v0.3.0** (ADR-0016) |
 | J | [J-dashboard-pane-consolidation.md](J-dashboard-pane-consolidation.md) | completed 2026-05-16 — ADR-0017 (Dashboard-Pane-Konsolidierung) |
 | K | [K-server-detail-visual.md](K-server-detail-visual.md) | completed 2026-05-16 — **v0.4.0** (ADR-0018 Server-Detail-Redesign) |
+| L | [L-dashboard-polling.md](L-dashboard-polling.md) | vorbereitet 2026-05-16 — ADR-0019 (Dashboard-SSE → HTMX-Polling, LLM-Stream-SSE bleibt) |
 
 ## Aktive Blocker
 
@@ -65,7 +66,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Offene ADR-Wünsche
 
-(keine — ADR-0017 deckt den nächsten Block ab; wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird)
+(keine — ADR-0019 deckt Block L ab; wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird)
 
 ## Update-Konvention
 

@@ -24,6 +24,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0016](0016-header-and-profile-dropdown.md) | Header-Navigation kompakt, Settings und Audit ins Profile-Dropdown (Block-I-Refinement) | Akzeptiert |
 | [0017](0017-dashboard-pane-single-partial.md) | Dashboard-Detail-Pane als ein gemeinsames Partial (kein HX-vs-Full-Page-Drift) | Akzeptiert |
 | [0018](0018-server-detail-visual-alignment.md) | Server-Detail-Redesign (Layout, KPI-Sparklines, Trend-Berechnung, sortierbare Findings-Tabelle) | Akzeptiert |
+| [0019](0019-dashboard-polling-not-sse.md) | Dashboard-Live-Updates via HTMX-Polling statt SSE (LLM-Stream bleibt SSE) | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

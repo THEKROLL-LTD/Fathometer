@@ -177,13 +177,13 @@ Tags und Server-Verwaltung:
 Dashboard und Filter:
 - `GET /` und `GET /servers/{id}?filter=<query-string>` — alle Filter (Tags, Severity, Status, has-fix, KEV, EPSS-Range, Package-Search) sind im URL-Query kodiert. Damit funktionieren Bookmarks und Share-Links direkt — Frontend muss keine separate Persistenz anlegen.
 
-`GET /events` ist ein Server-Sent-Events-Stream, an dem das Dashboard hängt. Wenn der Ingest einen neuen Scan verarbeitet, pusht er ein Event in einen Redis-/in-process-Channel, der SSE-Endpoint streamt es an alle verbundenen Clients. Im MVP genügt ein einfacher in-process Dispatcher (Python `queue` plus Background-Thread), kein Redis.
+Dashboard-Live-Updates laufen über **HTMX-Polling**, nicht über SSE (siehe ADR-0019). Der Dashboard-Pane und die Sidebar-Server-Liste polen jeweils alle 10 s über `hx-get` ihre eigene Partial-Route, gedrosselt auf sichtbare Tabs (`document.visibilityState === 'visible'`). Damit gibt es keinen `/events`-Endpoint mehr, keinen in-process Event-Bus und keine dauerhaft offenen Client-Connections fürs Dashboard. `GET /chat/{conversation_id}/stream` bleibt SSE — Token-Streaming einer LLM-Antwort ist der einzige Endpoint, an dem die Live-Bindung von Natur aus kurzlebig (Dauer einer Antwort) und UX-relevant ist.
 
 ## 7. UI und Routes
 
 Die UI bleibt bewusst flach. Die obere Nav hat fünf Items: Dashboard, Suche, Audit, Settings, plus rechts ein **Theme-Toggle** (Light/Dark/Auto, wird via `localStorage` und `prefers-color-scheme` gesetzt — DaisyUI macht das mit einer Klassen-Attribute-Umschaltung trivial). Eine **globale Suchleiste** sitzt prominent in der Topbar und akzeptiert CVE-IDs, Paketnamen oder Server-Namen.
 
-**`/` (Dashboard)** zeigt die Server-Liste als Karten. Über den Karten eine **Tag-Filter-Leiste** als Chips (alle vorhandenen Tags, Multi-Select, Default-Verknüpfung "Server hat *eines* der gewählten Tags", Toggle für UND-Verknüpfung). Über der Karten-Liste außerdem eine "Aufmerksamkeit nötig"-Sektion mit drei Buckets: Stale-Server, Server mit aktiven KEV-Findings, Server mit stale Trivy-DB. Jede Server-Karte hat den Server-Namen, alle Tag-Pills, einen großen Status-Badge (grün/gelb/orange/rot je nach höchster offener Severity gegen die globale Schwelle, mit Modifier wenn KEV vorhanden), kleine Zähler für offene/acknowledged Findings je Severity, einen prominenten **KEV-Counter** wenn > 0, einen Last-Seen-Indikator, einen Stale-Badge falls überfällig und einen DB-Stale-Badge falls die Trivy-DB veraltet ist. Karten sind klickbar und führen zur Server-Detail-View. Alle Filter (Tags, Severity-Schwelle-Override, Status) sind im URL-Query-String — Bookmarks und Share-Links funktionieren direkt. Das Dashboard reagiert per SSE auf neue Scans und animiert das Update der betroffenen Karte.
+**`/` (Dashboard)** zeigt die Server-Liste als Karten. Über den Karten eine **Tag-Filter-Leiste** als Chips (alle vorhandenen Tags, Multi-Select, Default-Verknüpfung "Server hat *eines* der gewählten Tags", Toggle für UND-Verknüpfung). Über der Karten-Liste außerdem eine "Aufmerksamkeit nötig"-Sektion mit drei Buckets: Stale-Server, Server mit aktiven KEV-Findings, Server mit stale Trivy-DB. Jede Server-Karte hat den Server-Namen, alle Tag-Pills, einen großen Status-Badge (grün/gelb/orange/rot je nach höchster offener Severity gegen die globale Schwelle, mit Modifier wenn KEV vorhanden), kleine Zähler für offene/acknowledged Findings je Severity, einen prominenten **KEV-Counter** wenn > 0, einen Last-Seen-Indikator, einen Stale-Badge falls überfällig und einen DB-Stale-Badge falls die Trivy-DB veraltet ist. Karten sind klickbar und führen zur Server-Detail-View. Alle Filter (Tags, Severity-Schwelle-Override, Status) sind im URL-Query-String — Bookmarks und Share-Links funktionieren direkt. Das Dashboard hält sich per HTMX-Polling frisch (Pane und Sidebar pollen alle 10 s, nur bei sichtbarem Tab; siehe ADR-0019).
 
 **`/servers/{id}` (Server-Detail)** ist die Triage-Hauptansicht. Header mit Server-Info (Name, Tags-Bearbeiten-Knopf, OS+Kernel, Trivy-DB-Stand, Last-Seen). Darunter ein **View-Toggle** zwischen drei Modi:
 
@@ -262,9 +262,9 @@ Findings-Zeilen, Audit-Zeilen, Server-Zeilen: Action-Buttons (Acknowledge, Reope
 
 Jede Severity-Pill bekommt zusätzlich zum Farb-Hintergrund ein kleines Icon (Heroicons via CDN, geladen als SVG-Sprite). Mapping: Critical = `exclamation-triangle`, High = `chevron-double-up`, Medium = `minus-circle`, Low = `chevron-down`, Unknown = `question-mark-circle`. KEV bekommt eine separate runde rote Badge mit weißem Punkt (Indikator-Stil), nicht Icon. Stale-Server bekommen `clock` Icon, DB-Stale bekommen `calendar-days`. Alle Icons inline-SVG mit `aria-label` für Screenreader.
 
-### Subtle Fade-In bei SSE-Updates
+### Subtle Fade-In bei Polling-Updates
 
-SSE-Channel aus Block H pusht Server-Updates. Wenn ein Server-Listeneintrag oder eine Card im Detail-Pane via HTMX-SSE-Swap aktualisiert wird, bekommt das ersetzende Element kurz (~1s) eine `bg-info-subtle` Akzent-Färbung mit `transition-colors duration-1000`. Damit sieht der User dass etwas live aktualisiert wurde, ohne dass es flackert oder springt. Anwendbar bei: neuer Scan kommt rein, Stale-Status wechselt, neue KEV-Findings.
+Dashboard-Pane und Sidebar pollen alle 10 s via HTMX (siehe ADR-0019). Wenn ein gepollter Container per `hx-swap="outerHTML"` ersetzt wird, bekommt das neu eingefügte Element kurz (~1 s) eine `bg-info-subtle` Akzent-Färbung mit `transition-colors duration-1000`. Trigger: `htmx:afterSwap` auf dem Polling-Container. Damit sieht der User dass etwas frisch geladen wurde, ohne dass es flackert oder springt. Anwendbar bei: neuer Scan kommt rein, Stale-Status wechselt, neue KEV-Findings. (Vor ADR-0019 war dasselbe SSE-getriggert — Verhalten aus User-Sicht unverändert.)
 
 ### Empty-States mit klaren CTAs
 
@@ -476,7 +476,7 @@ Die Reihenfolge baut so auf, dass nach jedem Block etwas Demo-fähiges existiert
 
 **Block G — LLM-Integration.** DeepInfra-Client mit Token-Cap, Conversation-Modelle, Chat-View mit SSE-Streaming, Update-Hooks bei neuen Scans, Prompt-Aufbau mit EPSS/KEV/CVSS/Vector-Daten und Group-by-Package, `nh3`-Sanitization auf LLM-Output bevor er ins Template geht. Nach diesem Block ist auch der LLM-Workflow live.
 
-**Block H — Live-Updates und Polish.** SSE-Channel für Dashboard-Updates, animierte Karten-Updates, Stale-Server-Hervorhebung, Trivy-DB-Stale-Hervorhebung, Tests (pytest für Ingest-Logik, Triage-Sortierung, Bulk-Ops, Diff-Berechnung, Auth, API, Rate-Limits, DoS-Bounds, Adversarial-Inputs), Docker-Image bauen und Compose testen. Hier wird's "produktionsreif" für den ersten Self-Hosting-Use.
+**Block H — Live-Updates und Polish.** SSE-Channel für Dashboard-Updates, animierte Karten-Updates, Stale-Server-Hervorhebung, Trivy-DB-Stale-Hervorhebung, Tests (pytest für Ingest-Logik, Triage-Sortierung, Bulk-Ops, Diff-Berechnung, Auth, API, Rate-Limits, DoS-Bounds, Adversarial-Inputs), Docker-Image bauen und Compose testen. Hier wird's "produktionsreif" für den ersten Self-Hosting-Use. *(Nachtrag: Der `/events`-SSE-Channel aus diesem Block wird in Block L durch HTMX-Polling abgelöst — siehe ADR-0019. LLM-Token-Streaming bleibt SSE.)*
 
 ## 17. Out of Scope (für spätere Versionen)
 
