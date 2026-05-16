@@ -2,8 +2,8 @@
 
 Deckt:
   * `GET /` ohne HX-Request: volle Seite mit `<aside>` Sidebar.
-  * `GET /` mit `HX-Request: true`: nur Welcome-Pane-Fragment, kein
-    `<html>`/`<aside>`.
+  * `GET /` mit `HX-Request: true`: nur Dashboard-Pane-Fragment (ADR-0017
+    — derselbe Pane-Inhalt wie der Full-Page-Pfad), kein `<html>`/`<aside>`.
   * `GET /` ohne Login: 302 auf `/login`.
   * `GET /servers/<id>` markiert die Sidebar-Zeile als aktiv
     (`active_server_id` -> `bg-primary/10` an der Row).
@@ -111,15 +111,22 @@ def test_dashboard_full_page_dashboard_template_renders(db_app: Flask) -> None:
     assert 'id="detail-pane"' in body
 
 
-def test_dashboard_hx_request_renders_welcome_pane(db_app: Flask) -> None:
-    """Beim HX-Pfad liefert die Dashboard-Route die Welcome-Card (Fragment)."""
+def test_dashboard_hx_request_renders_pane_fragment(db_app: Flask) -> None:
+    """Beim HX-Pfad liefert die Dashboard-Route den Pane-Inhalt als Fragment.
+
+    Nach ADR-0017 ist der Pane-Inhalt fuer HX und Full-Page identisch — der
+    konkrete Markup-Vergleich liegt in `test_dashboard_pane_consistency.py`.
+    Hier verifizieren wir nur, dass der HX-Response ueberhaupt Pane-Marker
+    enthaelt (`Dashboard`-Headline und Quick-Stats-Container).
+    """
     create_admin_user(db_app)
     client = db_app.test_client()
     login(client)
     resp = client.get("/", headers={"HX-Request": "true"})
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "Willkommen bei secscan" in body
+    assert "Dashboard</h1>" in body
+    assert 'id="quick-stats"' in body
 
 
 def test_dashboard_hx_request_returns_fragment_only(db_app: Flask) -> None:
@@ -133,8 +140,8 @@ def test_dashboard_hx_request_returns_fragment_only(db_app: Flask) -> None:
     # Fragment hat kein <html> und kein <aside>.
     assert "<html" not in body.lower(), body[:300]
     assert "<aside" not in body.lower(), body[:300]
-    # Welcome-Content vorhanden.
-    assert "Willkommen bei secscan" in body
+    # Pane-Inhalt (Headline) vorhanden.
+    assert "Dashboard</h1>" in body
 
 
 # ---------------------------------------------------------------------------

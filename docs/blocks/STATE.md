@@ -4,24 +4,23 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
-**MVP + UI v2 + ADR-0016-Refinement ready — v0.3.0 (2026-05-15).**
+**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung ready — v0.3.0 (2026-05-16).**
 
-Block-I-Refinement (ADR-0016) abgeschlossen: Header-Navigation
-kompakt mit Logo/Dashboard/Suche/Theme/Profile-Avatar, Settings und
-Audit ins flache Profile-Dropdown, Settings-View mit Sekundär-Nav
-(Tags/LLM/Server/Master-Key/About) im Detail-Pane, neue Routen für
-Master-Key-Rotation und About-Page. Sidebar reduziert auf reine
-Server-Liste. Funktional unverändert gegenüber v0.2.0.
+Block J (ADR-0017) abgeschlossen: Dashboard-Detail-Pane wird aus
+einem gemeinsamen Jinja-Partial (`dashboard/_detail_pane.html`)
+gerendert, Drift zwischen Full-Page- und HX-Pfad beseitigt. Klick
+auf Dashboard-Header-Button zeigt identisches Layout wie ein Reload
+(Headline „Dashboard", Server-Count, fünf KPI-Kacheln, Platzhalter).
+Funktional gegenüber v0.3.0 unverändert.
 
-722 Tests grün (+48 neue Refinement-Tests), Coverage 92.21 %.
-Security-Audit **ACCEPTABLE WITH NOTES** (1 low CONCERN — fehlender
-XSS-Adversarial-Test für Master-Key-Klartext-Render, kein realer
-Vektor weil URL-safe-Base64). Reviewer 19 PASS / 0 FAIL nach
-ruff-Lint-Fix.
+728 Tests grün (+3 neue Pane-Konsistenz-Regression-Tests, 5 e2e
+SKIPPED ohne Backend). `ruff check`, `mypy app/`, Alembic-Roundtrip
+(`upgrade → downgrade -1 → upgrade`) PASS. `_pane/welcome.html`
+sowie das leere `_pane/`-Verzeichnis entfernt.
 
 ## Aktueller Block
 
-**Backlog-leer · v0.3.0-Release.** Kein weiterer Block geplant.
+(keiner — Block J abgeschlossen 2026-05-16, nächster Block per User-Entscheidung)
 
 ## Completed
 
@@ -35,6 +34,7 @@ ruff-Lint-Fix.
 - **H — Live-Updates, Production-Hardening, Final-Polish** · abgeschlossen 2026-05-15 · Branch `feat/block-h` · Reviewer-Freigabe nach Re-Review (Image-Size, E2E-Skript-Regex, Screenshot-Defekte gefixt). Final-Security-Auditor: ACCEPTABLE WITH NOTES (1 low CONCERN: per-Server-Auth-Rate-Limit aus §9 als post-v0.1.0-Folge). 629 Tests grün (50 neue Block-H-Tests), Coverage 92.16 %. In-process Event-Bus mit `GET /events` SSE-Endpoint (Heartbeat 30s), Dashboard-Live-Card-Animation, 60s-Stale-Re-Render-Timer. Block-G-Action-Items umgesetzt: ADR-0013 (Fernet-KDF-Beibehalten + Weak-Key-Warning), ADR-0014 (Token-Cap-Best-Effort), `validate_base_url` Port-Range-Check, `@limiter.limit("60/hour")` auf `/chat/<id>/stream` und `/settings/llm/test-connection`, `Authorization` in structlog-Redaction-Pattern. Docker-Image 278 → 191 MB (Three-Stage flat-runtime). `scripts/e2e_smoke.sh` mit Python-Master-Key-Extraktion exit 0 in allen 11 Phasen. README mit nginx/Caddy/IP-Allowlist-Snippets. CHANGELOG.md mit v0.1.0-Eintrag. Screenshot: `docs/blocks/H-evidence/dashboard-live.png`. **Tag `v0.1.0` gesetzt.**
 - **I — UI-Modernisierung (Single-Page-Sidebar-Layout)** · abgeschlossen 2026-05-15 · Branch `feat/block-i` · Reviewer-Freigabe 27 PASS / 0 FAIL. Security-Auditor: **CLEAN** (keine neuen Sicherheits-Surfaces, 8 Punkte alle PASS). 45 neue Block-I-Tests grün (insgesamt 674), Coverage 92.54 %. `base_app.html` als Single-Page-Shell mit Sidebar (Quick-Stats, Sticky-Search mit `/`-Shortcut, Tag-Filter, Server-Liste mit Heartbeat-Bars, Settings-Akkordeon) + Detail-Pane (HTMX-Swap, `hx-push-url`). Heartbeat-Aggregation als Python-Service (Variante B, on-the-fly), Performance 50×50<200ms. `_inject_sidebar_context`-Context-Processor injiziert Sidebar-Variablen automatisch. `_partial_shell.html` für HX-Fragmente. Empty-States, Monospace-Cleanup, Quick-Copy-Macro-Fix aus Block F. Funktional gegenüber v0.1.0 unverändert. Screenshots: `docs/blocks/I-evidence/{dashboard,server-detail}.png`. **Tag `v0.2.0` gesetzt.**
 - **I-Refinement (ADR-0016) — Header + Profile-Dropdown + Settings-Sekundär-Nav + Master-Key/About** · abgeschlossen 2026-05-15 · Branch `feat/block-i-refinement` · Reviewer-Freigabe 19 PASS / 0 FAIL (nach Lint-Fix). Security-Auditor: **ACCEPTABLE WITH NOTES** (1 low CONCERN — fehlender XSS-Adversarial für Master-Key-Klartext, kein realer Vektor weil URL-safe-Base64-Zeichensatz). 48 neue Tests grün (insgesamt 722), Coverage 92.21 %. Header kompakt (Logo + Dashboard + Suche + Theme-Toggle + Profile-Avatar), Profile-Dropdown flach (Settings/Audit/Logout), Settings-View mit linker Sekundär-Nav (Tags/LLM-Provider/Server-Verwaltung/Master-Key/About). Neue Routen `/settings/master-key` (Rotation mit Confirm-Modal + einmaliger Klartext-Anzeige + Audit-Event `master_key.rotated` mit nur hash_prefix) und `/settings/about` (Version/Build-Hash/Alembic-Revision read-only). `/settings` → 302 auf `/settings/servers/`. Sidebar auf reine Server-Liste reduziert. 3-Modi-Render-Helper `app/views/_settings_shell.py` (Vollseite/Shell-Fragment/Content-only). Conftest-Härtung gegen TRUNCATE-Lock-Hänger via `lock_timeout` + `pg_terminate_backend`. Screenshots: `docs/blocks/I-refinement-evidence/{dashboard,profile-dropdown,settings-servers,settings-master-key,settings-about}.png`. **Tag `v0.3.0` zu setzen.**
+- **J — Dashboard-Pane-Konsolidierung (ADR-0017)** · abgeschlossen 2026-05-16 · Branch `feat/block-j-dashboard-pane` · 728 Tests grün (+3 neue Pane-Konsistenz-Regression-Tests), `ruff check` + `mypy app/` + Alembic-Roundtrip PASS. Gemeinsames Partial `dashboard/_detail_pane.html` wird sowohl von der Full-Page-Shell (`dashboard/index.html` via `{% include %}`) als auch direkt vom HX-Pfad in `app/views/dashboard.py` über `_build_pane_context()`-Helper konsumiert. `_pane/welcome.html` plus leeres `_pane/`-Verzeichnis entfernt. `base_app.html`-Welcome-Fallback weg, defensiver `if main_pane`-Zweig bleibt. Regression-Test prüft Pane-Marker-Identität in beiden Render-Pfaden und HX-Fragment-Eigenschaft (kein `<html>`/`<aside>` im Response). Bugfix/Refactor — funktional gegenüber v0.3.0 unverändert.
 
 ## Backlog (in Reihenfolge)
 
@@ -50,6 +50,7 @@ ruff-Lint-Fix.
 | H | [H-polish.md](H-polish.md) | completed 2026-05-15 — **MVP v0.1.0** |
 | I | [I-ui-modernization.md](I-ui-modernization.md) | completed 2026-05-15 — **MVP+UI v2 v0.2.0** |
 | I-Refinement | [I-addendum-header-layout.md](I-addendum-header-layout.md) | completed 2026-05-15 — **v0.3.0** (ADR-0016) |
+| J | [J-dashboard-pane-consolidation.md](J-dashboard-pane-consolidation.md) | completed 2026-05-16 — ADR-0017 (Dashboard-Pane-Konsolidierung) |
 
 ## Aktive Blocker
 
@@ -57,7 +58,7 @@ ruff-Lint-Fix.
 
 ## Offene ADR-Wünsche
 
-(keine — wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird)
+(keine — ADR-0017 deckt den nächsten Block ab; wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird)
 
 ## Update-Konvention
 

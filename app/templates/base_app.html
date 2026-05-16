@@ -158,9 +158,13 @@
       {% block detail_pane %}
         {% if main_pane %}
           {% include main_pane %}
-        {% else %}
-          {% include "_pane/welcome.html" %}
         {% endif %}
+        {# Sonst: leerer Pane. Alle aktiven Views ueberschreiben
+           `{% block detail_pane %}` selbst (Dashboard, Server-Detail,
+           Findings-Suche, Settings, Chat, Audit). Der frueher hier
+           inkludierte `_pane/welcome.html`-Fallback ist nach ADR-0017
+           weggefallen — eine fehlende Pane-Definition zu maskieren hat
+           den Dashboard-Drift erst entstehen lassen. #}
       {% endblock %}
     </main>
   </div>

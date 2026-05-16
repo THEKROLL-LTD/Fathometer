@@ -1,0 +1,72 @@
+{# Dashboard-Detail-Pane — die EINZIGE Quelle fuer den Dashboard-Inhalt
+   (ADR-0016 / ADR-0017).
+
+   Wird von zwei Pfaden konsumiert:
+     1. `dashboard/index.html` (Full-Page-Render) inkludiert dieses Partial
+        im `{% block detail_pane %}`.
+     2. `app/views/dashboard.py` (HX-Pfad) rendert dieses Partial direkt
+        via `render_template("dashboard/_detail_pane.html", **ctx)`.
+
+   Damit beide Pfade dasselbe Markup liefern, MUSS der Variablen-Vertrag
+   unten in beiden Fällen vollstaendig erfuellt sein.
+
+   Variablen-Vertrag (gesetzt in app/views/dashboard.py:_build_pane_context):
+     - `servers`              : list[ServerCardData] — fuer den Server-Count.
+     - `filter`               : DashboardFilter — fuer `filter.is_active`-Badge.
+     - `quick_stats`          : QuickStats — fuer `_quick_stats.html`.
+     - `available_tags`       : list[Tag] — fuer `_filter_bar.html`.
+     - `filter_tags`          : list[str] — fuer `_filter_bar.html`.
+     - `severity_threshold`   : Severity — fuer `_filter_bar.html`.
+     - `db_stale_threshold_h` : int — fuer `_attention.html`.
+     - `attention`            : AttentionSection — fuer `_attention.html`.
+     - `events_url`           : str — SSE-Endpoint-URL fuer das Alpine-Wrapper.
+
+   Sicherheit: kein `|safe` auf Variablen — alles autoescaped.
+#}
+<div class="p-6"
+     x-data="dashboardSse({{ events_url | tojson | forceescape }})"
+     x-init="init()"
+     @beforeunload.window="destroy()">
+{# ADR-0016: Dashboard-Default-Detail-Pane besteht aus Quick-Stats +
+   Filter-Bar + Platzhalter-Bereich. Das alte Server-Karten-Grid (Block D)
+   ist weggefallen — die Server-Liste lebt jetzt in der Sidebar.
+   `dashboardSse` und `staleTick` (Block H) bleiben aktiv: die SSE-Updates
+   sollen weiterhin Quick-Stats- und kuenftige Widget-Werte aktualisieren
+   koennen. #}
+
+  <header class="flex flex-wrap items-baseline justify-between gap-3 mb-4">
+    <h1 class="text-lg font-semibold">Dashboard</h1>
+    <span class="text-xs opacity-60">
+      {{ servers | length }} Server sichtbar
+      {% if filter.is_active %}<span class="badge badge-ghost badge-sm ml-1">gefiltert</span>{% endif %}
+    </span>
+  </header>
+
+  {# Quick-Stats-Header (5 Counter). #}
+  {% include "dashboard/_quick_stats.html" %}
+
+  {# Filter-Bar. #}
+  {% include "dashboard/_filter_bar.html" %}
+
+  {# "Aufmerksamkeit noetig" — falls aktiv, sehr knapp ueber dem
+     Platzhalter darstellen. Bleibt funktional gleich zu Block D. #}
+  {% if not attention.is_empty %}
+    <div x-data="staleTick()"
+         x-init="init()"
+         @beforeunload.window="destroy()"
+         class="mb-6">
+      {% include "dashboard/_attention.html" %}
+    </div>
+  {% endif %}
+
+  {# Platzhalter-Bereich gemaess ADR-0016 — Reviewer-Hinweis: bewusst leer. #}
+  <div class="border-2 border-dashed border-base-300 rounded-box p-12 text-center">
+    <p class="text-lg font-medium opacity-60 mb-2">Platzhalter</p>
+    <p class="text-sm opacity-50 mb-2">
+      Hier kommt später ein Widget-Bereich (Trends, letzte Aktivitäten, …).
+    </p>
+    <p class="text-xs opacity-40 italic">
+      Bewusst leer gelassen gemäß ADR-0016 — Inhalt in einem späteren Block.
+    </p>
+  </div>
+</div>
