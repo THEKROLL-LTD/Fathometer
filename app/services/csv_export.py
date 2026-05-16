@@ -29,13 +29,21 @@ import csv
 import io
 from collections.abc import Generator, Iterable, Iterator
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import nulls_last, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import AuditEvent, Finding, Server
-from app.services.findings_query import FindingsFilter, _apply_filters, _order_clauses
+from app.services.diff_view import compute_diff
+from app.services.findings_query import (
+    _SORT_COLUMNS,
+    FindingsFilter,
+    FindingsSortDir,
+    FindingsSortKey,
+    _apply_filters,
+    _order_clauses,
+)
 
 # Zeichen, die am Anfang eines Felds eine Formel triggern (OWASP-Liste).
 _FORMULA_TRIGGERS: frozenset[str] = frozenset({"=", "+", "-", "@", "\t", "\r"})
@@ -176,18 +184,47 @@ FINDINGS_CSV_COLUMNS: list[str] = [
     "title",
 ]
 
+# Block-K (ADR-0018): Mode-abhaengige CSV-Erweiterungen.
+FINDINGS_CSV_COLUMNS_GROUPED: list[str] = ["Group", *FINDINGS_CSV_COLUMNS]
+FINDINGS_CSV_COLUMNS_DIFF: list[str] = ["DiffStatus", *FINDINGS_CSV_COLUMNS]
+
+# Whitelist-Modi — der View prueft selbst und gibt nur valide Werte weiter.
+CsvExportMode = Literal["flach", "gruppiert", "diff"]
+
 
 def stream_findings_csv(
     session: Session,
     *,
     server_id: int | None,
     filter_obj: FindingsFilter,
+    mode: CsvExportMode = "flach",
+    sort: FindingsSortKey | None = None,
+    dir: FindingsSortDir = "desc",
 ) -> Generator[bytes]:
-    """Streamt Findings als CSV. Wenn `server_id` None ist, ueber die Flotte.
+    """Streamt Findings als CSV — Mode-abhaengig (Block K, ADR-0018).
 
-    Nutzt die in `findings_query.py` definierten Filter-Helpers. Reihenfolge:
-    §15-Default (KEV/EPSS/CVSS/Severity/first_seen_at).
+    Modi:
+        "flach"      — flache Liste aller gefilterten/sortierten Findings.
+        "gruppiert"  — wie "flach", plus Spalte `Group` (package_name);
+                       Sortierung: primaer nach Gruppe (asc), dann nach
+                       `sort` (gemaess `dir`).
+        "diff"       — nur Diff-Findings (neu+resolved seit vorletztem Scan)
+                       mit Spalte `DiffStatus`. `server_id` ist Pflicht;
+                       wenn kein Vorgaenger-Scan existiert, gibt es eine
+                       Hinweis-Zeile statt einer leeren CSV.
+
+    Sortierung im flachen/gruppierten Modus:
+    - Wenn `sort` None ist: §15-Default.
+    - Sonst: `_SORT_COLUMNS`-Whitelist (ORM-only, kein User-String im SQL).
+
+    Globaler Export (`server_id=None`) ist nur fuer `mode="flach"` und
+    `mode="gruppiert"` zulaessig — `mode="diff"` braucht zwingend einen
+    Server (sonst keine sinnvolle Diff-Semantik); der View kappt das ab.
     """
+    if mode == "diff":
+        return _stream_findings_csv_diff(session, server_id=server_id)
+    columns = FINDINGS_CSV_COLUMNS_GROUPED if mode == "gruppiert" else FINDINGS_CSV_COLUMNS
+
     stmt = select(Finding).options(selectinload(Finding.server))
     if server_id is not None:
         stmt = _apply_filters(stmt, server_id, filter_obj)
@@ -199,14 +236,94 @@ def stream_findings_csv(
         # Server-Bedingung.
         stmt = _apply_filters_no_server(stmt, filter_obj)
 
-    stmt = stmt.order_by(*_order_clauses(filter_obj))
+    order_clauses = _csv_order_clauses(filter_obj, mode=mode, sort=sort, dir=dir)
+    stmt = stmt.order_by(*order_clauses)
 
     def _row_iter() -> Iterator[dict[str, Any]]:
         result = session.execute(stmt.execution_options(yield_per=200))
         for finding in result.scalars():
-            yield _finding_row(finding)
+            row = _finding_row(finding)
+            if mode == "gruppiert":
+                row = {"Group": finding.package_name, **row}
+            yield row
 
-    return stream_csv(_row_iter(), FINDINGS_CSV_COLUMNS)
+    return stream_csv(_row_iter(), columns)
+
+
+def _csv_order_clauses(
+    filt: FindingsFilter,
+    *,
+    mode: CsvExportMode,
+    sort: FindingsSortKey | None,
+    dir: FindingsSortDir,
+) -> list[Any]:
+    """Baut die ORDER-BY-Klauseln fuer den CSV-Export.
+
+    - "gruppiert": primaer `package_name` ASC (= Gruppen-Buckets), dann
+      `sort`/`dir` (oder §15-Default), dann `identifier_key` ASC fuer
+      Determinismus.
+    - "flach": `sort`/`dir` falls gesetzt, sonst §15-Default.
+    """
+    clauses: list[Any] = []
+    if mode == "gruppiert":
+        clauses.append(Finding.package_name.asc())
+
+    if sort is not None and sort in _SORT_COLUMNS:
+        primary = _SORT_COLUMNS[sort]
+        clauses.append(nulls_last(primary.asc() if dir == "asc" else primary.desc()))
+        clauses.append(Finding.identifier_key.asc())
+    else:
+        clauses.extend(_order_clauses(filt))
+    return clauses
+
+
+def _stream_findings_csv_diff(
+    session: Session,
+    *,
+    server_id: int | None,
+) -> Generator[bytes]:
+    """Diff-Mode-CSV: nur neue/resolved Findings seit vorletztem Scan.
+
+    Wenn kein Vorgaenger-Scan existiert (oder `server_id=None`), liefert
+    der Stream die Header-Zeile plus eine einzelne Hinweis-Zeile:
+    "Kein vorheriger Scan zum Vergleich" — siehe ADR-0018 Mitigation
+    fuer leeren Diff.
+    """
+    columns = FINDINGS_CSV_COLUMNS_DIFF
+
+    if server_id is None:
+        # Globaler Diff-Export ist nicht definiert.
+        return stream_csv(iter([_diff_notice_row("Kein Server angegeben")]), columns)
+
+    diff = compute_diff(session, server_id)
+    if diff.previous_scan_at is None:
+        # Erst-Scan oder kein Scan — Hinweis-Zeile mit "neu".
+        return stream_csv(
+            iter([_diff_notice_row("Kein vorheriger Scan zum Vergleich")]),
+            columns,
+        )
+
+    def _row_iter() -> Iterator[dict[str, Any]]:
+        # Server-Name nachladen — `compute_diff` selectiert kein
+        # `selectinload(Finding.server)`, also greifen wir ueber das
+        # Finding-Objekt zu. Fuer den Diff-Output ist die Latenz egal
+        # (max. 2 Datenbank-Hops pro Server, da alle Findings desselben
+        # Servers sind und ihn ueber relationship() teilen).
+        for f in diff.new:
+            row = {"DiffStatus": "neu", **_finding_row(f)}
+            yield row
+        for f in diff.resolved:
+            row = {"DiffStatus": "resolved", **_finding_row(f)}
+            yield row
+
+    return stream_csv(_row_iter(), columns)
+
+
+def _diff_notice_row(notice: str) -> dict[str, Any]:
+    """Erzeugt eine Hinweis-Zeile fuer den Diff-Modus (siehe ADR-0018)."""
+    row: dict[str, Any] = dict.fromkeys(FINDINGS_CSV_COLUMNS_DIFF, "")
+    row["DiffStatus"] = notice
+    return row
 
 
 def _apply_filters_no_server(stmt: Any, filt: FindingsFilter) -> Any:
@@ -278,6 +395,9 @@ def _finding_row(f: Finding) -> dict[str, Any]:
 __all__ = [
     "AUDIT_CSV_COLUMNS",
     "FINDINGS_CSV_COLUMNS",
+    "FINDINGS_CSV_COLUMNS_DIFF",
+    "FINDINGS_CSV_COLUMNS_GROUPED",
+    "CsvExportMode",
     "stream_audit_csv",
     "stream_csv",
     "stream_findings_csv",

@@ -34,6 +34,7 @@ from typing import Any, Literal
 
 from sqlalchemy import case, func, nulls_last, or_, select
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.sql import ColumnElement
 
 from app.models import Finding, FindingClass, FindingStatus, Severity
 
@@ -44,6 +45,13 @@ from app.models import Finding, FindingClass, FindingStatus, Severity
 
 FindingsStatusFilter = Literal["open", "acknowledged", "resolved", "all"]
 FindingsClassFilter = Literal["os-pkgs", "lang-pkgs", "both"]
+
+# Block-K (ADR-0018): sortierbare Spalten-Header.
+# Whitelist-Literal — `_SORT_COLUMNS` mappt jeden Key auf eine fest
+# referenzierte Column. Damit ist `ORDER BY` immer ein Column-Objekt aus
+# dem Mapping, NIE eine User-Eingabe — kein SQL-Injection-Surface.
+FindingsSortKey = Literal["cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"]
+FindingsSortDir = Literal["asc", "desc"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +139,40 @@ _SEVERITY_RANK_TABLE: dict[Severity, int] = {
     Severity.MEDIUM: 2,
     Severity.LOW: 1,
     Severity.UNKNOWN: 0,
+}
+
+
+def _status_rank_expr() -> ColumnElement[int]:
+    """CASE-Expression: Status -> Rank fuer Sortierung.
+
+    Operationssemantik: OPEN zuerst (3), ACK in der Mitte (2), RESOLVED
+    unten (1). Bei `dir=asc` kehrt sich das natuerlich um.
+    """
+    return case(
+        (Finding.status == FindingStatus.OPEN, 3),
+        (Finding.status == FindingStatus.ACKNOWLEDGED, 2),
+        (Finding.status == FindingStatus.RESOLVED, 1),
+        else_=0,
+    )
+
+
+# Whitelist-Mapping: Sort-Key -> Column/Expression. Jeder Eintrag wird in
+# `list_findings()` direkt via `.asc()`/`.desc()` benutzt — ORM-only, kein
+# `text()`, kein User-String fliesst in das ORDER BY.
+#
+# Mypy-Hinweis: `InstrumentedAttribute[...]` und `case(...)` haben einen
+# gemeinsamen Bound bei `ColumnElement`, mypy laesst die Co-Variance hier
+# aber nicht inferieren — wir typisieren bewusst auf `Any` damit die
+# heterogene Sammlung valide bleibt. Die Sicherheit kommt aus der
+# Literal-Whitelist auf `sort` (siehe `FindingsSortKey`).
+_SORT_COLUMNS: dict[str, Any] = {
+    "cve": Finding.identifier_key,
+    "pkg": Finding.package_name,
+    "epss": Finding.epss_score,
+    "cvss": Finding.cvss_v3_score,
+    "sev": _severity_rank_expr(),
+    "status": _status_rank_expr(),
+    "first_seen": Finding.first_seen_at,
 }
 
 
@@ -227,15 +269,35 @@ def list_findings(
     filt: FindingsFilter,
     *,
     limit: int = 500,
+    sort: FindingsSortKey | None = None,
+    dir: FindingsSortDir = "desc",
 ) -> list[Finding]:
     """Liefert eine flache Liste von Findings fuer den *Liste*-View.
 
-    Sortierung: §15. Eager-Load der Notes vermeidet N+1 wenn die Liste in
-    einer Schleife geoeffnet wird (z.B. Detail-Modal mit Thread-Vorschau).
+    Sortierung:
+    - Wenn `sort` `None` ist: Default-Reihenfolge aus §15 (KEV/EPSS/CVSS/
+      Severity/first_seen) ueber `_order_clauses()`.
+    - Wenn `sort` gesetzt ist (ADR-0018 spaltensortierbare Tabelle): das
+      `_SORT_COLUMNS`-Mapping liefert die Primary-Column; `Finding.cve_id`
+      (= `identifier_key`) als deterministischer Tiebreaker.
+
+    `sort` ist `Literal`-typed — kein User-String fliesst direkt in das
+    ORDER BY. Falls trotzdem ein nicht-gemappter Key durchkommt, faellt
+    die Funktion auf die §15-Default-Order zurueck statt zu crashen.
+
+    Eager-Load der Notes vermeidet N+1, wenn die Liste in einer Schleife
+    geoeffnet wird.
     """
     stmt = select(Finding).options(selectinload(Finding.notes))
     stmt = _apply_filters(stmt, server_id, filt)
-    stmt = stmt.order_by(*_order_clauses(filt)).limit(limit)
+    if sort is None or sort not in _SORT_COLUMNS:
+        stmt = stmt.order_by(*_order_clauses(filt))
+    else:
+        primary = _SORT_COLUMNS[sort]
+        primary_clause = nulls_last(primary.asc()) if dir == "asc" else nulls_last(primary.desc())
+        # Sekundaerer Sort fuer deterministische Reihenfolge bei Ties.
+        stmt = stmt.order_by(primary_clause, Finding.identifier_key.asc())
+    stmt = stmt.limit(limit)
     return list(session.execute(stmt).scalars().all())
 
 
@@ -377,6 +439,8 @@ def count_findings(
 __all__ = [
     "FindingsClassFilter",
     "FindingsFilter",
+    "FindingsSortDir",
+    "FindingsSortKey",
     "FindingsStatusFilter",
     "PackageGroup",
     "count_findings",

@@ -236,6 +236,66 @@
 {%- endmacro %}
 
 
+{# Sortierbarer Spaltenheader (Block K, ADR-0018).
+
+   `field`        — Sort-Key (Whitelist in FindingsViewFilter._VALID_SORTS).
+   `label`        — User-sichtbares Label, lowercased gerendert.
+   `current_sort` — `view_filter.sort` (aktuelle Sortier-Spalte).
+   `current_dir`  — `view_filter.dir` ('asc'|'desc').
+   `server_id`    — fuer den HTMX-`hx-get`-URL-Build.
+   `view_filter`  — optional, fuer `to_query_string()`-Propagation; wenn None
+                    wird ein minimaler Query-String mit `mode` + sort/dir gebaut.
+
+   Klick togglet die Richtung wenn man dieselbe Spalte erneut waehlt,
+   sonst springt der Sort auf das Feld mit sinnvoller Default-Richtung
+   (cve/pkg/first_seen -> asc, sonst desc — gleiche Heuristik wie das
+   Mockup, siehe `docs/blocks/K-mockup-prototype.html`).
+
+   HTMX: `hx-get` swap das `#findings-section`-Fragment, `hx-push-url`
+   haelt die URL fuer Bookmarks aktuell. Bei JS-disabled bleibt das `<a>`
+   regulaerer Link (Form-of-Progressive-Enhancement).
+#}
+{% macro sort_header(field, label, current_sort, current_dir, server_id, view_filter=None) -%}
+  {%- if current_sort == field -%}
+    {%- set next_dir = 'asc' if current_dir == 'desc' else 'desc' -%}
+    {%- set indicator = '↑' if current_dir == 'asc' else '↓' -%}
+    {%- set is_active = true -%}
+    {%- set aria_sort = 'ascending' if current_dir == 'asc' else 'descending' -%}
+  {%- else -%}
+    {%- set next_dir = 'asc' if field in ('cve', 'pkg', 'first_seen') else 'desc' -%}
+    {%- set indicator = '↕' -%}
+    {%- set is_active = false -%}
+    {%- set aria_sort = 'none' -%}
+  {%- endif -%}
+  {%- if view_filter is not none -%}
+    {%- set qs = view_filter.to_query_string(override={'sort': field, 'dir': next_dir}) -%}
+  {%- else -%}
+    {%- set qs = 'sort=' ~ field ~ '&dir=' ~ next_dir -%}
+  {%- endif -%}
+  <th scope="col" aria-sort="{{ aria_sort }}" class="select-none">
+    <a href="{{ url_for('server_detail.show', server_id=server_id) }}?{{ qs }}"
+       class="inline-flex items-center gap-1 group"
+       hx-get="{{ url_for('server_detail.show', server_id=server_id) }}?{{ qs }}"
+       hx-target="#findings-section"
+       hx-select="#findings-section"
+       hx-swap="outerHTML"
+       hx-push-url="true"
+       title="Sortieren nach {{ label }}">
+      <span class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65 group-hover:opacity-100 transition-opacity">{{ label }}</span>
+      <span class="text-[10px] font-mono {% if is_active %}opacity-70{% else %}opacity-25{% endif %}">{{ indicator }}</span>
+    </a>
+  </th>
+{%- endmacro %}
+
+
+{# Tendency-Label — der Enum traegt das fertig formatierte Label.
+   Wir fuegen kein zusaetzliches Markup hinzu, damit das Template nur den
+   reinen Text bekommt (das `lowercase`-Styling kommt vom Container). #}
+{% macro tendency_label(tendency) -%}
+  {%- if tendency is not none and tendency.label is defined -%}{{ tendency.label }}{%- endif -%}
+{%- endmacro %}
+
+
 {# Status-Pille — open/acknowledged/resolved konsistent eingefaerbt. #}
 {% macro status_badge(status) -%}
   {%- set s = status.value if status is not none and status.value is defined else (status or '') -%}
