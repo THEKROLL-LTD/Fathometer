@@ -21,7 +21,7 @@ from typing import Any
 import structlog
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import login_required
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from werkzeug.wrappers import Response as WerkzeugResponse
@@ -37,7 +37,7 @@ from app.forms import (
     NoteForm,
     ReopenForm,
 )
-from app.models import Server, ServerTag, Tag
+from app.models import Finding, FindingStatus, Server, ServerTag, Severity, Tag
 from app.schemas.findings_view_filter import FindingsViewFilter
 from app.services.diff_view import DiffSection, compute_diff
 from app.services.findings_query import (
@@ -46,6 +46,14 @@ from app.services.findings_query import (
     group_findings_by_package,
     list_findings,
 )
+from app.services.heartbeat_aggregation import DailyStatus, heartbeats_for_servers
+from app.services.severity_history import (
+    DailySeverityCount,
+    count_kev_events_50d,
+    daily_severity_counts_for_server,
+    severity_snapshots_for_server,
+)
+from app.services.trend import Tendency, compute_tendency
 
 log = structlog.get_logger(__name__)
 
@@ -108,7 +116,13 @@ def _render_findings_section(
     diff: DiffSection | None = None
 
     if view_filter.mode == "list":
-        findings_list = list_findings(sess, server.id, findings_filter)
+        findings_list = list_findings(
+            sess,
+            server.id,
+            findings_filter,
+            sort=view_filter.sort,
+            dir=view_filter.dir,
+        )
     elif view_filter.mode == "group":
         groups = group_findings_by_package(sess, server.id, findings_filter)
     else:  # diff
@@ -145,11 +159,25 @@ def show(server_id: int) -> Any:
     view_filter = FindingsViewFilter.from_request(request.args)
     section_ctx = _render_findings_section(server, view_filter)
 
+    # Block K (ADR-0018): Header-Stats und Trend-Daten aufsammeln. Alle
+    # Aggregations-Calls fuehren je 1 SELECT aus — der Detail-Render bleibt
+    # auch bei ~10k Findings unter den ADR-Zielwerten (siehe Performance-
+    # Bekannte-Limitation).
+    sess = get_session()
+    tendency: Tendency = compute_tendency(sess, server.id)
+    sparklines: dict[str, list[int]] = severity_snapshots_for_server(sess, server.id, days=50)
+    trend_data: list[DailySeverityCount] = daily_severity_counts_for_server(
+        sess, server.id, days=50
+    )
+    kev_events_50d: int = count_kev_events_50d(sess, server.id)
+    heartbeat_cells: list[DailyStatus] = heartbeats_for_servers(sess, [server.id], days=50)[
+        server.id
+    ]
+    quick_counts = _quick_counts_for_server(sess, server.id)
+
     # Block I: `active_server_id` markiert die Sidebar-Zeile, `hx_partial`
     # entscheidet zwischen Vollseite (`base_app.html`) und Fragment-Shell
-    # (`_partial_shell.html`). Der Fragment-Pfad liefert den kompletten
-    # Detail-Pane (Server-Header + Findings-Sektion + Bulk-Modal usw.), damit
-    # die Sidebar-Navigation den Header nicht verschluckt.
+    # (`_partial_shell.html`).
     is_hx = request.headers.get("HX-Request") == "true"
     return render_template(
         "servers/detail.html",
@@ -158,8 +186,40 @@ def show(server_id: int) -> Any:
         remove_form=CSRFOnlyForm(),
         active_server_id=server.id,
         hx_partial=is_hx,
+        tendency=tendency,
+        sparklines=sparklines,
+        trend_data=trend_data,
+        kev_events_50d=kev_events_50d,
+        heartbeat_cells=heartbeat_cells,
+        quick_counts=quick_counts,
         **section_ctx,
     )
+
+
+def _quick_counts_for_server(sess: Any, server_id: int) -> dict[str, int]:
+    """Liefert OPEN-Counts pro Severity + KEV + Total fuer die KPI-Kacheln.
+
+    Eine einzige aggregierte Query mit `FILTER (WHERE …)`-Clauses, analog zu
+    `quick_stats.get_quick_stats()` — aber Server-scoped statt Tag-gefiltert.
+    """
+    is_open = Finding.status == FindingStatus.OPEN
+    stmt = select(
+        func.count().filter(is_open).label("total_open"),
+        func.count().filter(is_open, Finding.is_kev.is_(True)).label("kev_open"),
+        func.count().filter(is_open, Finding.severity == Severity.CRITICAL).label("critical_open"),
+        func.count().filter(is_open, Finding.severity == Severity.HIGH).label("high_open"),
+        func.count().filter(is_open, Finding.severity == Severity.MEDIUM).label("medium_open"),
+        func.count().filter(is_open, Finding.severity == Severity.LOW).label("low_open"),
+    ).where(Finding.server_id == server_id)
+    row = sess.execute(stmt).one()
+    return {
+        "total_open": int(row.total_open or 0),
+        "kev_open": int(row.kev_open or 0),
+        "critical_open": int(row.critical_open or 0),
+        "high_open": int(row.high_open or 0),
+        "medium_open": int(row.medium_open or 0),
+        "low_open": int(row.low_open or 0),
+    }
 
 
 @server_detail_bp.post("/<int:server_id>/tags/add")

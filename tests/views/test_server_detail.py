@@ -523,11 +523,16 @@ def test_show_search_q_filters(db_app: Flask) -> None:
     assert "CVE-2026-D502" not in body
 
 
-def test_show_default_sort_lists_kev_finding_first(db_app: Flask) -> None:
-    """Default-Sort §15 — das KEV-Finding erscheint vor dem non-KEV.
+def test_show_default_sort_renders_both_findings(db_app: Flask) -> None:
+    """ADR-0018: Default-Sort der Detail-Tabelle ist `sev desc` (Spalten-Sort).
 
-    Wir parsen die Reihenfolge der `<tr>`-Elemente in der Liste und stellen
-    sicher, dass das KEV-Finding zuerst kommt.
+    Block K hat das §15-Default-Order (KEV->EPSS->CVSS->Severity->first_seen) durch
+    den Server-Side-Spalten-Sort ersetzt — der View-Code reicht jetzt immer
+    `view_filter.sort` (Default `sev`) an `list_findings` weiter. Tiebreak
+    bei gleicher Severity ist `identifier_key asc`, NICHT mehr `is_kev desc`.
+
+    Wir testen entsprechend nur dass beide Findings im Output stehen — die
+    KEV-zuerst-Logik gehoert jetzt zum CVSS-/EPSS-Sort, nicht zum Default.
     """
     create_admin_user(db_app)
     sid = _setup_findings_server(db_app, "srv-sort")
@@ -551,12 +556,8 @@ def test_show_default_sort_lists_kev_finding_first(db_app: Flask) -> None:
     login(client)
     resp = client.get(f"/servers/{sid}?class=os-pkgs")
     body = resp.get_data(as_text=True)
-    pos_kev = body.find("CVE-2026-D602")
-    pos_non = body.find("CVE-2026-D601")
-    assert pos_kev != -1 and pos_non != -1, "Beide CVE-IDs muessen im HTML stehen."
-    assert pos_kev < pos_non, (
-        f"KEV-Finding muss zuerst gerendert werden: pos_kev={pos_kev}, pos_non={pos_non}"
-    )
+    assert "CVE-2026-D601" in body
+    assert "CVE-2026-D602" in body
 
 
 def test_show_with_htmx_header_returns_partial_only(db_app: Flask) -> None:

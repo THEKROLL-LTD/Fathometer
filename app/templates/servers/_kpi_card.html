@@ -1,0 +1,81 @@
+{# KPI-Karte mit grossem Wert + 50-Tage-Sparkline (Block K, ADR-0018).
+
+   Variablen-Vertrag:
+     - `label`         : str — kurzes Eyebrow-Label (z.B. "KEV", "Critical").
+     - `value`         : int — der grosse Counter-Wert.
+     - `tone`          : str — eine von {error, warning, accent, info}, steuert
+                         die Tailwind-Farbklassen-Variable.
+     - `sparkline`     : list[int] — 50 OPEN-Snapshot-Werte (aelteste zuerst).
+     - `kev_indicator` : bool (optional) — pulsierender roter Dot rechts oben,
+                         wenn `value > 0`. Default `False`.
+
+   Layout: 180px breite Kachel mit DaisyUI-Background, oberer Zeile (Eyebrow +
+   optionaler KEV-Dot), grossem `text-2xl`-Wert in `text-{tone}`-Farbe und
+   einer 22px-hohen Inline-SVG-Sparkline. Bei flacher Linie zeichnen wir eine
+   gedaempfte horizontale Mittellinie (kein leeres SVG-Loch).
+
+   Inline-SVG, keine externen Libraries — ADR-0001.
+#}
+{# Tone -> Tailwind-Farbe + SVG-Stroke-Color. Statisches Mapping, damit Tailwind
+   die Klassen im JIT-Pass purgen kann. #}
+{%- if tone == 'error' -%}
+  {%- set text_class = 'text-error' -%}
+  {%- set stroke_color = '#ef4444' -%}
+{%- elif tone == 'warning' -%}
+  {%- set text_class = 'text-warning' -%}
+  {%- set stroke_color = '#f59e0b' -%}
+{%- elif tone == 'accent' -%}
+  {%- set text_class = 'text-accent' -%}
+  {%- set stroke_color = '#14b8a6' -%}
+{%- elif tone == 'info' -%}
+  {%- set text_class = 'text-info' -%}
+  {%- set stroke_color = '#38bdf8' -%}
+{%- else -%}
+  {%- set text_class = 'text-base-content' -%}
+  {%- set stroke_color = '#6b7280' -%}
+{%- endif -%}
+{%- set show_pulse = kev_indicator | default(false) and value and value > 0 -%}
+{%- set data = sparkline or [] -%}
+{%- set data_len = data | length -%}
+
+<div class="rounded-box bg-base-200/60 border border-base-300 px-4 pt-3 pb-2 flex flex-col gap-1.5 w-[180px] min-w-0">
+  <div class="flex items-center justify-between">
+    <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">{{ label }}</div>
+    {%- if show_pulse %}
+    <span class="inline-block w-1.5 h-1.5 rounded-full bg-error animate-pulse" aria-hidden="true"></span>
+    {%- endif %}
+  </div>
+  <div class="font-mono text-2xl leading-none font-semibold {{ text_class }}" style="font-variant-numeric: tabular-nums;">{{ value if value is not none else 0 }}</div>
+  <div class="relative w-full" style="height: 22px;">
+    {%- if data_len > 1 -%}
+      {%- set vmax = data | max -%}
+      {%- set vmin = data | min -%}
+      {%- set vrange = vmax - vmin -%}
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block" role="img" aria-label="{{ label }} Verlauf {{ data_len }} Tage">
+        {%- if vrange == 0 -%}
+        <path d="M0,92 L100,92" fill="none" stroke="{{ stroke_color }}" stroke-width="2.5" stroke-opacity="0.35" stroke-linecap="round" />
+        {%- else -%}
+          {# Punkte aufbauen. PAD=8 oben/unten lassen vertikalen Headroom. #}
+          {%- set pad = 8 -%}
+          {%- set ns = namespace(points=[], path='', area='') -%}
+          {%- for v in data -%}
+            {%- set x = (loop.index0 * 100.0) / (data_len - 1) -%}
+            {%- set y = 100 - pad - ((v - vmin) * 1.0 / vrange) * (100 - 2 * pad) -%}
+            {%- if loop.first -%}
+              {%- set ns.path = 'M%.2f,%.2f' | format(x, y) -%}
+              {%- set ns.area = 'M%.2f,%.2f' | format(x, y) -%}
+            {%- else -%}
+              {%- set ns.path = ns.path + ' L%.2f,%.2f' | format(x, y) -%}
+              {%- set ns.area = ns.area + ' L%.2f,%.2f' | format(x, y) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {%- set ns.area = ns.area + ' L100,100 L0,100 Z' -%}
+        <path d="{{ ns.area }}" fill="{{ stroke_color }}" opacity="0.14" />
+        <path d="{{ ns.path }}" fill="none" stroke="{{ stroke_color }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+        {%- endif -%}
+      </svg>
+    {%- else -%}
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block" role="img" aria-label="{{ label }} keine History"></svg>
+    {%- endif -%}
+  </div>
+</div>

@@ -1,9 +1,16 @@
-{# Findings-Sektion fuer den Server-Detail-View (Block E).
+{# Findings-Sektion fuer den Server-Detail-View (Block K, ADR-0018).
 
-   Variablen-Vertrag (gesetzt in app/views/server_detail.py):
+   Refactor gegenueber Block E:
+     - Filter-Form (Status/Klasse/Severity-Min/KEV/Suche) entfernt.
+     - Counts-Pills (open/ack/resolved/KEV) entfernt — leben jetzt in der
+       HeaderStats-Sektion oberhalb.
+     - Sortierbare Spaltenheader via `sort_header()`-Macro.
+     - Mode-Segment als `join btn-xs` (flach/gruppiert/diff) statt Tabs.
+     - Bulk-Ack-Button + CSV-Button in der Toolbar.
+
+   Variablen-Vertrag (gesetzt in `app/views/server_detail.py`):
      - `server`        : Server (eager-loaded tag_links.tag)
-     - `view_filter`   : FindingsViewFilter (mode/status/class/severity/...)
-     - `counts`        : dict[str, int] — open/acknowledged/resolved/total/kev_open
+     - `view_filter`   : FindingsViewFilter (sort/dir/mode/...)
      - `findings`      : list[Finding] — fuer mode=list
      - `groups`        : list[PackageGroup] — fuer mode=group
      - `diff`          : DiffSection | None — fuer mode=diff
@@ -11,144 +18,92 @@
      - `reopen_form`   : ReopenForm
      - `note_form`     : NoteForm
      - `group_ack_form`: GroupAcknowledgeForm
+     - `bulk_form`     : BulkActionForm
      - `csrf_form`     : CSRFOnlyForm
+     - `total_findings`: int — Triage-Queue-Anzahl (fuer den Eyebrow-Counter).
 
-   Wird sowohl direkt aus `detail.html` als auch als HTMX-Partial gerendert.
-
-   Filter-State liegt vollstaendig im URL-Query-String — Bookmarks und Share-
-   Links funktionieren direkt (§7). Form ist `method="get"`; HTMX-Targeting
-   ist optional auf das `#findings-section`-Wrap.
+   Wird sowohl direkt aus `detail.html` als auch als HTMX-Partial-Swap
+   gerendert (siehe `sort_header()` mit `hx-target="#findings-section"`).
 #}
-{% from "_macros.html" import severity_badge, kev_badge %}
-<section class="space-y-4" id="findings-section">
-  {# Header: Titel + Counts-Badges + CSV-Export. #}
-  <header class="flex flex-wrap items-center justify-between gap-2">
-    <h2 class="text-xl font-semibold">Findings</h2>
-    <div class="flex flex-wrap items-center gap-2 text-sm">
-      <span class="badge badge-warning gap-1" title="Offene Findings">
-        <span class="font-semibold">{{ counts.open }}</span> open
-      </span>
-      <span class="badge badge-info gap-1" title="Acknowledged">
-        <span class="font-semibold">{{ counts.acknowledged }}</span> ack
-      </span>
-      <span class="badge badge-success gap-1" title="Resolved">
-        <span class="font-semibold">{{ counts.resolved }}</span> resolved
-      </span>
-      {% if counts.kev_open %}
-        <span class="badge badge-error ring-1 ring-error/40 gap-1"
-              title="Offene KEV-Findings — bekannte aktiv ausgenutzte CVEs.">
-          <span class="font-semibold">{{ counts.kev_open }}</span> KEV
-        </span>
-      {% endif %}
-      {# CSV-Export der aktuell gefilterten Findings (Block F).
-         `view_filter.to_query_string()` traegt alle aktiven Filter mit. #}
-      <a href="{{ url_for('findings.export_csv') }}?server_id={{ server.id }}&{{ view_filter.to_query_string() }}"
-         class="btn btn-xs btn-outline ml-2"
-         download
-         data-test="findings-csv-export"
-         title="Findings dieses Servers als CSV exportieren">
-        CSV
-      </a>
+{% from "_macros.html" import sort_header %}
+<section class="space-y-3" id="findings-section">
+  <header class="flex items-end justify-between gap-3 flex-wrap">
+    <div>
+      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">
+        Triage Queue · {{ total_findings | default(findings | length if findings else (groups | length if groups else 0)) }} Findings
+      </div>
+      <h2 class="font-mono text-base font-medium mt-1">Findings</h2>
+    </div>
+    <div class="flex items-center gap-2 flex-wrap">
+      {# Mode-Segment — jeder Button ist ein Link, der nur `mode` ueberschreibt
+         und alle anderen Filter/Sort-Werte aus dem aktuellen Query-String
+         erhaelt. #}
+      <div class="join" role="group" aria-label="Findings-Modus">
+        {% for mode_value, mode_label in [
+          ('list',  'flach'),
+          ('group', 'gruppiert'),
+          ('diff',  'diff'),
+        ] %}
+          <a href="{{ url_for('server_detail.show', server_id=server.id) }}?{{ view_filter.to_query_string(override={'mode': mode_value}) }}"
+             class="join-item btn btn-xs {% if view_filter.mode == mode_value %}btn-active{% else %}btn-ghost{% endif %}"
+             role="button"
+             aria-pressed="{{ 'true' if view_filter.mode == mode_value else 'false' }}"
+             data-test="mode-{{ mode_value }}">
+            {{ mode_label }}
+          </a>
+        {% endfor %}
+      </div>
+
+      {# Bulk-Ack-Button: oeffnet das Modal (Block-F `bulkAckIds`-Pattern,
+         siehe `static/js/bulk_ack.js`). Disabled wenn keine Auswahl. Die
+         Selection-State sitzt im umgebenden Alpine-Scope aus
+         `_view_list.html`/`_view_group.html` (via `bulkAckIds(() => selected)`).
+         Da die Bulk-Bar bereits in den View-Partials inline lebt, brauchen wir
+         den Button hier nicht zu duplizieren — wir verlinken die sticky Bar
+         per Hash-Anchor und blenden sie sowieso ein, sobald `selected.length>0`.
+         Stattdessen exponieren wir eine Toolbar-Variante mit gleicher Logik. #}
+      <div x-data="bulkAckIds(() => (window.__detailSelected || []))" class="inline-flex">
+        <button type="button"
+                class="btn btn-xs btn-primary gap-1"
+                :disabled="(window.__detailSelected || []).length === 0"
+                :title="(window.__detailSelected || []).length === 0 ? 'Erst Findings auswaehlen' : 'Auswahl abhaken'"
+                @click="openModal()"
+                data-test="bulk-ack-toolbar">
+          auswahl ack
+          <span x-show="(window.__detailSelected || []).length > 0"
+                class="font-mono opacity-80"
+                x-text="'·' + (window.__detailSelected || []).length"></span>
+        </button>
+        {% from "_macros.html" import bulk_ack_modal %}
+        {{ bulk_ack_modal(id='bulk-ack-modal-toolbar',
+                          title='Ausgewaehlte Findings abhaken') }}
+      </div>
+
+      {# CSV-Export-Dropdown: Mode-abhaengig (flach/gruppiert/diff).
+         `view_filter.to_query_string()` traegt alle aktiven Sort/Filter mit. #}
+      <details class="dropdown dropdown-end">
+        <summary class="btn btn-xs btn-ghost gap-1.5" data-test="findings-csv-export">
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+          </svg>
+          csv exportieren
+        </summary>
+        <ul class="dropdown-content z-30 menu menu-sm bg-base-100 border border-base-300 rounded-box shadow-lg mt-1 w-48">
+          {% for csv_mode, csv_label in [
+            ('flach', 'flach'),
+            ('gruppiert', 'gruppiert (nach Paket)'),
+            ('diff', 'diff (seit letztem Scan)'),
+          ] %}
+            <li>
+              <a href="{{ url_for('findings.export_csv') }}?server_id={{ server.id }}&{{ view_filter.to_query_string(override={'mode': csv_mode}) }}"
+                 download
+                 data-test="csv-mode-{{ csv_mode }}">{{ csv_label }}</a>
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
     </div>
   </header>
-
-  {# Mode-Tabs — jeder Tab ist ein Link, der nur `mode` ueberschreibt und alle
-     anderen Filter-Werte aus dem aktuellen Query-String erhaelt. #}
-  <nav class="tabs tabs-boxed bg-base-200" role="tablist" aria-label="View-Modus">
-    {% for mode_value, mode_label in [
-      ('list',  'Liste'),
-      ('group', 'Gruppiert nach Paket'),
-      ('diff',  'Diff seit letztem Scan'),
-    ] %}
-      <a class="tab {% if view_filter.mode == mode_value %}tab-active{% endif %}"
-         role="tab"
-         aria-selected="{{ 'true' if view_filter.mode == mode_value else 'false' }}"
-         href="{{ url_for('server_detail.show', server_id=server.id) }}?{{ view_filter.to_query_string(override={'mode': mode_value}) }}">
-        {{ mode_label }}
-      </a>
-    {% endfor %}
-  </nav>
-
-  {# Filter-Form: alle Filter aus dem Query-String, kein Server-State.
-     Diff-Mode hat keine Filter (Diff zeigt immer den vollen Zustand). #}
-  {% if view_filter.mode != 'diff' %}
-  <form method="get"
-        action="{{ url_for('server_detail.show', server_id=server.id) }}"
-        class="card bg-base-200 shadow-sm">
-    <div class="card-body p-4 flex flex-wrap items-end gap-3 text-sm">
-      {# Mode bleibt erhalten. #}
-      <input type="hidden" name="mode" value="{{ view_filter.mode }}">
-
-      <label class="form-control">
-        <span class="label-text text-xs opacity-70 pb-1">Status</span>
-        <select name="status" class="select select-bordered select-sm">
-          <option value="open"         {% if view_filter.status == 'open' %}selected{% endif %}>offen</option>
-          <option value="acknowledged" {% if view_filter.status == 'acknowledged' %}selected{% endif %}>acknowledged</option>
-          <option value="resolved"     {% if view_filter.status == 'resolved' %}selected{% endif %}>resolved</option>
-          <option value="all"          {% if view_filter.status == 'all' %}selected{% endif %}>alle</option>
-        </select>
-      </label>
-
-      {# Class-Toggle als 3er-Buttons-Group (DaisyUI `join`). #}
-      <div class="form-control">
-        <span class="label-text text-xs opacity-70 pb-1">Klasse</span>
-        <div class="join" role="group" aria-label="Finding-Klasse">
-          {% for cls_val, cls_label, cls_title in [
-            ('both',      'OS + Lang', 'Beide — OS-Pakete oben.'),
-            ('os-pkgs',   'nur OS',     'System-Pakete (apk/apt/rpm).'),
-            ('lang-pkgs', 'nur Lang',   'Library-Findings in installierten Binaries.'),
-          ] %}
-            <button type="submit" name="class" value="{{ cls_val }}"
-                    class="btn btn-sm join-item {% if view_filter.finding_class == cls_val %}btn-active btn-primary{% endif %}"
-                    title="{{ cls_title }}"
-                    aria-pressed="{{ 'true' if view_filter.finding_class == cls_val else 'false' }}">
-              {{ cls_label }}
-            </button>
-          {% endfor %}
-        </div>
-      </div>
-
-      <label class="form-control">
-        <span class="label-text text-xs opacity-70 pb-1">Severity-Min</span>
-        <select name="severity" class="select select-bordered select-sm">
-          <option value="all"      {% if not view_filter.severity %}selected{% endif %}>alle</option>
-          <option value="critical" {% if view_filter.severity and view_filter.severity.value == 'critical' %}selected{% endif %}>critical</option>
-          <option value="high"     {% if view_filter.severity and view_filter.severity.value == 'high'     %}selected{% endif %}>high+</option>
-          <option value="medium"   {% if view_filter.severity and view_filter.severity.value == 'medium'   %}selected{% endif %}>medium+</option>
-          <option value="low"      {% if view_filter.severity and view_filter.severity.value == 'low'      %}selected{% endif %}>low+</option>
-        </select>
-      </label>
-
-      <label class="form-control cursor-pointer">
-        <span class="label-text text-xs opacity-70 pb-1">&nbsp;</span>
-        <div class="flex items-center gap-2 h-8">
-          <input type="checkbox" name="kev_only" value="1"
-                 class="checkbox checkbox-sm checkbox-error"
-                 {% if view_filter.kev_only %}checked{% endif %}>
-          <span class="text-sm">nur KEV</span>
-        </div>
-      </label>
-
-      <label class="form-control flex-1 min-w-48">
-        <span class="label-text text-xs opacity-70 pb-1">Suche</span>
-        <input type="text"
-               name="q"
-               value="{{ view_filter.search or '' }}"
-               class="input input-bordered input-sm"
-               placeholder="CVE-ID, Paket, Titel…"
-               aria-label="Suche nach CVE-ID, Paket oder Titel">
-      </label>
-
-      <div class="flex items-center gap-2">
-        <button type="submit" class="btn btn-sm btn-primary">filtern</button>
-        <a href="{{ url_for('server_detail.show', server_id=server.id) }}?mode={{ view_filter.mode }}"
-           class="link link-hover text-xs opacity-70">
-          zuruecksetzen
-        </a>
-      </div>
-    </div>
-  </form>
-  {% endif %}
 
   {# Body je nach Modus. #}
   {% if view_filter.mode == 'list' %}

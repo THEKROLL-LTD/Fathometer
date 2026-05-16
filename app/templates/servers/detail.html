@@ -1,35 +1,36 @@
-{# Server-Detail `/servers/<id>` — Header + Findings-Sektion (Block E).
+{# Server-Detail `/servers/<id>` — komplettes Redesign (Block K, ADR-0018).
 
-   Variablen-Vertrag (gesetzt in app/views/server_detail.py:show):
+   Sektions-Reihenfolge (siehe ADR-0018 §Entscheidung):
+     1. Header              — Hostname, Status-Pill-Reihe, OS-Zeile,
+                              Hashtag-Tags, KI-Bewertung-Button.
+     2. Tag-Editor          — Akkordeon, default zugeklappt.
+     3. HeaderStats         — Total + Tendenz links, 4 KPI-Sparklines rechts.
+     4. Lebenszeichen       — HeartbeatLarge + 4-Spalten-Meta-Grid.
+     5. Severity-Trend      — Stacked-Bar-Chart + Range-Toggle + Legende.
+     6. Triage Queue        — eingebunden via `servers/_findings_section.html`.
+
+   Variablen-Vertrag (gesetzt in `app/views/server_detail.py:show`):
      - `server`         : Server (mit eager-loaded tag_links.tag)
      - `available_tags` : list[Tag] — fuer den Add-Tag-Selector
      - `add_form`       : CSRFOnlyForm
      - `remove_form`    : CSRFOnlyForm
      - `view_filter`    : FindingsViewFilter
-     - `counts`         : dict[str, int]
-     - `findings`       : list[Finding]            (fuer mode=list)
-     - `groups`         : list[PackageGroup]       (fuer mode=group)
-     - `diff`           : DiffSection | None       (fuer mode=diff)
-     - `ack_form`       : AcknowledgeForm
-     - `reopen_form`    : ReopenForm
-     - `note_form`      : NoteForm
-     - `group_ack_form` : GroupAcknowledgeForm
-     - `csrf_form`      : CSRFOnlyForm
-
-   Stale-Logik analog zu settings/servers.html via `is_older_than_h`-Filter:
-   - Server-Stale: last_scan_at > expected_scan_interval_h.
-   - DB-Stale: trivy_db_updated_at > 168h (1 Woche, konservativer Anzeige-
-     wert; die strenge 30h-Schwelle gilt fuer das "Aufmerksamkeit"-Dashboard).
+     - `findings`/`groups`/`diff` : View-Modus-abhaengig
+     - `tendency`        : Tendency-Enum (Block K)
+     - `sparklines`      : dict[str, list[int]] mit Keys kev/critical/high/medium/low (Block K)
+     - `trend_data`      : list[DailySeverityCount] (Block K)
+     - `kev_events_50d`  : int (Block K)
+     - `heartbeat_cells` : list[DailyStatus] (Block K)
+     - `quick_counts`    : dict mit kev_open/critical_open/high_open/medium_open/total_open (Block K)
+     - `ack_form`/`reopen_form`/`note_form`/`group_ack_form`/`bulk_form`/`csrf_form`
+     - `llm_configured`  : bool
+     - `hx_partial`      : bool — entscheidet zwischen Vollseite und Fragment.
 #}
-{# Block I: extendet `base_app.html` (Sidebar + Detail-Pane) bei vollem
-   Request, ansonsten `_partial_shell.html` (nur das Fragment fuer HTMX).
-   `hx_partial` wird vom View gesetzt (siehe `server_detail.py`). #}
 {% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
 
 {% block title %}{{ server.name }} · secscan{% endblock %}
 
 {% block detail_pane %}
-<div class="p-6">
 {% set is_active = not server.revoked_at and not server.retired_at %}
 {% set scan_stale = is_active
    and (not server.last_scan_at
@@ -37,170 +38,297 @@
 {% set db_stale = is_active
    and (not server.trivy_db_updated_at
         or server.trivy_db_updated_at | is_older_than_h(168)) %}
+{# Triage-Queue-Anzahl fuer den Eyebrow-Counter in der Findings-Sektion. #}
+{% if view_filter.mode == 'list' %}
+  {% set total_findings = findings | length %}
+{% elif view_filter.mode == 'group' %}
+  {% set total_findings = groups | sum(attribute='count_total') if groups else 0 %}
+{% else %}
+  {% set total_findings = (diff.new | length + diff.resolved | length) if diff else 0 %}
+{% endif %}
 
-<section class="space-y-6 max-w-5xl mx-auto">
-  <header class="card bg-base-200 shadow-sm">
-    <div class="card-body p-5 space-y-4">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0">
-          <h1 class="text-2xl font-semibold font-mono break-all">{{ server.name }}</h1>
-          {% if server.os_pretty_name or server.kernel_version or server.architecture %}
-            <p class="text-sm opacity-70 mt-1">
-              {% if server.os_pretty_name %}{{ server.os_pretty_name }}{% endif %}
-              {% if server.kernel_version %}
-                {% if server.os_pretty_name %} · {% endif %}{{ server.kernel_version }}
-              {% endif %}
-              {% if server.architecture %}
-                {% if server.os_pretty_name or server.kernel_version %} · {% endif %}{{ server.architecture }}
-              {% endif %}
-            </p>
-          {% endif %}
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          {# LLM-Bewertung anfordern. Backend (`POST /servers/<id>/chat`)
-             liefert JSON {conversation_id, stream_url} zurueck; wir
-             leiten daraufhin per JS auf die Chat-View weiter. Button
-             nur sichtbar wenn LLM ueberhaupt konfiguriert ist (siehe
-             Context-Processor `_inject_llm_configured`). #}
-          {% if llm_configured and is_active %}
-            <div x-data="{
-                  busy: false,
-                  async start() {
-                    if (this.busy) return;
-                    this.busy = true;
-                    try {
-                      const meta = document.querySelector('meta[name=&quot;csrf-token&quot;]');
-                      const csrf = meta ? meta.getAttribute('content') : '';
-                      {# `| forceescape`: tojson laesst `"` als Literal stehen,
-                         was hier den x-data-Attribut-Wert vorzeitig schliesst
-                         (siehe _macros.html · `quick_copy` fuer Kontext). #}
-                      const res = await fetch({{ url_for('llm_chat.start_conversation', server_id=server.id) | tojson | forceescape }}, {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: {
-                          'X-CSRFToken': csrf,
-                          'Accept': 'application/json'
-                        }
-                      });
-                      const data = await res.json();
-                      if (!res.ok) {
-                        const msg = (data && (data.message || data.error)) || ('Fehler ' + res.status);
-                        this.$dispatch('toast', {msg: msg, kind: 'error'});
-                        this.busy = false;
-                        return;
-                      }
-                      window.location.href = '/chat/' + data.conversation_id;
-                    } catch (e) {
-                      this.$dispatch('toast', {msg: 'Netzwerk-Fehler', kind: 'error'});
-                      this.busy = false;
-                    }
-                  }
-                 }"
-                 class="inline-block">
-              <button type="button"
-                      class="btn btn-primary btn-sm"
-                      @click="start()"
-                      :disabled="busy"
-                      title="LLM-Bewertung anfordern (oder zur aktiven Conversation springen)">
-                <span x-show="!busy">KI-Bewertung anfordern</span>
-                <span x-show="busy" class="flex items-center gap-2">
-                  <span class="loading loading-spinner loading-xs"></span>
-                  startet…
-                </span>
-              </button>
-            </div>
-          {% elif is_active %}
-            <a href="{{ url_for('llm_settings.show') }}"
-               class="btn btn-ghost btn-sm"
-               title="LLM-Provider ist noch nicht konfiguriert.">
-              KI-Bewertung (Provider fehlt)
-            </a>
-          {% endif %}
-          <a href="{{ url_for('dashboard.index') }}"
-             class="link link-hover text-sm">
-            zurueck zum Dashboard
-          </a>
-        </div>
-      </div>
-      {% if llm_configured and is_active %}
-        <p class="text-xs opacity-60 -mt-2">
-          Bewertungen sind Schaetzungen, nicht blind vertrauen.
-        </p>
-      {% endif %}
+<div class="px-6 py-6 max-w-[1600px] divide-y divide-base-content/10"
+     x-data="{ tagEditorOpen: false, trendRange: '50T' }">
 
-      {# Status-Badge-Reihe. Reihenfolge: schlimmster Marker zuerst. #}
-      <div class="flex flex-wrap gap-2">
+  {# =============== 1. Header =============== #}
+  <header class="flex items-start justify-between gap-4 flex-wrap pb-8">
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center gap-3 flex-wrap">
+        <h1 class="font-mono text-2xl lg:text-3xl font-semibold tracking-tight break-all">{{ server.name }}</h1>
+        {# Status-Pill-Reihe. Reihenfolge: schlimmster Marker zuerst. #}
         {% if server.revoked_at %}
-          <span class="badge badge-error"
+          <span class="badge badge-sm badge-error font-mono"
                 title="Widerrufen am {{ server.revoked_at.strftime('%Y-%m-%d %H:%M') }}">
             revoked
           </span>
         {% elif server.retired_at %}
-          <span class="badge badge-ghost"
+          <span class="badge badge-sm badge-ghost font-mono"
                 title="Stillgelegt am {{ server.retired_at.strftime('%Y-%m-%d %H:%M') }}">
             retired
           </span>
         {% else %}
-          <span class="badge badge-success">active</span>
+          <span class="badge badge-sm badge-success font-mono">active</span>
         {% endif %}
-
         {% if scan_stale %}
-          <span class="badge badge-warning"
+          <span class="badge badge-sm badge-warning font-mono"
                 title="Letzter Scan aelter als erwarteter Interval ({{ server.expected_scan_interval_h }}h).">
             stale
           </span>
         {% endif %}
         {% if db_stale %}
-          <span class="badge badge-warning"
+          <span class="badge badge-sm badge-warning font-mono"
                 title="Trivy-DB veraltet (Schwelle: 7 Tage).">
             db veraltet
           </span>
         {% endif %}
       </div>
-
-      {# Meta-Box: Scan- und DB-Zeitstempel + Scan-Interval. #}
-      <dl class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-        <div>
-          <dt class="opacity-60 text-xs uppercase tracking-wide">Letzter Scan</dt>
-          <dd>
-            {% if server.last_scan_at %}
-              <time datetime="{{ server.last_scan_at.isoformat() }}"
-                    title="{{ server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">
-                {{ server.last_scan_at | relative_time }}
-              </time>
-            {% else %}
-              <span class="opacity-60">noch nie</span>
-            {% endif %}
-          </dd>
+      <p class="font-mono text-xs opacity-60 mt-2">
+        {% if server.os_pretty_name %}{{ server.os_pretty_name }}{% endif %}
+        {% if server.kernel_version %}
+          {% if server.os_pretty_name %}<span class="opacity-30 mx-2">·</span>{% endif %}{{ server.kernel_version }}
+        {% endif %}
+        {% if server.architecture %}
+          {% if server.os_pretty_name or server.kernel_version %}<span class="opacity-30 mx-2">·</span>{% endif %}{{ server.architecture }}
+        {% endif %}
+        {% if server.last_scan_at %}
+          {% if server.os_pretty_name or server.kernel_version or server.architecture %}<span class="opacity-30 mx-2">·</span>{% endif %}
+          <span title="{{ server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">letzter scan {{ server.last_scan_at | relative_time }}</span>
+        {% endif %}
+      </p>
+      {% if server.tag_links %}
+      <p class="font-mono text-xs mt-2 flex flex-wrap gap-x-3 gap-y-1">
+        {# Tag-Color kommt aus dem Server-eigenen Tag-Modell (kein User-Input,
+           der die Color setzt — Color wird nur via Settings-UI gepflegt).
+           Inline-Style ist hier defensible: Tailwind kann beliebige Hex-Werte
+           nicht jitten, und wir vermeiden so eine Custom-CSS-Datei. #}
+        {% for link in server.tag_links %}
+          {% if link.tag %}
+          <a href="{{ url_for('dashboard.index') }}?tags={{ link.tag.name }}"
+             class="opacity-70 hover:opacity-100 transition-opacity"
+             style="color: {{ link.tag.color }}"
+             title="Dashboard nach #{{ link.tag.name }} filtern">#{{ link.tag.name }}</a>
+          {% endif %}
+        {% endfor %}
+      </p>
+      {% endif %}
+    </div>
+    <div class="flex flex-wrap items-center gap-2 shrink-0">
+      {% if llm_configured and is_active %}
+        <div x-data="{
+              busy: false,
+              async start() {
+                if (this.busy) return;
+                this.busy = true;
+                try {
+                  const meta = document.querySelector('meta[name=&quot;csrf-token&quot;]');
+                  const csrf = meta ? meta.getAttribute('content') : '';
+                  const res = await fetch({{ url_for('llm_chat.start_conversation', server_id=server.id) | tojson | forceescape }}, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                      'X-CSRFToken': csrf,
+                      'Accept': 'application/json'
+                    }
+                  });
+                  const data = await res.json();
+                  if (!res.ok) {
+                    const msg = (data && (data.message || data.error)) || ('Fehler ' + res.status);
+                    this.$dispatch('toast', {msg: msg, kind: 'error'});
+                    this.busy = false;
+                    return;
+                  }
+                  window.location.href = '/chat/' + data.conversation_id;
+                } catch (e) {
+                  this.$dispatch('toast', {msg: 'Netzwerk-Fehler', kind: 'error'});
+                  this.busy = false;
+                }
+              }
+             }"
+             class="inline-block">
+          <button type="button"
+                  class="btn btn-sm btn-primary gap-2"
+                  @click="start()"
+                  :disabled="busy"
+                  title="LLM-Bewertung anfordern (oder zur aktiven Conversation springen)">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            <span x-show="!busy">KI-Bewertung anfordern</span>
+            <span x-show="busy" class="flex items-center gap-2">
+              <span class="loading loading-spinner loading-xs"></span>
+              startet…
+            </span>
+          </button>
         </div>
-        <div>
-          <dt class="opacity-60 text-xs uppercase tracking-wide">Trivy-DB</dt>
-          <dd>
-            {% if server.trivy_db_updated_at %}
-              <time datetime="{{ server.trivy_db_updated_at.isoformat() }}"
-                    title="{{ server.trivy_db_updated_at.strftime('%Y-%m-%d %H:%M %Z') }}">
-                {{ server.trivy_db_updated_at | relative_time }}
-              </time>
-            {% else %}
-              <span class="opacity-60">unbekannt</span>
-            {% endif %}
-          </dd>
-        </div>
-        <div>
-          <dt class="opacity-60 text-xs uppercase tracking-wide">Scan-Interval</dt>
-          <dd>{{ server.expected_scan_interval_h }}h erwartet</dd>
-        </div>
-      </dl>
-
-      {# HTMX-Tag-Editor. Wird vom Endpoint als ganzes Fragment ersetzt. #}
-      <div>
-        <h2 class="text-xs uppercase tracking-wide opacity-60 mb-2">Tags</h2>
-        {% include "servers/_tag_editor.html" %}
-      </div>
+      {% elif is_active %}
+        <a href="{{ url_for('llm_settings.show') }}"
+           class="btn btn-sm btn-ghost"
+           title="LLM-Provider ist noch nicht konfiguriert.">
+          KI-Bewertung (Provider fehlt)
+        </a>
+      {% endif %}
     </div>
   </header>
 
-  {% include "servers/_findings_section.html" %}
-</section>
+  {# =============== 2. Tag-Editor (Akkordeon) =============== #}
+  <section class="py-4">
+    <button type="button"
+            class="flex items-center gap-2 text-xs uppercase tracking-[0.12em] font-mono opacity-65 hover:opacity-100 transition-opacity"
+            @click="tagEditorOpen = !tagEditorOpen"
+            :aria-expanded="tagEditorOpen ? 'true' : 'false'"
+            aria-controls="tag-editor-body">
+      <span x-text="tagEditorOpen ? '▾' : '▸'" class="text-xs"></span>
+      Tags verwalten
+      {% if server.tag_links %}
+        <span class="opacity-50 normal-case tracking-normal text-[11px]">· {{ server.tag_links | length }}</span>
+      {% endif %}
+    </button>
+    <div id="tag-editor-body" x-show="tagEditorOpen" x-cloak class="mt-3">
+      {% include "servers/_tag_editor.html" %}
+    </div>
+  </section>
+
+  {# =============== 3. HeaderStats =============== #}
+  <section class="py-8 flex items-end justify-between gap-8 flex-wrap">
+    <div class="min-w-0">
+      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Findings · offen · gesamt</div>
+      <div class="flex items-baseline gap-4 mt-3 flex-wrap min-w-0">
+        <div class="text-[64px] font-light leading-none tracking-tight" style="font-variant-numeric: tabular-nums;">
+          {{ quick_counts.total_open | default(0) }}
+        </div>
+        {% if tendency is defined and tendency is not none %}
+          <div class="font-mono text-sm opacity-60 lowercase">{{ tendency.label }}</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-3">
+      {% with label='KEV', value=quick_counts.kev_open | default(0), tone='error', sparkline=sparklines.kev | default([]), kev_indicator=true %}
+        {% include "servers/_kpi_card.html" %}
+      {% endwith %}
+      {% with label='Critical', value=quick_counts.critical_open | default(0), tone='error', sparkline=sparklines.critical | default([]), kev_indicator=false %}
+        {% include "servers/_kpi_card.html" %}
+      {% endwith %}
+      {% with label='High', value=quick_counts.high_open | default(0), tone='warning', sparkline=sparklines.high | default([]), kev_indicator=false %}
+        {% include "servers/_kpi_card.html" %}
+      {% endwith %}
+      {% with label='Medium', value=quick_counts.medium_open | default(0), tone='accent', sparkline=sparklines.medium | default([]), kev_indicator=false %}
+        {% include "servers/_kpi_card.html" %}
+      {% endwith %}
+    </div>
+  </section>
+
+  {# =============== 4. Lebenszeichen =============== #}
+  <section class="py-8 space-y-4">
+    <div class="flex items-end justify-between gap-3 flex-wrap">
+      <div>
+        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Lebenszeichen · 50 Tage</div>
+        <h3 class="font-mono text-base font-medium mt-1">Taegliche scans · max-severity pro Tag</h3>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 text-[10px] uppercase tracking-wider font-mono opacity-60">
+        <span><span class="inline-block w-2 h-2 rounded-sm bg-error align-[1px] mr-1.5"></span>crit</span>
+        <span><span class="inline-block w-2 h-2 rounded-sm bg-warning align-[1px] mr-1.5"></span>high</span>
+        <span><span class="inline-block w-2 h-2 rounded-sm bg-accent align-[1px] mr-1.5"></span>medium</span>
+        <span><span class="inline-block w-2 h-2 rounded-sm bg-info align-[1px] mr-1.5"></span>low</span>
+        <span><span class="inline-block w-2 h-2 rounded-sm bg-success/60 align-[1px] mr-1.5"></span>clean</span>
+        <span><span class="inline-block w-2 h-2 rounded-sm bg-base-content/20 align-[1px] mr-1.5"></span>kein scan</span>
+        <span><span class="inline-block w-2 h-2 rounded-full bg-error align-[1px] mr-1.5"></span>kev</span>
+      </div>
+    </div>
+    <div class="rounded-box bg-base-200/40 border border-base-300 px-5 py-6">
+      {% with cells=heartbeat_cells | default([]) %}
+        {% include "servers/_heartbeat_large.html" %}
+      {% endwith %}
+      <div class="flex justify-between mt-2 text-[10px] uppercase tracking-wider font-mono opacity-60">
+        <span>–{{ (heartbeat_cells | default([])) | length }}T</span><span>heute</span>
+      </div>
+    </div>
+    <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-2">
+      <div>
+        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Erwarteter Intervall</div>
+        <dd class="font-mono mt-1">{{ server.expected_scan_interval_h }} h</dd>
+      </div>
+      <div>
+        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Letzter Scan</div>
+        <dd class="font-mono mt-1">
+          {% if server.last_scan_at %}
+            <time datetime="{{ server.last_scan_at.isoformat() }}"
+                  title="{{ server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.last_scan_at | relative_time }}</time>
+          {% else %}<span class="opacity-60">noch nie</span>{% endif %}
+        </dd>
+      </div>
+      <div>
+        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Trivy-DB</div>
+        <dd class="font-mono mt-1">
+          {% if server.trivy_db_updated_at %}
+            <time datetime="{{ server.trivy_db_updated_at.isoformat() }}"
+                  title="{{ server.trivy_db_updated_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.trivy_db_updated_at | relative_time }}</time>
+          {% else %}<span class="opacity-60">unbekannt</span>{% endif %}
+        </dd>
+      </div>
+      <div>
+        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">KEV-Ereignisse · 50T</div>
+        <dd class="font-mono mt-1 {% if kev_events_50d and kev_events_50d > 0 %}text-error{% endif %}">{{ kev_events_50d | default(0) }}</dd>
+      </div>
+    </dl>
+  </section>
+
+  {# =============== 5. Severity-Trend =============== #}
+  <section class="py-8 space-y-3">
+    <div class="flex items-end justify-between gap-3 flex-wrap">
+      <div>
+        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Severity Trend · pro Tag</div>
+        <h3 class="font-mono text-base font-medium mt-1">
+          Verteilung der offenen Findings ueber
+          <span x-text="trendRange === '24h' ? '24 h' : trendRange.replace('T',' Tage')"></span>
+        </h3>
+      </div>
+      <div class="join" role="group" aria-label="Zeit-Range">
+        {% for range_value in ['24h', '7T', '30T', '50T'] %}
+          <button type="button"
+                  @click="trendRange = '{{ range_value }}'"
+                  :class="'join-item btn btn-xs ' + (trendRange === '{{ range_value }}' ? 'btn-active' : 'btn-ghost')"
+                  :aria-pressed="trendRange === '{{ range_value }}' ? 'true' : 'false'">
+            {{ range_value }}
+          </button>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="rounded-box bg-base-200/40 border border-base-300 px-5 py-6">
+      {# Server-side rendert immer das volle 50T-Slice — der Range-Toggle ist
+         eine pure Frontend-Visualisierung ueber das Alpine `trendRange`-State,
+         die per CSS `display: none` Bars ausserhalb des Slice ausblendet.
+         Fuer das MVP ist das ausreichend; eine vollwertige Re-Render-Logik
+         steht im Re-Open-Trigger der ADR. #}
+      {% with days_data=trend_data | default([]) %}
+        {% include "servers/_stacked_bar_chart.html" %}
+      {% endwith %}
+      <div class="flex justify-between mt-1 text-[10px] uppercase tracking-wider font-mono opacity-60">
+        <span x-text="trendRange === '24h' ? 'vor 24 h' : '–' + (({'24h':1,'7T':7,'30T':30,'50T':50})[trendRange] - 1) + 'T'"></span>
+        <span>heute</span>
+      </div>
+    </div>
+    {% if trend_data %}
+      {% set t_critical = trend_data | sum(attribute='critical') %}
+      {% set t_high = trend_data | sum(attribute='high') %}
+      {% set t_medium = trend_data | sum(attribute='medium') %}
+      {% set t_low = trend_data | sum(attribute='low') %}
+      {% set t_sum = t_critical + t_high + t_medium + t_low %}
+      <div class="flex items-center justify-between gap-3 flex-wrap text-xs pt-1">
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono">
+          <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-error align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">Critical</span><span class="font-semibold">{{ t_critical }}</span><span class="opacity-50 ml-1.5">{% if t_sum %}{{ '%.1f' | format(t_critical * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span></span>
+          <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-warning align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">High</span><span class="font-semibold">{{ t_high }}</span><span class="opacity-50 ml-1.5">{% if t_sum %}{{ '%.1f' | format(t_high * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span></span>
+          <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">Medium</span><span class="font-semibold">{{ t_medium }}</span><span class="opacity-50 ml-1.5">{% if t_sum %}{{ '%.1f' | format(t_medium * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span></span>
+          <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-info align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">Low</span><span class="font-semibold">{{ t_low }}</span><span class="opacity-50 ml-1.5">{% if t_sum %}{{ '%.1f' | format(t_low * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span></span>
+        </div>
+        <div class="opacity-40 font-mono text-[11px]">σ kumulativ · roh-totals nicht entdupliziert</div>
+      </div>
+    {% endif %}
+  </section>
+
+  {# =============== 6. Triage Queue (Findings) =============== #}
+  <section class="py-8">
+    {% include "servers/_findings_section.html" %}
+  </section>
+
 </div>
 {% endblock %}

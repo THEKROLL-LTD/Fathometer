@@ -1,0 +1,67 @@
+{# Grosser Heartbeat-Bar fuer die Detail-View (Block K, ADR-0018).
+
+   Variablen-Vertrag:
+     - `cells` : list[DailyStatus] (aus heartbeat_aggregation.py) — aelteste
+                 zuerst. Felder: `day`, `max_severity` (Severity|None),
+                 `kev_count` (int), `had_scan` (bool).
+
+   Unterschied zur Sidebar-Variante (`sidebar/_heartbeat_bar.html`):
+     - Inline-SVG statt vieler kleiner Spans (besser fuer 50 Cells mit Dots).
+     - Hoehe 56 px statt 20 px, breitere Cells, mehr Gap.
+     - KEV-Cells bekommen einen kleinen roten Dot oberhalb der Bar.
+     - viewBox `0 0 50 100`, preserveAspectRatio="none" — der Container
+       skaliert auf 100% Breite.
+
+   Severity-Farb-Mapping (gleich wie §7a Sidebar):
+     - critical -> #ef4444 (Tailwind error)
+     - high     -> #f59e0b (warning)
+     - medium   -> #14b8a6 (accent)
+     - low      -> #38bdf8 (info)
+     - None + had_scan  -> rgba(34,197,94,0.6) (clean / success-soft)
+     - None + !had_scan -> rgba(0,0,0,0.18)   (kein scan / leer)
+     - unknown          -> rgba(0,0,0,0.4)
+#}
+{%- set n = cells | length -%}
+<div class="w-full" style="height: 56px;">
+  <svg viewBox="0 0 50 100" preserveAspectRatio="none"
+       class="w-full h-full block"
+       role="img"
+       aria-label="Heartbeat letzte {{ n }} Tage">
+    {%- if n > 0 -%}
+      {%- set slot_w = 50.0 / n -%}
+      {%- set gap = slot_w * 0.32 -%}
+      {%- set bar_w = slot_w - gap -%}
+      {%- if bar_w < 0.1 -%}{% set bar_w = 0.1 %}{%- endif -%}
+      {%- for cell in cells -%}
+        {%- set sev = cell.max_severity.value if cell.max_severity else '' -%}
+        {%- if sev == 'critical' -%}{% set color = '#ef4444' %}{% set opacity = 1.0 -%}
+        {%- elif sev == 'high' -%}{% set color = '#f59e0b' %}{% set opacity = 1.0 -%}
+        {%- elif sev == 'medium' -%}{% set color = '#14b8a6' %}{% set opacity = 1.0 -%}
+        {%- elif sev == 'low' -%}{% set color = '#38bdf8' %}{% set opacity = 1.0 -%}
+        {%- elif sev == 'unknown' -%}{% set color = 'rgba(0,0,0,0.4)' %}{% set opacity = 1.0 -%}
+        {%- elif cell.had_scan -%}{% set color = 'rgba(34,197,94,0.6)' %}{% set opacity = 1.0 -%}
+        {%- else -%}{% set color = 'rgba(0,0,0,0.18)' %}{% set opacity = 0.5 -%}
+        {%- endif -%}
+        {%- set is_empty = (not sev and not cell.had_scan) -%}
+        {%- set x = loop.index0 * slot_w + gap / 2.0 -%}
+        {%- set y = 35 if is_empty else 8 -%}
+        {%- set h = 30 if is_empty else 84 -%}
+        <rect x="{{ '%.3f' | format(x) }}"
+              y="{{ y }}"
+              width="{{ '%.3f' | format(bar_w) }}"
+              height="{{ h }}"
+              rx="0.5" ry="0.5"
+              fill="{{ color }}"
+              {% if is_empty %}opacity="{{ opacity }}"{% endif %}>
+          <title>{{ cell.day.isoformat() }}{% if sev %} · max {{ sev }}{% endif %}{% if cell.kev_count %} · {{ cell.kev_count }} KEV{% endif %}{% if not cell.had_scan %} · kein scan{% endif %}</title>
+        </rect>
+        {%- if cell.kev_count and cell.kev_count > 0 -%}
+          {%- set cx = (loop.index0 + 0.5) * slot_w -%}
+          {%- set r = (slot_w * 0.4) -%}
+          {%- if r < 0.6 -%}{% set r = 0.6 %}{%- endif -%}
+        <circle cx="{{ '%.3f' | format(cx) }}" cy="3" r="{{ '%.3f' | format(r) }}" fill="#ef4444" />
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+  </svg>
+</div>

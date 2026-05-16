@@ -1,0 +1,77 @@
+{# Stacked-Bar-Chart fuer den Severity-Trend (Block K, ADR-0018).
+
+   Variablen-Vertrag:
+     - `days_data` : list[DailySeverityCount] — aelteste zuerst. Felder:
+                     `day`, `critical`, `high`, `medium`, `low`, `kev`.
+
+   Layout: SVG, viewBox 50x100, preserveAspectRatio="none" — der Container
+   skaliert auf 100% Breite/Hoehe. Pro Tag eine gestapelte Saeule
+   (critical -> high -> medium -> low, von unten nach oben). KEV-Tage
+   bekommen einen roten Dot oberhalb der Saeule.
+
+   Inline-SVG, keine Chart-Library — ADR-0001.
+#}
+{%- set n = days_data | length -%}
+<div class="w-full" style="height: 220px;">
+  <svg viewBox="0 0 50 100" preserveAspectRatio="none"
+       class="w-full h-full block"
+       role="img"
+       aria-label="Severity Trend ueber {{ n }} Tage">
+    {%- if n > 0 -%}
+      {%- set slot_w = 50.0 / n -%}
+      {%- set gap = slot_w * 0.2 -%}
+      {%- set bar_w = slot_w - gap -%}
+      {%- if bar_w < 0.1 -%}{% set bar_w = 0.1 %}{%- endif -%}
+      {# Maximum aller Tagessummen — gegen 1 geclampt damit /0 unmoeglich. #}
+      {%- set ns = namespace(vmax=1) -%}
+      {%- for d in days_data -%}
+        {%- set total = d.critical + d.high + d.medium + d.low -%}
+        {%- if total > ns.vmax -%}{% set ns.vmax = total %}{%- endif -%}
+      {%- endfor -%}
+      {%- set scale = (100.0 - 6.0) / ns.vmax -%}
+      {%- for d in days_data -%}
+        {%- set total = d.critical + d.high + d.medium + d.low -%}
+        {%- set x = loop.index0 * slot_w + gap / 2.0 -%}
+        {%- if total > 0 -%}
+          {# Stack von unten (y=98) nach oben: low -> medium -> high -> critical. #}
+          {%- set ystate = namespace(y=98.0) -%}
+          {%- if d.low and d.low > 0 -%}
+            {%- set hgt = d.low * scale -%}
+            {%- set ystate.y = ystate.y - hgt -%}
+            <rect x="{{ '%.3f' | format(x) }}" y="{{ '%.3f' | format(ystate.y) }}" width="{{ '%.3f' | format(bar_w) }}" height="{{ '%.3f' | format(hgt) }}" fill="#38bdf8" />
+          {%- endif -%}
+          {%- if d.medium and d.medium > 0 -%}
+            {%- set hgt = d.medium * scale -%}
+            {%- set ystate.y = ystate.y - hgt -%}
+            <rect x="{{ '%.3f' | format(x) }}" y="{{ '%.3f' | format(ystate.y) }}" width="{{ '%.3f' | format(bar_w) }}" height="{{ '%.3f' | format(hgt) }}" fill="#14b8a6" />
+          {%- endif -%}
+          {%- if d.high and d.high > 0 -%}
+            {%- set hgt = d.high * scale -%}
+            {%- set ystate.y = ystate.y - hgt -%}
+            <rect x="{{ '%.3f' | format(x) }}" y="{{ '%.3f' | format(ystate.y) }}" width="{{ '%.3f' | format(bar_w) }}" height="{{ '%.3f' | format(hgt) }}" fill="#f59e0b" />
+          {%- endif -%}
+          {%- if d.critical and d.critical > 0 -%}
+            {%- set hgt = d.critical * scale -%}
+            {%- set ystate.y = ystate.y - hgt -%}
+            <rect x="{{ '%.3f' | format(x) }}" y="{{ '%.3f' | format(ystate.y) }}" width="{{ '%.3f' | format(bar_w) }}" height="{{ '%.3f' | format(hgt) }}" fill="#ef4444" />
+          {%- endif -%}
+        {%- endif -%}
+        {%- if d.kev and d.kev > 0 -%}
+          {%- set cx = (loop.index0 + 0.5) * slot_w -%}
+          {%- set r = (slot_w * 0.45) -%}
+          {%- if r < 0.6 -%}{% set r = 0.6 %}{%- endif -%}
+          {# Dot oberhalb der hoechsten Stack-Position; bei leeren Tagen am Boden. #}
+          {%- if total > 0 -%}
+            {%- set cy_raw = ystate.y - r - 0.5 -%}
+            {%- set cy = cy_raw if cy_raw > (r + 1) else (r + 1) -%}
+          {%- else -%}
+            {%- set cy = r + 1 -%}
+          {%- endif -%}
+          <circle cx="{{ '%.3f' | format(cx) }}" cy="{{ '%.3f' | format(cy) }}" r="{{ '%.3f' | format(r) }}" fill="#ef4444">
+            <title>{{ d.day.isoformat() }} · {{ d.kev }} neue KEV</title>
+          </circle>
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+  </svg>
+</div>

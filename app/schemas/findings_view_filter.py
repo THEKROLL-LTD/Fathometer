@@ -28,11 +28,17 @@ log = structlog.get_logger(__name__)
 
 
 ViewMode = Literal["list", "group", "diff"]
+SortKey = Literal["cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"]
+SortDir = Literal["asc", "desc"]
 
 _VALID_MODES: frozenset[str] = frozenset({"list", "group", "diff"})
 _VALID_STATUS: frozenset[str] = frozenset({"open", "acknowledged", "resolved", "all"})
 _VALID_CLASS: frozenset[str] = frozenset({"os-pkgs", "lang-pkgs", "both"})
 _VALID_SEVERITIES: frozenset[str] = frozenset({"critical", "high", "medium", "low", "all"})
+_VALID_SORTS: frozenset[str] = frozenset(
+    {"cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"}
+)
+_VALID_DIRS: frozenset[str] = frozenset({"asc", "desc"})
 _BOOL_TRUE_TOKENS: frozenset[str] = frozenset({"1", "true", "on", "yes"})
 
 
@@ -47,6 +53,10 @@ class FindingsViewFilter(BaseModel):
     severity: Severity | None = None
     kev_only: bool = False
     search: str | None = None
+    # ADR-0018: sortierbare Spalten-Header in der Server-Detail-Tabelle.
+    # Default `sort=sev, dir=desc` entspricht §15 (high-severity oben).
+    sort: SortKey = "sev"
+    dir: SortDir = "desc"
 
     @field_validator("search", mode="before")
     @classmethod
@@ -84,6 +94,16 @@ class FindingsViewFilter(BaseModel):
         else:
             severity = Severity(sev_raw)
 
+        sort_raw = (args.get("sort") or "sev").strip().lower()
+        if sort_raw not in _VALID_SORTS:
+            log.debug("findings_filter.sort_rejected", value=sort_raw)
+            sort_raw = "sev"
+
+        dir_raw = (args.get("dir") or "desc").strip().lower()
+        if dir_raw not in _VALID_DIRS:
+            log.debug("findings_filter.dir_rejected", value=dir_raw)
+            dir_raw = "desc"
+
         return cls(
             mode=mode_raw,  # type: ignore[arg-type]
             status=status_raw,  # type: ignore[arg-type]
@@ -91,6 +111,8 @@ class FindingsViewFilter(BaseModel):
             severity=severity,
             kev_only=_parse_bool(args.get("kev_only")),
             search=args.get("q"),
+            sort=sort_raw,  # type: ignore[arg-type]
+            dir=dir_raw,  # type: ignore[arg-type]
         )
 
     def to_findings_filter(self) -> FindingsFilter:
@@ -122,6 +144,13 @@ class FindingsViewFilter(BaseModel):
             parts.append(("kev_only", "1"))
         if self.search:
             parts.append(("q", self.search))
+        # Sort/Dir immer mitgeben — Bookmarks sollen die explizite
+        # Sortierung beibehalten, auch wenn sie zufaellig dem Default
+        # entspricht. Macht URL kompakter ohne Wirkungsaenderung.
+        if self.sort != "sev":
+            parts.append(("sort", self.sort))
+        if self.dir != "desc":
+            parts.append(("dir", self.dir))
 
         if override:
             # Bestehende Keys ersetzen, sonst anhaengen.
@@ -146,4 +175,4 @@ def _parse_bool(value: str | None) -> bool:
     return value.strip().lower() in _BOOL_TRUE_TOKENS
 
 
-__all__ = ["FindingsViewFilter", "ViewMode"]
+__all__ = ["FindingsViewFilter", "SortDir", "SortKey", "ViewMode"]

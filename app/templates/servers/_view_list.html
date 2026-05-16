@@ -14,18 +14,22 @@
    Bei groesseren Listen waere ein zentraler Modal-Host effizienter, aber
    der State-Scope pro Row haelt den Code lokal und uebersichtlich.
 #}
-{% from "_macros.html" import quick_copy, severity_badge, kev_badge, epss_pill, cvss_pill, package_cell, status_badge %}
+{% from "_macros.html" import quick_copy, severity_badge, kev_badge, epss_pill, cvss_pill, package_cell, status_badge, sort_header %}
 
 {% if not findings %}
   <div class="card bg-base-200">
     <div class="card-body items-center text-center py-10">
       <p class="opacity-60">Keine Findings fuer diesen Filter.</p>
       <p class="text-xs opacity-50">
-        Probiere einen anderen Status oder setze die Filter zurueck.
+        Sort/Mode aendern oder einen anderen Server waehlen.
       </p>
     </div>
   </div>
 {% else %}
+{# Block K: Selection-State wird zusaetzlich an `window.__detailSelected`
+   gespiegelt, damit die Toolbar-Bulk-Ack-Buttons (in `_findings_section.html`)
+   ohne aufwendigen Alpine-Cross-Scope auf die aktuelle Auswahl zugreifen.
+   `x-effect` reicht — Alpine re-evaluiert bei jeder Aenderung. #}
 <div x-data="{
        selected: [],
        allIds() {
@@ -42,33 +46,32 @@
        get someSelected() {
          return this.selected.length > 0 && !this.allSelected;
        }
-     }">
-<div class="overflow-x-auto">
-  <table class="table table-zebra table-sm align-middle">
-    <thead class="text-xs uppercase tracking-wide">
+     }"
+     x-effect="window.__detailSelected = selected">
+<div class="overflow-x-auto rounded-box bg-base-200/40 border border-base-300">
+  <table class="table table-sm align-middle w-full">
+    <thead class="border-b border-base-300">
       <tr>
-        {# Checkbox-Spalte fuer Bulk-Auswahl (Block F).
-           Header-Checkbox toggled alle in der aktuell gerenderten Liste.
-           `indeterminate` zeigt Teil-Auswahl an. #}
-        <th class="w-8">
+        {# Checkbox-Spalte fuer Bulk-Auswahl (Block F + K). #}
+        <th class="w-10 pr-0">
           <input type="checkbox"
-                 class="checkbox checkbox-xs"
+                 class="checkbox checkbox-sm"
                  aria-label="Alle in dieser Liste auswaehlen"
                  :checked="allSelected"
                  :indeterminate.prop="someSelected"
                  @change="toggleAll($event.target.checked)"
                  data-test="bulk-select-all">
         </th>
-        <th class="w-24">Severity</th>
-        <th class="w-44">CVE</th>
-        <th>Paket</th>
-        <th class="w-40">installiert</th>
-        <th class="w-20">KEV</th>
-        <th class="w-20">EPSS</th>
-        <th class="w-16">CVSS</th>
-        <th class="w-28">Status</th>
-        <th class="w-28">Seit</th>
-        <th class="w-32 text-right">Aktion</th>
+        {{ sort_header('cve', 'CVE / Titel', view_filter.sort, view_filter.dir, server.id, view_filter=view_filter) }}
+        {{ sort_header('pkg', 'Paket', view_filter.sort, view_filter.dir, server.id, view_filter=view_filter) }}
+        {{ sort_header('epss', 'EPSS', view_filter.sort, view_filter.dir, server.id, view_filter=view_filter) }}
+        {{ sort_header('cvss', 'CVSS', view_filter.sort, view_filter.dir, server.id, view_filter=view_filter) }}
+        {{ sort_header('sev', 'Severity', view_filter.sort, view_filter.dir, server.id, view_filter=view_filter) }}
+        {{ sort_header('status', 'Status', view_filter.sort, view_filter.dir, server.id, view_filter=view_filter) }}
+        {{ sort_header('first_seen', 'Erstmals', view_filter.sort, view_filter.dir, server.id, view_filter=view_filter) }}
+        <th class="w-32 text-right">
+          <span class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Aktion</span>
+        </th>
       </tr>
     </thead>
     <tbody>
@@ -76,9 +79,14 @@
       <tr class="hover {% if f.is_kev %}bg-error/5{% endif %}"
           :class="{ 'bg-primary/10': selected.includes({{ f.id }}) }"
           x-data="{ ackOpen: false, reopenOpen: false, detailOpen: false }">
-        <td>
+        {# Block K: Spaltenreihenfolge gemaess ADR-0018:
+           Checkbox · CVE · Paket · EPSS · CVSS · Severity · Status · Erstmals · Aktion.
+           KEV-Spalte entfaellt — der KEV-Indikator lebt jetzt als Inline-
+           Badge neben der CVE-ID. `installed_version` rutscht in die CVE-
+           Zelle als Sub-Zeile. #}
+        <td class="pr-0" @click.stop>
           <input type="checkbox"
-                 class="checkbox checkbox-xs"
+                 class="checkbox checkbox-sm"
                  data-bulk-id="true"
                  value="{{ f.id }}"
                  aria-label="Finding {{ f.identifier_key }} fuer Bulk auswaehlen"
@@ -87,21 +95,26 @@
                                      ? [...selected, {{ f.id }}]
                                      : selected.filter(id => id !== {{ f.id }})">
         </td>
-        <td>{{ severity_badge(f.severity) }}</td>
 
         <td>
-          <div class="flex items-center gap-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap min-w-0">
             <button type="button"
-                    class="link link-hover font-mono text-left"
+                    class="link link-hover font-mono text-xs font-semibold text-left"
                     @click="detailOpen = true"
                     aria-label="Details fuer {{ f.identifier_key }}">
               {{ f.identifier_key }}
             </button>
+            {{ kev_badge(f.is_kev, size='xs') }}
             {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
           </div>
           {% if f.title %}
-            <div class="text-xs opacity-70 truncate max-w-[28ch]" title="{{ f.title }}">
+            <div class="text-xs opacity-60 truncate max-w-[44ch] mt-0.5" title="{{ f.title }}">
               {{ f.title }}
+            </div>
+          {% endif %}
+          {% if f.installed_version %}
+            <div class="font-mono text-[10px] opacity-50 mt-0.5">
+              {{ f.installed_version }}{% if f.fixed_version %} → <span class="text-success">{{ f.fixed_version }}</span>{% endif %}
             </div>
           {% endif %}
         </td>
@@ -113,23 +126,9 @@
           </div>
         </td>
 
-        <td class="font-mono text-xs">
-          {% if f.installed_version %}
-            <div title="{{ f.installed_version }}" class="truncate max-w-[20ch]">
-              {{ f.installed_version }}
-            </div>
-          {% else %}<span class="opacity-40">–</span>{% endif %}
-          {% if f.fixed_version %}
-            <div class="text-success opacity-80 truncate max-w-[20ch]"
-                 title="Fix verfuegbar: {{ f.fixed_version }}">
-              → {{ f.fixed_version }}
-            </div>
-          {% endif %}
-        </td>
-
-        <td>{{ kev_badge(f.is_kev) }}</td>
         <td>{{ epss_pill(f.epss_score) }}</td>
         <td>{{ cvss_pill(f.cvss_v3_score) }}</td>
+        <td>{{ severity_badge(f.severity) }}</td>
         <td>{{ status_badge(f.status) }}</td>
 
         <td class="text-xs">
