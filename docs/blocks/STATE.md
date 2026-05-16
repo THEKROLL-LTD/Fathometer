@@ -20,7 +20,19 @@ sowie das leere `_pane/`-Verzeichnis entfernt.
 
 ## Aktueller Block
 
-(keiner — Block J abgeschlossen 2026-05-16, nächster Block per User-Entscheidung)
+**Block K — Server-Detail-Redesign (ADR-0018, Spec-Stand v3 vom 2026-05-16)** · Plan: [K-server-detail-visual.md](K-server-detail-visual.md) · Mockup: [K-mockup-prototype.html](K-mockup-prototype.html) · Branch: noch nicht erstellt · Status: **Spec + Visual-Mockup finalisiert, wartet auf User-Freigabe vor Implementierung**.
+
+Größerer Block als zunächst skizziert — der dritte Design-Wurf (`S5lepfeL8MeibyHP1ojRbw`) bringt neue Backend-Datenpfade plus vollständigen Layout-Refactor. Geplanter Umfang:
+
+- **Header:** Hostname `text-2xl lg:text-3xl font-mono`, Hashtag-Tags (`#name` mit Tag-Color statt Pills), OS-Zeile mit inline „letzter scan vor X h", Status-Pill-Reihe (active + stale + db veraltet bei Bedarf), KI-Bewertung-Button als Primary rechts.
+- **HeaderStats:** Großer Total-Findings-Counter (`text-[64px]`) + Tendenz-Label („über 50 tage stabil / steigend / fallend") links; vier KPI-Kacheln mit 50-Tage-Sparklines rechts (KEV/Critical/High/Medium).
+- **Lebenszeichen-Sektion:** Größere Heartbeat-Bar als eigene Sektion + 4-Spalten-Meta-Grid (Erwarteter Intervall · Letzter Scan · Trivy-DB-Alter · KEV-Ereignisse · 50T).
+- **Severity-Trend-Sektion:** Stacked-Bar-Chart über 50 Tage mit Range-Toggle (24h/7T/30T/50T), Legende mit Counts und Prozenten.
+- **FindingsTable-Refactor:** Filter-Bar entfällt komplett; sortierbare Spalten-Header (server-side via `?sort=cvss&dir=desc`); Mode-Toggle (flach/gruppiert/diff) in der Toolbar; Bulk-Select-Checkboxes; „auswahl ack"-Button öffnet Confirm-Modal mit optionalem Kommentar; CSV-Button mode-abhängig (flach/gruppiert/diff).
+- **Neue Backend-Services:** `compute_tendency()` (avg-7T vs avg-50T mit ±5% Threshold), `severity_snapshots_for_server()` (on-the-fly Daily-OPEN-Snapshots aus Finding-Lifecycle), `daily_severity_counts_for_server()`, `count_kev_events_50d()`.
+- **Schema-Erweiterung:** `FindingsViewFilter` um `sort` und `dir` (Whitelist-Enums).
+
+**Out of Scope:** 1J-Range-Toggle (Re-Open-Trigger), Suche-Input in Server-Detail (globale `/search` bleibt), Klasse-Toggle (OS/Lang), persistente `finding_severity_daily`-Tabelle (alles on-the-fly).
 
 ## Completed
 

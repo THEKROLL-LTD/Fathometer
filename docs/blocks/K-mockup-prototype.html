@@ -1,0 +1,735 @@
+<!doctype html>
+<!--
+  secscan — UI-Mockup für Block-K (Server-Detail-Redesign, ADR-0018, Stand 2026-05-16)
+
+  Zweck: visueller Soll-Stand für die Block-K-Implementierung. Der Implementer
+  baut Jinja-Templates daneben und vergleicht das Resultat Pixel-für-Pixel
+  gegen dieses Mockup. KEIN funktionales Backend; alle Daten sind Beispiel-
+  Daten, eingebettet in das Alpine-State unten.
+
+  Stack-Konsistenz: Tailwind 3.4.16, DaisyUI 4.12.14, Alpine.js 3.14.7 —
+  identisch zu app/templates/base_app.html. Charts sind Inline-SVG mit
+  handgerechneten Koordinaten (kein Chart.js, kein Node-Build — ADR-0001).
+
+  Sektionen (von oben nach unten, gleicher Aufbau wie in ADR-0018 §Entscheidung):
+    1. Header — Hostname + Status-Pills + OS-Zeile mit inline Letzter-Scan +
+       Hashtag-Tags + KI-Bewertung-Button.
+    2. HeaderStats — Total-Findings (text-[64px]) + Tendenz-Label + vier
+       KPI-Kacheln mit 50-Tage-Sparklines (KEV/Critical/High/Medium).
+    3. Lebenszeichen — Eyebrow + HeartbeatLarge (height ~56) + 4-Spalten-
+       Meta-Grid (Erwarteter Intervall · Letzter Scan · Trivy-DB · KEV-50T).
+    4. Severity-Trend — Stacked-Bar-Chart 50 Tage + Range-Toggle (24h/7T/30T/50T)
+       + Legende mit Counts und Prozenten.
+    5. Triage Queue (Findings) — Eyebrow + Title + Toolbar (Mode-Segment ·
+       auswahl ack · csv exportieren) + sortierbare Tabelle mit Bulk-Select.
+
+  Demo-Server: edge-02.fra.example.net (aus dem Screenshot des User).
+  Counts: KEV 2 · Critical 3 · High 11 · Medium 22 · Low 8 · Unknown 0 → 44 offen.
+  Tendency: STABLE → "über 50 tage stabil".
+
+  Was das Mockup NICHT abdeckt (siehe ADR-0018 §Out of Scope):
+    - 1J-Range im Toggle (nur 24h/7T/30T/50T).
+    - Suche-Input in der Findings-Toolbar.
+    - Klasse-Toggle OS+Lang/nur OS/nur Lang.
+-->
+<html lang="de" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>secscan — Mockup Block-K Server-Detail</title>
+
+  <script src="https://cdn.tailwindcss.com/3.4.16?plugins=forms,typography"></script>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" />
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.7/dist/cdn.min.js"></script>
+
+  <style>
+    /* Heartbeat-Legenden-Dot (Block-I-konsistent). */
+    .dot { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 0.125rem; vertical-align: 1px; margin-right: 0.375rem; }
+    .dot-round { border-radius: 9999px; }
+    /* Eyebrow-Label im ganzen Mockup. */
+    .eyebrow { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.65; font-family: ui-monospace, monospace; }
+    /* SVG-Layer ohne reflow bei Resize. !important, damit Tailwind-Preflight
+       die intrinsic SVG-Width nicht zurueck auf `auto` zwingt. */
+    .chart-svg { width: 100% !important; display: block; height: 100%; }
+    .chart-wrap { position: relative; width: 100%; }
+  </style>
+</head>
+<body class="bg-base-100 text-base-content antialiased text-sm h-screen flex flex-col overflow-hidden">
+
+  <!-- ===== Topbar (vereinfacht, nur Visual-Anker) ============================ -->
+  <header class="h-14 shrink-0 border-b border-base-300 px-4 flex items-center gap-3 bg-base-200">
+    <a href="#" class="flex items-center gap-2 font-semibold tracking-tight">
+      <span class="inline-block w-6 h-6 rounded bg-primary text-primary-content text-center text-sm leading-6 font-bold" aria-hidden="true">s</span>
+      <span class="hidden sm:inline">secscan</span>
+    </a>
+    <nav class="flex items-center gap-1 ml-4">
+      <a class="btn btn-ghost btn-sm" href="#">Dashboard</a>
+      <a class="btn btn-ghost btn-sm" href="#">Suche</a>
+    </nav>
+    <div class="ml-auto flex items-center gap-2">
+      <button class="btn btn-ghost btn-sm btn-circle" aria-label="Theme umschalten">
+        <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      </button>
+      <div class="avatar placeholder">
+        <div class="bg-base-300 text-base-content rounded-full w-8">
+          <span class="text-xs font-semibold">A</span>
+        </div>
+      </div>
+      <span class="text-sm font-medium">admin</span>
+    </div>
+  </header>
+
+  <!-- ===== Main-Container: Sidebar + Detail ================================== -->
+  <div class="flex flex-1 overflow-hidden min-h-0">
+
+    <!-- ---- Sidebar (vereinfacht) ---- -->
+    <aside class="w-80 lg:w-96 shrink-0 border-r border-base-300 bg-base-200 overflow-y-auto flex flex-col" aria-label="Sidebar">
+      <div class="px-3 pt-3 pb-2 shrink-0">
+        <input type="search" class="input input-sm input-bordered w-full font-mono" placeholder="Server filtern…  ( / )" />
+      </div>
+      <ul class="divide-y divide-base-300 flex-1" role="list">
+        <li class="px-3 py-3 hover:bg-base-300 cursor-pointer">
+          <div class="flex items-center gap-2 text-sm font-mono">
+            <span class="inline-block w-2 h-2 rounded-full bg-success"></span>
+            <span class="truncate">api-01.p…</span>
+          </div>
+          <div class="text-[10px] opacity-60 font-mono mt-0.5 ml-4">prod · eu-w…</div>
+        </li>
+        <li class="px-3 py-3 bg-primary/10 border-l-2 border-primary cursor-pointer">
+          <div class="flex items-center gap-2 text-sm font-mono font-semibold">
+            <span class="inline-block w-2 h-2 rounded-full bg-success"></span>
+            <span class="truncate">edge-02.fra.example.net</span>
+          </div>
+          <div class="text-[10px] opacity-60 font-mono mt-0.5 ml-4">prod · kubernetes</div>
+        </li>
+        <li class="px-3 py-3 hover:bg-base-300 cursor-pointer">
+          <div class="flex items-center gap-2 text-sm font-mono">
+            <span class="inline-block w-2 h-2 rounded-full bg-success"></span>
+            <span class="truncate">db-master.eu…</span>
+          </div>
+          <div class="text-[10px] opacity-60 font-mono mt-0.5 ml-4">prod · postgres-16</div>
+        </li>
+        <li class="px-3 py-3 hover:bg-base-300 cursor-pointer">
+          <div class="flex items-center gap-2 text-sm font-mono">
+            <span class="inline-block w-2 h-2 rounded-full bg-success"></span>
+            <span class="truncate">monitor.lhr…</span>
+          </div>
+          <div class="text-[10px] opacity-60 font-mono mt-0.5 ml-4">staging</div>
+        </li>
+      </ul>
+    </aside>
+
+    <!-- ---- Detail-Pane: Server-Detail-Hauptansicht ---- -->
+    <main class="flex-1 min-w-0 overflow-y-auto" role="main"
+          x-data="serverDetail()">
+
+      <div class="px-6 py-6 max-w-[1600px] divide-y divide-base-300">
+
+        <!-- =============== 1. Header =============================== -->
+        <header class="flex items-start justify-between gap-4 flex-wrap pb-8">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-3 flex-wrap">
+              <h1 class="font-mono text-2xl lg:text-3xl font-semibold tracking-tight truncate">
+                edge-02.fra.example.net
+              </h1>
+              <span class="badge badge-sm badge-success font-mono">active</span>
+              <span class="badge badge-sm badge-warning font-mono" title="Trivy-DB veraltet (Schwelle: 7 Tage).">db veraltet</span>
+            </div>
+            <p class="font-mono text-xs opacity-60 mt-2">
+              Ubuntu 22.04 LTS
+              <span class="opacity-30 mx-2">·</span>5.15.0-118
+              <span class="opacity-30 mx-2">·</span>aarch64
+              <span class="opacity-30 mx-2">·</span>letzter scan vor 4 h
+            </p>
+            <p class="font-mono text-xs mt-2 flex flex-wrap gap-x-3 gap-y-1">
+              <a class="opacity-70 hover:opacity-100 transition-opacity" style="color: #d97706">#prod</a>
+              <a class="opacity-70 hover:opacity-100 transition-opacity" style="color: #9333ea">#kubernetes</a>
+              <a class="opacity-70 hover:opacity-100 transition-opacity" style="color: #16a34a">#dmz</a>
+            </p>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary gap-2 shrink-0">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            KI-Bewertung anfordern
+          </button>
+        </header>
+
+        <!-- =============== 2. HeaderStats (Total + Tendenz + 4 KPI-Karten) === -->
+        <section class="py-8 flex items-end justify-between gap-8 flex-wrap">
+          <!-- Links: Total + Tendenz -->
+          <div class="min-w-0">
+            <div class="eyebrow">Findings · offen · gesamt</div>
+            <div class="flex items-baseline gap-4 mt-3 flex-wrap min-w-0">
+              <div class="text-[64px] font-light leading-none tracking-tight" style="font-variant-numeric: tabular-nums;">44</div>
+              <div class="font-mono text-sm opacity-60 lowercase">über 50 tage stabil</div>
+            </div>
+          </div>
+
+          <!-- Rechts: 4 KPI-Karten mit Sparklines -->
+          <div class="flex flex-wrap gap-3">
+            <!-- KEV -->
+            <template x-data="{ tone:'error', label:'KEV', value:2, indicatorPulse:true, spark:sparklines.kev }"></template>
+            <div class="rounded-box bg-base-200 border border-base-300 px-4 pt-3 pb-2 flex flex-col gap-1.5 w-[180px] min-w-0">
+              <div class="flex items-center justify-between">
+                <div class="eyebrow">KEV</div>
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-error animate-pulse" aria-hidden="true"></span>
+              </div>
+              <div class="font-mono text-2xl leading-none font-semibold text-error" style="font-variant-numeric: tabular-nums;">2</div>
+              <div class="chart-wrap" style="height: 22px;">
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="chart-svg" role="img" aria-label="KEV Verlauf 50 Tage"
+                     x-html="renderSparkline(sparklines.kev, '#ef4444')"></svg>
+              </div>
+            </div>
+            <!-- Critical -->
+            <div class="rounded-box bg-base-200 border border-base-300 px-4 pt-3 pb-2 flex flex-col gap-1.5 w-[180px] min-w-0">
+              <div class="flex items-center justify-between">
+                <div class="eyebrow">Critical</div>
+              </div>
+              <div class="font-mono text-2xl leading-none font-semibold text-error" style="font-variant-numeric: tabular-nums;">3</div>
+              <div class="chart-wrap" style="height: 22px;">
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="chart-svg" role="img" aria-label="Critical Verlauf 50 Tage"
+                     x-html="renderSparkline(sparklines.critical, '#ef4444')"></svg>
+              </div>
+            </div>
+            <!-- High -->
+            <div class="rounded-box bg-base-200 border border-base-300 px-4 pt-3 pb-2 flex flex-col gap-1.5 w-[180px] min-w-0">
+              <div class="flex items-center justify-between">
+                <div class="eyebrow">High</div>
+              </div>
+              <div class="font-mono text-2xl leading-none font-semibold text-warning" style="font-variant-numeric: tabular-nums;">11</div>
+              <div class="chart-wrap" style="height: 22px;">
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="chart-svg" role="img" aria-label="High Verlauf 50 Tage"
+                     x-html="renderSparkline(sparklines.high, '#f59e0b')"></svg>
+              </div>
+            </div>
+            <!-- Medium -->
+            <div class="rounded-box bg-base-200 border border-base-300 px-4 pt-3 pb-2 flex flex-col gap-1.5 w-[180px] min-w-0">
+              <div class="flex items-center justify-between">
+                <div class="eyebrow">Medium</div>
+              </div>
+              <div class="font-mono text-2xl leading-none font-semibold text-accent" style="font-variant-numeric: tabular-nums;">22</div>
+              <div class="chart-wrap" style="height: 22px;">
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="chart-svg" role="img" aria-label="Medium Verlauf 50 Tage"
+                     x-html="renderSparkline(sparklines.medium, '#14b8a6')"></svg>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- =============== 3. Lebenszeichen ===================== -->
+        <section class="py-8 space-y-4">
+          <div class="flex items-end justify-between gap-3 flex-wrap">
+            <div>
+              <div class="eyebrow">Lebenszeichen · 50 Tage</div>
+              <h3 class="font-mono text-base font-medium mt-1">Tägliche scans · max-severity pro Tag</h3>
+            </div>
+            <div class="flex flex-wrap items-center gap-3 text-[10px] uppercase tracking-wider font-mono opacity-60">
+              <span><span class="dot bg-error"></span>crit</span>
+              <span><span class="dot bg-warning"></span>high</span>
+              <span><span class="dot bg-accent"></span>medium</span>
+              <span><span class="dot bg-info"></span>low</span>
+              <span><span class="dot bg-success/60"></span>clean</span>
+              <span><span class="dot bg-base-content/20"></span>kein scan</span>
+              <span><span class="dot dot-round bg-error"></span>kev</span>
+            </div>
+          </div>
+          <div class="rounded-box bg-base-200 border border-base-300 px-5 py-6">
+            <div class="chart-wrap" style="height: 56px;">
+              <svg viewBox="0 0 50 100" preserveAspectRatio="none" class="chart-svg" role="img" aria-label="Heartbeat 50 Tage"
+                   x-html="renderHeartbeatLarge(heartbeat)"></svg>
+            </div>
+            <div class="flex justify-between mt-2 text-[10px] uppercase tracking-wider font-mono opacity-60">
+              <span>–50T</span><span>heute</span>
+            </div>
+          </div>
+          <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-2">
+            <div>
+              <div class="eyebrow">Erwarteter Intervall</div>
+              <dd class="font-mono mt-1">24 h</dd>
+            </div>
+            <div>
+              <div class="eyebrow">Letzter Scan</div>
+              <dd class="font-mono mt-1">vor 4 h</dd>
+            </div>
+            <div>
+              <div class="eyebrow">Trivy-DB</div>
+              <dd class="font-mono mt-1">vor 2 d</dd>
+            </div>
+            <div>
+              <div class="eyebrow">KEV-Ereignisse · 50T</div>
+              <dd class="font-mono mt-1 text-error">4</dd>
+            </div>
+          </dl>
+        </section>
+
+        <!-- =============== 4. Severity Trend ===================== -->
+        <section class="py-8 space-y-3">
+          <div class="flex items-end justify-between gap-3 flex-wrap">
+            <div>
+              <div class="eyebrow">Severity Trend · pro Tag</div>
+              <h3 class="font-mono text-base font-medium mt-1">
+                Verteilung der offenen Findings über
+                <span x-text="range === '24h' ? '24 h' : (range.replace('T',' Tage'))"></span>
+              </h3>
+            </div>
+            <div class="join">
+              <template x-for="r in ['24h','7T','30T','50T']" :key="r">
+                <button type="button"
+                        @click="range = r"
+                        :class="'join-item btn btn-xs ' + (range === r ? 'btn-active' : 'btn-ghost')"
+                        x-text="r"></button>
+              </template>
+            </div>
+          </div>
+          <div class="rounded-box bg-base-200 border border-base-300 px-5 py-6">
+            <div class="chart-wrap" style="height: 220px;">
+              <svg viewBox="0 0 50 100" preserveAspectRatio="none" class="chart-svg" role="img" aria-label="Stacked severity trend"
+                   x-html="renderStackedBars(trendSlice)"></svg>
+            </div>
+            <div class="flex justify-between mt-1 text-[10px] uppercase tracking-wider font-mono opacity-60">
+              <span x-text="range === '24h' ? 'vor 24 h' : `–${rangeDays(range) - 1}T`"></span>
+              <span x-text="`${Math.floor(rangeDays(range)/2)}T`"></span>
+              <span>heute</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between gap-3 flex-wrap text-xs pt-1">
+            <div class="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono">
+              <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-error align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">Critical</span><span class="font-semibold" x-text="totals.critical.toLocaleString('de-DE')"></span><span class="opacity-50 ml-1.5" x-text="pct(totals.critical)"></span></span>
+              <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-warning align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">High</span><span class="font-semibold" x-text="totals.high.toLocaleString('de-DE')"></span><span class="opacity-50 ml-1.5" x-text="pct(totals.high)"></span></span>
+              <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">Medium</span><span class="font-semibold" x-text="totals.medium.toLocaleString('de-DE')"></span><span class="opacity-50 ml-1.5" x-text="pct(totals.medium)"></span></span>
+              <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-info align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">Low</span><span class="font-semibold" x-text="totals.low.toLocaleString('de-DE')"></span><span class="opacity-50 ml-1.5" x-text="pct(totals.low)"></span></span>
+            </div>
+            <div class="opacity-40 font-mono text-[11px]">σ kumulativ über <span x-text="rangeDays(range)"></span>T · roh-totals nicht entdupliziert</div>
+          </div>
+        </section>
+
+        <!-- =============== 5. Triage Queue (Findings) =============== -->
+        <section class="py-8 space-y-3">
+          <div class="flex items-end justify-between gap-3 flex-wrap">
+            <div>
+              <div class="eyebrow">Triage Queue · <span x-text="findings.length"></span> Findings</div>
+              <h3 class="font-mono text-base font-medium mt-1">Findings</h3>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <!-- Mode-Segment -->
+              <div class="join">
+                <template x-for="m in ['flach','gruppiert','diff']" :key="m">
+                  <button type="button"
+                          @click="mode = m"
+                          :class="'join-item btn btn-xs ' + (mode === m ? 'btn-active' : 'btn-ghost')"
+                          :aria-pressed="mode === m"
+                          x-text="m"></button>
+                </template>
+              </div>
+              <button type="button"
+                      class="btn btn-xs btn-ghost gap-1"
+                      :disabled="selected.size === 0"
+                      :title="selected.size === 0 ? 'Erst Findings auswählen' : ''"
+                      @click="bulkModalOpen = true">
+                auswahl ack
+                <span x-show="selected.size > 0" class="font-mono opacity-70" x-text="'·' + selected.size"></span>
+              </button>
+              <button type="button" class="btn btn-xs btn-ghost gap-1.5">
+                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+                </svg>
+                csv exportieren
+              </button>
+            </div>
+          </div>
+
+          <!-- Diff-Mode-Placeholder -->
+          <div x-show="mode === 'diff'" class="rounded-box bg-base-200 border border-base-300 px-5 py-12 text-center">
+            <p class="font-mono text-sm opacity-70">Diff zwischen den letzten zwei Scans</p>
+            <p class="font-mono text-xs opacity-60 mt-2">7 neue · 2 resolved seit dem vorherigen Scan-Run.</p>
+          </div>
+
+          <!-- Tabelle (flach + gruppiert) -->
+          <div x-show="mode !== 'diff'" class="overflow-x-auto rounded-box bg-base-200 border border-base-300">
+            <table class="table table-sm align-middle w-full">
+              <thead class="border-b border-base-300">
+                <tr>
+                  <th class="w-10 pr-0">
+                    <input type="checkbox" class="checkbox checkbox-sm"
+                           :checked="allChecked()" @change="toggleAll()" aria-label="Alle auswählen" />
+                  </th>
+                  <template x-for="col in columns" :key="col.id">
+                    <th scope="col"
+                        @click="toggleSort(col.id)"
+                        :aria-sort="sortKey === col.id ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+                        :class="'select-none cursor-pointer group ' + (col.cls || '')">
+                      <span class="inline-flex items-center gap-1">
+                        <span class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-60 group-hover:opacity-100 transition-opacity" x-text="col.label"></span>
+                        <span :class="'text-[10px] font-mono ' + (sortKey === col.id ? 'opacity-70' : 'opacity-25')"
+                              x-text="sortKey === col.id ? (sortDir === 'asc' ? '↑' : '↓') : '↕'"></span>
+                      </span>
+                    </th>
+                  </template>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- flach -->
+                <template x-if="mode === 'flach'">
+                  <template x-for="f in sortedFindings" :key="f.id">
+                    <tr :class="'hover cursor-pointer transition-colors ' + (f.isKev ? 'bg-error/5 ' : '')">
+                      <td class="pr-0" @click.stop>
+                        <input type="checkbox" class="checkbox checkbox-sm"
+                               :checked="selected.has(f.id)" @change="toggleSelect(f.id)"
+                               :aria-label="'Auswählen: ' + f.cveId" />
+                      </td>
+                      <td>
+                        <div class="flex items-center gap-2 flex-wrap min-w-0">
+                          <span class="font-mono text-xs font-semibold" x-text="f.cveId"></span>
+                          <span x-show="f.isKev" class="badge badge-xs badge-error ring-1 ring-error/40 font-semibold">KEV 1</span>
+                        </div>
+                        <div x-show="f.title" class="text-xs opacity-60 truncate max-w-[44ch] mt-0.5" x-text="f.title"></div>
+                      </td>
+                      <td>
+                        <div class="flex flex-col leading-tight min-w-0 max-w-[28ch]">
+                          <div class="flex items-baseline gap-2 min-w-0">
+                            <span class="font-mono font-semibold truncate" x-text="f.pkg"></span>
+                            <span x-show="f.pkgPath" class="font-mono text-xs opacity-50 truncate" x-text="'@' + (f.pkgPath || '')"></span>
+                          </div>
+                          <span class="font-mono text-[10px] uppercase tracking-wider opacity-60 mt-0.5" x-text="f.pkgPath ? 'lang-pkgs' : 'os-pkgs'"></span>
+                        </div>
+                      </td>
+                      <td>
+                        <span class="font-mono text-xs opacity-50 mr-1">EPSS</span>
+                        <span :class="'font-mono text-xs font-semibold ' + epssTone(f.epss)" x-text="f.epss != null ? Math.round(f.epss*100) + '%' : '—'"></span>
+                      </td>
+                      <td>
+                        <span class="font-mono text-xs opacity-50 mr-1">CVSS</span>
+                        <span :class="'font-mono text-xs font-semibold ' + cvssTone(f.cvss)" x-text="f.cvss != null ? f.cvss.toFixed(1) : '—'"></span>
+                      </td>
+                      <td>
+                        <span :class="'badge badge-xs uppercase tracking-wide ' + sevBadge(f.sev)" x-text="f.sev"></span>
+                      </td>
+                      <td>
+                        <span :class="'badge badge-xs ' + statusBadge(f.status)" x-text="f.status"></span>
+                      </td>
+                      <td class="text-xs font-mono opacity-70" x-text="f.firstSeen"></td>
+                    </tr>
+                  </template>
+                </template>
+                <!-- gruppiert -->
+                <template x-if="mode === 'gruppiert'">
+                  <template x-for="[pkg, rows] in grouped" :key="pkg">
+                    <template>
+                      <tr class="bg-base-300">
+                        <td colspan="8" class="font-mono text-xs uppercase tracking-wider opacity-70 py-1.5">
+                          <span class="font-semibold" x-text="pkg"></span>
+                          <span class="opacity-50 ml-2" x-text="'· ' + rows.length + (rows.length === 1 ? ' Finding' : ' Findings')"></span>
+                        </td>
+                      </tr>
+                      <template x-for="f in rows" :key="f.id">
+                        <tr :class="'hover cursor-pointer transition-colors ' + (f.isKev ? 'bg-error/5 ' : '')">
+                          <td class="pr-0" @click.stop>
+                            <input type="checkbox" class="checkbox checkbox-sm"
+                                   :checked="selected.has(f.id)" @change="toggleSelect(f.id)" />
+                          </td>
+                          <td>
+                            <div class="flex items-center gap-2 flex-wrap min-w-0">
+                              <span class="font-mono text-xs font-semibold" x-text="f.cveId"></span>
+                              <span x-show="f.isKev" class="badge badge-xs badge-error ring-1 ring-error/40 font-semibold">KEV 1</span>
+                            </div>
+                            <div x-show="f.title" class="text-xs opacity-60 truncate max-w-[44ch] mt-0.5" x-text="f.title"></div>
+                          </td>
+                          <td>
+                            <span class="font-mono text-xs opacity-50" x-text="f.pkgPath ? 'lang-pkgs' : 'os-pkgs'"></span>
+                          </td>
+                          <td>
+                            <span class="font-mono text-xs opacity-50 mr-1">EPSS</span>
+                            <span :class="'font-mono text-xs font-semibold ' + epssTone(f.epss)" x-text="f.epss != null ? Math.round(f.epss*100) + '%' : '—'"></span>
+                          </td>
+                          <td>
+                            <span class="font-mono text-xs opacity-50 mr-1">CVSS</span>
+                            <span :class="'font-mono text-xs font-semibold ' + cvssTone(f.cvss)" x-text="f.cvss != null ? f.cvss.toFixed(1) : '—'"></span>
+                          </td>
+                          <td>
+                            <span :class="'badge badge-xs uppercase tracking-wide ' + sevBadge(f.sev)" x-text="f.sev"></span>
+                          </td>
+                          <td>
+                            <span :class="'badge badge-xs ' + statusBadge(f.status)" x-text="f.status"></span>
+                          </td>
+                          <td class="text-xs font-mono opacity-70" x-text="f.firstSeen"></td>
+                        </tr>
+                      </template>
+                    </template>
+                  </template>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- =============== Bulk-Ack-Modal ================= -->
+        <dialog class="modal" :class="bulkModalOpen ? 'modal-open' : ''">
+          <div class="modal-box max-w-lg">
+            <h3 class="font-bold text-lg">Findings acknowledgen</h3>
+            <p class="py-2 text-sm opacity-80">
+              <span class="font-mono font-semibold" x-text="selected.size"></span> Findings markieren als <span class="badge badge-info badge-sm">acknowledged</span>.
+            </p>
+            <ul class="text-xs font-mono opacity-80 max-h-32 overflow-y-auto bg-base-200 border border-base-300 rounded p-2 space-y-0.5">
+              <template x-for="id in [...selected].slice(0, 10)" :key="id">
+                <li x-text="findings.find(f => f.id === id)?.cveId"></li>
+              </template>
+              <li x-show="selected.size > 10" class="opacity-50" x-text="`…+${selected.size - 10} weitere`"></li>
+            </ul>
+            <label class="form-control mt-4">
+              <span class="label-text text-xs opacity-70">Optionaler Kommentar (nicht pflichtig nach ADR-0006)</span>
+              <textarea class="textarea textarea-bordered textarea-sm font-mono" rows="2" placeholder="Begründung, Triage-Notiz, …"></textarea>
+            </label>
+            <div class="modal-action">
+              <button type="button" class="btn btn-sm btn-ghost" @click="bulkModalOpen = false">Abbrechen</button>
+              <button type="button" class="btn btn-sm btn-primary" @click="confirmBulkAck()">Acknowledgen</button>
+            </div>
+          </div>
+          <form method="dialog" class="modal-backdrop" @click="bulkModalOpen = false"><button>close</button></form>
+        </dialog>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- Alpine-Component: serverDetail() — State + Charts + Sort + Selection  -->
+  <!-- ===================================================================== -->
+  <script>
+    function serverDetail() {
+      // Deterministische Demo-Reihen — 50 Werte pro Severity, plausibel
+      // wachsend/fallend, KEIN Math.random (Block-K-Spec: kein random in render).
+      function ramp(seed, base, swing, period) {
+        const out = [];
+        for (let i = 0; i < 50; i++) {
+          // Sinus-Welle + leichter Trend + seed-Offset.
+          const wave = Math.sin((i + seed) * (Math.PI * 2 / period)) * swing;
+          const trend = (i / 50) * (swing * 0.3);
+          out.push(Math.max(0, Math.round(base + wave + trend)));
+        }
+        return out;
+      }
+      const sparklines = {
+        kev:      ramp(7, 1.5, 1.2, 12),
+        critical: ramp(3, 3,   2,   18),
+        high:     ramp(5, 10,  3,   22),
+        medium:   ramp(2, 21,  4,   30),
+      };
+
+      // Heartbeat: 50 Cells. Mix aus crit/high/medium/low/clean/empty.
+      // sev ∈ {critical,high,medium,low,unknown,empty,clean}; kev: bool.
+      const HEART_SEV = ["critical","high","medium","low","clean","clean","clean","high","medium","clean","clean","critical","high","medium","medium","low","clean","clean","high","medium","critical","high","medium","low","clean","empty","clean","high","medium","medium","low","clean","clean","high","critical","medium","medium","low","clean","clean","high","medium","low","clean","clean","high","critical","medium","high","medium"];
+      const HEART_KEV = new Set([2, 14, 21, 35]);
+      const heartbeat = HEART_SEV.map((sev, i) => ({ sev, kev: HEART_KEV.has(i) }));
+
+      // Severity-Trend: 50 Tage stacked Counts.
+      const severityTrend = Array.from({ length: 50 }, (_, i) => ({
+        day: i,
+        critical: Math.max(0, Math.round(3 + Math.sin(i * 0.28) * 2 + i * 0.04)),
+        high:     Math.max(0, Math.round(12 + Math.sin(i * 0.18) * 4 + i * 0.06)),
+        medium:   Math.max(0, Math.round(24 + Math.sin(i * 0.13) * 5 + i * 0.02)),
+        low:      Math.max(0, Math.round(9  + Math.sin(i * 0.21) * 3)),
+        kev:      i === 6 || i === 18 || i === 31 || i === 44 ? 1 : 0,
+      }));
+
+      // Findings: 8 Demo-CVEs aus dem User-Screenshot + Variationen.
+      const findings = [
+        { id: 1, cveId: "CVE-2024-6387", title: "regreSSHion: race condition in OpenSSH's sshd", pkg: "openssh-server",  pkgPath: "/usr/sbin/sshd", sev: "critical", isKev: true,  epss: 0.12, cvss: 9.8, status: "open",         firstSeen: "2024-07-02" },
+        { id: 2, cveId: "CVE-2024-3094", title: "Backdoor in xz/liblzma upstream releases",       pkg: "xz-utils",        pkgPath: "/usr/bin/xz",    sev: "critical", isKev: true,  epss: 0.52, cvss: 10.0, status: "open",        firstSeen: "2024-03-30" },
+        { id: 3, cveId: "CVE-2024-2961", title: "iconv buffer overflow in ISO-2022-CN-EXT",       pkg: "glibc",           pkgPath: null,             sev: "high",     isKev: false, epss: 0.05, cvss: 8.8, status: "open",         firstSeen: "2024-04-18" },
+        { id: 4, cveId: "CVE-2023-44487",title: "HTTP/2 rapid reset attack",                      pkg: "nginx",           pkgPath: null,             sev: "high",     isKev: false, epss: 0.07, cvss: 7.5, status: "acknowledged", firstSeen: "2023-10-10" },
+        { id: 5, cveId: "CVE-2023-39418",title: "PostgreSQL MERGE row security policy bypass",    pkg: "postgresql-15",   pkgPath: null,             sev: "medium",   isKev: false, epss: 0.004,cvss: 4.4, status: "open",         firstSeen: "2023-11-09" },
+        { id: 6, cveId: "CVE-2024-21626",title: "runc process.cwd container breakout",             pkg: "runc",            pkgPath: "/usr/bin/runc",  sev: "high",     isKev: false, epss: 0.18, cvss: 8.6, status: "open",         firstSeen: "2024-02-01" },
+        { id: 7, cveId: "CVE-2024-0397", title: "ssl.SSLContext.cert_store_stats memory disclose", pkg: "python3.11",     pkgPath: null,             sev: "medium",   isKev: false, epss: 0.002,cvss: 5.3, status: "open",         firstSeen: "2024-03-19" },
+        { id: 8, cveId: "CVE-2023-50387",title: "KeyTrap — DNSSEC resolver CPU exhaustion",        pkg: "unbound",         pkgPath: null,             sev: "high",     isKev: false, epss: 0.34, cvss: 7.5, status: "resolved",     firstSeen: "2024-02-13" },
+      ];
+
+      return {
+        // ---------- State ----------
+        mode: "flach",
+        range: "50T",
+        sortKey: "sev",
+        sortDir: "desc",
+        selected: new Set(),
+        bulkModalOpen: false,
+        sparklines,
+        heartbeat,
+        severityTrend,
+        findings,
+
+        columns: [
+          { id: "cve",       label: "CVE / Titel" },
+          { id: "pkg",       label: "Paket" },
+          { id: "epss",      label: "EPSS",     cls: "w-20" },
+          { id: "cvss",      label: "CVSS",     cls: "w-20" },
+          { id: "sev",       label: "Severity", cls: "w-24" },
+          { id: "status",    label: "Status",   cls: "w-28" },
+          { id: "firstSeen", label: "Erstmals", cls: "w-24" },
+        ],
+
+        // ---------- Computed ----------
+        get sortedFindings() {
+          const SEV_RANK = { critical: 4, high: 3, medium: 2, low: 1, unknown: 0 };
+          const STATUS_RANK = { open: 3, acknowledged: 2, resolved: 1 };
+          const dir = this.sortDir === "asc" ? 1 : -1;
+          return [...this.findings].sort((a, b) => {
+            let va, vb;
+            switch (this.sortKey) {
+              case "cve":       va = a.cveId; vb = b.cveId; break;
+              case "pkg":       va = a.pkg;   vb = b.pkg;   break;
+              case "epss":      va = a.epss ?? -1; vb = b.epss ?? -1; break;
+              case "cvss":      va = a.cvss ?? -1; vb = b.cvss ?? -1; break;
+              case "sev":       va = SEV_RANK[a.sev] ?? 0; vb = SEV_RANK[b.sev] ?? 0; break;
+              case "status":    va = STATUS_RANK[a.status] ?? 0; vb = STATUS_RANK[b.status] ?? 0; break;
+              case "firstSeen": va = a.firstSeen; vb = b.firstSeen; break;
+              default: va = 0; vb = 0;
+            }
+            return va < vb ? -1 * dir : va > vb ? dir : 0;
+          });
+        },
+        get grouped() {
+          const m = new Map();
+          for (const f of this.sortedFindings) {
+            if (!m.has(f.pkg)) m.set(f.pkg, []);
+            m.get(f.pkg).push(f);
+          }
+          return [...m.entries()];
+        },
+        get trendSlice() {
+          const days = this.rangeDays(this.range);
+          return this.severityTrend.slice(-days);
+        },
+        get totals() {
+          const t = { critical: 0, high: 0, medium: 0, low: 0 };
+          for (const d of this.trendSlice) {
+            t.critical += d.critical; t.high += d.high;
+            t.medium += d.medium;     t.low += d.low;
+          }
+          t.sum = t.critical + t.high + t.medium + t.low;
+          return t;
+        },
+
+        // ---------- Methods ----------
+        rangeDays(r) { return ({ "24h": 1, "7T": 7, "30T": 30, "50T": 50 })[r] || 50; },
+        pct(n) {
+          if (this.totals.sum === 0) return "0%";
+          return ((n / this.totals.sum) * 100).toFixed(1).replace(".", ",") + "%";
+        },
+        toggleSort(key) {
+          if (this.sortKey === key) {
+            this.sortDir = this.sortDir === "asc" ? "desc" : "asc";
+          } else {
+            this.sortKey = key;
+            this.sortDir = ["cve", "pkg", "firstSeen"].includes(key) ? "asc" : "desc";
+          }
+        },
+        toggleSelect(id) {
+          const s = new Set(this.selected);
+          if (s.has(id)) s.delete(id); else s.add(id);
+          this.selected = s;
+        },
+        allChecked() { return this.findings.length > 0 && this.findings.every(f => this.selected.has(f.id)); },
+        toggleAll() {
+          this.selected = this.allChecked() ? new Set() : new Set(this.findings.map(f => f.id));
+        },
+        confirmBulkAck() {
+          // Mockup-only: würde im echten Code POST /findings/bulk_acknowledge mit
+          // selected-IDs + optionalem Kommentar machen.
+          alert(`Mock: ${this.selected.size} Findings acknowledged`);
+          this.selected = new Set();
+          this.bulkModalOpen = false;
+        },
+
+        sevBadge(s)    { return ({ critical:"badge-error", high:"badge-warning", medium:"badge-accent", low:"badge-info", unknown:"badge-ghost" })[s] || "badge-ghost"; },
+        statusBadge(s) { return ({ open:"badge-warning", acknowledged:"badge-info", resolved:"badge-success" })[s] || "badge-ghost"; },
+        epssTone(s) { if (s == null) return "opacity-40"; const p = s*100; if (p>=50) return "text-error"; if (p>=10) return "text-warning"; if (p>=1) return "text-info"; return ""; },
+        cvssTone(s) { if (s == null) return "opacity-40"; if (s>=9) return "text-error"; if (s>=7) return "text-warning"; if (s>=4) return "text-accent"; return ""; },
+
+        // ---------- Inline-SVG-Renderer ----------
+        renderSparkline(data, color) {
+          if (!data || data.length === 0) return "";
+          const w = 100, h = 100, PAD = 8;
+          const max = Math.max(...data), min = Math.min(...data);
+          const range = Math.max(max - min, 1e-6);
+          const y = v => h - PAD - ((v - min) / range) * (h - 2 * PAD);
+          const pts = data.map((v, i) => [(i / (data.length - 1)) * w, y(v)]);
+          const linePath = pts.map(([x, ny], i) => (i === 0 ? `M${x},${ny}` : `L${x},${ny}`)).join(" ");
+          const areaPath = linePath + ` L${w},${h} L0,${h} Z`;
+          const flat = max - min < 0.001;
+          if (flat) {
+            return `<path d="M0,${h - PAD} L${w},${h - PAD}" fill="none" stroke="${color}" stroke-width="2.5" stroke-opacity="0.35" stroke-linecap="round" />`;
+          }
+          return `
+            <path d="${areaPath}" fill="${color}" opacity="0.14" />
+            <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+          `;
+        },
+        renderStackedBars(data) {
+          if (!data || data.length === 0) return "";
+          // viewBox ist statisch 50x100 (siehe SVG-Element). Bars werden
+          // ueber die volle viewBox-Breite verteilt — egal wieviele Tage
+          // der aktuelle Range-Slice hat.
+          const VIEWBOX_W = 50;
+          const max = Math.max(...data.map(d => (d.critical||0)+(d.high||0)+(d.medium||0)+(d.low||0)), 1);
+          const h = 100;
+          const slotW = VIEWBOX_W / data.length;
+          const gap = 0.2 * slotW;
+          const barW = Math.max(slotW - gap, 0.1);
+          const out = [];
+          data.forEach((d, i) => {
+            const total = (d.critical||0)+(d.high||0)+(d.medium||0)+(d.low||0);
+            if (total === 0) return;
+            const scale = (h - 6) / max;
+            let y = h - 2;
+            const x = i * slotW + gap / 2;
+            const layers = [
+              { v: d.low || 0,      c: "#38bdf8" },
+              { v: d.medium || 0,   c: "#14b8a6" },
+              { v: d.high || 0,     c: "#f59e0b" },
+              { v: d.critical || 0, c: "#ef4444" },
+            ];
+            for (const L of layers) {
+              if (L.v === 0) continue;
+              const hgt = L.v * scale;
+              y -= hgt;
+              out.push(`<rect x="${x}" y="${y}" width="${barW}" height="${hgt}" fill="${L.c}" />`);
+            }
+            if (d.kev > 0) {
+              const cx = (i + 0.5) * slotW;
+              const r = Math.max(0.6, slotW * 0.45);
+              out.push(`<circle cx="${cx}" cy="${Math.max(r + 1, y - r - 0.5)}" r="${r}" fill="#ef4444" />`);
+            }
+          });
+          return out.join("");
+        },
+        renderHeartbeatLarge(cells) {
+          if (!cells || cells.length === 0) return "";
+          // viewBox ist statisch 50x100. cells.length koennte abweichen
+          // (theoretisch 50, aber defensiv handhaben).
+          const VIEWBOX_W = 50;
+          const slotW = VIEWBOX_W / cells.length;
+          const gap = 0.32 * slotW;
+          const barW = Math.max(slotW - gap, 0.1);
+          const colorFor = c => ({
+            critical: "#ef4444", high: "#f59e0b", medium: "#14b8a6", low: "#38bdf8",
+            unknown:  "rgba(0,0,0,0.4)", empty: "rgba(0,0,0,0.18)", clean: "rgba(34,197,94,0.6)",
+          })[c.sev] || "rgba(34,197,94,0.6)";
+          const out = [];
+          cells.forEach((c, i) => {
+            const x = i * slotW + gap / 2;
+            const y = c.sev === "empty" ? 35 : 8;
+            const h = c.sev === "empty" ? 30 : 84;
+            out.push(`<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="0.5" ry="0.5" fill="${colorFor(c)}" ${c.sev === "empty" ? 'opacity="0.5"' : ''} />`);
+            if (c.kev) {
+              const cx = (i + 0.5) * slotW;
+              const r = Math.max(0.6, slotW * 0.4);
+              out.push(`<circle cx="${cx}" cy="3" r="${r}" fill="#ef4444" />`);
+            }
+          });
+          return out.join("");
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -23,6 +23,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0015](0015-gunicorn-gthread-for-sse.md) | Gunicorn `gthread`-Worker-Class für SSE-Endpoints | Akzeptiert |
 | [0016](0016-header-and-profile-dropdown.md) | Header-Navigation kompakt, Settings und Audit ins Profile-Dropdown (Block-I-Refinement) | Akzeptiert |
 | [0017](0017-dashboard-pane-single-partial.md) | Dashboard-Detail-Pane als ein gemeinsames Partial (kein HX-vs-Full-Page-Drift) | Akzeptiert |
+| [0018](0018-server-detail-visual-alignment.md) | Server-Detail-Redesign (Layout, KPI-Sparklines, Trend-Berechnung, sortierbare Findings-Tabelle) | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 
