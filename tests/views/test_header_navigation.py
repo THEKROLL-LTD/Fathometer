@@ -214,9 +214,8 @@ def test_header_theme_toggle_present_with_sun_and_moon(
     # `resolvedDark is not defined` (siehe Regression in v0.3.0).
     assert 'x-data="themeToggle(&#34;' in header, (
         "themeToggle-Argument muss HTML-escaped sein (`| forceescape`), "
-        "sonst schliesst das eingebettete `\"` das x-data-Attribut."
+        'sonst schliesst das eingebettete `"` das x-data-Attribut.'
     )
     assert 'x-data="themeToggle("' not in header, (
-        "Ungescaptes `\"` im x-data-Attribut bricht das Parsing — "
-        "`| forceescape` fehlt im Template."
+        'Ungescaptes `"` im x-data-Attribut bricht das Parsing — `| forceescape` fehlt im Template.'
     )

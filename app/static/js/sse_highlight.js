@@ -1,16 +1,18 @@
 /**
- * Subtle Fade-In bei SSE-/HTMX-Updates (Block I, §7a Should #10).
+ * Subtle Fade-In bei HTMX-Polling-Updates (Block I, §7a Should #10).
  *
  * Verhalten:
  *   - Listener auf `htmx:afterSettle` an `document.body`: getauschtes
  *     Target bekommt fuer 1s einen `bg-info/20`-Akzent. Wenn das Target
  *     `#detail-pane` ist (z.B. nach Server-Klick in der Sidebar), faerben
  *     wir es nicht — der Pane-Swap ist schon offensichtlich.
- *   - Listener auf das globale `secscan:scan-received`-CustomEvent
- *     (vom Block-H-SSE-Client dispatcht): findet die Sidebar-Zeile mit
- *     passender `data-server-id` und faerbt sie fuer 1s ein. Falls keine
- *     Zeile in der Sidebar existiert (z.B. Server gerade revoked), passiert
- *     nichts — fail-silent.
+ *
+ * Hinweis (ADR-0019): Frueher hat dieses Modul zusaetzlich auf das
+ * `secscan:scan-received`-CustomEvent gehoert, das die ehemalige SSE-
+ * Komponente `dashboardSse` gefeuert hat. Mit Block L gibt es keinen
+ * SSE-Channel fuers Dashboard mehr — Updates kommen via HTMX-Polling auf
+ * dem Pane- und Sidebar-Container und werden durch den `htmx:afterSwap`/
+ * `afterSettle`-Listener unten automatisch hervorgehoben.
  *
  * Sicherheit:
  *   - Wir manipulieren ausschliesslich `classList` an bestehenden Elementen.
@@ -40,18 +42,5 @@
     // Detail-Pane-Swaps sind durch URL-Change schon sichtbar — kein Flash.
     if (tgt.id === "detail-pane" || tgt.id === "detail-pane-content") return;
     flash(tgt);
-  });
-
-  // Block H SSE liefert `scan.received`-Events ueber `dashboardSse` an die
-  // Karten. Wir hoeren parallel auf ein Custom-Event, das der SSE-Client
-  // alternativ feuern kann (`secscan:scan-received` mit detail.server_id).
-  // Falls nicht vorhanden -> kein No-Op-Error.
-  window.addEventListener("secscan:scan-received", function (ev) {
-    var sid = ev && ev.detail && ev.detail.server_id;
-    if (!sid) return;
-    var row = document.querySelector(
-      '#server-list [data-server-id="' + Number(sid) + '"]'
-    );
-    if (row) flash(row);
   });
 })();

@@ -68,7 +68,7 @@
 
   {# Reihenfolge ist wichtig: Alle App-eigenen Skripte, die globale
      Alpine-Komponenten-Factories an `window.*` haengen (themeToggle,
-     bulkAckIds/bulkAckMatch, dashboardSse/staleTick, llmChat,
+     bulkAckIds/bulkAckMatch, staleTick, llmChat,
      llmProviderForm, ...), MUESSEN vor `alpinejs.cdn.min.js` stehen.
      Mit `defer` werden Scripts in DOM-Reihenfolge ausgefuehrt — wenn
      Alpine zuerst laeuft, scannt es den DOM nach `x-data` und ruft die
@@ -86,10 +86,10 @@
      mit X-CSRFToken-Header aus dem oben gesetzten <meta>. #}
   <script defer src="{{ url_for('static', filename='js/bulk_ack.js') }}"></script>
 
-  {# SSE-Live-Update- und Stale-Re-Render-Komponenten (Block H).
-     Stellen `window.dashboardSse(eventsUrl)` und `window.staleTick()` als
-     Alpine-Component-Factories bereit. Nur das Dashboard verdrahtet sie. #}
-  <script defer src="{{ url_for('static', filename='js/sse.js') }}"></script>
+  {# Stale-Re-Render-Komponente (Block H, nach ADR-0019 ohne SSE).
+     Stellt `window.staleTick()` als Alpine-Component-Factory bereit.
+     Nur das Dashboard verdrahtet sie. #}
+  <script defer src="{{ url_for('static', filename='js/stale.js') }}"></script>
 
   {# Page-spezifische Komponenten-Skripte (z.B. `llm_chat.js`,
      `llm_settings.js`). Stehen bewusst VOR Alpine — sie registrieren

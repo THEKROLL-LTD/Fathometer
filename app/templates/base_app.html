@@ -62,7 +62,7 @@
 
   {# Wichtige Lade-Reihenfolge (vgl. base.html-Kommentar):
      Alle App-Skripte die `window.*`-Factories registrieren (themeToggle,
-     bulkAckIds/bulkAckMatch, dashboardSse/staleTick, sidebarSearch,
+     bulkAckIds/bulkAckMatch, staleTick, sidebarSearch,
      sseHighlight, llmProviderForm, ...) MUESSEN vor `alpinejs.cdn.min.js`
      stehen. Mit `defer` werden Scripts in DOM-Reihenfolge ausgefuehrt;
      Alpine v3 startet aus defer-Kontext SOFORT (readyState === 'interactive'
@@ -73,7 +73,7 @@
 
   {# Wiederverwendete Block-A/F/H-Komponenten. #}
   <script defer src="{{ url_for('static', filename='js/bulk_ack.js') }}"></script>
-  <script defer src="{{ url_for('static', filename='js/sse.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/stale.js') }}"></script>
 
   {# Block-I-Skripte. #}
   <script defer src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
@@ -135,19 +135,12 @@
            Detail-Pane, Settings ins Profile-Dropdown. #}
         {% include "sidebar/_search.html" %}
 
-        <ul id="server-list"
-            role="list"
-            class="divide-y divide-base-300 flex-1">
-          {% for srv in (sidebar_servers or []) %}
-            {% with server=srv,
-                    cells=(sidebar_heartbeats or {}).get(srv.id, []),
-                    is_active=(active_server_id == srv.id) %}
-              {% include "sidebar/_server_row.html" %}
-            {% endwith %}
-          {% else %}
-            {% include "_empty/no_servers.html" %}
-          {% endfor %}
-        </ul>
+        {# Server-Liste als HTMX-Polling-Container ausgelagert (ADR-0019).
+           Das Partial enthaelt die Pflicht-`id="server-list"` und die
+           Polling-Attribute; bei einem Self-Replace via `outerHTML` bleibt
+           die Sticky-Search drueber stehen, weil sie ausserhalb des
+           Polling-Targets liegt. #}
+        {% include "sidebar/_server_list.html" %}
       {% endblock %}
     </aside>
 

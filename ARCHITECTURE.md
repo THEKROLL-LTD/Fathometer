@@ -436,7 +436,7 @@ Zwei verwandte Probleme, beide live im SQL berechnet und im Dashboard sichtbar �
 
 **Stale Trivy-DB:** Trivy nutzt eine Vulnerability-DB, die täglich aktualisiert wird. Wenn auf einem Server die lokale Trivy-DB nicht aktuell ist, sind die gemeldeten Findings veraltet — das ist potentiell gefährlich, weil der User sich in falscher Sicherheit wiegt. Ein Server gilt als DB-stale wenn `now() - trivy_db_updated_at > stale_db_threshold_h` (Default 30h — knappe Toleranz für die tägliche Aktualisierung; in Settings konfigurierbar falls die Umgebung längere Wartungsfenster hat). DB-stale-Server bekommen einen orangenen Badge auf der Dashboard-Karte und tauchen in einer eigenen Sub-Sektion der "Aufmerksamkeit"-Liste auf mit Tooltip "Trivy-DB seit X Tagen nicht aktualisiert — Findings könnten unvollständig sein. Auf dem Server `trivy --download-db-only` ausführen oder den nächsten Trivy-Run abwarten."
 
-Beide Stale-Zustände triggern im MVP keinen Notification-Channel (gibt's ja noch nicht), nur das visuelle Signal. Sind aber im Audit-Log indirekt sichtbar via `scan.received` Events mit den DB-Versionen.
+Beide Stale-Zustände triggern im MVP keinen Notification-Channel (gibt's ja noch nicht), nur das visuelle Signal. Sind aber im Audit-Log indirekt sichtbar via `scan.ingested`-Events mit den DB-Versionen.
 
 ## 15. Triage-Signale und Priorisierung
 

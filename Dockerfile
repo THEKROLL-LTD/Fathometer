@@ -153,20 +153,20 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # und ersetzt sich dann mit Gunicorn. Worker-, Thread- und Timeout-Werte
 # ueber Env steuerbar.
 #
-# `--worker-class gthread` ist Pflicht (nicht `sync`): die App hat zwei
-# Long-lived-SSE-Endpoints (`GET /events` fuers Dashboard, `GET /chat/.../
-# stream` fuer LLM-Chat). Eine offene SSE-Connection bindet einen
-# Sync-Worker-Slot dauerhaft — schon ein einziger Browser-Tab plus ein
-# zweiter Request laesst den Server bei 2 Sync-Workern komplett haengen.
+# `--worker-class gthread` ist Pflicht (nicht `sync`): die App hat einen
+# Long-lived-SSE-Endpoint (`GET /chat/.../stream` fuer LLM-Chat-Token-
+# Streaming). Eine offene SSE-Connection bindet einen Sync-Worker-Slot
+# dauerhaft — schon ein einziger laufender Chat-Stream plus ein zweiter
+# Request laesst den Server bei 2 Sync-Workern komplett haengen.
 # Mit `gthread` halten Threads die Streams offen, andere Threads
-# bedienen normale Requests parallel.
+# bedienen normale Requests (inkl. Dashboard-Polling-Fetches) parallel.
 #
 # Default 2 Workers x 8 Threads = 16 gleichzeitige Connections. Reicht
 # fuer Single-User-Self-Hosting mit ein paar offenen Tabs locker; gibt
 # kaum Memory-Overhead, weil Threads sich den Prozess teilen.
 # Thread-Safety: SQLAlchemy nutzt scoped sessions, structlog ist
-# thread-safe, der EventBus baut auf `queue.Queue` — alles thread-safe.
-# Siehe ADR-0015.
+# thread-safe — alles thread-safe.
+# Siehe ADR-0015 (gthread) und ADR-0019 (Dashboard-Polling statt SSE).
 # Build-Revision in die runtime-Stage durchreichen, damit die About-View
 # sie ausliest. Der ARG aus Stage 1 muss in den finalen Stage neu
 # deklariert werden (Docker-Multi-Stage-Verhalten).

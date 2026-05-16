@@ -4,6 +4,73 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.5.0] — 2026-05-16
+
+Stabilitaets-Release aus [ADR-0019](docs/decisions/0019-dashboard-polling-not-sse.md).
+Beobachtete Haenger im `docker compose`-Stack (HTTP/1.1-Slot-Limit,
+Thread-Pin, EventBus-Worker-Affinity) werden behoben, indem
+Dashboard-Live-Updates von Server-Sent-Events auf HTMX-Polling
+umgestellt werden. LLM-Chat-Streaming (`GET /chat/<id>/stream`)
+bleibt unveraendert SSE — der einzige verbleibende SSE-Endpoint.
+
+Funktional gegenueber v0.4.0 aus User-Sicht unveraendert bis auf die
+Update-Latenz: statt < 1 s (SSE-Push) zeigt das Dashboard Aenderungen
+mit durchschnittlich ~5 s Verzoegerung an (Polling-Intervall 10 s).
+Animations-Verhalten beim Update bleibt identisch (`sse_highlight.js`
+laeuft auf `htmx:afterSettle`).
+
+### Geaendert — Block L (ADR-0019)
+
+- Dashboard-Pane (`app/templates/dashboard/_detail_pane.html`) ist jetzt
+  ein HTMX-Polling-Container mit `id="dashboard-pane"`,
+  `hx-trigger="every 10s [document.visibilityState === 'visible']"`
+  und `hx-swap="outerHTML"`. Aktive Filter (`?severity=...`, `?tag=...`)
+  werden ueber `request.path` + optionaler `request.query_string` im
+  Re-Fetch erhalten.
+- Sidebar-Server-Liste (`app/templates/sidebar/_server_list.html`,
+  neu extrahiert) polled analog gegen die neue Route
+  `GET /_partials/sidebar` (`sidebar_partials_bp.sidebar_partial`,
+  `@login_required`).
+- ARCHITECTURE §6 / §7 / §7a auf Polling umgestellt; §14-Audit-Log-Hinweis
+  korrigiert (`scan.ingested` statt nie-implementiertes `scan.received`).
+- Dockerfile-Kommentar: `gthread`-Begruendung verlagert sich auf den
+  LLM-Stream-Endpoint allein. Thread-Zahlen `2 × 8` unveraendert.
+- README nginx-/Caddy-Snippets ohne `/events`-Block.
+- `app/static/js/sse.js` umbenannt zu `app/static/js/stale.js`.
+  `staleTick()` unveraendert; `dashboardSse(...)` ersatzlos entfernt.
+  `app/static/js/sse_highlight.js` bleibt eingebunden (Polling-Highlight
+  laeuft weiter ueber `htmx:afterSettle`), nur der nie mehr gefeuerte
+  `secscan:scan-received`-Listener ist raus.
+
+### Entfernt — Block L (ADR-0019)
+
+- `GET /events`-SSE-Endpoint (`app/api/events.py`, 116 LoC) — kein extern
+  dokumentierter API-Endpoint, kein Kompatibilitaets-Bruch.
+- In-process `EventBus` (`app/services/event_bus.py`, 163 LoC).
+- `event_bus.publish("scan.received", ...)`-Hook im Scan-Ingest
+  (`app/api/scans.py`).
+- `init_event_bus(app)` und `events_bp`-Blueprint-Registrierung in
+  `app/__init__.py`.
+- Alpine-Komponente `dashboardSse(...)` plus `window.dashboardSse`-Export.
+
+### Tests
+
+- 785 passed, 5 skipped (E2E ohne Backend), Coverage 92.35 %.
+- 177 adversarial Tests passed.
+- Drei neue Test-Module: `tests/views/test_dashboard_polling.py`,
+  `tests/views/test_sidebar_partial.py`,
+  `tests/adversarial/test_polling_no_rate_limit.py`.
+- Drei geloeschte Test-Module gegen die entfernte SSE-Surface:
+  `tests/api/test_events_sse.py`, `tests/api/test_scans_event_publish.py`,
+  `tests/services/test_event_bus.py`.
+
+### Migrationen / Operations
+
+- Keine Alembic-Migration noetig (reine Code- und Template-Aenderung).
+- Roll-Back-Plan: Branch verwerfen, ADR-0019 auf „Verworfen" setzen,
+  alternative Loesung als neue ADR. Live-System laeuft auf v0.4.0
+  weiter — SSE-Haenger sind nervig aber nicht datenschaedigend.
+
 ## [v0.3.0] — 2026-05-15
 
 UI-Refinement-Release aus ADR-0016. Funktional gegenueber v0.2.0

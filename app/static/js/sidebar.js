@@ -210,9 +210,19 @@
     init();
   }
 
-  // HTMX kann die Sidebar austauschen (z.B. nach Tag-Filter-Klick); wir
-  // re-binden Tooltip-Handler defensiv. Idempotent durch `dataset.flag`.
-  document.body.addEventListener("htmx:afterSettle", function () {
+  // HTMX kann die Sidebar austauschen (z.B. nach Tag-Filter-Klick oder
+  // nach dem 10s-Polling-Swap aus ADR-0019); wir re-binden Tooltip-Handler
+  // defensiv. Idempotent durch `dataset.flag`.
+  document.body.addEventListener("htmx:afterSettle", function (evt) {
     bindHeartbeatTooltips();
+    // Nach einem Self-Swap der Server-Liste (Polling) sind die `hidden`-
+    // Klassen aus der vorherigen Suche weg. Falls eine aktive Suche im
+    // Search-Input steht, Filter erneut anwenden, damit der User keine
+    // Server zu sehen bekommt, die er gerade weggetippt hat.
+    var tgt = evt && evt.detail && evt.detail.target;
+    if (tgt && tgt.id === "server-list") {
+      var input = document.getElementById("sidebar-search-input");
+      if (input && input.value) applyFilter(input.value);
+    }
   });
 })();

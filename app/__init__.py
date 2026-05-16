@@ -90,7 +90,7 @@ def _relative_time(value: datetime | None) -> str:
 def _iso_or_empty(value: datetime | None) -> str:
     """Render einen Zeitstempel als ISO-8601-String, sonst leeren String.
 
-    Wird in `data-*`-Attributen verwendet, damit `static/js/sse.js` die
+    Wird in `data-*`-Attributen verwendet, damit `static/js/stale.js` die
     Relativzeit-Labels client-seitig re-rendern kann ohne den Server zu
     fragen. Naive datetimes werden als UTC behandelt.
     """
@@ -226,18 +226,11 @@ def create_app() -> Flask:
 
     init_auth(app)
 
-    # Event-Bus (Block H) — Singleton an die App haengen, damit der
-    # Scan-Ingest-Hook (`POST /api/scans`) und der SSE-Endpoint
-    # (`GET /events`) denselben Dispatcher nutzen.
-    from app.services.event_bus import init_event_bus
-
-    init_event_bus(app)
-
     # 7. Blueprints.
     app.register_blueprint(health_bp)
 
-    from app.api.events import events_bp
     from app.api.llm_chat import llm_chat_bp
+    from app.views._sidebar_context import sidebar_partials_bp
     from app.views.audit_view import audit_bp
     from app.views.auth import auth_bp
     from app.views.dashboard import dashboard_bp
@@ -260,7 +253,7 @@ def create_app() -> Flask:
     app.register_blueprint(audit_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(llm_chat_bp)
-    app.register_blueprint(events_bp)
+    app.register_blueprint(sidebar_partials_bp)
 
     # API-Blueprint (Block C). Routes werden in `register_api_routes`
     # importiert (lazy, vermeidet Zirkulaere durch `from app import csrf,

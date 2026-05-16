@@ -40,7 +40,7 @@ Die App lauscht im Container auf Port 8000 in Klartext-HTTP. **Sie ist nicht daf
 Wichtige Punkte fuer die Proxy-Konfiguration:
 
 - **`/api/scans`**: erlaubt gzipped Bodies bis 10 MB on the wire (Default `MAX_CONTENT_LENGTH`), die Wire-Cap des Proxy sollte mindestens 12-15 MB sein damit der Backend-413 den Job macht, nicht der Proxy. `proxy_request_buffering off` empfohlen, damit grosse Scans nicht zuerst im Proxy-RAM gepuffert werden.
-- **`/events`** und **`/chat/<id>/stream`**: SSE-Endpoints. Buffering muss aus, Read-Timeout mindestens 1h (Heartbeat alle 30s) und HTTP/1.1 ohne `Connection: keep-alive`-Header damit der Stream nicht wegen Idle-Timeout abreisst.
+- **`/chat/<id>/stream`**: SSE-Endpoint fuer den LLM-Token-Stream (einzige verbliebene SSE-Verwendung nach ADR-0019). Buffering muss aus, Read-Timeout mindestens 1h (Heartbeat alle 30s) und HTTP/1.1 ohne `Connection: keep-alive`-Header damit der Stream nicht wegen Idle-Timeout abreisst. Dashboard-Live-Updates laufen seit v0.5.0 ueber HTMX-Polling (Pane + Sidebar alle 10s, nur bei sichtbarem Tab) und brauchen keine Proxy-Spezialbehandlung.
 - **HSTS, moderne Ciphers, HTTP-zu-HTTPS-Redirect** macht der Proxy. Im Backend ist nichts davon konfiguriert — bewusst, damit die App auch hinter exotischen Proxies funktioniert.
 
 #### nginx-Snippet
@@ -75,19 +75,8 @@ server {
     proxy_set_header X-Forwarded-Proto $scheme;
   }
 
-  # /events — Dashboard-SSE-Stream. Lange Verbindungen, kein Buffer.
-  location = /events {
-    proxy_pass http://localhost:8000;
-    proxy_http_version 1.1;
-    proxy_set_header Connection      "";
-    proxy_set_header Host            $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_buffering   off;
-    proxy_cache       off;
-    proxy_read_timeout 3600s;
-  }
-
-  # /chat/<id>/stream — LLM-Token-Stream. Gleiche SSE-Regeln.
+  # /chat/<id>/stream — LLM-Token-Stream (einzige SSE-Verbindung nach
+  # ADR-0019). Lange Verbindungen, kein Buffer.
   location ~ ^/chat/[^/]+/stream$ {
     proxy_pass http://localhost:8000;
     proxy_http_version 1.1;
@@ -135,9 +124,11 @@ secscan.example.com {
     max_size 15MB
   }
 
-  # SSE-Endpoints: Buffering aus, lange Read-Timeouts.
+  # SSE-Endpoint (LLM-Token-Stream, ADR-0019): Buffering aus, lange
+  # Read-Timeouts. `/events` ist mit Block L weggefallen — Dashboard-
+  # Updates laufen jetzt ueber HTMX-Polling auf den normalen UI-Routes.
   @sse {
-    path /events /chat/*/stream
+    path /chat/*/stream
   }
   reverse_proxy @sse localhost:8000 {
     flush_interval -1

@@ -4,7 +4,7 @@ Hintergrund: Alpine v3 startet aus dem `defer`-Kontext SOFORT (weil
 `document.readyState === 'interactive'` zum Script-Eval-Zeitpunkt) und
 feuert `alpine:init` synchron. Wenn `alpinejs.cdn.min.js` vor den App-
 Skripten geladen wird, die `window.bulkAckIds`, `window.sidebarSearch`,
-`window.dashboardSse`, `window.staleTick`, `window.themeToggle`, ...
+`window.staleTick`, `window.themeToggle`, ...
 registrieren, dann scannt Alpine den DOM bevor diese Factories existieren.
 Folge: `x-data="bulkAckIds(...)"` und alle anderen Komponenten werden mit
 leerem Scope initialisiert, was sich als Bulk-Ack-Modal-Visibility ohne
@@ -13,6 +13,10 @@ funktionierendes Cancel ("comment/busy/canApply is not defined") aeussert.
 Dieser Test stellt sicher, dass Alpine NACH allen Factory-Skripten
 referenziert wird — gleiche Regel wie in `base.html` (siehe Kommentar
 dort).
+
+ADR-0019: `js/sse.js` ist zu `js/stale.js` umbenannt — die einzige
+Komponente die hier bleibt ist `staleTick()`. `dashboardSse` ist
+mit Block L entfernt.
 """
 
 from __future__ import annotations
@@ -29,13 +33,13 @@ ALPINE_MARKER = "https://cdn.jsdelivr.net/npm/alpinejs@3"
 
 # Pro Template: nur Skripte pruefen die das Template tatsaechlich verlinkt.
 # `base.html` ist die Pre-Auth-Shell (Setup/Login) und braucht weder
-# Sidebar- noch SSE-Highlight-Skripte; `base_app.html` ist die volle
+# Sidebar- noch sse_highlight-Skripte; `base_app.html` ist die volle
 # App-Shell mit Sidebar.
 FACTORY_SCRIPTS_BY_TEMPLATE = {
     "base_app.html": [
         "js/theme.js",
         "js/bulk_ack.js",
-        "js/sse.js",
+        "js/stale.js",
         "js/sidebar.js",
         "js/sse_highlight.js",
         "js/llm_settings.js",
@@ -43,7 +47,7 @@ FACTORY_SCRIPTS_BY_TEMPLATE = {
     "base.html": [
         "js/theme.js",
         "js/bulk_ack.js",
-        "js/sse.js",
+        "js/stale.js",
     ],
 }
 

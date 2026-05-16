@@ -1,0 +1,36 @@
+{# Sidebar-Server-Liste — HTMX-Polling-Container (ADR-0019).
+
+   Wird aus zwei Pfaden konsumiert:
+     1. `base_app.html` inkludiert dieses Partial direkt im Full-Page-Render.
+     2. `GET /_partials/sidebar` (`sidebar_partials_bp.sidebar_partial`)
+        rendert es als HTMX-Antwort fuer den Polling-Trigger.
+
+   Pflicht: `id="server-list"` bleibt nach jedem Swap erhalten — sonst
+   frisst HTMX den Polling-Trigger und der Re-Bind-Handler in `sidebar.js`
+   (Heartbeat-Tooltips, Filter-Re-Apply) findet die Wurzel nicht mehr.
+
+   Variablen-Vertrag (gesetzt von `build_sidebar_context()`):
+     - `sidebar_servers`    : list[Server]  (mit eager-loaded tag_links)
+     - `sidebar_heartbeats` : dict[int, list[DailyStatus]]
+     - `active_server_id`   : int | None
+
+   Sicherheit: kein `|safe` — Server-/Tag-Namen sind server-seitig
+   validiert und werden autoescaped gerendert.
+#}
+<ul id="server-list"
+    role="list"
+    class="divide-y divide-base-300 flex-1"
+    hx-get="{{ url_for('sidebar_partials.sidebar_partial') }}{% if filter_tags %}?{% for t in filter_tags %}tag={{ t | urlencode }}{% if not loop.last %}&{% endif %}{% endfor %}{% endif %}"
+    hx-trigger="every 10s [document.visibilityState === 'visible']"
+    hx-target="this"
+    hx-swap="outerHTML">
+  {% for srv in (sidebar_servers or []) %}
+    {% with server=srv,
+            cells=(sidebar_heartbeats or {}).get(srv.id, []),
+            is_active=(active_server_id == srv.id) %}
+      {% include "sidebar/_server_row.html" %}
+    {% endwith %}
+  {% else %}
+    {% include "_empty/no_servers.html" %}
+  {% endfor %}
+</ul>

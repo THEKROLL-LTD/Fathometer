@@ -4,7 +4,23 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
-**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign — v0.4.0 (2026-05-16). Block L (ADR-0019 SSE→Polling) als nächster Block geplant.**
+**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling — v0.5.0 (2026-05-16).**
+
+Block L (ADR-0019) abgeschlossen: Dashboard-Live-Updates laufen jetzt
+über HTMX-Polling statt SSE. `GET /events`, `EventBus` und der
+in-process Publish-Hook im Scan-Ingest sind ersatzlos entfernt;
+LLM-Chat-Streaming (`GET /chat/<id>/stream`) bleibt unverändert SSE.
+Pane (`#dashboard-pane`) und Sidebar-Server-Liste (`#server-list` über
+neue Route `GET /_partials/sidebar`) polen alle 10 s mit
+`document.visibilityState === 'visible'`-Gating und `hx-swap="outerHTML"`.
+Aktive Filter (`?severity=...`, `?tag=...`) bleiben über
+`request.path` + optionaler `request.query_string` im Re-Fetch erhalten.
+
+785 Tests grün, Coverage 92.35 % (Threshold 85 %); 177 adversarial
+Tests grün. `ruff check`/`ruff format --check`/`mypy app/` PASS,
+Alembic-Roundtrip PASS, `docker compose up --build` + `/healthz` PASS,
+Image-Size 191 MB. `docker stats` Idle-CPU 0.04 % unter offenem Tab —
+deutlich unter der ADR-0019-Schwelle.
 
 Block K (ADR-0018) abgeschlossen: Server-Detail-View vollständig nach
 dem dritten Design-Bundle (`S5lepfeL8MeibyHP1ojRbw`) umgebaut. Header
@@ -25,7 +41,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Aktueller Block
 
-**Block L — Dashboard-Polling statt SSE (ADR-0019)** · Status: vorbereitet, noch nicht gestartet. Branch-Vorschlag `feat/block-l-dashboard-polling`. Brief und DoD in [`L-dashboard-polling.md`](L-dashboard-polling.md). Hintergrund: beobachtete Hänger im `docker compose`-Stack durch HTTP/1.1-Slot-Limit + Thread-Pin + EventBus-Worker-Affinity (ADR-0019 Kontext-Sektion). SSE bleibt ausschließlich für `GET /chat/{cid}/stream` (LLM-Token-Streaming).
+(keiner — Block L abgeschlossen 2026-05-16, nächster Block per User-Entscheidung)
 
 ## Completed
 
@@ -40,6 +56,8 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 - **I — UI-Modernisierung (Single-Page-Sidebar-Layout)** · abgeschlossen 2026-05-15 · Branch `feat/block-i` · Reviewer-Freigabe 27 PASS / 0 FAIL. Security-Auditor: **CLEAN** (keine neuen Sicherheits-Surfaces, 8 Punkte alle PASS). 45 neue Block-I-Tests grün (insgesamt 674), Coverage 92.54 %. `base_app.html` als Single-Page-Shell mit Sidebar (Quick-Stats, Sticky-Search mit `/`-Shortcut, Tag-Filter, Server-Liste mit Heartbeat-Bars, Settings-Akkordeon) + Detail-Pane (HTMX-Swap, `hx-push-url`). Heartbeat-Aggregation als Python-Service (Variante B, on-the-fly), Performance 50×50<200ms. `_inject_sidebar_context`-Context-Processor injiziert Sidebar-Variablen automatisch. `_partial_shell.html` für HX-Fragmente. Empty-States, Monospace-Cleanup, Quick-Copy-Macro-Fix aus Block F. Funktional gegenüber v0.1.0 unverändert. Screenshots: `docs/blocks/I-evidence/{dashboard,server-detail}.png`. **Tag `v0.2.0` gesetzt.**
 - **I-Refinement (ADR-0016) — Header + Profile-Dropdown + Settings-Sekundär-Nav + Master-Key/About** · abgeschlossen 2026-05-15 · Branch `feat/block-i-refinement` · Reviewer-Freigabe 19 PASS / 0 FAIL (nach Lint-Fix). Security-Auditor: **ACCEPTABLE WITH NOTES** (1 low CONCERN — fehlender XSS-Adversarial für Master-Key-Klartext, kein realer Vektor weil URL-safe-Base64-Zeichensatz). 48 neue Tests grün (insgesamt 722), Coverage 92.21 %. Header kompakt (Logo + Dashboard + Suche + Theme-Toggle + Profile-Avatar), Profile-Dropdown flach (Settings/Audit/Logout), Settings-View mit linker Sekundär-Nav (Tags/LLM-Provider/Server-Verwaltung/Master-Key/About). Neue Routen `/settings/master-key` (Rotation mit Confirm-Modal + einmaliger Klartext-Anzeige + Audit-Event `master_key.rotated` mit nur hash_prefix) und `/settings/about` (Version/Build-Hash/Alembic-Revision read-only). `/settings` → 302 auf `/settings/servers/`. Sidebar auf reine Server-Liste reduziert. 3-Modi-Render-Helper `app/views/_settings_shell.py` (Vollseite/Shell-Fragment/Content-only). Conftest-Härtung gegen TRUNCATE-Lock-Hänger via `lock_timeout` + `pg_terminate_backend`. Screenshots: `docs/blocks/I-refinement-evidence/{dashboard,profile-dropdown,settings-servers,settings-master-key,settings-about}.png`. **Tag `v0.3.0` zu setzen.**
 - **J — Dashboard-Pane-Konsolidierung (ADR-0017)** · abgeschlossen 2026-05-16 · Branch `feat/block-j-dashboard-pane` · 728 Tests grün (+3 neue Pane-Konsistenz-Regression-Tests), `ruff check` + `mypy app/` + Alembic-Roundtrip PASS. Gemeinsames Partial `dashboard/_detail_pane.html` wird sowohl von der Full-Page-Shell (`dashboard/index.html` via `{% include %}`) als auch direkt vom HX-Pfad in `app/views/dashboard.py` über `_build_pane_context()`-Helper konsumiert. `_pane/welcome.html` plus leeres `_pane/`-Verzeichnis entfernt. `base_app.html`-Welcome-Fallback weg, defensiver `if main_pane`-Zweig bleibt. Regression-Test prüft Pane-Marker-Identität in beiden Render-Pfaden und HX-Fragment-Eigenschaft (kein `<html>`/`<aside>` im Response). Bugfix/Refactor — funktional gegenüber v0.3.0 unverändert.
+- **L — Dashboard-Polling statt SSE (ADR-0019)** · abgeschlossen 2026-05-16 · Branch `feat/block-l` · Reviewer-Freigabe APPROVE (alle DoD-Items grün). 785 Tests grün (3 neue: `tests/views/test_dashboard_polling.py`, `tests/views/test_sidebar_partial.py`, `tests/adversarial/test_polling_no_rate_limit.py`; 3 gelöscht: `tests/api/test_events_sse.py`, `tests/api/test_scans_event_publish.py`, `tests/services/test_event_bus.py`; 5 e2e SKIPPED ohne Backend). Coverage 92.35 % (Threshold 85 %), 177 adversarial PASS. `ruff check`/`ruff format --check`/`mypy app/` PASS, Alembic-Roundtrip PASS, `docker compose up --build` + `/healthz` PASS, Image 191 MB, Idle-CPU 0.04 % unter offenem Tab. Entfernt: `app/api/events.py` (116 LoC), `app/services/event_bus.py` (163 LoC), `event_bus.publish`-Hook in `app/api/scans.py`, `init_event_bus(app)` + `events_bp` aus `app/__init__.py`, Alpine-Komponente `dashboardSse(...)` plus `window.dashboardSse`-Export. Neu: Polling-Wrapper in `app/templates/dashboard/_detail_pane.html` (`#dashboard-pane`, `every 10s`, `outerHTML`) und Sidebar-Polling-Route `GET /_partials/sidebar` (`sidebar_partials_bp.sidebar_partial`, `@login_required`) mit Container `#server-list`. JS-Datei `app/static/js/sse.js` umbenannt zu `stale.js`; `staleTick()` unverändert, Doc-Header zugeschnitten. `sse_highlight.js` bleibt (Polling-Highlight via `htmx:afterSettle`). ARCHITECTURE §6/§7/§7a auf Polling umgestellt; §14-Audit-Log-Hinweis von nie-implementiertem `scan.received` auf echtes `scan.ingested` korrigiert. Filter-Persistenz (`request.path` + optionale `request.query_string`) erhalten. **Tag `v0.5.0` zu setzen.**
+
 - **K — Server-Detail-Redesign (ADR-0018)** · abgeschlossen 2026-05-16 · Branch `feat/block-k` · Reviewer-Freigabe nach Re-Review (ruff-format auf 3 neue Test-Files). 797 Tests grün (+69 neue Block-K-Tests: 20 Service-Unit-Tests + 13 View-Tests + 36 Adversarial-Sort-Param + 0 weitere; 5 e2e SKIPPED). `ruff check` + `ruff format --check` (Block-K-Outputs) + `mypy app/` (0 Errors) + Alembic-Roundtrip + `docker compose up --build` + `/healthz` 200 — alles PASS. Neue Services: `app/services/trend.py` (`Tendency`-Enum + `compute_tendency()` avg-7T-vs-avg-50T-±5%-Heuristik), `app/services/severity_history.py` (`DailySeverityCount`-Dataclass + `severity_snapshots_for_server` + `daily_severity_counts_for_server` + `count_kev_events_50d` — on-the-fly aus Finding-Lifecycle, KEINE neue persistente Tabelle). Schema-Erweiterung: `FindingsViewFilter.sort`/`.dir` mit Literal-Whitelist + Fallback-auf-Default. `findings_query.list_findings` mit statischem `_SORT_COLUMNS`-Mapping (ORM-only). CSV-Export `mode=flach|gruppiert|diff` mit Group-Spalte bzw. `DiffStatus`-Spalte und leerer-Diff-Fallback-Hinweis. Templates: `detail.html` komplett umgebaut auf `max-w-[1600px]` mit Header/HeaderStats/Lebenszeichen/Severity-Trend/Tag-Editor-Akkordeon/Findings-Section; `_kpi_card.html`/`_heartbeat_large.html`/`_stacked_bar_chart.html` neu (Inline-SVG, kein Node-Build); `_macros.html` um `sort_header()` und `tendency_label()` erweitert; `_findings_section.html` ohne Filter-Form, mit Mode-Segment + Bulk-Ack-Toolbar + CSV-Dropdown. Bulk-Ack wiederverwendet `POST /api/findings/bulk-acknowledge` aus Block F unverändert. Performance-Bench Daily-Snapshots 10k×50T standalone ~80–100 ms (ADR-0018-Schwelle). Bekannte Limitations dokumentiert in ADR-0018 (Re-Open-Events, 100k-Findings-Server, Re-Open-Trigger für persistente Snapshot-Tabelle). Default-Sort `sev,desc` mit `identifier_key`-Tiebreak ersetzt im Detail-View den §15-`is_kev DESC`-Tiebreak (ADR-konform). **Tag `v0.4.0` zu setzen.**
 
 ## Backlog (in Reihenfolge)
@@ -58,7 +76,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 | I-Refinement | [I-addendum-header-layout.md](I-addendum-header-layout.md) | completed 2026-05-15 — **v0.3.0** (ADR-0016) |
 | J | [J-dashboard-pane-consolidation.md](J-dashboard-pane-consolidation.md) | completed 2026-05-16 — ADR-0017 (Dashboard-Pane-Konsolidierung) |
 | K | [K-server-detail-visual.md](K-server-detail-visual.md) | completed 2026-05-16 — **v0.4.0** (ADR-0018 Server-Detail-Redesign) |
-| L | [L-dashboard-polling.md](L-dashboard-polling.md) | vorbereitet 2026-05-16 — ADR-0019 (Dashboard-SSE → HTMX-Polling, LLM-Stream-SSE bleibt) |
+| L | [L-dashboard-polling.md](L-dashboard-polling.md) | completed 2026-05-16 — **v0.5.0** (ADR-0019 Dashboard-SSE → HTMX-Polling, LLM-Stream-SSE bleibt) |
 
 ## Aktive Blocker
 

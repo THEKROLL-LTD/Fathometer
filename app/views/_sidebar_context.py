@@ -11,6 +11,10 @@ Variablen-Vertrag (siehe `base_app.html`):
   - available_tags     : list[Tag]
   - filter_tags        : list[str]
   - active_server_id   : int | None  (vom View gesetzt)
+
+Zusaetzlich stellt dieses Modul den HTMX-Polling-Endpoint
+`GET /_partials/sidebar` bereit (ADR-0019): dasselbe Sidebar-Markup
+ohne Page-Shell, das `base_app.html` per `hx-get` alle 10s nachzieht.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from flask import Blueprint, render_template, request
+from flask_login import login_required
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -82,4 +88,29 @@ def is_hx_request(request: Any) -> bool:
     return bool(request.headers.get("HX-Request") == "true")
 
 
-__all__ = ["build_sidebar_context", "is_hx_request"]
+sidebar_partials_bp = Blueprint("sidebar_partials", __name__)
+
+
+@sidebar_partials_bp.get("/_partials/sidebar")
+@login_required
+def sidebar_partial() -> Any:
+    """HTMX-Polling-Endpoint fuer die Sidebar-Server-Liste (ADR-0019).
+
+    Liefert ausschliesslich das `<ul id="server-list">`-Fragment ohne
+    `<html>`/`<head>`/`<body>`-Shell. Wird von `base_app.html` per
+    `hx-get` alle 10 s (nur bei sichtbarem Tab) nachgezogen und ersetzt
+    sich selbst via `outerHTML`.
+
+    Filter-Tags werden — analog zum Dashboard-Polling-Pane — aus dem
+    Query-String (`?tag=...`) uebernommen, damit ein aktiver Tag-Filter
+    auch in der Sidebar-Server-Liste persistiert.
+    """
+    filter_tags = request.args.getlist("tag") or None
+    ctx = build_sidebar_context(filter_tags=filter_tags)
+    active_id = request.args.get("active_server_id", type=int)
+    if active_id is not None:
+        ctx["active_server_id"] = active_id
+    return render_template("sidebar/_server_list.html", **ctx)
+
+
+__all__ = ["build_sidebar_context", "is_hx_request", "sidebar_partials_bp"]
