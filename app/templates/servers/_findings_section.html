@@ -35,16 +35,24 @@
       <h2 class="font-mono text-base font-medium mt-1">Findings</h2>
     </div>
     <div class="flex items-center gap-2 flex-wrap">
-      {# Mode-Segment — jeder Button ist ein Link, der nur `mode` ueberschreibt
-         und alle anderen Filter/Sort-Werte aus dem aktuellen Query-String
-         erhaelt. #}
+      {# Mode-Segment — jeder Button swappt das `#findings-section`-Partial
+         per HTMX (kein Full-Page-Reload, sonst springt die Scroll-Position).
+         Plain-Href bleibt als Fallback fuer ohne-JS / Mittelklick. Pattern
+         deckungsgleich zu `sort_header()` im `_macros.html`. #}
       <div class="join" role="group" aria-label="Findings-Modus">
         {% for mode_value, mode_label in [
           ('list',  'flach'),
           ('group', 'gruppiert'),
           ('diff',  'diff'),
         ] %}
-          <a href="{{ url_for('server_detail.show', server_id=server.id) }}?{{ view_filter.to_query_string(override={'mode': mode_value}) }}"
+          {%- set mode_qs = view_filter.to_query_string(override={'mode': mode_value}) -%}
+          {%- set mode_url = url_for('server_detail.show', server_id=server.id) ~ '?' ~ mode_qs -%}
+          <a href="{{ mode_url }}"
+             hx-get="{{ mode_url }}"
+             hx-target="#findings-section"
+             hx-select="#findings-section"
+             hx-swap="outerHTML"
+             hx-push-url="true"
              class="join-item btn btn-xs {% if view_filter.mode == mode_value %}btn-active{% else %}btn-ghost{% endif %}"
              role="button"
              aria-pressed="{{ 'true' if view_filter.mode == mode_value else 'false' }}"
