@@ -156,6 +156,16 @@ class CSRFOnlyForm(FlaskForm):
     """Leere Form ausschliesslich fuer den CSRF-Token (z.B. Delete-Buttons)."""
 
 
+class MasterKeyRotateForm(FlaskForm):
+    """Reines CSRF-Token-Form fuer die Master-Key-Rotation.
+
+    Die Rotation hat keine User-Inputs — Flask-WTF stellt `csrf_token`
+    automatisch bereit. Eigene Klasse (statt `CSRFOnlyForm`-Reuse), damit
+    Tests und Reviewer den Zweck am Form-Namen erkennen koennen und der
+    Audit-Helfer in §13 die richtige Aktion zuordnen kann.
+    """
+
+
 # Max-Laenge fuer Notiz-/Kommentar-Texte aus ARCHITECTURE.md §10: max 8 KB
 # pro Notiz. Wir setzen das als WTForms-Validator und verlassen uns nicht
 # auf die DB allein.
@@ -307,6 +317,7 @@ __all__ = [
     "GroupAcknowledgeForm",
     "LlmSettingsForm",
     "LoginForm",
+    "MasterKeyRotateForm",
     "NoteForm",
     "ReopenForm",
     "SetupStep1Form",

@@ -4,6 +4,10 @@
 # laeuft als non-root user.
 
 ARG PYTHON_VERSION=3.13
+# Build-Revision (Git-SHA o.ae.) — wird vom CI per `--build-arg` gesetzt
+# und in der Runtime-Stage als ENV exportiert. About-View liest das
+# via `os.environ.get("SECSCAN_BUILD_REVISION", "dev")`.
+ARG SECSCAN_BUILD_REVISION=dev
 
 # ---------------------------------------------------------------------------
 # Stage 1 — Builder
@@ -163,7 +167,12 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Thread-Safety: SQLAlchemy nutzt scoped sessions, structlog ist
 # thread-safe, der EventBus baut auf `queue.Queue` — alles thread-safe.
 # Siehe ADR-0015.
-ENV SECSCAN_GUNICORN_WORKERS=2 \
+# Build-Revision in die runtime-Stage durchreichen, damit die About-View
+# sie ausliest. Der ARG aus Stage 1 muss in den finalen Stage neu
+# deklariert werden (Docker-Multi-Stage-Verhalten).
+ARG SECSCAN_BUILD_REVISION=dev
+ENV SECSCAN_BUILD_REVISION=${SECSCAN_BUILD_REVISION} \
+    SECSCAN_GUNICORN_WORKERS=2 \
     SECSCAN_GUNICORN_THREADS=8 \
     SECSCAN_GUNICORN_TIMEOUT=120
 

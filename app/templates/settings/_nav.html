@@ -1,0 +1,78 @@
+{# Settings-Sekundaer-Navigation (ADR-0016 / Block-I-Refinement).
+
+   Variablen:
+     - `active` (str) — aktiver Tab-Bezeichner aus dem View:
+       `tags`, `llm`, `servers`, `master_key`, `about`.
+
+   Layout: 224px (`w-56`) Sticky-Nav links innerhalb des Detail-Pane.
+   Aktiver Eintrag: `menu-active bg-primary/10 text-primary font-semibold`
+   (gemaess Mockup §454-491).
+
+   Klick auf einen Eintrag: HTMX-Swap nur des Content-Bereichs rechts
+   (`hx-target="#settings-content"`, `hx-swap="innerHTML"`,
+   `hx-headers='{"HX-Target": "settings-content"}'`). Nav bleibt stehen.
+   `href`-Fallback fuer No-JS.
+#}
+<nav id="settings-nav"
+     class="settings-nav w-56 shrink-0 border-r border-base-300 bg-base-100 py-4"
+     aria-label="Settings-Navigation">
+  <div class="px-4 pb-2 text-xs uppercase opacity-50 tracking-wide">Settings</div>
+  <ul class="menu menu-sm w-full px-2">
+    <li>
+      <a href="{{ url_for('settings.tags_list') }}"
+         hx-get="{{ url_for('settings.tags_list') }}"
+         hx-target="#settings-content"
+         hx-swap="innerHTML"
+         hx-push-url="true"
+         hx-headers='{"HX-Target": "settings-content"}'
+         class="{% if active == 'tags' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
+        Tags
+      </a>
+    </li>
+    <li>
+      <a href="{{ url_for('llm_settings.show') }}"
+         hx-get="{{ url_for('llm_settings.show') }}"
+         hx-target="#settings-content"
+         hx-swap="innerHTML"
+         hx-push-url="true"
+         hx-headers='{"HX-Target": "settings-content"}'
+         class="{% if active == 'llm' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
+        LLM-Provider
+      </a>
+    </li>
+    <li>
+      <a href="{{ url_for('servers.list_servers') }}"
+         hx-get="{{ url_for('servers.list_servers') }}"
+         hx-target="#settings-content"
+         hx-swap="innerHTML"
+         hx-push-url="true"
+         hx-headers='{"HX-Target": "settings-content"}'
+         class="{% if active == 'servers' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
+        Server-Verwaltung
+      </a>
+    </li>
+    <li>
+      <a href="{{ url_for('settings.master_key_view') }}"
+         hx-get="{{ url_for('settings.master_key_view') }}"
+         hx-target="#settings-content"
+         hx-swap="innerHTML"
+         hx-push-url="true"
+         hx-headers='{"HX-Target": "settings-content"}'
+         class="flex items-center {% if active == 'master_key' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
+        <span>Master-Key</span>
+        <span class="badge badge-xs badge-warning ml-auto">neu</span>
+      </a>
+    </li>
+    <li>
+      <a href="{{ url_for('settings.about_view') }}"
+         hx-get="{{ url_for('settings.about_view') }}"
+         hx-target="#settings-content"
+         hx-swap="innerHTML"
+         hx-push-url="true"
+         hx-headers='{"HX-Target": "settings-content"}'
+         class="{% if active == 'about' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
+        About
+      </a>
+    </li>
+  </ul>
+</nav>

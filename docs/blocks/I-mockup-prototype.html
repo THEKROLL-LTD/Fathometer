@@ -1,0 +1,797 @@
+<!doctype html>
+<!--
+  secscan — UI-Mockup für Block-I-Refinement (ADR-0016 + I-addendum-header-layout.md)
+
+  Zweck: visuelles Alignment des neuen Layouts vor Implementierung.
+  KEIN funktionales Backend. Alle Daten sind Beispieldaten.
+
+  Interaktion:
+    - Klick auf einen Server in der Sidebar → Server-Detail rechts
+    - Klick auf "Dashboard" oder Logo → Dashboard-Default
+    - Klick auf "Suche" → Such-View
+    - Klick auf Profile-Icon (rechts oben) → Dropdown (flach, ohne Sub-Menü)
+    - Settings im Dropdown → Settings-View mit Default-Tab "Tags".
+      Die Sub-Bereiche (Tags, LLM, Server, Master-Key, About) liegen
+      als linke Sekundär-Navigation im Settings-Pane.
+    - Audit-Item im Dropdown → Audit-View
+    - Theme-Toggle (sun/moon) → Light/Dark Umschalt
+    - Lokales Sidebar-Such-Input filtert die Server-Liste live
+
+  Stack-Konsistenz: Tailwind 3.4.16, DaisyUI 4.12.14, Alpine.js 3.14.7 — identisch
+  zu app/templates/base.html. Heroicons inline als SVG.
+-->
+<html lang="de" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>secscan — Mockup Block-I Layout</title>
+
+  <script src="https://cdn.tailwindcss.com/3.4.16?plugins=forms,typography"></script>
+  <link
+    href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css"
+    rel="stylesheet"
+    type="text/css"
+  />
+  <style>
+    [x-cloak] { display: none !important; }
+    /* Heartbeat-Pill Höhen-Konsistenz */
+    .hb-pill { width: 4px; min-width: 4px; border-radius: 1px; }
+    .hb-bar  { gap: 2px; }
+    /* Subtle active-server border */
+    .server-row.active { border-left: 3px solid hsl(var(--p)); padding-left: 9px; }
+    .server-row        { border-left: 3px solid transparent; padding-left: 9px; }
+    /* Mockup-Banner soll auffallen aber nicht stören */
+    .mockup-banner { font-family: ui-monospace, SFMono-Regular, monospace; }
+  </style>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.7/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-screen bg-base-100 text-base-content antialiased">
+
+<div
+  x-data="mockup()"
+  x-init="init()"
+  class="flex flex-col min-h-screen"
+>
+
+  <!-- Mockup-Hinweis-Banner (würde im Echtbetrieb wegfallen) -->
+  <div class="mockup-banner bg-warning/30 px-4 py-1.5 text-center text-xs">
+    MOCKUP · Block-I-Refinement (ADR-0016) · kein Backend · Klicke Server, Dashboard, Profile-Icon
+  </div>
+
+  <!-- ====================================================================
+       HEADER (fix, gemäß ADR-0016)
+       Links: Logo + Dashboard + Suche
+       Rechts: Theme-Toggle + Profile-Icon-Dropdown
+       ==================================================================== -->
+  <header class="navbar bg-base-200 border-b border-base-300 px-4 min-h-14">
+    <div class="flex-1 flex items-center gap-2">
+      <!-- Logo + Brand -->
+      <a href="#" @click.prevent="goDashboard()"
+         class="flex items-center gap-2 text-lg font-semibold tracking-tight hover:opacity-80">
+        <span class="inline-block w-6 h-6 rounded bg-primary text-primary-content
+                     text-center text-sm leading-6 font-bold">s</span>
+        <span>secscan</span>
+      </a>
+
+      <!-- Top-Level-Navigation: Dashboard + Suche -->
+      <nav class="flex items-center gap-1 ml-4 text-sm" aria-label="Hauptnavigation">
+        <button @click="goDashboard()"
+                :class="state === 'dashboard' ? 'btn-active' : ''"
+                class="btn btn-ghost btn-sm">Dashboard</button>
+        <button @click="state = 'search'"
+                :class="state === 'search' ? 'btn-active' : ''"
+                class="btn btn-ghost btn-sm">Suche</button>
+      </nav>
+    </div>
+
+    <div class="flex-none flex items-center gap-1">
+      <!-- Theme-Toggle (sun/moon Icon — gemäß ADR-0016 sichtbar im Header) -->
+      <button
+        @click="toggleTheme()"
+        class="btn btn-ghost btn-sm btn-circle"
+        :aria-label="theme === 'dark' ? 'Hellen Modus aktivieren' : 'Dunklen Modus aktivieren'"
+        :title="theme === 'dark' ? 'Light-Mode' : 'Dark-Mode'">
+        <!-- Sun -->
+        <svg x-show="theme === 'dark'" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5"
+             viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+        </svg>
+        <!-- Moon -->
+        <svg x-show="theme === 'light'" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5"
+             viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+
+      <!-- Profile-Icon mit Dropdown -->
+      <div class="relative" @click.outside="closeProfile()">
+        <button
+          @click="profileOpen = !profileOpen"
+          class="btn btn-ghost btn-sm btn-circle"
+          aria-label="Profil-Menü">
+          <span class="inline-flex w-7 h-7 rounded-full bg-neutral text-neutral-content
+                       items-center justify-center text-sm font-semibold">A</span>
+        </button>
+
+        <!-- Dropdown -->
+        <div x-show="profileOpen" x-cloak x-transition.opacity
+             class="absolute right-0 mt-2 w-64 bg-base-100 border border-base-300
+                    rounded-box shadow-xl z-50 overflow-hidden">
+
+          <!-- Header: angemeldet als -->
+          <div class="px-4 py-3 border-b border-base-300">
+            <div class="text-xs opacity-60">Angemeldet als</div>
+            <div class="font-semibold">admin</div>
+          </div>
+
+          <!-- Settings (flacher Eintrag, ohne Sub-Menü — gemäß ADR-0016) -->
+          <button
+            @click="openSettings('tags')"
+            class="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-base-200">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            Settings
+          </button>
+
+          <!-- Audit (direkt im Dropdown) -->
+          <button
+            @click="state = 'audit'; profileOpen = false"
+            class="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-base-200">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="9" y1="13" x2="15" y2="13"/>
+              <line x1="9" y1="17" x2="15" y2="17"/>
+            </svg>
+            Audit
+          </button>
+
+          <div class="border-t border-base-300"></div>
+
+          <!-- Logout -->
+          <button
+            @click="alert('Logout (Mockup)')"
+            class="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-base-200 text-error">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+            Logout
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ====================================================================
+       HAUPTBEREICH: Sidebar (Server-Liste) + Detail-Pane
+       ==================================================================== -->
+  <div class="flex flex-1 min-h-0">
+
+    <!-- ================= SIDEBAR ================= -->
+    <aside class="w-80 shrink-0 border-r border-base-300 bg-base-100 flex flex-col">
+      <!-- Sticky lokale Server-Suche/Filter -->
+      <div class="sticky top-0 bg-base-100 px-3 pt-3 pb-2 border-b border-base-300 z-10">
+        <input
+          type="text"
+          x-model="serverFilter"
+          @keydown.escape="serverFilter=''; $el.blur()"
+          placeholder="Server filtern…  ( / )"
+          class="input input-bordered input-sm w-full"
+          aria-label="Server-Liste lokal filtern" />
+        <div class="text-[10px] opacity-50 mt-1 px-1">
+          <span x-text="filteredServers.length"></span> von <span x-text="servers.length"></span> Servern
+        </div>
+      </div>
+
+      <!-- Server-Liste mit Heartbeat-Bars -->
+      <ul class="flex-1 overflow-y-auto">
+        <template x-for="srv in filteredServers" :key="srv.id">
+          <li>
+            <button
+              @click="openServer(srv)"
+              :class="state === 'server' && selectedServer && selectedServer.id === srv.id ? 'active bg-base-200' : ''"
+              class="server-row w-full text-left py-2.5 pr-3 hover:bg-base-200 border-b border-base-200/60 flex items-center gap-2">
+              <!-- Status-Pill mit Severity-Farbe -->
+              <span :class="statusPillClass(srv.status)"
+                    class="inline-block w-2.5 h-2.5 rounded-full shrink-0"></span>
+
+              <div class="flex-1 min-w-0">
+                <div class="font-mono text-sm truncate" x-text="srv.name"></div>
+                <div class="flex items-center gap-1 mt-0.5 flex-wrap">
+                  <template x-for="t in srv.tags">
+                    <span class="badge badge-xs badge-ghost" x-text="t"></span>
+                  </template>
+                  <span x-show="srv.kev > 0"
+                        class="badge badge-xs badge-error gap-1">
+                    <span class="w-1.5 h-1.5 rounded-full bg-base-100"></span>
+                    KEV
+                  </span>
+                </div>
+              </div>
+
+              <!-- Heartbeat-Bar (30 Pillen, älteste links) -->
+              <div class="hb-bar flex items-center h-6 shrink-0">
+                <template x-for="(d, i) in srv.heartbeat" :key="i">
+                  <span class="hb-pill h-5"
+                        :class="hbColorClass(d)"
+                        :title="`${heartbeatTooltipDate(i)} · ${heartbeatTooltipState(d)}`"></span>
+                </template>
+              </div>
+            </button>
+          </li>
+        </template>
+
+        <template x-if="filteredServers.length === 0">
+          <li class="px-4 py-6 text-sm opacity-60">Keine Server zu „<span x-text="serverFilter"></span>“.</li>
+        </template>
+      </ul>
+    </aside>
+
+    <!-- ================= DETAIL-PANE ================= -->
+    <main class="flex-1 overflow-y-auto bg-base-100">
+
+      <!-- === STATE: dashboard === -->
+      <section x-show="state === 'dashboard'" x-cloak class="p-6">
+        <div class="flex items-baseline justify-between mb-4">
+          <h1 class="text-lg font-semibold">Dashboard</h1>
+          <span class="text-xs opacity-60">Letzte Aktualisierung: gerade eben</span>
+        </div>
+
+        <!-- Quick-Stats (5 Counter) — gemäß ADR-0016 hier im Detail-Pane statt Sidebar -->
+        <div class="grid grid-cols-5 gap-3 mb-6">
+          <button class="card bg-base-200 hover:bg-base-300 p-4 text-left transition">
+            <div class="text-xs opacity-60">Total open</div>
+            <div class="text-2xl font-bold mt-1">142</div>
+          </button>
+          <button class="card bg-error/10 hover:bg-error/20 p-4 text-left transition">
+            <div class="text-xs opacity-70">KEV</div>
+            <div class="text-2xl font-bold mt-1 text-error">3</div>
+          </button>
+          <button class="card bg-error/10 hover:bg-error/20 p-4 text-left transition">
+            <div class="text-xs opacity-70">Critical</div>
+            <div class="text-2xl font-bold mt-1 text-error">8</div>
+          </button>
+          <button class="card bg-warning/10 hover:bg-warning/20 p-4 text-left transition">
+            <div class="text-xs opacity-70">High</div>
+            <div class="text-2xl font-bold mt-1 text-warning">37</div>
+          </button>
+          <button class="card bg-base-200 hover:bg-base-300 p-4 text-left transition">
+            <div class="text-xs opacity-60">Stale-Server</div>
+            <div class="text-2xl font-bold mt-1">2</div>
+          </button>
+        </div>
+
+        <!-- Kompakte Filter-Bar (war in §7a in der Sidebar — wandert hierher) -->
+        <div class="bg-base-200/60 rounded-box p-3 mb-6 flex items-center gap-3 flex-wrap text-sm">
+          <span class="opacity-60">Filter:</span>
+          <select class="select select-bordered select-sm">
+            <option>alle Tags</option>
+            <option>production</option>
+            <option>staging</option>
+          </select>
+          <select class="select select-bordered select-sm">
+            <option>Severity: high+</option>
+            <option>Severity: medium+</option>
+            <option>alle</option>
+          </select>
+          <label class="label cursor-pointer gap-1">
+            <input type="checkbox" class="checkbox checkbox-sm" />
+            <span>nur KEV</span>
+          </label>
+          <label class="label cursor-pointer gap-1">
+            <input type="checkbox" class="checkbox checkbox-sm" />
+            <span>nur stale</span>
+          </label>
+        </div>
+
+        <!-- Platzhalter-Bereich (bewusst leer gemäß ADR-0016) -->
+        <div class="border-2 border-dashed border-base-300 rounded-box p-12 text-center">
+          <div class="text-sm opacity-50 font-mono mb-2">Platzhalter</div>
+          <div class="text-base opacity-70">
+            Hier kommt später ein Widget-Bereich (Trends, letzte Aktivitäten, …).
+          </div>
+          <div class="text-xs opacity-40 mt-2">
+            Bewusst leer gelassen gemäß ADR-0016 — Inhalt in einem späteren Block.
+          </div>
+        </div>
+      </section>
+
+      <!-- === STATE: server (Detail eines einzelnen Servers) === -->
+      <section x-show="state === 'server' && selectedServer" x-cloak class="p-6">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <div class="text-xs opacity-50 mb-1">Server</div>
+            <h1 class="text-2xl font-mono font-semibold" x-text="selectedServer?.name"></h1>
+            <div class="text-sm opacity-70 mt-1" x-text="selectedServer?.os"></div>
+            <div class="flex items-center gap-1.5 mt-2">
+              <span class="badge badge-success badge-sm">active</span>
+              <template x-if="selectedServer?.dbStale">
+                <span class="badge badge-warning badge-sm">db veraltet</span>
+              </template>
+              <template x-for="t in selectedServer?.tags || []">
+                <span class="badge badge-ghost badge-sm" x-text="t"></span>
+              </template>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-sm btn-outline">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 8V4l8 8-8 8v-4H4V8z"/>
+              </svg>
+              KI-Bewertung
+            </button>
+            <button class="btn btn-sm btn-ghost" @click="goDashboard()">← Dashboard</button>
+          </div>
+        </div>
+
+        <!-- Meta-Grid -->
+        <div class="grid grid-cols-3 gap-4 mb-6">
+          <div class="card bg-base-200 p-4">
+            <div class="text-xs opacity-60">Letzter Scan</div>
+            <div class="font-semibold mt-1">gerade eben</div>
+          </div>
+          <div class="card bg-base-200 p-4">
+            <div class="text-xs opacity-60">Trivy-DB</div>
+            <div class="font-semibold mt-1" x-text="selectedServer?.dbStale ? 'veraltet' : '2026-05-15'"></div>
+          </div>
+          <div class="card bg-base-200 p-4">
+            <div class="text-xs opacity-60">Scan-Intervall</div>
+            <div class="font-semibold mt-1">24h erwartet</div>
+          </div>
+        </div>
+
+        <!-- View-Modus-Tabs (aus Block E) -->
+        <div role="tablist" class="tabs tabs-boxed mb-4 w-fit">
+          <a role="tab" class="tab tab-active">Liste</a>
+          <a role="tab" class="tab">Gruppiert nach Paket</a>
+          <a role="tab" class="tab">Diff seit letztem Scan</a>
+        </div>
+
+        <!-- Findings-Header mit Status-Zähler -->
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-lg font-semibold">Findings</span>
+          <span class="badge badge-warning ml-2"><span x-text="selectedServer?.findings.length"></span> open</span>
+          <span class="badge badge-info">0 ack</span>
+          <span class="badge badge-success">0 resolved</span>
+          <div class="flex-1"></div>
+          <button class="btn btn-xs btn-outline">CSV</button>
+        </div>
+
+        <!-- Findings-Tabelle -->
+        <div class="overflow-x-auto bg-base-100 border border-base-300 rounded-box">
+          <table class="table table-sm">
+            <thead class="text-xs uppercase opacity-70">
+              <tr>
+                <th><input type="checkbox" class="checkbox checkbox-xs" /></th>
+                <th>Severity</th>
+                <th>CVE</th>
+                <th>Paket</th>
+                <th>Installiert</th>
+                <th>KEV</th>
+                <th>CVSS</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="f in selectedServer?.findings || []" :key="f.cve">
+                <tr class="group hover:bg-base-200">
+                  <td><input type="checkbox" class="checkbox checkbox-xs" /></td>
+                  <td>
+                    <span :class="severityBadge(f.severity)"
+                          class="badge badge-sm uppercase" x-text="f.severity"></span>
+                  </td>
+                  <td class="font-mono text-xs" x-text="f.cve"></td>
+                  <td class="font-mono text-xs" x-text="f.pkg"></td>
+                  <td class="font-mono text-xs" x-text="f.installed"></td>
+                  <td>
+                    <span x-show="f.kev" class="badge badge-xs badge-error">KEV</span>
+                  </td>
+                  <td class="font-mono" x-text="f.cvss"></td>
+                  <td><span class="badge badge-warning badge-sm">open</span></td>
+                  <td class="text-right">
+                    <button class="btn btn-xs btn-ghost opacity-0 group-hover:opacity-100 transition">Ack</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- === STATE: search === -->
+      <section x-show="state === 'search'" x-cloak class="p-6 max-w-3xl">
+        <h1 class="text-lg font-semibold mb-4">Globale Suche</h1>
+        <input type="text" placeholder="CVE-ID, Paket, Server-Name…"
+               class="input input-bordered w-full" autofocus />
+        <p class="text-sm opacity-60 mt-3">
+          Suche aggregiert über alle Server. Beispiele: <code class="font-mono">CVE-2026-44990</code>,
+          <code class="font-mono">next@</code>, <code class="font-mono">testhost</code>.
+        </p>
+        <div class="mt-6 text-sm opacity-50 italic">— noch keine Eingabe —</div>
+      </section>
+
+      <!-- === STATE: audit === -->
+      <section x-show="state === 'audit'" x-cloak class="p-6">
+        <h1 class="text-lg font-semibold mb-4">Audit-Log</h1>
+        <div class="overflow-x-auto bg-base-100 border border-base-300 rounded-box">
+          <table class="table table-sm">
+            <thead class="text-xs uppercase opacity-70">
+              <tr><th>Zeit</th><th>Event</th><th>Akteur</th><th>Ziel</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="font-mono text-xs">2026-05-15 14:32:01</td><td>llm.queried</td><td>admin</td><td>testhost</td></tr>
+              <tr><td class="font-mono text-xs">2026-05-15 13:11:50</td><td>finding.acknowledged</td><td>admin</td><td>CVE-2026-44990</td></tr>
+              <tr><td class="font-mono text-xs">2026-05-15 09:04:22</td><td>scan.ingested</td><td>server:testhost</td><td>—</td></tr>
+              <tr><td class="font-mono text-xs">2026-05-14 22:18:07</td><td>server.registered</td><td>master-key</td><td>db-replica-1</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- === STATE: settings ===
+           Innere Zwei-Spalten-Struktur:
+             - Settings-Nav links (sticky, ~220px)
+             - Settings-Content rechts (wechselt mit settingsTab)
+      -->
+      <section x-show="state === 'settings'" x-cloak class="flex min-h-full">
+
+        <!-- Settings-Nav (gemäß ADR-0016 als linke Sekundär-Navigation) -->
+        <nav class="w-56 shrink-0 border-r border-base-300 bg-base-100 py-4"
+             aria-label="Settings-Navigation">
+          <div class="px-4 pb-2 text-xs uppercase opacity-50 tracking-wide">Settings</div>
+          <ul class="menu menu-sm w-full px-2">
+            <li>
+              <button @click="settingsTab = 'tags'"
+                      :class="settingsTab === 'tags' ? 'menu-active bg-primary/10 text-primary font-semibold' : ''">
+                Tags
+              </button>
+            </li>
+            <li>
+              <button @click="settingsTab = 'llm'"
+                      :class="settingsTab === 'llm' ? 'menu-active bg-primary/10 text-primary font-semibold' : ''">
+                LLM-Provider
+              </button>
+            </li>
+            <li>
+              <button @click="settingsTab = 'servers'"
+                      :class="settingsTab === 'servers' ? 'menu-active bg-primary/10 text-primary font-semibold' : ''">
+                Server-Verwaltung
+              </button>
+            </li>
+            <li>
+              <button @click="settingsTab = 'master-key'"
+                      :class="settingsTab === 'master-key' ? 'menu-active bg-primary/10 text-primary font-semibold' : ''">
+                <span>Master-Key</span>
+                <span class="badge badge-xs badge-warning ml-auto">neu</span>
+              </button>
+            </li>
+            <li>
+              <button @click="settingsTab = 'about'"
+                      :class="settingsTab === 'about' ? 'menu-active bg-primary/10 text-primary font-semibold' : ''">
+                About
+              </button>
+            </li>
+          </ul>
+        </nav>
+
+        <!-- Settings-Content (rechts) — wechselt mit settingsTab -->
+        <div id="settings-content" class="flex-1 p-6 min-w-0">
+
+          <!-- Tags -->
+          <div x-show="settingsTab === 'tags'" class="max-w-2xl">
+            <h1 class="text-lg font-semibold mb-4">Tags</h1>
+            <div class="bg-base-200 rounded-box p-4 mb-4">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="badge badge-lg gap-2">production
+                  <button class="opacity-50 hover:opacity-100">×</button></span>
+                <span class="badge badge-lg gap-2">staging
+                  <button class="opacity-50 hover:opacity-100">×</button></span>
+                <span class="badge badge-lg gap-2">db
+                  <button class="opacity-50 hover:opacity-100">×</button></span>
+              </div>
+            </div>
+            <form class="flex items-end gap-2">
+              <div class="flex-1">
+                <label class="label"><span class="label-text">Neuer Tag</span></label>
+                <input type="text" placeholder="z.B. external-facing"
+                       class="input input-bordered w-full input-sm" />
+              </div>
+              <div>
+                <label class="label"><span class="label-text">Farbe</span></label>
+                <input type="color" value="#6366f1" class="w-12 h-9 rounded cursor-pointer" />
+              </div>
+              <button class="btn btn-primary btn-sm">Hinzufügen</button>
+            </form>
+          </div>
+
+          <!-- LLM-Provider -->
+          <div x-show="settingsTab === 'llm'" class="max-w-2xl">
+            <h1 class="text-lg font-semibold mb-4">LLM-Provider</h1>
+            <div class="space-y-3">
+              <div>
+                <label class="label"><span class="label-text">Provider-Anzeigename</span></label>
+                <input type="text" value="DeepInfra" class="input input-bordered input-sm w-full" />
+              </div>
+              <div>
+                <label class="label"><span class="label-text">Base-URL</span></label>
+                <input type="text" value="https://api.deepinfra.com/v1/openai"
+                       class="input input-bordered input-sm w-full font-mono" />
+              </div>
+              <div>
+                <label class="label"><span class="label-text">Model</span></label>
+                <input type="text" value="deepseek-ai/DeepSeek-V3"
+                       class="input input-bordered input-sm w-full font-mono" />
+              </div>
+              <div>
+                <label class="label"><span class="label-text">API-Key</span></label>
+                <input type="password" value="••••••••••••••••••"
+                       class="input input-bordered input-sm w-full font-mono" />
+              </div>
+              <div class="flex gap-2 pt-2">
+                <button class="btn btn-sm btn-outline">Verbindung testen</button>
+                <button class="btn btn-sm btn-primary">Speichern</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Server-Verwaltung -->
+          <div x-show="settingsTab === 'servers'">
+            <h1 class="text-lg font-semibold mb-4">Server-Verwaltung</h1>
+            <div class="overflow-x-auto bg-base-100 border border-base-300 rounded-box">
+              <table class="table table-sm">
+                <thead class="text-xs uppercase opacity-70">
+                  <tr><th>Name</th><th>Registriert</th><th>Letzter Scan</th><th>Status</th><th></th></tr>
+                </thead>
+                <tbody>
+                  <template x-for="srv in servers" :key="srv.id">
+                    <tr>
+                      <td class="font-mono text-sm" x-text="srv.name"></td>
+                      <td class="text-xs opacity-70">2026-04-12</td>
+                      <td class="text-xs opacity-70">gerade eben</td>
+                      <td><span class="badge badge-success badge-sm">active</span></td>
+                      <td class="text-right">
+                        <button class="btn btn-xs btn-ghost">Key rotieren</button>
+                        <button class="btn btn-xs btn-ghost text-error">Retire</button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Master-Key -->
+          <div x-show="settingsTab === 'master-key'" class="max-w-2xl">
+            <h1 class="text-lg font-semibold mb-4">Master-Key</h1>
+            <div class="alert alert-info text-sm mb-4">
+              Der Master-Key authentifiziert die Registrierung neuer Server.
+              Er wird nur einmal angezeigt — bewahre ihn sicher auf.
+            </div>
+            <div class="bg-base-200 rounded-box p-4 mb-4 space-y-1">
+              <div class="text-xs opacity-60">Aktueller Master-Key (Hash)</div>
+              <div class="font-mono text-sm">letzte Rotation: <strong>2026-04-12 10:23</strong></div>
+              <div class="text-xs opacity-50">durch admin · Audit-Event
+                <code class="font-mono">master_key.rotated</code></div>
+            </div>
+            <button class="btn btn-warning btn-sm">Neuen Master-Key generieren</button>
+            <p class="text-xs opacity-60 mt-2">
+              Alte Server-Keys bleiben gültig. Nur neue Registrierungen brauchen den neuen Key.
+            </p>
+          </div>
+
+          <!-- About -->
+          <div x-show="settingsTab === 'about'" class="max-w-2xl">
+            <h1 class="text-lg font-semibold mb-4">About</h1>
+            <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+              <dt class="opacity-60">App-Version</dt><dd class="font-mono">secscan 0.2.0-dev</dd>
+              <dt class="opacity-60">Build-Hash</dt><dd class="font-mono">a1b2c3d</dd>
+              <dt class="opacity-60">DB-Schema</dt>
+              <dd class="font-mono">alembic rev 0014_server_daily_status</dd>
+              <dt class="opacity-60">Python</dt><dd class="font-mono">3.13.1</dd>
+              <dt class="opacity-60">Flask</dt><dd class="font-mono">3.0.x</dd>
+              <dt class="opacity-60">Health</dt>
+              <dd><a class="link link-primary font-mono" href="#" onclick="return false">/healthz</a></dd>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script>
+  // ====================================================================
+  // Mockup-State und Beispieldaten
+  // ====================================================================
+  function mockup() {
+    return {
+      state: 'dashboard',
+      settingsTab: 'tags',     // welcher Settings-Sub-Bereich gerade aktiv ist
+      theme: 'light',
+      profileOpen: false,
+      serverFilter: '',
+      selectedServer: null,
+      servers: [],
+
+      init() {
+        // Heartbeat-Daten generieren (deterministisch je Server)
+        this.servers = [
+          this.makeServer(1, 'testhost',     'macOS 26.3.1 · 25.3.0 · aarch64', ['production','db'],     'critical', 3, 0.85),
+          this.makeServer(2, 'web-01',       'Ubuntu 24.04 · x86_64',           ['production'],          'high',     0, 0.65),
+          this.makeServer(3, 'web-02',       'Ubuntu 24.04 · x86_64',           ['production'],          'medium',   0, 0.40),
+          this.makeServer(4, 'db-replica-1', 'Debian 12 · x86_64',              ['production','db'],     'medium',   0, 0.50),
+          this.makeServer(5, 'cache-redis',  'Alpine 3.20 · x86_64',            ['production'],          'low',      0, 0.20),
+          this.makeServer(6, 'gitlab',       'Ubuntu 22.04 · x86_64',           ['internal'],            'high',     0, 0.55),
+          this.makeServer(7, 'staging-app',  'Ubuntu 24.04 · x86_64',           ['staging'],             'medium',   0, 0.35),
+          this.makeServer(8, 'monitoring',   'Debian 12 · x86_64',              ['internal'],            'low',      0, 0.15),
+          this.makeServer(9, 'cdn-edge-eu',  'Alpine 3.20 · aarch64',           ['production','edge'],   'medium',   0, 0.30),
+          this.makeServer(10,'backup-store', 'Debian 12 · x86_64',              ['internal'],            'stale',    0, 0.05),
+        ];
+      },
+
+      get filteredServers() {
+        const q = this.serverFilter.trim().toLowerCase();
+        if (!q) return this.servers;
+        return this.servers.filter(s =>
+          s.name.toLowerCase().includes(q) ||
+          s.tags.some(t => t.toLowerCase().includes(q))
+        );
+      },
+
+      goDashboard() {
+        this.state = 'dashboard';
+        this.selectedServer = null;
+        this.profileOpen = false;
+      },
+      openServer(srv) {
+        this.state = 'server';
+        this.selectedServer = srv;
+        this.profileOpen = false;
+      },
+      openSettings(which) {
+        // Profile-Dropdown-Klick auf "Settings": Settings-View öffnen,
+        // Default-Sub-Tab "tags" (kann via Argument überschrieben werden, z.B.
+        // für Direkt-URL-Simulation).
+        this.state = 'settings';
+        this.settingsTab = which || 'tags';
+        this.profileOpen = false;
+      },
+      closeProfile() { this.profileOpen = false; },
+
+      toggleTheme() {
+        this.theme = this.theme === 'light' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', this.theme);
+      },
+
+      // -----------------------------------------------------------------
+      // Severity-Styling
+      // -----------------------------------------------------------------
+      statusPillClass(s) {
+        return {
+          critical: 'bg-error',
+          high:     'bg-warning',
+          medium:   'bg-warning/60',
+          low:      'bg-success',
+          stale:    'bg-base-300',
+        }[s] || 'bg-base-300';
+      },
+      severityBadge(s) {
+        const k = s.toLowerCase();
+        return {
+          critical: 'badge-error',
+          high:     'badge-warning',
+          medium:   'badge-warning badge-outline',
+          low:      'badge-success badge-outline',
+        }[k] || 'badge-ghost';
+      },
+
+      // -----------------------------------------------------------------
+      // Heartbeat-Bar — 30 deterministische Pillen je Server
+      // Farbmapping aus §7a §225: green/yellow/orange/red/grey
+      // -----------------------------------------------------------------
+      hbColorClass(state) {
+        return {
+          ok:       'bg-success',
+          ack:      'bg-warning/60',
+          high:     'bg-warning',
+          critical: 'bg-error',
+          stale:    'bg-base-300',
+        }[state] || 'bg-base-300';
+      },
+      heartbeatTooltipDate(i) {
+        // i=0 ist ältester Tag, i=29 ist heute
+        const d = new Date();
+        d.setDate(d.getDate() - (29 - i));
+        return d.toISOString().slice(0, 10);
+      },
+      heartbeatTooltipState(s) {
+        return {
+          ok: 'keine offenen Findings über Schwelle',
+          ack: 'offene Findings — alle acknowledged',
+          high: 'offene High-Severity',
+          critical: 'offene Critical oder KEV',
+          stale: 'kein Scan an diesem Tag',
+        }[s] || s;
+      },
+
+      makeServer(id, name, os, tags, worstStatus, kev, badRatio) {
+        // Deterministischer Heartbeat: badRatio bestimmt Anteil schlechter Tage,
+        // jüngste Tage spiegeln den aktuellen worstStatus stärker wider.
+        const hb = [];
+        let seed = id * 9301 + 49297;
+        const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+        for (let i = 0; i < 30; i++) {
+          const recency = i / 29; // 0..1, neuer = höher
+          const r = rand();
+          if (r < badRatio * (0.3 + 0.7 * recency)) {
+            // schlechter Tag — die letzten Tage spiegeln worstStatus
+            if (recency > 0.85) hb.push(worstStatus === 'stale' ? 'stale' : worstStatus);
+            else hb.push(r < 0.1 ? 'ack' : (r < 0.5 ? 'high' : 'critical'));
+          } else if (r > 0.95) {
+            hb.push('stale');
+          } else {
+            hb.push('ok');
+          }
+        }
+
+        // Beispiel-Findings nur für testhost vollständig
+        let findings = [];
+        if (name === 'testhost') {
+          findings = [
+            { cve: 'CVE-2026-44990', pkg: 'sanitize-html@package-lock.json', installed: '2.17.3', kev: true,  cvss: '9.3', severity: 'critical' },
+            { cve: 'CVE-2026-44578', pkg: 'next@package-lock.json',          installed: '16.2.4', kev: false, cvss: '8.6', severity: 'high' },
+            { cve: 'CVE-2026-44574', pkg: 'next@package-lock.json',          installed: '16.2.4', kev: false, cvss: '8.1', severity: 'high' },
+            { cve: 'CVE-2026-44575', pkg: 'next@package-lock.json',          installed: '16.2.4', kev: false, cvss: '7.5', severity: 'high' },
+            { cve: 'CVE-2026-6321',  pkg: 'fast-uri@package-lock.json',      installed: '3.1.0',  kev: false, cvss: '7.5', severity: 'high' },
+            { cve: 'CVE-2026-6322',  pkg: 'fast-uri@package-lock.json',      installed: '3.1.0',  kev: false, cvss: '7.5', severity: 'high' },
+            { cve: 'CVE-2026-7811',  pkg: 'lodash@package-lock.json',        installed: '4.17.20',kev: false, cvss: '6.4', severity: 'medium' },
+          ];
+        } else {
+          // andere Server bekommen ein bis zwei Platzhalter-Findings
+          if (worstStatus !== 'low' && worstStatus !== 'stale') {
+            findings = [
+              { cve: 'CVE-2026-11111', pkg: 'openssl@/var/lib/dpkg/status', installed: '3.0.13', kev: false,
+                cvss: worstStatus === 'high' ? '7.5' : '5.5', severity: worstStatus },
+            ];
+          }
+        }
+
+        return {
+          id, name, os, tags, status: worstStatus, kev,
+          heartbeat: hb,
+          dbStale: name === 'testhost',
+          findings,
+        };
+      },
+    };
+  }
+
+  // Globaler /-Shortcut: fokussiert das Sidebar-Filter-Input
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement.tagName !== 'INPUT' &&
+        document.activeElement.tagName !== 'TEXTAREA') {
+      const input = document.querySelector('aside input[type="text"]');
+      if (input) { e.preventDefault(); input.focus(); }
+    }
+  });
+</script>
+
+</body>
+</html>

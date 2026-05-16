@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, flash, redirect, url_for
 from flask_login import login_required
 from sqlalchemy import select, update
 from werkzeug.wrappers import Response as WerkzeugResponse
@@ -25,7 +25,7 @@ from app.audit import log_event
 from app.db import get_session
 from app.forms import CSRFOnlyForm
 from app.models import Finding, FindingStatus, Server
-from app.views._sidebar_context import is_hx_request
+from app.views._settings_shell import render_settings
 
 log = structlog.get_logger(__name__)
 servers_bp = Blueprint("servers", __name__, url_prefix="/settings/servers")
@@ -36,13 +36,12 @@ servers_bp = Blueprint("servers", __name__, url_prefix="/settings/servers")
 def list_servers() -> Any:
     sess = get_session()
     rows = sess.execute(select(Server).order_by(Server.created_at.desc())).scalars().all()
-    return render_template(
-        "settings/servers.html",
+    return render_settings(
+        active="servers",
+        content_template="settings/servers.html",
         servers=rows,
         revoke_form=CSRFOnlyForm(),
         retire_form=CSRFOnlyForm(),
-        # Block I: Sidebar-Layout-Flag.
-        hx_partial=is_hx_request(request),
     )
 
 

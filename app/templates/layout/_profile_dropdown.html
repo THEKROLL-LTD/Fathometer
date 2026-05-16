@@ -1,0 +1,97 @@
+{# Profile-Avatar mit Dropdown (ADR-0016 / Mockup §117-179).
+
+   Flache Einträge — Settings, Audit, Logout. Kein Sub-Menü.
+
+   Variablen:
+     - `current_user` (Flask-Login User) — `username`, `is_authenticated`.
+
+   Sicherheit:
+     - Logout ist POST mit CSRF-Token (Flask-WTF).
+     - Dropdown-State lokal in Alpine (`profileOpen`).
+     - Username wird per Jinja-Autoescape gerendert; kein `|safe`.
+#}
+{% set initial = (current_user.username[:1] | upper) if current_user.username else "?" %}
+<div class="relative"
+     x-data="{ profileOpen: false }"
+     @click.outside="profileOpen = false"
+     @keydown.escape.window="profileOpen = false">
+  <button type="button"
+          @click="profileOpen = !profileOpen"
+          :aria-expanded="profileOpen ? 'true' : 'false'"
+          class="btn btn-ghost btn-sm btn-circle"
+          aria-label="Profil-Menü">
+    <span class="inline-flex w-7 h-7 rounded-full bg-neutral text-neutral-content
+                 items-center justify-center text-sm font-semibold"
+          aria-hidden="true">{{ initial }}</span>
+  </button>
+
+  <div id="profile-dropdown"
+       x-show="profileOpen"
+       x-cloak
+       x-transition.opacity
+       class="absolute right-0 mt-2 w-64 bg-base-100 border border-base-300
+              rounded-box shadow-xl z-50 overflow-hidden"
+       role="menu"
+       aria-labelledby="profile-dropdown-button">
+    {# Header: Benutzername. #}
+    <div class="px-4 py-3 border-b border-base-300">
+      <div class="text-xs opacity-60">Angemeldet als</div>
+      <div class="font-semibold font-mono">{{ current_user.username }}</div>
+    </div>
+
+    {# Settings (flacher Eintrag, kein Sub-Menue). #}
+    <a href="{{ url_for('settings.settings_index') }}"
+       hx-get="{{ url_for('servers.list_servers') }}"
+       hx-target="#detail-pane"
+       hx-push-url="true"
+       @click="profileOpen = false"
+       class="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-base-200"
+       role="menuitem">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      Settings
+    </a>
+
+    {# Audit-Log. #}
+    <a href="{{ url_for('audit.list_events') }}"
+       hx-get="{{ url_for('audit.list_events') }}"
+       hx-target="#detail-pane"
+       hx-push-url="true"
+       @click="profileOpen = false"
+       class="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-base-200"
+       role="menuitem">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="9" y1="13" x2="15" y2="13"/>
+        <line x1="9" y1="17" x2="15" y2="17"/>
+      </svg>
+      Audit
+    </a>
+
+    <div class="border-t border-base-300"></div>
+
+    {# Logout: POST mit CSRF-Token. #}
+    <form method="post" action="{{ url_for('auth.logout') }}" class="m-0">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <button type="submit"
+              class="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-base-200 text-error"
+              role="menuitem">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        Logout
+      </button>
+    </form>
+  </div>
+</div>
