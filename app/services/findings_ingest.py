@@ -47,6 +47,13 @@ from app.schemas.scan_envelope import (
 log = structlog.get_logger(__name__)
 
 
+# Postgres-Hard-Limit fuer Bind-Parameter pro Query: 65535 (uint16). Eine
+# Finding-Row bindet 22 Spalten — wir batchen daher in 1000er-Schritten und
+# haben damit ~22000 Parameter pro Statement, also komfortabel unter dem
+# Limit auch wenn jemand spaeter Spalten ergaenzt.
+FINDINGS_INSERT_CHUNK_SIZE = 1000
+
+
 # ---------------------------------------------------------------------------
 # Ergebnis-Datenstruktur
 # ---------------------------------------------------------------------------
@@ -248,41 +255,47 @@ def ingest_scan(
     updated_count = 0
 
     if rows:
-        stmt = pg_insert(Finding).values(rows)
-        update_cols: dict[str, Any] = {
-            "installed_version": stmt.excluded.installed_version,
-            "fixed_version": stmt.excluded.fixed_version,
-            "severity": stmt.excluded.severity,
-            "title": stmt.excluded.title,
-            "description": stmt.excluded.description,
-            "cvss_v3_score": stmt.excluded.cvss_v3_score,
-            "cvss_v3_vector": stmt.excluded.cvss_v3_vector,
-            "epss_score": stmt.excluded.epss_score,
-            "epss_percentile": stmt.excluded.epss_percentile,
-            "is_kev": stmt.excluded.is_kev,
-            "kev_added_at": stmt.excluded.kev_added_at,
-            "cwe_ids": stmt.excluded.cwe_ids,
-            "attack_vector": stmt.excluded.attack_vector,
-            "references": stmt.excluded.references,
-            "last_seen_at": stmt.excluded.last_seen_at,
-            "finding_class": stmt.excluded.finding_class,
-        }
-        upsert = stmt.on_conflict_do_update(
-            constraint="uq_findings_natural_key",
-            set_=update_cols,
-        ).returning(Finding.id, Finding.first_seen_at)
+        # Postgres-Limit: max 65535 Bind-Parameter pro Query. Bei 22 Spalten
+        # pro Row passt das fuer ~2978 Rows; ein grosser Server-Scan (Ubuntu
+        # /-Root) liefert aber leicht 5000+ Findings. Daher in Batches von
+        # FINDINGS_INSERT_CHUNK_SIZE Rows upserten und Ergebnisse aggregieren.
+        for chunk_start in range(0, len(rows), FINDINGS_INSERT_CHUNK_SIZE):
+            chunk = rows[chunk_start : chunk_start + FINDINGS_INSERT_CHUNK_SIZE]
+            stmt = pg_insert(Finding).values(chunk)
+            update_cols: dict[str, Any] = {
+                "installed_version": stmt.excluded.installed_version,
+                "fixed_version": stmt.excluded.fixed_version,
+                "severity": stmt.excluded.severity,
+                "title": stmt.excluded.title,
+                "description": stmt.excluded.description,
+                "cvss_v3_score": stmt.excluded.cvss_v3_score,
+                "cvss_v3_vector": stmt.excluded.cvss_v3_vector,
+                "epss_score": stmt.excluded.epss_score,
+                "epss_percentile": stmt.excluded.epss_percentile,
+                "is_kev": stmt.excluded.is_kev,
+                "kev_added_at": stmt.excluded.kev_added_at,
+                "cwe_ids": stmt.excluded.cwe_ids,
+                "attack_vector": stmt.excluded.attack_vector,
+                "references": stmt.excluded.references,
+                "last_seen_at": stmt.excluded.last_seen_at,
+                "finding_class": stmt.excluded.finding_class,
+            }
+            upsert = stmt.on_conflict_do_update(
+                constraint="uq_findings_natural_key",
+                set_=update_cols,
+            ).returning(Finding.id, Finding.first_seen_at)
 
-        upsert_result = session.execute(upsert)
-        # Heuristik: wenn `first_seen_at == now` ist, war es ein Insert.
-        # `now` ist eindeutig (Pydantic gibt einen Mikrosekunden-Stempel) —
-        # aber praktischer ist: wir vergleichen `first_seen_at` mit `now`
-        # mit Toleranz. Wir benutzen RETURNING-Daten:
-        for _row_id, first_seen in upsert_result.all():
-            # Wenn first_seen_at innerhalb der letzten Sekunde -> Insert.
-            if first_seen and abs((first_seen - now).total_seconds()) < 1.0:
-                inserted_count += 1
-            else:
-                updated_count += 1
+            upsert_result = session.execute(upsert)
+            # Heuristik: wenn `first_seen_at == now` ist, war es ein Insert.
+            # `now` ist eindeutig (Pydantic gibt einen Mikrosekunden-Stempel)
+            # — aber praktischer ist: wir vergleichen `first_seen_at` mit
+            # `now` mit Toleranz. Wir benutzen RETURNING-Daten:
+            for _row_id, first_seen in upsert_result.all():
+                # Wenn first_seen_at innerhalb der letzten Sekunde -> Insert.
+                if first_seen and abs((first_seen - now).total_seconds()) < 1.0:
+                    inserted_count += 1
+                else:
+                    updated_count += 1
 
     # ---- 3. Resolve-Phase: alles was OPEN/ACK aber nicht im Scan war ----
     resolved_count = 0

@@ -40,6 +40,7 @@ from app.forms import (
 from app.models import Finding, FindingStatus, Server, ServerTag, Severity, Tag
 from app.schemas.findings_view_filter import FindingsViewFilter
 from app.services.diff_view import DiffSection, compute_diff
+from app.settings_service import get_settings_row
 from app.services.findings_query import (
     PackageGroup,
     count_findings,
@@ -156,7 +157,10 @@ def show(server_id: int) -> Any:
     if server is None:
         abort(404)
 
-    view_filter = FindingsViewFilter.from_request(request.args)
+    view_filter = FindingsViewFilter.from_request(
+        request.args,
+        user_default_severity=get_settings_row().severity_threshold,
+    )
     section_ctx = _render_findings_section(server, view_filter)
 
     # Block K (ADR-0018): Header-Stats und Trend-Daten aufsammeln. Alle

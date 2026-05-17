@@ -52,6 +52,7 @@ from app.services.csv_export import (
     stream_findings_csv,
     stream_findings_csv_cross_server,
 )
+from app.settings_service import get_settings_row
 
 log = structlog.get_logger(__name__)
 
@@ -485,7 +486,10 @@ def export_csv() -> Response:
         response.headers["Content-Disposition"] = 'attachment; filename="findings.csv"'
         return response
 
-    view_filter = FindingsViewFilter.from_request(request.args)
+    view_filter = FindingsViewFilter.from_request(
+        request.args,
+        user_default_severity=get_settings_row(sess).severity_threshold,
+    )
     findings_filter = view_filter.to_findings_filter()
 
     mode_raw = (request.args.get("mode") or "flach").strip().lower()
