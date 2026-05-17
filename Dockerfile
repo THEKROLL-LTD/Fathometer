@@ -16,15 +16,18 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Build-Tools fuer native Wheels (argon2-cffi, cryptography, psycopg).
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Cache-Mounts fuer apt-Lists ueberleben Layer-Invalidierungen — vermeidet
+# erneutes Index-Herunterladen bei jedem Build.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
-        libffi-dev \
-    && rm -rf /var/lib/apt/lists/*
+        libffi-dev
 
 WORKDIR /build
 
@@ -32,14 +35,30 @@ WORKDIR /build
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
-COPY pyproject.toml ./
-COPY app ./app
+# ---- Dependency-Layer (aendert sich nur bei pyproject.toml-Updates) -------
+# Trick: zuerst nur pyproject.toml + README.md + Stub-App kopieren und
+# `pip install .` ausfuehren. Damit werden ausschliesslich die Dependencies
+# (inkl. Wheel-Builds fuer cryptography/argon2-cffi/psycopg) installiert.
+# Das Stub-Package selbst entfernen wir gleich wieder — der echte App-Code
+# wird im naechsten Layer als `--no-deps` reininstalliert.
+#
+# Cache-Mount auf /root/.cache/pip: pip's HTTP-Wheel-Cache ueberlebt
+# Layer-Invalidierungen, sodass selbst bei pyproject-Aenderungen nicht
+# alle Wheels neu heruntergeladen werden muessen.
+COPY pyproject.toml README.md ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    mkdir -p app && touch app/__init__.py && \
+    pip install --upgrade pip && \
+    pip install --no-compile . && \
+    pip uninstall -y secscan
 
-# --no-compile spart Platz; __pycache__ wird im Runtime-Stage ohnehin entfernt.
-# Anschliessend pip/setuptools (Build-Tools) aus dem Runtime-venv loeschen, weil
-# zur Laufzeit nichts mehr installiert wird.
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --no-compile . && \
+# ---- App-Layer (aendert sich bei jedem Code-Change) -----------------------
+# Echten App-Code kopieren und Package ohne Re-Resolution der Dependencies
+# installieren. Das ist billig (kein Wheel-Build) und damit ist die Mehrheit
+# der Builds bei Code-Aenderungen einstellige Sekunden.
+COPY app ./app
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-compile --no-deps . && \
     pip uninstall -y pip setuptools wheel 2>/dev/null || true && \
     find /opt/venv -name '*.pyc' -delete && \
     find /opt/venv -depth -name '__pycache__' -type d -exec rm -rf {} + && \
@@ -71,11 +90,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Anschliessend doc/man/locale-Dateien entfernen (nur en/de behalten) und
 # Python-Bytecode-Caches loeschen, damit das Image-Volumen unter dem
 # DoD-Cap von 200 MB bleibt.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \
         curl \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && rm -rf /usr/share/doc /usr/share/man /usr/share/info \
     && find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
          ! -name 'en' ! -name 'en_US' ! -name 'de' ! -name 'de_DE' \
