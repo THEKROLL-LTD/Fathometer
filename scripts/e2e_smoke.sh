@@ -247,7 +247,7 @@ log "api-key erhalten (${#API_KEY} bytes)"
 # ---------------------------------------------------------------------------
 # Phase 6 — Trivy-Mock-Binary, dann Agent ausfuehren
 #
-# Der Reference-Agent ruft `trivy fs <path> --format json --quiet
+# Der Reference-Agent ruft `trivy rootfs <path> --format json --quiet
 # --scanners vuln --output <file>`. Wir basteln ein Mock, das das `--output`-
 # Argument extrahiert und unsere Fixture dorthin kopiert. Damit kann
 # `secscan-agent.sh` unveraendert laufen.

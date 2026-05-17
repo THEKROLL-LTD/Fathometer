@@ -2,8 +2,18 @@
 #
 # secscan-agent.sh
 # ----------------
-# Sammelt OS-/Kernel-Info, läuft `trivy fs /` und sendet das Resultat
+# Sammelt OS-/Kernel-Info, läuft `trivy rootfs /` und sendet das Resultat
 # als Wrapper-Envelope an einen secscan-Server.
+#
+# Subcommand-Wahl: `rootfs` (NICHT `fs`). Begruendung:
+#   - `trivy fs <dir>` ist fuer Source-Repos/vendored Deps gedacht und
+#     scannt auf einem Live-System nur die OS-Package-DB (apt/dpkg) —
+#     Go-Binaries unter /usr/local/bin, /var/lib/rancher etc. werden
+#     uebersprungen. Auf einem k3s-Node hiessen das praktisch alle
+#     HIGH/CRITICAL aus den Cluster-Komponenten fehlen.
+#   - `trivy rootfs <dir>` ist explizit fuer Live-Root-Filesystems und
+#     fuehrt zusaetzlich `gobinary`/`jar`/etc-Analyzer aus.
+# Siehe https://trivy.dev/docs/v0.70/coverage/others/standalone/
 #
 # Voraussetzungen: bash >= 4, curl, jq, gzip, trivy (>= 0.70.0)
 #                  (https://aquasecurity.github.io/trivy/)
@@ -87,7 +97,7 @@ trivy_out="$(mktemp -t secscan-trivy.XXXXXX.json)"
 trap 'rm -f "$trivy_out"' EXIT
 
 log "Starte Trivy-Scan auf ${SCAN_PATH} ..."
-if ! "$TRIVY_BIN" fs "$SCAN_PATH" \
+if ! "$TRIVY_BIN" rootfs "$SCAN_PATH" \
        --format json \
        --quiet \
        --scanners vuln \

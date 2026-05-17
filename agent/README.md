@@ -17,9 +17,10 @@ solange das Envelope-Schema eingehalten wird.
 - `trivy` (>= 0.70.0) — Installation siehe https://aquasecurity.github.io/trivy/
   Ältere Versionen funktionieren u.U., aber EPSS-, KEV- und Attack-Vector-Felder
   fehlen oder sind unvollständig — die Triage-Sortierung verliert dann ihre Schärfe.
-- root-Rechte für den Scan (`trivy fs /` muss alle installierten Pakete sehen,
-  sowohl OS-Pakete als auch eingebettete Library-Findings in installierten
-  Binaries)
+- root-Rechte für den Scan (`trivy rootfs /` muss alle installierten Pakete
+  sehen, sowohl OS-Pakete als auch eingebettete Library-Findings in
+  installierten Binaries — Go-Binaries unter `/usr/local/bin`,
+  `/var/lib/rancher` etc.)
 
 ## Installation in drei Schritten
 
@@ -90,7 +91,7 @@ Der Agent baut einen JSON-Envelope (Schema siehe ARCHITECTURE.md Sektion 6) und 
     "kernel_version": "5.15.0-91-generic",
     "architecture": "x86_64"
   },
-  "scan": { /* unveränderter trivy fs --format json Output */ }
+  "scan": { /* unveränderter trivy rootfs --format json Output */ }
 }
 ```
 

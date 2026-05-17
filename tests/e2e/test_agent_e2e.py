@@ -94,7 +94,7 @@ def test_agent_script_pushes_real_fixture(tmp_path: Path) -> None:
     # Schritt 2: Mock-Trivy-Skript.
     mock_trivy = tmp_path / "mock-trivy.sh"
     fixture_str = str(FIXTURE)
-    # secscan-agent.sh ruft: trivy fs <path> --format json ... --output <file>
+    # secscan-agent.sh ruft: trivy rootfs <path> --format json ... --output <file>
     mock_trivy.write_text(
         "#!/usr/bin/env bash\n"
         "set -e\n"
