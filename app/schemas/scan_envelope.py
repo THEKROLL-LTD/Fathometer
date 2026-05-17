@@ -41,8 +41,13 @@ Erkenntnisse aus den realen Fixtures (`tests/fixtures/trivy/`):
     Versuche zusammen). Top-Level- und Strukturfehler dagegen → 422.
 
 Pragmatische Defaults wo §10 unscharf war:
-- max 50 References pro Finding (§10 oben sagt "max 50 URLs pro Finding").
-- max 20 CweIDs pro Finding (§10 oben sagt "max 20 pro Finding").
+- max 100 References pro Finding — defensiv per Validator getrimmt, nicht
+  hart abgelehnt. Trivy liefert fuer Distro-CVEs regelmaessig >50 Refs
+  (NVD + Mailinglisten + Vendor-Advisories). Limit war historisch 50 +
+  `Field(max_length=…)`, aber der Field-Constraint feuerte VOR dem
+  Trim-Validator und produzierte HTTP 422 statt das beabsichtigte Trim
+  (Fix v0.6.1).
+- max 50 CweIDs pro Finding — analog defensiv getrimmt.
 - max 50.000 Vulnerabilities aggregiert ueber alle Results (§9).
 - max 1.000 Results pro Scan (§10 "Listen-Bounds").
 - max 64 KB pro einzelnem String-Feld (§9 "Trivy-JSON-Sanity-Checks") — wir
@@ -107,8 +112,8 @@ _AV_RE = re.compile(r"(?:^|/)AV:([NALP])(?:/|$)")
 # Listen- und String-Bounds.
 MAX_VULNS_PER_SCAN = 50_000
 MAX_RESULTS_PER_SCAN = 1_000
-MAX_REFERENCES_PER_VULN = 50
-MAX_CWE_IDS_PER_VULN = 20
+MAX_REFERENCES_PER_VULN = 100
+MAX_CWE_IDS_PER_VULN = 50
 MAX_STRING_LENGTH = 65_536  # 64 KB pro String-Feld (§9).
 MAX_REF_URL_LENGTH = 2_048  # §10 "max 2 KB pro URL".
 MAX_TITLE_LENGTH = 512
@@ -284,16 +289,12 @@ class TrivyVulnerability(BaseModel):
     kev_added_at: datetime | None = Field(default=None, alias="CISAKEVDateAdded")
     is_kev_hint: bool | None = Field(default=None, alias="IsKEV")
 
-    cwe_ids: list[str] | None = Field(
-        default=None,
-        alias="CweIDs",
-        max_length=MAX_CWE_IDS_PER_VULN,
-    )
-    references: list[str] | None = Field(
-        default=None,
-        alias="References",
-        max_length=MAX_REFERENCES_PER_VULN,
-    )
+    # `max_length` bewusst NICHT am Field — der `field_validator` darunter
+    # cleant Junk und trimmt auf das Maximum. Field-Constraints feuern als
+    # Built-in-Validation VOR `@field_validator(mode="after")` und wuerden
+    # einen Reject ausloesen statt das beabsichtigte Trim (siehe v0.6.1).
+    cwe_ids: list[str] | None = Field(default=None, alias="CweIDs")
+    references: list[str] | None = Field(default=None, alias="References")
     primary_url: str | None = Field(default=None, alias="PrimaryURL", max_length=MAX_REF_URL_LENGTH)
     published_date: datetime | None = Field(default=None, alias="PublishedDate")
     last_modified_date: datetime | None = Field(default=None, alias="LastModifiedDate")
@@ -338,7 +339,10 @@ class TrivyVulnerability(BaseModel):
     def _validate_cwe_ids(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return None
-        # §10: ungueltige Items verwerfen, max 20 — wir strippen ungueltige.
+        # §10 + v0.6.1: ungueltige Items verwerfen, dann defensiv auf
+        # `MAX_CWE_IDS_PER_VULN` trimmen. Dieser Validator ist die einzige
+        # Cap-Quelle — am Field gibt es bewusst kein `max_length`, sonst
+        # wuerde der Built-in-Constraint einen harten Reject ausloesen.
         cleaned: list[str] = []
         for item in v:
             if not isinstance(item, str):
@@ -354,6 +358,9 @@ class TrivyVulnerability(BaseModel):
     def _validate_references(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return None
+        # §10 + v0.6.1: Junk verwerfen, dann defensiv auf
+        # `MAX_REFERENCES_PER_VULN` trimmen. Einzige Cap-Quelle —
+        # kein `max_length` am Field (sonst harter Reject statt Trim).
         cleaned: list[str] = []
         for item in v:
             if not isinstance(item, str):

@@ -190,11 +190,60 @@ def test_references_strip_non_http_schemes() -> None:
     assert parsed.references == ["https://example.com/cve", "http://example.com/notice"]
 
 
-def test_references_max_50() -> None:
-    """Mehr als 50 References -> ValidationError (max_length=50)."""
-    vuln = _minimal_vuln(References=[f"https://example.com/cve/{i}" for i in range(60)])
-    with pytest.raises(ValidationError):
-        TrivyVulnerability.model_validate(vuln)
+def test_references_trimmed_above_100() -> None:
+    """120 References -> Parse OK, defensiv auf 100 getrimmt (v0.6.1).
+
+    Vorher: harter HTTP-422-Reject durch `Field(max_length=50)`, weil der
+    Built-in-Constraint VOR dem `@field_validator(mode="after")`-Trim
+    feuerte. Trivy liefert fuer Distro-CVEs regelmaessig >50 Refs (NVD
+    + Mailinglisten + Vendor-Advisories) — das hat real ein Ubuntu-22.04-
+    aarch64-Scan vom Agent abgewuergt.
+    """
+    vuln = _minimal_vuln(References=[f"https://example.com/cve/{i}" for i in range(120)])
+    parsed = TrivyVulnerability.model_validate(vuln)
+    assert parsed.references is not None
+    assert len(parsed.references) == 100
+    # Reihenfolge erhalten — Trim am Tail.
+    assert parsed.references[0] == "https://example.com/cve/0"
+    assert parsed.references[-1] == "https://example.com/cve/99"
+
+
+def test_references_at_100_boundary() -> None:
+    """Boundary: 100 -> 100 erhalten; 101 -> auf 100 getrimmt."""
+    at = _minimal_vuln(References=[f"https://example.com/cve/{i}" for i in range(100)])
+    parsed_at = TrivyVulnerability.model_validate(at)
+    assert parsed_at.references is not None
+    assert len(parsed_at.references) == 100
+
+    over = _minimal_vuln(References=[f"https://example.com/cve/{i}" for i in range(101)])
+    parsed_over = TrivyVulnerability.model_validate(over)
+    assert parsed_over.references is not None
+    assert len(parsed_over.references) == 100
+
+
+def test_cwe_ids_trimmed_above_50() -> None:
+    """60 CWE-IDs -> Parse OK, defensiv auf 50 getrimmt (v0.6.1).
+
+    Symmetrisch zu References — gleicher Bug-Pattern (Field-Constraint
+    vor Validator), gleicher Fix (Validator ist einzige Cap-Quelle).
+    """
+    vuln = _minimal_vuln(CweIDs=[f"CWE-{i}" for i in range(1, 61)])
+    parsed = TrivyVulnerability.model_validate(vuln)
+    assert parsed.cwe_ids is not None
+    assert len(parsed.cwe_ids) == 50
+
+
+def test_cwe_ids_at_50_boundary() -> None:
+    """Boundary: 50 -> 50 erhalten; 51 -> auf 50 getrimmt."""
+    at = _minimal_vuln(CweIDs=[f"CWE-{i}" for i in range(1, 51)])
+    parsed_at = TrivyVulnerability.model_validate(at)
+    assert parsed_at.cwe_ids is not None
+    assert len(parsed_at.cwe_ids) == 50
+
+    over = _minimal_vuln(CweIDs=[f"CWE-{i}" for i in range(1, 52)])
+    parsed_over = TrivyVulnerability.model_validate(over)
+    assert parsed_over.cwe_ids is not None
+    assert len(parsed_over.cwe_ids) == 50
 
 
 def test_description_at_64kb_boundary() -> None:

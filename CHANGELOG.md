@@ -4,6 +4,48 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.6.1] — 2026-05-17
+
+### Fixed
+
+- Ingest-Schema rejecte Trivy-Scans mit > 50 References pro Vulnerability
+  hart mit HTTP 422 (`scan.Results.*.Vulnerabilities.*.References:
+  too_long`), obwohl der `_validate_references`-Validator defensiv auf
+  das Limit trimmen sollte. Ursache: `max_length=…` am Pydantic-Field
+  feuert als Built-in-Constraint VOR dem `@field_validator(mode="after")`-
+  Trim. Real beobachtet auf einer arm64-Hetzner-Cloud-Instanz
+  (Ubuntu 22.04, rke2-Server): der Scan enthielt 20+ Distro-CVEs mit
+  jeweils > 50 References (NVD + Ubuntu-Mailinglisten + Vendor-Advisories).
+  Fix: `max_length` aus den Field-Definitionen `references` und `cwe_ids`
+  in `app/schemas/scan_envelope.py` entfernt — der Trim-Validator ist
+  jetzt die einzige Cap-Quelle.
+
+### Changed
+
+- `MAX_REFERENCES_PER_VULN` von 50 auf 100 angehoben.
+- `MAX_CWE_IDS_PER_VULN` von 20 auf 50 angehoben.
+- ARCHITECTURE §10 Validierungs-Limits entsprechend aktualisiert
+  (defensives Trim explizit dokumentiert statt impliziertem Hard-Reject).
+
+### Tests
+
+- `tests/adversarial/test_envelope_validation.py`: vier neue Boundary-
+  und Trim-Tests fuer `references` und `cwe_ids` (jeweils
+  `_trimmed_above_N` + `_at_N_boundary`). Alter `test_references_max_50`-
+  Test umgeschrieben — `pytest.raises(ValidationError)` raus.
+- `tests/api/test_scans_ingest.py`: neuer Integration-Regression-Test
+  `test_scans_202_accepts_vuln_with_many_references` — Envelope mit 120
+  References + 60 CWE-IDs landet als 202 statt 422; DB persistiert die
+  defensiv getrimmten Listen (100 bzw. 50).
+- 873 Tests grün, Coverage unveraendert ueber Threshold 85 %.
+
+### Migrationen / Operations
+
+- Keine Alembic-Migration. `Finding.references` ist `ARRAY(Text)` und
+  `Finding.cwe_ids` ist `ARRAY(String(16))` ohne harte Length-Constraints.
+- Bestehende Agents brauchen kein Update — sie senden bereits den
+  vollen Trivy-Output; bisher wurden sie nur abgewiesen.
+
 ## [v0.6.0] — 2026-05-16
 
 Dashboard-Redesign aus [ADR-0020](docs/decisions/0020-dashboard-cross-server-findings.md).
