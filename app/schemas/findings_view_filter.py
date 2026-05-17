@@ -70,8 +70,22 @@ class FindingsViewFilter(BaseModel):
         return cleaned or None
 
     @classmethod
-    def from_request(cls, args: MultiDict[str, str]) -> FindingsViewFilter:
-        """Konstruiert den Filter aus `request.args`. Ungueltiges -> Default."""
+    def from_request(
+        cls,
+        args: MultiDict[str, str],
+        *,
+        user_default_severity: Severity | None = None,
+    ) -> FindingsViewFilter:
+        """Konstruiert den Filter aus `request.args`. Ungueltiges -> Default.
+
+        `user_default_severity` ist die Severity-Schwelle aus den User-
+        Settings (`settings.severity_threshold`, Default `HIGH`). Sie wird
+        **nur** angewandt, wenn der `severity`-Key in `args` fehlt — ein
+        explizites `?severity=all` setzt den Filter weiterhin auf "alles
+        anzeigen" und uebersteuert das User-Setting. Damit zeigt ein frisch
+        geoeffneter Server-Detail-Tab per Default nur HIGH+ statt aller 4000
+        LOW-Findings, ohne dass Bookmark-URLs ihre Wirkung verlieren.
+        """
         mode_raw = (args.get("mode") or "list").strip().lower()
         if mode_raw not in _VALID_MODES:
             log.debug("findings_filter.mode_rejected", value=mode_raw)
@@ -87,12 +101,16 @@ class FindingsViewFilter(BaseModel):
             log.debug("findings_filter.class_rejected", value=class_raw)
             class_raw = "both"
 
-        sev_raw = (args.get("severity") or "all").strip().lower()
         severity: Severity | None
-        if sev_raw == "all" or sev_raw not in _VALID_SEVERITIES:
-            severity = None
+        if "severity" not in args:
+            # Kein expliziter Filter in URL -> User-Setting greift.
+            severity = user_default_severity
         else:
-            severity = Severity(sev_raw)
+            sev_raw = (args.get("severity") or "all").strip().lower()
+            if sev_raw == "all" or sev_raw not in _VALID_SEVERITIES:
+                severity = None
+            else:
+                severity = Severity(sev_raw)
 
         sort_raw = (args.get("sort") or "sev").strip().lower()
         if sort_raw not in _VALID_SORTS:
