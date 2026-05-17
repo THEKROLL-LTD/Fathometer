@@ -394,3 +394,65 @@ def test_scans_400_bad_json(db_app: Flask) -> None:
     )
     assert resp.status_code == 400
     assert resp.get_json()["error"]["code"] == "bad_json"
+
+
+# ---------------------------------------------------------------------------
+# Regression v0.6.1 — >50 References pro Vuln muss durchgehen (defensiv getrimmt)
+# ---------------------------------------------------------------------------
+
+
+def test_scans_202_accepts_vuln_with_many_references(db_app: Flask) -> None:
+    """Vuln mit 120 References landet als 202 — vorher: 422 `too_long`.
+
+    Reproduktion des produktiven Bugs vom 2026-05-17, beobachtet auf einer
+    arm64-Hetzner-Cloud-Instanz (Ubuntu 22.04, rke2-Server): der Trivy-Scan
+    enthielt 20+ Distro-CVEs mit jeweils > 50 References (NVD + Ubuntu-
+    Mailinglisten + Vendor-Advisories). Der Ingest hat den ganzen Scan mit
+    HTTP 422 abgewiesen.
+
+    Fix: `max_length=` von den `references`/`cwe_ids`-Fields entfernt, der
+    `field_validator` ist die einzige Cap-Quelle und trimmt defensiv.
+    """
+    server_id, api_key = register_test_server(db_app, name="refs-heavy-srv")
+    client = db_app.test_client()
+
+    scan = {
+        "ArtifactName": "/",
+        "ArtifactType": "filesystem",
+        "Results": [
+            {
+                "Target": "/",
+                "Class": "lang-pkgs",
+                "Type": "python-pkg",
+                "Vulnerabilities": [
+                    {
+                        "VulnerabilityID": "CVE-2024-99999",
+                        "PkgName": "openssh",
+                        "PkgID": "openssh@8.9",
+                        "InstalledVersion": "8.9",
+                        "FixedVersion": "9.0",
+                        "Severity": "HIGH",
+                        "Title": "many-refs",
+                        "Description": "regression for v0.6.1",
+                        "References": [
+                            f"https://example.com/cve-2024-99999/ref/{i}" for i in range(120)
+                        ],
+                        "CweIDs": [f"CWE-{i}" for i in range(1, 61)],
+                    }
+                ],
+            }
+        ],
+    }
+    resp = _post_scan(client, _envelope(scan), bearer=api_key)
+
+    assert resp.status_code == 202, resp.get_data(as_text=True)
+    body = resp.get_json()
+    assert body["findings_inserted"] == 1
+
+    findings = _findings_for(db_app, server_id)
+    assert len(findings) == 1
+    refs = findings[0].references or []
+    cwes = findings[0].cwe_ids or []
+    # Defensiv getrimmt — nicht abgelehnt.
+    assert len(refs) == 100, len(refs)
+    assert len(cwes) == 50, len(cwes)
