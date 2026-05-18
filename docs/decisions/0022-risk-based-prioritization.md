@@ -99,9 +99,9 @@ Schätzung auf Basis typischer Linux-Server-Findings (Ubuntu 22.04 LTS Stock, +1
 - ~20-30% `monitor` — MEDIUM-Severity-Block mit kleinem EPSS.
 - ~15-30% `pending` — HIGH/CRITICAL irgendwo, EPSS ≥ 0.1, oder KEV.
 
-Bei einer 200-Server-Flotte × 300 Findings/Server = 60K Findings, davon **geschätzt** ~15K in `pending` für den ersten LLM-Pass. Mit Caching auf `(cve_id, package_purl, cve_data_fingerprint, server_context_fingerprint)` und Cross-Server-Reuse für identische Replikas: realistische LLM-Call-Rate liegt vermutlich bei 10-30% der Pending-Count-Rate. Bei DeepSeek-V3-Preisen (Block-G-Default-Provider) ist das pro Tag im einstelligen Dollar-Bereich.
+Bei einer 200-Server-Flotte × 300 Findings/Server = 60K Findings, davon **geschätzt** ~15K in `pending`. Mit Application-Grouping (ADR-0023) reduziert sich das auf ~5-15 Groups pro Server × ~10 unique Server-Context-Fingerprints = wenige hundert eindeutige LLM-Calls für den initialen Library-Aufbau. Bei DeepSeek-V3-Preisen (Block-G-Default-Provider) ist das pro Monat im niedrigen einstelligen Dollar-Bereich nach Library-Stabilisierung.
 
-**Diese Schätzung wird vor Block-P-Scharfschaltung empirisch validiert** — Block P startet mit einem Observation-Mode (Fingerprints berechnet, Cache befüllt, keine LLM-Calls), und erst nach 1-2 Wochen Realbetrieb wird das Feature-Flag auf live umgelegt. Falls die echten Zahlen außerhalb des erwarteten Bereichs liegen, werden die Pre-Triage-Cuts in Block O nachjustiert (Konstanten im Code, keine Schema-Migration).
+**Diese Schätzung wird vor Block-P-Scharfschaltung empirisch validiert** — Block P startet mit einem Observation-Mode (Jobs werden geschrieben, Worker schreibt `would_call`-Marker statt echter LLM-Calls), und erst nach 1-2 Wochen Realbetrieb wird das Feature-Flag auf `live` umgelegt. Falls die echten Zahlen außerhalb des erwarteten Bereichs liegen, werden die Pre-Triage-Cuts in Block O nachjustiert (Konstanten im Code, keine Schema-Migration). Details der Block-P-Architektur in ADR-0023.
 
 ### Host-Snapshot — Datenmodell
 
@@ -411,20 +411,7 @@ Erwartete Test-Anzahl nach Block O: ca. +90 Tests.
 
 ## Re-Open-Trigger
 
-- **LLM-Final-Bewertung (Block P).** Block O liefert `pending`-Findings. Block P spielt LLM-Aufrufe gegen die Block-G-Wrapper-Schicht, persistiert finale Bands (escalate/act/mitigate) plus Demote-Möglichkeit zu monitor/noise. Schema-Slot `risk_band_source = 'llm'` ist da, Block P füllt ihn. Block-G-LLM-Code bleibt das Referenz-SDK; falls das Chat-Feature umgebaut wird, sorgen wir für eine saubere Service-Schicht die beide Use-Cases bedient.
-
-  **Deployment-Strategie zweiphasig:**
-
-  - **Phase 1 — Observation Mode.** Block P liefert die Fingerprint-Engine plus Cache-Tabelle (`llm_risk_cache`), aber setzt keine LLM-Calls ab. Pro `pending`-Finding wird der `cache_key` aus `(cve_id, package_purl, cve_data_fingerprint, server_context_fingerprint)` berechnet und ein `would_call`-Placeholder geschrieben. Nach 1-2 Wochen Realbetrieb steht fest, wieviele eindeutige Cache-Keys die Flotte produziert (das ist die echte LLM-Call-Rate, nicht die Pending-Count-Rate), wie stabil die Server-Context-Fingerprints zwischen Scans sind, und wieviel Cross-Server-Reuse möglich ist. Falls die Zahlen zu hoch sind: Pre-Triage-Cuts in Block O nachjustieren (z.B. EPSS-Trigger von 0.1 auf 0.3 anheben) und Observation-Pass wiederholen.
-
-  - **Phase 2 — Live.** Per Feature-Flag (Settings-Schalter oder Config-Konstante) wird der LLM-Call scharfgeschaltet. Cache-Hits bleiben Cache-Hits, Cache-Misses lösen einen echten LLM-Call aus, Ergebnis wird in `llm_risk_cache` plus auf den `Finding`-Spalten persistiert.
-
-  **Fingerprint-Details** für die Block-P-Spec festgehalten:
-
-  - **`cve_data_fingerprint`** = stabile Hash über `(severity, severity_by_provider, epss_score, is_kev, vendor_status)`. Ändert sich bei Trivy-DB-Updates die die CVE neu bewerten.
-  - **`server_context_fingerprint`** = stabile Hash über die semantisch-stabilen Snapshot-Felder: `os_family`+`os_version`, sortierte Server-Tags, sortierte Set-Repräsentation der Listener als `(proto, addr, port, process_comm)` ohne PID, sortierte eindeutige `comm`-Werte der Prozesse ohne Args, sortierte Listen kernel_modules und services, plus das `gaps`-Array. PIDs, args, snapshot_at-Timestamps und user-Felder fließen bewusst NICHT ein — sonst würde der Hash bei jedem Scan wackeln und Cache wäre nutzlos.
-  - **Eviction:** TTL 30 Tage plus LRU bei Cache-Tabellen-Größe > 100K Einträgen.
-  - **Cross-Server-Reuse** ist explizit gewollt — identische Replikas (gleiches OS, gleiche Tags, gleicher semantischer Snapshot) teilen sich einen Cache-Eintrag.
+- **LLM-Final-Bewertung mit Application-Grouping (Block P).** Block O liefert `pending`-Findings. Block P führt eine Application-Group-Schicht ein (Findings gruppiert nach Owner-Application via wachsender LLM-gepflegter Pattern-Library), eine Two-Pass-LLM-Architektur (Pass 1 Group-Detection, Pass 2 Risk-Bewertung pro Group), und einen asynchronen Worker-Container für die LLM-Aufrufe. Schema-Slot `risk_band_source = 'llm'` ist da, Block P füllt ihn. Detail-Spec in [ADR-0023](0023-llm-risk-reviewer-and-application-grouping.md).
 - **Pre-Triage-Cuts anpassen.** Wenn LLM-Volumen sich als zu groß erweist (z.B. 50%+ aller Findings landen in pending): HIGH-Trigger auf CRITICAL verschärfen oder EPSS-Trigger von 0.1 auf 0.3 anheben. Konstanten im Code, keine Migration nötig.
 - **Daily-Re-Eval-Job für EPSS/KEV-DB-Updates.** Engine läuft heute nur bei Scan-Ingest. Falls Operator-Feedback nach EPSS-Stale-Findings fragt, Hintergrund-Job nachrüsten.
 - **Manueller Operator-Override per Finding oder per Server-Tag.** Acknowledgement reicht heute — wenn realer Workflow zeigt, dass Operator regelmäßig „aber wir haben WAF davor"-Diskussionen führt: eigene ADR mit Override-Spalte und UI-Surface.

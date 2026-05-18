@@ -177,7 +177,9 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Aktueller Block
 
-(keiner — Block O abgeschlossen 2026-05-18, naechster Block per User-Entscheidung. Block P bereits als Re-Open-Trigger in ADR-0022 angelegt: LLM-Final-Bewertung der `pending`-Findings.)
+**P — LLM-Risk-Reviewer mit Application-Grouping (Two-Pass) und asynchroner Job-Queue** · gestartet 2026-05-18 · Branch `feat/block-p` · Spec [ADR-0023](../decisions/0023-llm-risk-reviewer-and-application-grouping.md) · Brief [P-llm-risk-reviewer.md](P-llm-risk-reviewer.md) · Zielversion v0.9.0.
+
+Fünf Bausteine: (1) Application-Group-Schicht — neue Tabelle `application_groups` plus FK `Finding.application_group_id`, Findings nach Owner-Application (k3s, openssh-server, etc.) gruppiert, Group-Bewertung wird auf alle enthaltenen Findings vererbt (Worst-Case-Band); (2) Two-Pass-LLM-Architektur — Pass 1 detect Groups mit wiederverwendbaren Match-Patterns (Path-Prefix / pkg_name_exact / pkg_name_glob / pkg_purl_pattern), Pass 2 bewertet pro Group mit Server-Kontext (compact-form, ~2-4K Tokens); (3) asynchroner Worker via `llm_jobs`-Tabelle in separatem Container `secscan-llm-worker`, Single-Concurrency-Default, 2s-Polling mit `SELECT FOR UPDATE SKIP LOCKED`, Pass-2-Jobs warten via `depends_on` auf Pass-1; (4) Two-Level-Caching — Pass-1-Cache *ist* die `application_groups`-Library, Pass-2-Cache als `llm_risk_cache`-Tabelle mit `(group_id, group_findings_fp, cve_data_fp, server_context_fp)`-Key, TTL 30d + LRU 100K; (5) UI-Redesign auf Group-Cards mit `evaluating`-State und Feature-Flag `BLOCK_P_LLM_MODE ∈ {off, observation, live}` für stufenweise Inbetriebnahme. Reasons bleiben deskriptiv — keine konkreten Update-Befehle, keine spezifischen Application-Version-Empfehlungen.
 
 ## Completed
 
@@ -222,6 +224,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 | M | [M-dashboard-findings.md](M-dashboard-findings.md) | completed 2026-05-16 — **v0.6.0** (ADR-0020 Cross-Server-Findings + KPI-Sparklines, /findings/search-Removal) |
 | N | [N-agent-installer.md](N-agent-installer.md) | completed 2026-05-18 — **v0.7.0** (ADR-0021 Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding) |
 | O | [O-risk-engine.md](O-risk-engine.md) | completed 2026-05-18 — **v0.8.0** (ADR-0022 Pre-Triage-Risk-Engine + Host-Snapshot + Vendor-Severity + Risk-zentrisches UI) |
+| P | [P-llm-risk-reviewer.md](P-llm-risk-reviewer.md) | in progress (gestartet 2026-05-18) — Zielversion v0.9.0 (ADR-0023 LLM-Risk-Reviewer + Application-Grouping + async Worker) |
 
 ## Aktive Blocker
 
@@ -229,7 +232,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Offene ADR-Wünsche
 
-(keine — ADR-0022 deckt Block O ab. Block P wird LLM-Final-Bewertung der `pending`-Findings bringen und nutzt den `risk_band_source = "llm"`-Slot der bereits angelegt ist. Wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird.)
+(keine — ADR-0023 deckt Block P komplett ab inklusive Application-Group-Schicht, Two-Pass-LLM-Architektur, asynchroner Worker-Pattern und UI-Redesign. Wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird.)
 
 ## Update-Konvention
 

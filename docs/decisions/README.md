@@ -28,6 +28,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0020](0020-dashboard-cross-server-findings.md) | Dashboard-Redesign: Cross-Server-Findings-Tabelle, KPI-Sparklines, Entfernung von /findings/search (Block M) | Akzeptiert |
 | [0021](0021-agent-bootstrap-installer.md) | Agent-Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding (Block N) | Akzeptiert |
 | [0022](0022-risk-based-prioritization.md) | Risk-basierte Priorisierung: Pre-Triage-Engine, Host-Snapshot, Vendor-Severity, UI-Redesign (Block O) | Akzeptiert |
+| [0023](0023-llm-risk-reviewer-and-application-grouping.md) | LLM-Risk-Reviewer mit Application-Grouping (Two-Pass) und asynchroner Job-Queue (Block P) | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 
