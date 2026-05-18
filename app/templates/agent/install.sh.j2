@@ -188,6 +188,22 @@ SERVER_ID=""
 detect_system() {
   phase 1 6 "System detection"
 
+  # v0.7.1: Warnen wenn SECSCAN_URL HTTP statt HTTPS ist. Ein Reverse-Proxy
+  # vor dem Backend antwortet typisch mit 301 -> HTTPS auf /api/register,
+  # was den Wizard zwar dank --post301/302/303 -L durchbringt, aber den
+  # Operator unnoetig im Unklaren laesst. Wenn das Backend hinter TLS
+  # laeuft sollte SECSCAN_PUBLIC_URL=https://... gesetzt sein (siehe
+  # README "Deploy-Checkliste").
+  case "$SECSCAN_URL" in
+    https://*) : ;;
+    http://*)
+      warn "SECSCAN_URL is http://; consider setting SECSCAN_PUBLIC_URL=https://... on the backend"
+      ;;
+    *)
+      warn "SECSCAN_URL has no scheme (expected http:// or https://)"
+      ;;
+  esac
+
   if [[ ! -r /etc/os-release ]]; then
     fail "/etc/os-release not readable; cannot detect distribution"
     abort "unsupported system"
@@ -538,8 +554,13 @@ register_server() {
     attempts=$((attempts + 1))
     info "POST ${SECSCAN_URL}/api/register"
     local http_status
+    # v0.7.1: --post301/302/303 -L laesst curl einem 30x-Redirect FOLGEN
+    # und den POST-Body neu senden (Default ist 30x -> GET). Notwendig wenn
+    # SECSCAN_URL via HTTP genannt wurde und der Reverse-Proxy auf HTTPS
+    # umbiegt.
     http_status="$(curl -sS \
       --max-time 30 \
+      --post301 --post302 --post303 -L \
       -o "$response_body" -w '%{http_code}' \
       -X POST "${SECSCAN_URL%/}/api/register" \
       -H "Content-Type: application/json" \

@@ -42,6 +42,27 @@ class Settings(BaseSettings):
         description="SQLAlchemy-URL mit async-faehigem psycopg-Treiber.",
     )
 
+    # ----- Public-URL (Block N / v0.7.1) -----
+    # Explizite extern sichtbare Base-URL des Backends, inkl. Schema. Wird
+    # vom Bootstrap-Installer-Template (`/install.sh`) und vom Context-
+    # Processor `external_base_url` bevorzugt vor `request.host_url`
+    # verwendet. Ohne diesen Override sieht Flask hinter einem TLS-
+    # terminierenden Reverse-Proxy nur das interne `http://`-Schema —
+    # das wuerde im gerenderten Installer einen falschen `SECSCAN_URL`
+    # einbacken und beim ersten `POST /api/register` einen HTTP→HTTPS-
+    # 301-Redirect ausloesen (`curl -X POST` verliert dann den POST).
+    # Mitigation laeuft zusaetzlich ueber `werkzeug.middleware.proxy_fix.
+    # ProxyFix` (siehe `app/__init__.py`), aber `SECSCAN_PUBLIC_URL` ist
+    # die explizite, deploy-eindeutige Quelle der Wahrheit.
+    public_url: str | None = Field(
+        default=None,
+        description=(
+            "Extern sichtbare Backend-URL inkl. Schema, z.B. "
+            "'https://secscan.example.com'. Trailing-Slash wird "
+            "abgeschnitten."
+        ),
+    )
+
     # ----- Body- und Decompress-Limits (siehe ARCHITECTURE.md §9) -----
     max_body_mb: int = Field(default=10, ge=1, le=1024)
     max_decompressed_mb: int = Field(default=100, ge=1, le=10240)

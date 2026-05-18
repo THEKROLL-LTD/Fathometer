@@ -170,6 +170,7 @@ payload="$(jq -n \
 # decompresses with a streaming limit (see ARCHITECTURE.md §9).
 http_status="$(printf '%s' "$payload" | gzip -c | curl -sS \
   --max-time "$TIMEOUT_SEC" \
+  --post301 --post302 --post303 -L \
   -o "$response_body" -w '%{http_code}' \
   -X POST "${SECSCAN_URL%/}/api/scans" \
   -H "Authorization: Bearer ${SECSCAN_API_KEY}" \

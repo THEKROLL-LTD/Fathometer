@@ -209,12 +209,34 @@ def create_app() -> Flask:
     # damit beide Setups ohne extra ENV-Var funktionieren.
     agent_files_dir = (Path(__file__).resolve().parent.parent / "agent").as_posix()
 
+    # v0.7.1: ProxyFix aktivieren, damit Flask hinter einem TLS-
+    # terminierenden Reverse-Proxy (nginx/Caddy mit
+    # `X-Forwarded-Proto $scheme`) `request.scheme` und damit
+    # `request.host_url` korrekt als `https://` aufloest. Ohne ProxyFix
+    # rendert `GET /install.sh` `SECSCAN_URL=http://...`, was beim
+    # ersten `POST /api/register` einen HTTP->HTTPS-301-Redirect
+    # ausloest, dem `curl -X POST` nicht folgt. `x_proto=1`/`x_host=1`/
+    # `x_for=1` vertraut genau einem Proxy-Hop — die Defaults sind
+    # bewusst konservativ.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+
+    app.wsgi_app = ProxyFix(  # type: ignore[method-assign]
+        app.wsgi_app, x_proto=1, x_host=1, x_for=1
+    )
+
+    # v0.7.1: explizite Public-URL aus `SECSCAN_PUBLIC_URL`. Wenn gesetzt,
+    # ueberschreibt sie `request.host_url`-Fallback im Installer-Render
+    # und im `external_base_url`-Context-Processor. Deploy-eindeutige
+    # Quelle der Wahrheit — empfohlen fuer alle Production-Setups.
+    public_url = (settings.public_url or "").rstrip("/")
+
     app.config.update(
         SECRET_KEY=settings.secret_key.get_secret_value() or "dev-only-insecure",
         MAX_CONTENT_LENGTH=settings.max_body_bytes,  # 10 MB Default — §9.
         SECSCAN_DATABASE_URL=settings.database_url,
         SECSCAN_SETTINGS=settings,
         AGENT_FILES_DIR=agent_files_dir,
+        EXTERNAL_BASE_URL=public_url,  # leer = Fallback auf `request.host_url`.
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=False,  # in Produktion via Reverse-Proxy auf True.

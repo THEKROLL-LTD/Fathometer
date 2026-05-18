@@ -4,6 +4,67 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.7.1] — 2026-05-18
+
+Defect-Fix-Release fuer Block N. Drei verschraenkte Bugs, die zusammen
+verhindert haben, dass der Bootstrap-Installer hinter einem
+TLS-terminierenden Reverse-Proxy durchlaeuft.
+
+### Fixed
+
+- **`/install.sh` rendert jetzt HTTPS** wenn das Backend hinter einem
+  TLS-terminierenden Reverse-Proxy laeuft. Ursache: ohne ProxyFix sah
+  Flask `request.scheme=http`, weil nginx/Caddy intern HTTP nach
+  Gunicorn forwarded. `werkzeug.middleware.proxy_fix.ProxyFix` ist
+  jetzt aktiv (`x_proto=1`, `x_host=1`, `x_for=1`) und wertet
+  `X-Forwarded-Proto`/`X-Forwarded-Host` von genau einem Hop aus. Die
+  README-nginx-Snippets setzen `X-Forwarded-Proto $scheme` schon seit
+  Block H — ohne diesen Patch wurde der Header aber ignoriert. Real
+  beobachtet auf `secscan.thekroll.ltd`: gerendertes
+  `SECSCAN_URL=http://...`, beim ersten `POST /api/register`
+  HTTP→HTTPS-301-Redirect, `curl -X POST` ohne `-L` haengt.
+- **Curl-POST folgt jetzt 30x-Redirects** in `install.sh.j2`,
+  `agent/secscan-agent.sh` und `agent/secscan-register.sh`. Neue
+  Flags `--post301 --post302 --post303 -L` — Default-Verhalten von
+  `curl -L` ist auf 30x den POST in einen GET umzuwandeln, was beim
+  `/api/register`-Roundtrip den Body verliert. Mit den drei Flags
+  wird der POST-Body neu gesendet.
+- **Phase-1-Warn-Hinweis im Wizard** wenn `SECSCAN_URL` mit `http://`
+  startet — Operator bekommt eine klare Meldung, dass
+  `SECSCAN_PUBLIC_URL=https://...` im Backend gesetzt sein sollte
+  (kein hartes Abort, Dev-Setups bleiben moeglich).
+
+### Neu
+
+- **`SECSCAN_PUBLIC_URL`-Env-Var.** Explizite extern sichtbare
+  Backend-URL inkl. Schema, z.B. `https://secscan.example.com`. Wird
+  in `app.config["EXTERNAL_BASE_URL"]` propagiert und vom Installer-
+  Render plus vom `external_base_url`-Context-Processor bevorzugt
+  vor `request.host_url`. Empfohlen fuer alle Production-Setups —
+  deploy-eindeutige Quelle der Wahrheit unabhaengig vom Proxy-Setup.
+  Trailing-Slash wird abgeschnitten. README- und `.env.example`-
+  Eintrag entsprechend ergaenzt.
+
+### Tests
+
+- `tests/views/test_install_sh_public_url.py`: sechs Cases fuer die
+  drei Render-Pfade (Fallback, ProxyFix-aware,
+  `SECSCAN_PUBLIC_URL`-Override) plus drei Sanity-Checks fuer die
+  `--post30x -L`-Flags in den drei Bash-Files.
+- 998 Tests gruen (+6 vs. v0.7.0), Coverage 92 % (Threshold 85 %).
+- `ruff check`/`ruff format --check`/`mypy app/`/`shellcheck agent/*.sh`
+  PASS. Image-Size 191 MB unveraendert.
+
+### Migrationen / Operations
+
+- Keine Alembic-Migration.
+- Bestehende Deployments: nach dem Upgrade `SECSCAN_PUBLIC_URL` in
+  `.env` setzen und einmal `docker compose up -d --force-recreate`.
+  Ohne den Wert funktioniert das Backend weiter, der Installer
+  rendert dann via ProxyFix-aware `request.host_url` — sofern der
+  Reverse-Proxy `X-Forwarded-Proto $scheme` setzt (steht in den
+  README-Snippets).
+
 ## [v0.7.0] — 2026-05-18
 
 Block N aus [ADR-0021](docs/decisions/0021-agent-bootstrap-installer.md):

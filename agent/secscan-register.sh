@@ -95,6 +95,7 @@ trap 'rm -f "$response_body"' EXIT
 
 http_status="$(curl -sS \
   --max-time 30 \
+  --post301 --post302 --post303 -L \
   -o "$response_body" -w '%{http_code}' \
   -X POST "${server_url}/api/register" \
   -H "Content-Type: application/json" \

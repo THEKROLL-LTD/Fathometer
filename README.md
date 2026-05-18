@@ -239,7 +239,7 @@ Aufwandsschätzung: ~8 Wochen Vollzeit für die MVP-Blöcke A–H, plus weitere 
 Reihenfolge fuer ein frisches Production-Deployment:
 
 1. `.env.example` nach `.env` kopieren. `SECSCAN_ENCRYPTION_KEY` mit `python -c "import secrets; print(secrets.token_urlsafe(48))"` erzeugen und eintragen — niemals selbst tippen, siehe ADR-0013.
-2. `SECSCAN_SECRET_KEY` (Flask-Session) ebenfalls erzeugen und eintragen.
+2. `SECSCAN_SECRET_KEY` (Flask-Session) ebenfalls erzeugen und eintragen. **`SECSCAN_PUBLIC_URL`** auf die externe HTTPS-URL setzen (z.B. `https://secscan.example.com`) — sonst rendert der Bootstrap-Installer in Schritt 7 die interne HTTP-URL und der erste `POST /api/register` laeuft in einen 301-Redirect.
 3. `docker compose up -d --build`, dann `curl -fsS http://localhost:8000/healthz` zur Bestaetigung.
 4. Reverse-Proxy konfigurieren (nginx- oder Caddy-Snippet oben), TLS-Zertifikat einrichten, IP-Allowlist auf `/api/scans` setzen.
 5. Setup-Wizard im Browser durchklicken (`https://secscan.example.com/setup/step1`): Admin-Account anlegen, Master-Key generieren, Defaults setzen.
