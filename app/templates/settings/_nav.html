@@ -41,6 +41,17 @@
       </a>
     </li>
     <li>
+      <a href="{{ url_for('settings.llm_reviewer_view') }}"
+         hx-get="{{ url_for('settings.llm_reviewer_view') }}"
+         hx-target="#settings-content"
+         hx-swap="innerHTML"
+         hx-push-url="true"
+         hx-headers='{"HX-Target": "settings-content"}'
+         class="{% if active == 'llm_reviewer' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
+        LLM Reviewer
+      </a>
+    </li>
+    <li>
       <a href="{{ url_for('servers.list_servers') }}"
          hx-get="{{ url_for('servers.list_servers') }}"
          hx-target="#settings-content"

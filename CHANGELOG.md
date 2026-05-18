@@ -4,6 +4,150 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.9.0] — 2026-05-19
+
+Block P (ADR-0023) — LLM-Risk-Reviewer mit Application-Grouping
+(Two-Pass) + asynchroner Job-Queue + Mode-Feature-Flag + Settings-Tab.
+
+### Added
+
+- **Two-Pass-LLM-Architektur fuer Final-Risk-Bewertung.** Pass 1
+  (`group_detection`) erzeugt aus ungroupierten `pending`-Findings (aus
+  Block-O-Pre-Triage) neue `application_groups`-Eintraege mit
+  wiederverwendbaren Match-Patterns (`path_prefixes` /
+  `pkg_name_exact` / `pkg_name_glob` / `pkg_purl_pattern`). Pass 2
+  (`risk_evaluation`) bewertet pro Group das `risk_band` mit
+  Server-Kontext (compact-form ohne PIDs/args/timestamps,
+  ~2-4K Tokens). LLM-Output ueberschreibt Block-O-Pre-Triage-Bands
+  nicht direkt — Pass 2 setzt `Finding.risk_band_source='llm'`,
+  Pre-Triage-Loop im Ingest skipt diese Findings beim Re-Ingest.
+- **Application-Group-Schicht** als neue Tabelle `application_groups`
+  plus FK `Finding.application_group_id` (ON DELETE SET NULL). Group-
+  Bewertung wird auf alle enthaltenen Findings als Worst-Case-Band
+  vererbt. `worst_finding_id`-Verweis (kein FK — Group ueberlebt
+  Finding-Delete).
+- **Asynchroner Worker** als eigener Container `secscan-llm-worker`
+  (entrypoint `python -m app.workers.llm_worker`, keine eingehenden
+  Ports, nur DB-Connect + LLM-Provider-Egress). 2s-Polling auf
+  `llm_jobs` mit `SELECT FOR UPDATE SKIP LOCKED`, Dependency-Check
+  (Pass-2-Jobs warten via `depends_on` auf Pass-1), Stale-Reaper alle
+  60s reset `in_progress`-Jobs aelter als 10 min auf `queued` mit
+  exponential backoff (max 3 Attempts → `failed`). Heartbeat alle 10s
+  in `settings.llm_worker_heartbeat_at`; Healthcheck-Skript
+  `app/workers/healthcheck.py` exit 0/1 abhaengig von < 30s
+  Heartbeat-Alter.
+- **Feature-Flag `BLOCK_P_LLM_MODE`** (Settings-Spalte mit
+  CheckConstraint `off`/`observation`/`live`) fuer stufenweise
+  Inbetriebnahme. `observation`-Mode schreibt `would_call`-Marker
+  statt echter LLM-Calls — ermoeglicht Cache-Befuellung und
+  Cost-Math vor Scharfschaltung.
+- **Token-Budget** `SECSCAN_LLM_TOKEN_BUDGET_DAILY` (Default 1M) mit
+  00:00-UTC-Reset. Sowohl Pass-1- als auch Pass-2-Verbrauch wird
+  verbucht (Pre-Tag-Hotfix nach Security-Auditor-Befund). Bei
+  Budget-Erschoepfung: Worker pausiert, einmaliges Audit
+  `llm.budget_exhausted` pro Reset-Zyklus.
+- **Two-Level-Caching.** Pass-1-Cache *ist* die `application_groups`-
+  Library (deterministischer Pattern-Match via `GroupMatcher`-
+  Singleton mit `_lock`). Pass-2-Cache als `llm_risk_cache`-Tabelle
+  mit SHA256-Key ueber
+  `(group_id, group_findings_fp, cve_data_fp, server_context_fp)`,
+  TTL 30 Tage + LRU bei > 100K Rows. Server-Context-Fingerprint
+  enthaelt KEINE PIDs/args/snapshot_at — stabil zwischen Scans.
+- **UI auf Group-Cards.** Findings auf Server-Detail werden nach
+  `application_group_id` gruppiert mit Group-Cards (Label,
+  Risk-Pill, Findings-Count, Reason-Mono-Box, Worst-Finding-Anker,
+  Drill-down-`<details>`). Default-expanded ab `pending` aufwaerts,
+  default-collapsed fuer `monitor`/`noise`. Ungroupierte Findings
+  landen in „Pending grouping"-Sektion am Ende. `evaluating`-State
+  mit Spinner solange Worker arbeitet.
+- **Dashboard-Findings-Tabelle** bekommt `Group`-Spalte (zwischen
+  Risk und Severity) und `application_group`-Filter-Select.
+  Default-Sort bleibt `risk` (DESC).
+- **Settings-Tab `/settings/llm-reviewer`.** Zeigt Mode +
+  Queue-/Library-/Cache-/Token-Stats + Worker-Liveness.
+  Master-Key-gated Mode-Wechsel mit DSGVO-Privacy-Notice (Modal
+  mit Confirm-Checkbox) beim Wechsel auf `live`; Re-queue-Backlog-
+  Button fuer observation→live-Transition. Audit-Events
+  `llm.mode_changed` und `llm.backlog_requeued`.
+- **LLM-Output-Validierung strikt:** JSON-Schema (OpenAI-`response_format`
+  mode), Label-Regex `^[a-z0-9][a-z0-9_-]{0,63}$`, Vollstaendigkeits-
+  Check Pass-1 (jedes Input-Finding in genau einer Group ODER
+  `ungrouped`), `risk_band ∈ {escalate,act,mitigate,monitor,noise}` —
+  `pending`/`unknown` LLM-verboten via Pydantic-Literal +
+  Backend-Set-Check + DB-CheckConstraints (Defense-in-Depth dreifach).
+  `worst_finding_id` muss Group-Mitglied sein, `reason` ≤ 256 chars,
+  NUL-frei. Pattern-Defensiv-Trim gegen Injection (`/etc/passwd`-
+  Pfade technisch erlaubt aber harmlos; `*`-only, `"/"`-allein,
+  leerer String, Non-ASCII werden gedroppt).
+- **DB-Migrationen 0005 + 0006.** 0005: drei neue Tabellen
+  (`application_groups`, `llm_jobs`, `llm_risk_cache`), neue
+  Finding-Spalte `application_group_id`, neuer Findings-Index
+  `ix_findings_application_group`, drei Settings-Spalten
+  (`block_p_llm_mode`, `llm_worker_heartbeat_at`,
+  `llm_token_budget_used_today`). 0006: Mini-Migration fuer
+  `settings.llm_token_budget_reset_at`-Spalte. Kein Backfill.
+- **Audit-Events neu:** `llm.mode_changed`, `llm.budget_exhausted`,
+  `llm.jobs_queued`, `llm.job_done`, `llm.job_failed`,
+  `llm.job_reaped`, `llm.backlog_requeued`, `risk.llm_group_skipped`.
+
+### Changed
+
+- **ARCHITECTURE.md** §7 (Group-Spalte + Filter), §7a (Server-Detail
+  Group-Layer mit `evaluating`-State), §12 (neuer Subabschnitt
+  „Risk-Reviewer (Block P, ADR-0023)"), §13 (neue Audit-Actions),
+  §17 (sieben neue Out-of-Scope-Punkte).
+- **`docker-compose.yml`** mit drittem Service `secscan-llm-worker`
+  (depends_on db service_healthy, Healthcheck via Python-Skript,
+  keine ports).
+- **Block-G-LLM-Wrapper** wird vom Risk-Reviewer-Service mitgenutzt
+  (gleicher Provider-Pfad, `AsyncOpenAI`-Pattern).
+
+### Compat-Hinweise
+
+- **MIN_AGENT_VERSION bleibt 0.1.0.** Alte Agents 0.2.0/0.3.0 weiter
+  akzeptiert.
+- **Default-Mode `off`.** Frische Installationen haben den
+  LLM-Reviewer deaktiviert; Operator muss bewusst auf `observation`
+  oder `live` schalten (Master-Key-gated).
+- **DSGVO-Notice beim live-Mode** zeigt der Settings-Tab als Modal mit
+  Confirm-Checkbox. Notice ist UX-Schutz; Master-Key ist die echte
+  Backend-Schwelle.
+
+### Tests
+
+- **1477 Tests gruen** (Vorher v0.8.0: 1226; Delta +251 — 33 Phase A
+  + 46 Phase B + 21 Phase C + 8 Phase D + 25 Phase E + 13 Phase F +
+  105 Phase H). Coverage **91.70 %** (Threshold 85 %).
+- **421 adversarial PASS** (Vorher: 326; +95 neue Block-P-Cases:
+  Pass-1-Halluzination/Missing/Label-Regex/Pattern-Injection/
+  Non-ASCII, Pass-2-Halluzination/Invalid-Band/Worst-Not-In-Group/
+  NUL-Reason/Reason-Length, Worker-Race-SKIP-LOCKED 2-of-1 + 5-of-3,
+  Worker-Corrupted-Payload, Cache-Key-Collision mit Reihenfolge-
+  Sensitivitaet).
+- **10 Block-P-E2E-Integration-Tests** (`test_block_p_e2e_observation`,
+  `test_block_p_e2e_live`, `test_block_p_mode_switch`) gruen.
+- `ruff check` + `ruff format --check` + `mypy app/` (68 source files)
+  + `shellcheck agent/*.sh` PASS. Alembic-Roundtrip 0004↔0005↔0006
+  PASS gegen Postgres-17. `docker build` + `docker compose up
+  --build` startet drei Container alle healthy nach ~30s. Image-Size
+  **192 MB** (Delta +1 MB vs. v0.8.0).
+
+### Security-Auditor-Notes
+
+ACCEPTABLE WITH NOTES → SECURITY APPROVED. Alle 10 Pflicht-Punkte
+PASS: LLM-Output-Validation strikt, `pending`/`unknown` LLM-verboten
+(dreifach: Pydantic-Literal + Set-Check + DB-CheckConstraints),
+Worker-Container ohne eingehende Ports, Mode-Wechsel master_key-gated,
+Token-Budget-Cap funktioniert (inkl. Pre-Tag-Hotfix Pass-1-Buchung),
+`risk_band` hat keinen direkten User-Input-Pfad, Worker-Race mit
+SKIP-LOCKED bewiesen, DSGVO-Notice mit Confirm-Checkbox plus
+Master-Key-Backend-Gate, Pattern-Defensiv-Trim gegen Injection,
+Cache-Key deterministisch und Reihenfolge-sensitiv. Drei optionale
+Re-Open-Trigger als Folge-PR-Kandidaten: Worker-Logging auf structlog
+umstellen, `ON CONFLICT DO NOTHING` in `_persist_pass1_groups` fuer
+Multi-Worker-Skalierung, Setup-Wizard-DSGVO-Notice mit konkreter
+Feld-Liste.
+
 ## [v0.8.0] — 2026-05-18
 
 Block O (ADR-0022) — Pre-Triage-Risk-Engine + Host-Snapshot-Sammlung +

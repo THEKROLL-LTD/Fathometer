@@ -53,5 +53,39 @@ services:
       retries: 5
       start_period: 20s
 
+  # Block P (ADR-0023): asynchroner LLM-Risk-Reviewer-Worker.
+  # Eigener Container ohne eingehende Ports — nur DB-Connect und LLM-
+  # Provider-Egress (HTTPS via openai-SDK). Image und Build-Context sind
+  # identisch zum `app`-Service; der Worker laeuft mit anderem Entrypoint
+  # (`python -m app.workers.llm_worker`). Healthcheck ist ein interner
+  # Python-Aufruf, kein HTTP — siehe `app/workers/healthcheck.py`.
+  # Worker-Settings (Mode, Token-Budget, Reset-At) leben auf der
+  # Singleton-`settings`-Zeile und werden dort vom Web-Container
+  # geaendert — der Worker liest sie im Tick.
+  secscan-llm-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["python", "-m", "app.workers.llm_worker"]
+    environment:
+      SECSCAN_ENCRYPTION_KEY: ${SECSCAN_ENCRYPTION_KEY}
+      SECSCAN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-secscan}:${POSTGRES_PASSWORD:-secscan}@db:5432/${POSTGRES_DB:-secscan}
+      SECSCAN_WORKER_POLL_INTERVAL_SEC: ${SECSCAN_WORKER_POLL_INTERVAL_SEC:-2.0}
+      SECSCAN_WORKER_STALE_TIMEOUT_MIN: ${SECSCAN_WORKER_STALE_TIMEOUT_MIN:-10}
+      SECSCAN_LLM_TOKEN_BUDGET_DAILY: ${SECSCAN_LLM_TOKEN_BUDGET_DAILY:-1000000}
+      SECSCAN_LLM_CACHE_TTL_DAYS: ${SECSCAN_LLM_CACHE_TTL_DAYS:-30}
+      SECSCAN_LLM_CACHE_MAX_ROWS: ${SECSCAN_LLM_CACHE_MAX_ROWS:-100000}
+      SECSCAN_LOG_LEVEL: ${SECSCAN_LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.workers.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
 volumes:
   secscan-db:

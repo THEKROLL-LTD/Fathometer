@@ -1,0 +1,83 @@
+{# Application-Group-Card (Block P, ADR-0023 §UI-Konsequenzen).
+
+   Render-Vertrag:
+     - `group`         : ApplicationGroup — mit `id`, `label`, `explanation`,
+                         `risk_band`, `risk_band_reason`, `worst_finding_id`.
+     - `findings`      : list[Finding] — alle Findings dieser Group, in der
+                         Default-Sort-Reihenfolge (KEV/EPSS/CVSS/Severity).
+     - `worst_finding` : Finding | None — bereits aufgeloest aus
+                         `group.worst_finding_id` (kann None sein, wenn der
+                         Eintrag inzwischen geloescht wurde).
+     - `open_default`  : bool — default `false`. Wenn true: `<details open>`,
+                         das Drill-down ist beim Render expanded (typisch
+                         escalate/act/mitigate/pending/unknown-Groups).
+
+   Sicherheit:
+     - `group.label` und `group.explanation` sind LLM-Output, durch das
+       Pass-1-Schema serverseitig validiert (Regex/Length-Whitelist), und
+       werden trotzdem standard-autoescaped (kein |safe).
+     - `risk_band_reason` ist Plaintext aus dem Pass-2-LLM-Output und
+       wird in einer `<pre class="font-mono">`-Box gerendert — strict-escape
+       reicht, keine Markdown-Pipeline.
+#}
+{%- set _open_default = open_default | default(false) -%}
+{%- set _band = group.risk_band or 'pending' -%}
+<div class="card bg-base-200/40 rounded-box p-4 mb-3"
+     data-test="group-card-{{ group.id }}">
+  <div class="flex items-start justify-between gap-3 flex-wrap">
+    <div class="min-w-0 flex-1">
+      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">
+        APPLICATION GROUP
+      </div>
+      <h3 class="font-mono text-xl truncate" data-test="group-label">
+        {{ group.label }}
+      </h3>
+      {% if group.explanation %}
+        <p class="text-xs opacity-70 mt-1" data-test="group-explanation">
+          {{ group.explanation }}
+        </p>
+      {% endif %}
+    </div>
+    <div class="flex flex-col items-end gap-1 shrink-0">
+      {% with band_value=_band, as_link=false, compact=false, show_count=false %}
+        {% include "_partials/risk_band_pill.html" %}
+      {% endwith %}
+      <span class="badge badge-ghost badge-sm" data-test="group-findings-count">
+        {{ findings | length }} {% if (findings | length) == 1 %}finding{% else %}findings{% endif %}
+      </span>
+    </div>
+  </div>
+
+  {% if group.risk_band_reason %}
+    <div class="bg-base-300/40 rounded p-2 mt-3 font-mono text-xs whitespace-pre-wrap break-words"
+         data-test="group-risk-reason">
+      {{ group.risk_band_reason }}
+    </div>
+  {% endif %}
+
+  {% if group.worst_finding_id and worst_finding %}
+    <div class="mt-3 border-l-4 border-error pl-3"
+         data-test="group-worst-finding">
+      <div class="text-[10px] uppercase tracking-wider opacity-65">WORST FINDING</div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <a href="#finding-{{ worst_finding.id }}"
+           class="link link-hover font-mono text-xs font-semibold"
+           data-test="group-worst-finding-link">
+          {{ worst_finding.identifier_key }}
+        </a>
+        <span class="text-xs opacity-70">{{ worst_finding.package_name }}</span>
+      </div>
+    </div>
+  {% endif %}
+
+  <details class="mt-3"
+           {% if _open_default %}open{% endif %}
+           data-test="group-findings-details">
+    <summary class="cursor-pointer text-sm opacity-80 select-none">
+      Show all {{ findings | length }} {% if (findings | length) == 1 %}finding{% else %}findings{% endif %}
+    </summary>
+    <div class="mt-2">
+      {% include "_partials/group_findings_table.html" %}
+    </div>
+  </details>
+</div>

@@ -14,7 +14,7 @@ from typing import Any, Literal
 from urllib.parse import urlencode
 
 import structlog
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from werkzeug.datastructures import MultiDict
 
 from app.models import Severity
@@ -28,7 +28,7 @@ log = structlog.get_logger(__name__)
 
 
 ViewMode = Literal["list", "group", "diff"]
-SortKey = Literal["risk", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"]
+SortKey = Literal["risk", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen", "group"]
 SortDir = Literal["asc", "desc"]
 RiskBandFilter = Literal["escalate", "act", "mitigate", "pending", "unknown", "monitor", "noise"]
 ActionRequiredFilter = Literal["yes", "no"]
@@ -39,7 +39,7 @@ _VALID_CLASS: frozenset[str] = frozenset({"os-pkgs", "lang-pkgs", "both"})
 _VALID_SEVERITIES: frozenset[str] = frozenset({"critical", "high", "medium", "low", "all"})
 # Block O (ADR-0022): `risk` als Default-Primary-Sort.
 _VALID_SORTS: frozenset[str] = frozenset(
-    {"risk", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"}
+    {"risk", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen", "group"}
 )
 _VALID_DIRS: frozenset[str] = frozenset({"asc", "desc"})
 _VALID_RISK_BANDS: frozenset[str] = frozenset(
@@ -70,6 +70,9 @@ class FindingsViewFilter(BaseModel):
     # ADR-0018, aber Bookmark-URLs sollen funktionieren).
     risk_band: RiskBandFilter | None = None
     action_required: ActionRequiredFilter | None = None
+    # Block P (ADR-0023): Filter auf Application-Group-ID. `ge=1` haelt
+    # negative/Null-Werte raus. Ungueltiges still auf None.
+    application_group_id: int | None = Field(default=None, ge=1)
 
     @field_validator("search", mode="before")
     @classmethod
@@ -151,6 +154,20 @@ class FindingsViewFilter(BaseModel):
         elif action_required_raw:
             log.debug("findings_filter.action_required_rejected", value=action_required_raw)
 
+        # Block P (ADR-0023): Application-Group-ID-Filter.
+        ag_raw = (args.get("application_group") or "").strip()
+        application_group_id: int | None = None
+        if ag_raw:
+            try:
+                ag_int = int(ag_raw)
+            except ValueError:
+                log.debug("findings_filter.application_group_rejected", value=ag_raw)
+            else:
+                if ag_int >= 1:
+                    application_group_id = ag_int
+                else:
+                    log.debug("findings_filter.application_group_rejected", value=ag_raw)
+
         return cls(
             mode=mode_raw,  # type: ignore[arg-type]
             status=status_raw,  # type: ignore[arg-type]
@@ -162,6 +179,7 @@ class FindingsViewFilter(BaseModel):
             dir=dir_raw,  # type: ignore[arg-type]
             risk_band=risk_band,
             action_required=action_required,
+            application_group_id=application_group_id,
         )
 
     def to_findings_filter(self) -> FindingsFilter:
@@ -174,6 +192,7 @@ class FindingsViewFilter(BaseModel):
             search=self.search,
             risk_band=self.risk_band,
             action_required=self.action_required,
+            application_group_id=self.application_group_id,
         )
 
     def to_query_string(self, *, override: dict[str, str] | None = None) -> str:
@@ -207,6 +226,9 @@ class FindingsViewFilter(BaseModel):
             parts.append(("risk_band", self.risk_band))
         if self.action_required is not None:
             parts.append(("action_required", self.action_required))
+        # Block P (ADR-0023).
+        if self.application_group_id is not None:
+            parts.append(("application_group", str(self.application_group_id)))
 
         if override:
             # Bestehende Keys ersetzen, sonst anhaengen.

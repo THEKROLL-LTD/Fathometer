@@ -1,0 +1,90 @@
+{# Server-Detail-Findings-Section: Application-Group-Cards (Block P, ADR-0023).
+
+   Variablen-Vertrag (durchgereicht von `_findings_section.html`):
+     - `application_groups` : list[dict] — jede dict-Entry hat:
+                              `group` (ApplicationGroup),
+                              `findings` (list[Finding]),
+                              `worst_finding` (Finding|None).
+                              Reihenfolge bereits nach RISK_BAND_SORT_RANK
+                              DESC vom Backend (`_load_application_groups_
+                              for_server()`).
+     - `ungrouped_findings` : list[Finding] — Findings ohne
+                              `application_group_id` (Pending-grouping-
+                              Sektion am Ende).
+     - `server`             : Server.
+
+   Default-Expand-Logik:
+     - escalate / act / mitigate / pending / unknown  -> `<details open>`.
+     - monitor / noise / NULL (evaluating)           -> collapsed.
+
+   Wenn eine Group keinen `risk_band` hat (Pass 2 nicht durch), rendern wir
+   `group_evaluating_card.html` statt `application_group_card.html`. Block-L-
+   Polling fueltert die UI auf, sobald der Worker fertig ist.
+
+   Ungrouped-Findings werden in einer eigenen "Pending grouping"-Sektion am
+   Ende dargestellt, mit dem Block-K-Tabellen-Markup (`_view_list.html`)
+   wiederverwendet. Wenn beide Listen leer sind, zeigen wir den vertrauten
+   Empty-State-Block aus Block K.
+#}
+{%- set _expanded_bands = ['escalate', 'act', 'mitigate', 'pending', 'unknown'] -%}
+{% if not application_groups and not ungrouped_findings %}
+  <div class="card bg-base-200">
+    <div class="card-body items-center text-center py-10">
+      <p class="opacity-60">Keine offenen Findings auf diesem Server.</p>
+      <p class="text-xs opacity-50">
+        Filter pruefen oder Status auf "alle" stellen.
+      </p>
+    </div>
+  </div>
+{% else %}
+  {# Application-Group-Cards-Liste. #}
+  {% if application_groups %}
+    <div class="space-y-3" data-test="application-groups-section">
+      {% for entry in application_groups %}
+        {%- set _grp = entry.group -%}
+        {%- set _findings = entry.findings -%}
+        {%- set _wf = entry.worst_finding -%}
+        {% if _grp.risk_band is none %}
+          {% with group=_grp, findings=_findings %}
+            {% include "_partials/group_evaluating_card.html" %}
+          {% endwith %}
+        {% else %}
+          {%- set _open = _grp.risk_band in _expanded_bands -%}
+          {% with group=_grp,
+                  findings=_findings,
+                  worst_finding=_wf,
+                  open_default=_open %}
+            {% include "_partials/application_group_card.html" %}
+          {% endwith %}
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {# Ungrouped-Findings — "Pending grouping"-Sektion am Ende.
+     Wir wiederverwenden das Block-K-Tabellen-Markup (`_view_list.html`)
+     mit `findings=ungrouped_findings` ueber ein `{% with %}`-Scope, damit
+     die existierende Sort/Bulk/Modal-Logik unveraendert greift. #}
+  {% if ungrouped_findings %}
+    <section class="mt-6" data-test="pending-grouping-section">
+      <header class="flex items-center gap-2 mb-2">
+        <span class="loading loading-spinner loading-xs opacity-60"
+              aria-hidden="true"></span>
+        <h3 class="text-sm font-mono uppercase tracking-[0.12em] opacity-65">
+          Pending grouping
+        </h3>
+        <span class="badge badge-ghost badge-sm">
+          {{ ungrouped_findings | length }}
+          {% if (ungrouped_findings | length) == 1 %}finding{% else %}findings{% endif %}
+        </span>
+      </header>
+      <p class="text-xs opacity-60 mb-2">
+        These findings have not been assigned to an application group yet.
+        The risk reviewer worker will pick them up shortly.
+      </p>
+      {% with findings=ungrouped_findings %}
+        {% include "servers/_view_list.html" %}
+      {% endwith %}
+    </section>
+  {% endif %}
+{% endif %}

@@ -44,7 +44,19 @@ _VALID_STATUS: frozenset[str] = frozenset({"open", "acknowledged", "resolved", "
 # Block O (ADR-0022): Risk-Sort-Key wird Default-Primary; bleibt in der
 # Whitelist neben den Block-M-Keys.
 _VALID_SORTS: frozenset[str] = frozenset(
-    {"risk", "server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"}
+    {
+        "risk",
+        "server",
+        "cve",
+        "pkg",
+        "epss",
+        "cvss",
+        "sev",
+        "status",
+        "first_seen",
+        # Block P (ADR-0023): Sort nach ApplicationGroup.label.
+        "group",
+    }
 )
 _VALID_DIRS: frozenset[str] = frozenset({"asc", "desc"})
 
@@ -60,7 +72,17 @@ _Q_MAX_LEN: int = 128
 
 DashboardStatusFilter = Literal["open", "acknowledged", "resolved", "all"]
 DashboardSortKey = Literal[
-    "risk", "server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"
+    "risk",
+    "server",
+    "cve",
+    "pkg",
+    "epss",
+    "cvss",
+    "sev",
+    "status",
+    "first_seen",
+    # Block P (ADR-0023).
+    "group",
 ]
 DashboardSortDir = Literal["asc", "desc"]
 DashboardRiskBand = Literal["escalate", "act", "mitigate", "pending", "unknown", "monitor", "noise"]
@@ -101,6 +123,11 @@ class DashboardFilter(BaseModel):
     # Block O (ADR-0022)
     risk_band: DashboardRiskBand | None = None
     action_required: DashboardActionRequired | None = None
+    # Block P (ADR-0023): Filter auf `Finding.application_group_id`. `None`
+    # bedeutet "kein Filter"; `ge=1` schliesst negative/Null-IDs aus. Bookmark-
+    # stabilitaet: ungueltige Werte (Strings, < 1) werden in `from_request()`
+    # still auf None gemappt — keine 422.
+    application_group_id: int | None = Field(default=None, ge=1)
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -212,6 +239,25 @@ class DashboardFilter(BaseModel):
         elif action_required_raw:
             log.debug("dashboard_filter.action_required_rejected", value=action_required_raw)
 
+        # Block P (ADR-0023): Application-Group-ID-Filter. Akzeptiert nur
+        # positive Integer; alles andere (None/Strings/<1) wird still
+        # verworfen — Bookmark-Stabilitaet ueber alles.
+        ag_raw = (args.get("application_group") or "").strip()
+        application_group_id: int | None = None
+        if ag_raw:
+            try:
+                ag_int = int(ag_raw)
+            except ValueError:
+                log.debug("dashboard_filter.application_group_rejected", value=ag_raw)
+            else:
+                if ag_int >= 1:
+                    application_group_id = ag_int
+                else:
+                    log.debug(
+                        "dashboard_filter.application_group_rejected",
+                        value=ag_raw,
+                    )
+
         return cls(
             tags=raw_tags,
             tags_mode=tags_mode,
@@ -224,6 +270,7 @@ class DashboardFilter(BaseModel):
             dir=dir_raw,  # type: ignore[arg-type]
             risk_band=risk_band,
             action_required=action_required,
+            application_group_id=application_group_id,
         )
 
     def to_query_string(self, *, override: dict[str, str] | None = None) -> str:
@@ -265,6 +312,9 @@ class DashboardFilter(BaseModel):
             parts.append(("risk_band", self.risk_band))
         if self.action_required is not None:
             parts.append(("action_required", self.action_required))
+        # Block P (ADR-0023): Application-Group-ID-Filter.
+        if self.application_group_id is not None:
+            parts.append(("application_group", str(self.application_group_id)))
 
         if override:
             seen_keys = {k for k, _ in parts}
@@ -298,6 +348,7 @@ class DashboardFilter(BaseModel):
             or self.status != "open"
             or self.risk_band is not None
             or self.action_required is not None
+            or self.application_group_id is not None
         )
 
 

@@ -131,9 +131,42 @@
     </div>
   </header>
 
-  {# Body je nach Modus. #}
+  {# Body je nach Modus.
+
+     Block P (ADR-0023): im list-Modus rendern wir primaer die Application-
+     Group-Cards (`_view_groups.html`). Wenn aber Finding-Filter aktiv sind
+     (status != open, severity, class, kev_only, q, risk_band, action_required,
+     application_group_id) ODER explizit nach einer anderen Spalte als
+     `risk/desc` sortiert wird, fallen wir auf die flache `_view_list.html`
+     zurueck — die Group-Card-Ansicht waere unter aktiven Filtern nicht
+     mehr aussagekraeftig (Group enthielt vor dem Filter mehr Findings als
+     die Card zeigt). `?flat=1` erzwingt die flache Ansicht zusaetzlich
+     als Power-User-Bookmark. #}
+  {# `severity` ist nicht im `_filters_active`-Check, weil der User-Default-
+     Severity-Threshold (settings.severity_threshold, typisch HIGH) bei
+     jedem Render automatisch greift — dieser Default ist KEIN "aktiver
+     Filter" sondern Render-Hintergrund und soll die Group-Card-Ansicht
+     nicht deaktivieren. URL-explizites `?severity=...` haben wir hier
+     bewusst nicht gesondert behandelt; eine Group-Card unter strengem
+     Severity-Cut bleibt informativ (die Card-Pille reflektiert die
+     vollstaendige Group, die Drilldown-Tabelle die gefilterte Auswahl). #}
+  {% set _filters_active = (
+       view_filter.status != 'open'
+       or view_filter.finding_class != 'both'
+       or view_filter.kev_only
+       or view_filter.search
+       or view_filter.risk_band is not none
+       or view_filter.action_required is not none
+       or view_filter.application_group_id is not none
+  ) %}
+  {% set _sort_default = view_filter.sort == 'risk' and view_filter.dir == 'desc' %}
+  {% set _force_flat = request.args.get('flat') == '1' %}
   {% if view_filter.mode == 'list' %}
-    {% include "servers/_view_list.html" %}
+    {% if _force_flat or _filters_active or not _sort_default %}
+      {% include "servers/_view_list.html" %}
+    {% else %}
+      {% include "servers/_view_groups.html" %}
+    {% endif %}
   {% elif view_filter.mode == 'group' %}
     {% include "servers/_view_group.html" %}
   {% else %}

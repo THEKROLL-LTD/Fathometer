@@ -45,13 +45,16 @@ from app.middleware.gzip import (
     DecompressLimitError,
     read_decompressed_body,
 )
-from app.models import Finding, FindingStatus, Server
+from app.models import ApplicationGroup, Finding, FindingStatus, LLMJob, Server
 from app.schemas.scan_envelope import Envelope
 from app.services.agent_version import version_lt
 from app.services.findings_ingest import ingest_scan as run_ingest
 from app.services.findings_ingest import server_is_active
+from app.services.group_matcher import GroupMatcher, apply_matches_for_server
 from app.services.host_state_ingest import persist_host_state
-from app.services.risk_engine import pretriage
+from app.services.llm_fingerprints import group_findings_fingerprint
+from app.services.risk_engine import RiskBand, pretriage
+from app.settings_service import get_settings_row
 
 log = structlog.get_logger(__name__)
 
@@ -363,6 +366,115 @@ def ingest_scan() -> Response | tuple[Response, int]:
         actor=server.name,
         session=sess,
     )
+
+    # ---- 7b. Block-P LLM-Job-Queueing (ADR-0023) ----------------------
+    # Mode-Flag steuert das komplette Block-P-System: `off` ueberspringt
+    # Pattern-Match UND Job-Queueing. `observation` und `live` queuen Jobs;
+    # der Worker entscheidet wie er sie verarbeitet (Stub vs. Live-LLM).
+    settings_row = get_settings_row(sess)
+    if settings_row.block_p_llm_mode != "off":
+        # 1) Library-Reload + Pattern-Match. `reload()` muss bei jedem
+        # Scan laufen — der Web-Container weiss nichts von Pass-1-Inserts
+        # im Worker-Container ohne expliziten Refresh. `apply_matches_for_server`
+        # laeuft erst NACH dem Findings-UPSERT (Block O), sonst sind frisch
+        # eingefuegte Findings noch ungrouped.
+        GroupMatcher.get().reload(sess)
+        apply_matches_for_server(sess, server.id)
+        # Flush, damit die nachfolgenden SELECTs die neu gesetzten
+        # `application_group_id`-Werte sehen (autoflush koennte sonst
+        # ueberlistet werden, wenn die ORM-Identity-Map die Findings noch
+        # ohne Group hat).
+        sess.flush()
+
+        # 2) Pending Findings ohne Group → Pass-1-Job (Group-Detection).
+        ungrouped = list(
+            sess.execute(
+                select(Finding).where(
+                    Finding.server_id == server.id,
+                    Finding.application_group_id.is_(None),
+                    Finding.status == FindingStatus.OPEN,
+                    Finding.risk_band == RiskBand.PENDING.value,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        pass1_job_id: int | None = None
+        if ungrouped:
+            pass1_job = LLMJob(
+                job_type="group_detection",
+                server_id=server.id,
+                payload={"finding_ids": [f.id for f in ungrouped]},
+            )
+            sess.add(pass1_job)
+            sess.flush()
+            pass1_job_id = pass1_job.id
+
+        # 3) Fuer jede betroffene Group ein Pass-2-Job, sofern Fingerprint
+        # sich geaendert hat oder noch keine Bewertung existiert.
+        # Re-Eval bei `cve_data_fingerprint`-Drift wird hier NICHT
+        # zusaetzlich getriggert; der Worker erkennt den Drift via
+        # Cache-Miss (cve_data_fingerprint ist Teil des Cache-Keys),
+        # solange ein Pass-2-Job gequeued ist. MVP-Kompromiss
+        # (siehe ADR-0023 §"Cache-Invalidation"): wir queuen Pass-2
+        # genau dann, wenn das Group-Findings-Set sich aendert oder die
+        # Group noch unbewertet ist.
+        affected_groups = list(
+            sess.execute(
+                select(ApplicationGroup)
+                .join(Finding, Finding.application_group_id == ApplicationGroup.id)
+                .where(
+                    Finding.server_id == server.id,
+                    Finding.status == FindingStatus.OPEN,
+                )
+                .distinct()
+            )
+            .scalars()
+            .all()
+        )
+
+        pass2_queued = 0
+        for grp in affected_groups:
+            findings_in_group = list(
+                sess.execute(
+                    select(Finding).where(
+                        Finding.server_id == server.id,
+                        Finding.application_group_id == grp.id,
+                        Finding.status == FindingStatus.OPEN,
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not findings_in_group:
+                continue
+
+            new_fp = group_findings_fingerprint(findings_in_group)
+            # Idempotenz: gleicher Fingerprint + bereits bewertet → skip.
+            if grp.group_findings_fingerprint == new_fp and grp.risk_band is not None:
+                continue
+
+            pass2_job = LLMJob(
+                job_type="risk_evaluation",
+                server_id=server.id,
+                payload={"group_id": grp.id, "server_id": server.id},
+                depends_on=pass1_job_id,  # darf None sein
+            )
+            sess.add(pass2_job)
+            pass2_queued += 1
+
+        log_event(
+            "llm.jobs_queued",
+            target_type="server",
+            target_id=server.id,
+            metadata={
+                "pass1_queued": 1 if pass1_job_id is not None else 0,
+                "pass2_queued": pass2_queued,
+                "mode": settings_row.block_p_llm_mode,
+            },
+            actor=server.name,
+            session=sess,
+        )
 
     log_event(
         "scan.ingested",

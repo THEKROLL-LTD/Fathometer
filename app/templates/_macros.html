@@ -275,7 +275,7 @@
     {%- set is_active = true -%}
     {%- set aria_sort = 'ascending' if current_dir == 'asc' else 'descending' -%}
   {%- else -%}
-    {%- set next_dir = 'asc' if field in ('cve', 'pkg', 'first_seen', 'server') else 'desc' -%}
+    {%- set next_dir = 'asc' if field in ('cve', 'pkg', 'first_seen', 'server', 'group') else 'desc' -%}
     {%- set indicator = '↕' -%}
     {%- set is_active = false -%}
     {%- set aria_sort = 'none' -%}

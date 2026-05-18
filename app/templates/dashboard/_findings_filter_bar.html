@@ -103,6 +103,35 @@
     {% endfor %}
   </select>
 
+  {# Application-Group-Filter (Block P, ADR-0023).
+
+     Optionen werden aus `available_application_groups` gerendert — die
+     View liefert die aktuell aktive Library, alphabetisch sortiert, mit
+     Cap auf 100 Eintraege (`from app.views.dashboard._load_application_
+     groups_for_filter`). Bei groesseren Libraries braucht der Operator
+     ohnehin den URL-Filter direkt. #}
+  {% if available_application_groups %}
+  <select name="application_group"
+          class="select select-bordered select-sm"
+          aria-label="Application-Group-Filter"
+          hx-get="{{ _hx_url }}"
+          hx-trigger="change"
+          hx-target="{{ _hx_target }}"
+          hx-select="{{ _hx_target }}"
+          hx-swap="outerHTML"
+          hx-include="closest form"
+          hx-push-url="true"
+          data-test="filter-application-group">
+    <option value="">Group: alle</option>
+    {% for grp in available_application_groups %}
+      <option value="{{ grp.id }}"
+              {% if view_filter.application_group_id == grp.id %}selected{% endif %}>
+        {{ grp.label }}
+      </option>
+    {% endfor %}
+  </select>
+  {% endif %}
+
   {# Action-Required-Filter (Block O, ADR-0022). #}
   <select name="action_required"
           class="select select-bordered select-sm"

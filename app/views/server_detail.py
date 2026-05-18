@@ -38,6 +38,7 @@ from app.forms import (
     ReopenForm,
 )
 from app.models import (
+    ApplicationGroup,
     Finding,
     FindingStatus,
     Server,
@@ -58,7 +59,7 @@ from app.services.findings_query import (
     list_findings,
 )
 from app.services.heartbeat_aggregation import DailyStatus, heartbeats_for_servers
-from app.services.risk_engine import no_band_values, yes_band_values
+from app.services.risk_engine import RISK_BAND_SORT_RANK, RiskBand, no_band_values, yes_band_values
 from app.services.severity_history import (
     DailySeverityCount,
     count_kev_events_50d,
@@ -109,6 +110,122 @@ def _render_tag_editor(server: Server) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[str, Any]]:
+    """Liefert die Application-Groups fuer den Server, sortiert nach Risk-Band.
+
+    Block P (ADR-0023): Findings werden in der Server-Detail-Findings-Section
+    nach `application_group_id` gruppiert. Wir laden:
+
+      1. Alle Groups die mindestens ein OPEN-Finding auf dem Server haben.
+      2. Pro Group: die OPEN-Findings, sortiert nach §15
+         (KEV/EPSS/CVSS/Severity-Tiebreak).
+      3. Falls `group.worst_finding_id` gesetzt: das Worst-Finding-Objekt.
+
+    Sortierung der Groups: DESC nach `RISK_BAND_SORT_RANK` — escalate first,
+    NULL-Band-Groups (Worker arbeitet noch) als `pending`-Rank-40 einsortiert.
+
+    Rueckgabe-Format: list[dict] mit Keys `group`, `findings`, `worst_finding`.
+    Das ist absichtlich keine Dataclass, weil Templates direkt dict-Access
+    nutzen und keine Typ-Stabilitaet brauchen.
+    """
+    # Alle Groups die mindestens ein OPEN-Finding auf diesem Server haben.
+    # `distinct()` damit pro Group ein Eintrag rauskommt; `selectinload` waere
+    # ueberkopf weil Findings ohnehin in einer Folge-Query gezielt geladen
+    # werden (Sortierung nach §15).
+    groups_stmt = (
+        select(ApplicationGroup)
+        .join(Finding, Finding.application_group_id == ApplicationGroup.id)
+        .where(
+            Finding.server_id == server_id,
+            Finding.status == FindingStatus.OPEN,
+        )
+        .distinct()
+    )
+    groups = list(sess.execute(groups_stmt).scalars().all())
+
+    if not groups:
+        return []
+
+    # Worst-Finding-Lookup vorbereiten — `worst_finding_id` ist kein FK,
+    # darum manuell auflueoesen. Filter auf Server, damit ein veralteter
+    # Cross-Server-Verweis nicht stiltlich angezeigt wird.
+    wf_ids = [g.worst_finding_id for g in groups if g.worst_finding_id is not None]
+    worst_by_id: dict[int, Finding] = {}
+    if wf_ids:
+        worst_stmt = select(Finding).where(Finding.id.in_(wf_ids), Finding.server_id == server_id)
+        for f in sess.execute(worst_stmt).scalars().all():
+            worst_by_id[f.id] = f
+
+    # Findings pro Group laden — eine Query pro Group ist akzeptabel: die
+    # Anzahl Groups pro Server liegt bei 5-15 (Operator-Realitaet), und die
+    # Block-K-Sort-Order braucht dieselben Tiebreaker wie der Server-weite
+    # Listen-Modus. Wir reuse `list_findings()` mit einem Group-Filter via
+    # Direct-Query (FindingsFilter hat keinen `application_group_id`-Slot,
+    # weil das eine Server-Detail-spezifische Achse ist).
+    result: list[dict[str, Any]] = []
+    for grp in groups:
+        findings_stmt = (
+            select(Finding)
+            .where(
+                Finding.server_id == server_id,
+                Finding.application_group_id == grp.id,
+                Finding.status == FindingStatus.OPEN,
+            )
+            .order_by(
+                Finding.is_kev.desc(),
+                Finding.cvss_v3_score.desc().nullslast(),
+                Finding.first_seen_at.asc(),
+            )
+        )
+        grp_findings = list(sess.execute(findings_stmt).scalars().all())
+        result.append(
+            {
+                "group": grp,
+                "findings": grp_findings,
+                "worst_finding": (
+                    worst_by_id.get(grp.worst_finding_id)
+                    if grp.worst_finding_id is not None
+                    else None
+                ),
+            }
+        )
+
+    # Sortierung: DESC nach RISK_BAND_SORT_RANK. NULL-Band ranked als
+    # PENDING (40) ein — Operator soll evaluating-Groups oben sehen, nicht
+    # versteckt am Ende.
+    def _rank(entry: dict[str, Any]) -> int:
+        band = entry["group"].risk_band
+        if band is None:
+            return RISK_BAND_SORT_RANK[RiskBand.PENDING]
+        # Map String -> Enum -> Rank. Fallback 0 bei unbekanntem Wert.
+        try:
+            return RISK_BAND_SORT_RANK[RiskBand(band)]
+        except (KeyError, ValueError):
+            return 0
+
+    result.sort(key=_rank, reverse=True)
+    return result
+
+
+def _load_ungrouped_findings_for_server(sess: Any, server_id: int) -> list[Finding]:
+    """OPEN-Findings ohne `application_group_id` ("Pending grouping"-Bucket)."""
+    stmt = (
+        select(Finding)
+        .where(
+            Finding.server_id == server_id,
+            Finding.application_group_id.is_(None),
+            Finding.status == FindingStatus.OPEN,
+        )
+        .order_by(
+            Finding.is_kev.desc(),
+            Finding.cvss_v3_score.desc().nullslast(),
+            Finding.first_seen_at.asc(),
+        )
+        .limit(500)
+    )
+    return list(sess.execute(stmt).scalars().all())
+
+
 def _render_findings_section(
     server: Server,
     view_filter: FindingsViewFilter,
@@ -118,6 +235,10 @@ def _render_findings_section(
     Rueckgabe als dict — die Template-Inklusion (`servers/_findings_section
     .html`) konsumiert die Keys direkt. Wird sowohl beim Vollseiten- als
     auch beim HTMX-Partial-Render genutzt.
+
+    Block P (ADR-0023): zusaetzlich werden die Application-Groups und ihre
+    Findings geladen — die Section-Hauptansicht (`mode=list`) gruppiert
+    nach Application-Group statt nach Risk-Band auf Finding-Ebene.
     """
     sess = get_session()
     findings_filter = view_filter.to_findings_filter()
@@ -127,6 +248,8 @@ def _render_findings_section(
     findings_list: list[Any] = []
     groups: list[PackageGroup] = []
     diff: DiffSection | None = None
+    application_groups: list[dict[str, Any]] = []
+    ungrouped_findings: list[Finding] = []
 
     if view_filter.mode == "list":
         findings_list = list_findings(
@@ -136,6 +259,12 @@ def _render_findings_section(
             sort=view_filter.sort,
             dir=view_filter.dir,
         )
+        # Block P: Group-Aufschluesselung — laeuft ergaenzend zur Listen-
+        # Query, weil das Template (siehe `_findings_section.html`) die
+        # Groups als primaere Render-Quelle nutzt und die flache Liste
+        # nur als Fallback/Sort-Ueberschreibung haelt.
+        application_groups = _load_application_groups_for_server(sess, server.id)
+        ungrouped_findings = _load_ungrouped_findings_for_server(sess, server.id)
     elif view_filter.mode == "group":
         groups = group_findings_by_package(sess, server.id, findings_filter)
     else:  # diff
@@ -148,6 +277,8 @@ def _render_findings_section(
         "findings": findings_list,
         "groups": groups,
         "diff": diff,
+        "application_groups": application_groups,
+        "ungrouped_findings": ungrouped_findings,
         "ack_form": AcknowledgeForm(),
         "reopen_form": ReopenForm(),
         "note_form": NoteForm(),

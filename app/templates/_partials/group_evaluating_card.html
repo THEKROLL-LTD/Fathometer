@@ -1,0 +1,34 @@
+{# Application-Group-Card im `evaluating`-State (Block P, ADR-0023).
+
+   Wird gerendert wenn `group.risk_band IS NULL` — also Pass 1 ist durch
+   (Group existiert mit Label), aber Pass 2 hat noch keinen Risk-Band
+   geschrieben. Block-L-Polling fueltert die UI nach.
+
+   Render-Vertrag:
+     - `group`    : ApplicationGroup (mit `id`, `label`, `explanation?`).
+     - `findings` : list[Finding] der Group, fuer den Count.
+#}
+<div class="card bg-base-200/40 rounded-box p-4 mb-3"
+     data-test="group-evaluating-{{ group.id }}">
+  <div class="flex items-center justify-between gap-3 flex-wrap">
+    <div class="min-w-0">
+      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">
+        APPLICATION GROUP
+      </div>
+      <h3 class="font-mono text-xl truncate" data-test="group-label">
+        {{ group.label }}
+      </h3>
+      {% if group.explanation %}
+        <p class="text-xs opacity-70 mt-1">{{ group.explanation }}</p>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-2 opacity-70 shrink-0">
+      <span class="loading loading-spinner loading-sm"
+            data-test="group-evaluating-spinner"
+            aria-label="Evaluating"></span>
+      <span class="text-xs" data-test="group-evaluating-text">
+        Evaluating risk for {{ findings | length }} {% if (findings | length) == 1 %}finding{% else %}findings{% endif %}...
+      </span>
+    </div>
+  </div>
+</div>

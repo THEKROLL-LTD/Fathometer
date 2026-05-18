@@ -148,6 +148,9 @@
                und Erstmals nach hinten. #}
             {{ sort_header('risk', 'Risk', view_filter.sort, view_filter.dir,
                            view_filter=view_filter, route='dashboard.index') }}
+            {# Block P (ADR-0023): Group-Spalte zwischen Risk und Server. #}
+            {{ sort_header('group', 'Group', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
             {{ sort_header('server', 'Server', view_filter.sort, view_filter.dir,
                            view_filter=view_filter, route='dashboard.index') }}
             {{ sort_header('cve', 'CVE / Titel', view_filter.sort, view_filter.dir,
@@ -193,6 +196,31 @@
                       show_count=false %}
                 {% include "_partials/risk_band_pill.html" %}
               {% endwith %}
+            </td>
+
+            {# Group-Spalte (Block P, ADR-0023): Label als Filter-Link
+               auf `?application_group=<id>`. Findings ohne Group zeigen
+               einen dezenten Em-Dash. Eager-Load der `application_group`-
+               Relation (siehe `list_findings_cross_server()`) verhindert
+               N+1 fuer diese Spalte. #}
+            <td class="whitespace-nowrap" data-test="finding-group-cell">
+              {% if f.application_group_id and f.application_group %}
+                <a href="{{ url_for('dashboard.index') }}?application_group={{ f.application_group_id }}"
+                   hx-get="{{ url_for('dashboard.index') }}?application_group={{ f.application_group_id }}"
+                   hx-target="#findings-section"
+                   hx-select="#findings-section"
+                   hx-swap="outerHTML"
+                   hx-push-url="true"
+                   class="badge badge-ghost badge-sm font-mono opacity-80 hover:opacity-100"
+                   title="Nach Application-Group filtern"
+                   data-test="finding-group-link">
+                  {{ f.application_group.label }}
+                </a>
+              {% else %}
+                <span class="opacity-40 font-mono"
+                      title="Noch keine Application-Group zugewiesen"
+                      data-test="finding-group-empty">—</span>
+              {% endif %}
             </td>
 
             {# Server-Spalte: Name als Link auf Server-Detail, darunter Tag-

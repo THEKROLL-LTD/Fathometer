@@ -1,0 +1,285 @@
+"""Tests fuer `app.services.group_matcher` — Block P (ADR-0023) Pattern-Match.
+
+Verifiziert die Match-Reihenfolge:
+1. ``path_prefixes`` — laengster Match gewinnt.
+2. ``pkg_name_exact`` — ADR-0011-``@target``-Suffix wird gestrippt.
+3. ``pkg_name_glob`` — fnmatch.
+4. ``pkg_purl_pattern`` — Prefix.
+
+Plus Library-Reload und :func:`apply_matches_for_server`.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import pytest
+from flask import Flask
+from sqlalchemy import select
+
+from app.db import get_session_factory
+from app.models import (
+    ApplicationGroup,
+    AttackVector,
+    Finding,
+    FindingClass,
+    FindingStatus,
+    FindingType,
+    Severity,
+)
+from app.services.group_matcher import GroupMatcher, apply_matches_for_server
+from tests._helpers import register_test_server
+
+
+@pytest.fixture(autouse=True)
+def _reset_singleton() -> None:
+    """Vor jedem Test den GroupMatcher-Singleton resetten."""
+    GroupMatcher._reset_for_tests()
+    yield
+    GroupMatcher._reset_for_tests()
+
+
+def _make_finding(
+    server_id: int,
+    *,
+    cve: str = "CVE-2024-0001",
+    package_name: str = "openssl",
+    target_path: str | None = None,
+    purl: str | None = None,
+) -> Finding:
+    now = datetime.now(tz=UTC)
+    return Finding(
+        server_id=server_id,
+        finding_type=FindingType.VULNERABILITY,
+        finding_class=FindingClass.OS_PKGS,
+        identifier_key=cve,
+        package_name=package_name,
+        installed_version="1.0",
+        severity=Severity.HIGH,
+        attack_vector=AttackVector.UNKNOWN,
+        status=FindingStatus.OPEN,
+        is_kev=False,
+        first_seen_at=now,
+        last_seen_at=now,
+        target_path=target_path,
+        package_purl=purl,
+    )
+
+
+def _insert_group(
+    sess,
+    label: str,
+    *,
+    path_prefixes: list[str] | None = None,
+    pkg_name_exact: list[str] | None = None,
+    pkg_name_glob: list[str] | None = None,
+    pkg_purl_pattern: list[str] | None = None,
+) -> ApplicationGroup:
+    grp = ApplicationGroup(
+        label=label,
+        explanation=f"Test group {label}",
+        path_prefixes=path_prefixes or [],
+        pkg_name_exact=pkg_name_exact or [],
+        pkg_name_glob=pkg_name_glob or [],
+        pkg_purl_pattern=pkg_purl_pattern or [],
+        source="llm",
+    )
+    sess.add(grp)
+    sess.flush()
+    return grp
+
+
+# ---------------------------------------------------------------------------
+# Match-Reihenfolge & Edge-Cases
+# ---------------------------------------------------------------------------
+
+
+def test_path_prefix_longest_wins(db_app: Flask) -> None:
+    """k3s mit `/var/lib/rancher/k3s/agent/containerd/...` matched k3s (laenger),
+    nicht eine hypothetische containerd-Group."""
+    server_id, _ = register_test_server(db_app, name="matcher-1")
+    factory = get_session_factory(db_app)
+    with db_app.app_context():
+        sess = factory()
+        try:
+            k3s = _insert_group(sess, "k3s", path_prefixes=["/var/lib/rancher/k3s/"])
+            _insert_group(sess, "containerd", path_prefixes=["/var/lib/"])
+            sess.commit()
+            matcher = GroupMatcher.get()
+            matcher.reload(sess)
+            f = _make_finding(
+                server_id,
+                target_path="/var/lib/rancher/k3s/agent/containerd/snapshot",
+            )
+            assert matcher.match(f) is not None
+            assert matcher.match(f).label == "k3s"
+            assert matcher.match(f).id == k3s.id
+        finally:
+            sess.close()
+
+
+def test_pkg_name_exact_when_no_path_match(db_app: Flask) -> None:
+    server_id, _ = register_test_server(db_app, name="matcher-2")
+    factory = get_session_factory(db_app)
+    with db_app.app_context():
+        sess = factory()
+        try:
+            _insert_group(sess, "openssh-server", pkg_name_exact=["openssh-server"])
+            sess.commit()
+            matcher = GroupMatcher.get()
+            matcher.reload(sess)
+            f = _make_finding(server_id, package_name="openssh-server")
+            grp = matcher.match(f)
+            assert grp is not None
+            assert grp.label == "openssh-server"
+        finally:
+            sess.close()
+
+
+def test_pkg_name_exact_strips_at_target_suffix(db_app: Flask) -> None:
+    """ADR-0011: `package_name` enthaelt `@target`-Disambiguation; der Matcher
+    muss das vor dem Vergleich abschneiden."""
+    server_id, _ = register_test_server(db_app, name="matcher-3")
+    factory = get_session_factory(db_app)
+    with db_app.app_context():
+        sess = factory()
+        try:
+            _insert_group(sess, "stdlib", pkg_name_exact=["stdlib"])
+            sess.commit()
+            matcher = GroupMatcher.get()
+            matcher.reload(sess)
+            # Trivy persistiert `stdlib@/usr/local/bin/k3s-server`.
+            f = _make_finding(server_id, package_name="stdlib@/usr/local/bin/k3s-server")
+            grp = matcher.match(f)
+            assert grp is not None
+            assert grp.label == "stdlib"
+        finally:
+            sess.close()
+
+
+def test_pkg_name_glob_when_no_exact_match(db_app: Flask) -> None:
+    server_id, _ = register_test_server(db_app, name="matcher-4")
+    factory = get_session_factory(db_app)
+    with db_app.app_context():
+        sess = factory()
+        try:
+            _insert_group(sess, "k3s", pkg_name_glob=["k3s-*"])
+            sess.commit()
+            matcher = GroupMatcher.get()
+            matcher.reload(sess)
+            f = _make_finding(server_id, package_name="k3s-server")
+            grp = matcher.match(f)
+            assert grp is not None
+            assert grp.label == "k3s"
+        finally:
+            sess.close()
+
+
+def test_pkg_purl_pattern_as_last_resort(db_app: Flask) -> None:
+    server_id, _ = register_test_server(db_app, name="matcher-5")
+    factory = get_session_factory(db_app)
+    with db_app.app_context():
+        sess = factory()
+        try:
+            _insert_group(sess, "golang-stdlib", pkg_purl_pattern=["pkg:golang/stdlib"])
+            sess.commit()
+            matcher = GroupMatcher.get()
+            matcher.reload(sess)
+            f = _make_finding(
+                server_id,
+                package_name="completely-unrelated",
+                purl="pkg:golang/stdlib@1.23.5",
+            )
+            grp = matcher.match(f)
+            assert grp is not None
+            assert grp.label == "golang-stdlib"
+        finally:
+            sess.close()
+
+
+def test_no_match_returns_none(db_app: Flask) -> None:
+    server_id, _ = register_test_server(db_app, name="matcher-6")
+    factory = get_session_factory(db_app)
+    with db_app.app_context():
+        sess = factory()
+        try:
+            _insert_group(sess, "k3s", pkg_name_exact=["k3s"])
+            sess.commit()
+            matcher = GroupMatcher.get()
+            matcher.reload(sess)
+            f = _make_finding(server_id, package_name="zzz-unknown-pkg")
+            assert matcher.match(f) is None
+        finally:
+            sess.close()
+
+
+def test_reload_picks_up_new_groups(db_app: Flask) -> None:
+    """Library-Reload muss neue Groups sehen."""
+    server_id, _ = register_test_server(db_app, name="matcher-7")
+    factory = get_session_factory(db_app)
+    with db_app.app_context():
+        sess = factory()
+        try:
+            sess.commit()
+            matcher = GroupMatcher.get()
+            matcher.reload(sess)
+            f = _make_finding(server_id, package_name="newpkg")
+            assert matcher.match(f) is None
+
+            _insert_group(sess, "newpkg", pkg_name_exact=["newpkg"])
+            sess.commit()
+            matcher.reload(sess)
+            grp = matcher.match(f)
+            assert grp is not None
+            assert grp.label == "newpkg"
+        finally:
+            sess.close()
+
+
+def test_apply_matches_for_server_assigns_and_updates_last_used(
+    db_app: Flask,
+) -> None:
+    server_id, _ = register_test_server(db_app, name="matcher-apply")
+    factory = get_session_factory(db_app)
+    with db_app.app_context():
+        sess = factory()
+        try:
+            grp = _insert_group(sess, "openssl", pkg_name_exact=["openssl"])
+            grp_id = grp.id
+            f1 = _make_finding(server_id, cve="CVE-X-1", package_name="openssl")
+            f2 = _make_finding(server_id, cve="CVE-X-2", package_name="openssl")
+            f3 = _make_finding(server_id, cve="CVE-X-3", package_name="ghost")
+            sess.add_all([f1, f2, f3])
+            sess.commit()
+
+            count = apply_matches_for_server(sess, server_id)
+            sess.commit()
+            assert count == 2
+
+            assigned = list(
+                sess.execute(
+                    select(Finding).where(
+                        Finding.server_id == server_id,
+                        Finding.application_group_id.is_not(None),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(assigned) == 2
+            assert all(f.application_group_id == grp_id for f in assigned)
+
+            grp_after = sess.execute(
+                select(ApplicationGroup).where(ApplicationGroup.id == grp_id)
+            ).scalar_one()
+            assert grp_after.last_used_at is not None
+        finally:
+            sess.close()
+
+
+def test_empty_library_returns_none_when_unloaded(db_app: Flask) -> None:
+    """Matcher ohne `reload()`-Call returnt None — Singleton-Default."""
+    server_id, _ = register_test_server(db_app, name="matcher-unloaded")
+    matcher = GroupMatcher.get()
+    f = _make_finding(server_id, package_name="anything")
+    assert matcher.match(f) is None

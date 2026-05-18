@@ -37,7 +37,16 @@ from sqlalchemy import case, func, nulls_last, or_, select
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.sql import ColumnElement
 
-from app.models import Finding, FindingClass, FindingStatus, Server, ServerTag, Severity, Tag
+from app.models import (
+    ApplicationGroup,
+    Finding,
+    FindingClass,
+    FindingStatus,
+    Server,
+    ServerTag,
+    Severity,
+    Tag,
+)
 from app.services.risk_engine import RISK_BAND_SORT_RANK, RiskBand, no_band_values, yes_band_values
 
 if TYPE_CHECKING:
@@ -60,13 +69,34 @@ FindingsActionRequiredFilter = Literal["yes", "no"]
 # referenzierte Column. Damit ist `ORDER BY` immer ein Column-Objekt aus
 # dem Mapping, NIE eine User-Eingabe — kein SQL-Injection-Surface.
 # Block O (ADR-0022): `"risk"` als neuer Default-Primary-Sort.
-FindingsSortKey = Literal["risk", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"]
+FindingsSortKey = Literal[
+    "risk",
+    "cve",
+    "pkg",
+    "epss",
+    "cvss",
+    "sev",
+    "status",
+    "first_seen",
+    # Block P (ADR-0023): Sort nach ApplicationGroup.label.
+    "group",
+]
 FindingsSortDir = Literal["asc", "desc"]
 
 # Block M (ADR-0020): Cross-Server-Sort enthaelt zusaetzlich `"server"`
 # (Sortierung nach `Server.name`).
 FindingsCrossSortKey = Literal[
-    "risk", "server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"
+    "risk",
+    "server",
+    "cve",
+    "pkg",
+    "epss",
+    "cvss",
+    "sev",
+    "status",
+    "first_seen",
+    # Block P (ADR-0023).
+    "group",
 ]
 
 
@@ -90,6 +120,11 @@ class FindingsFilter:
     search: str | None = None  # case-insensitive substring
     risk_band: FindingsRiskBandFilter | None = None
     action_required: FindingsActionRequiredFilter | None = None
+    # Block P (ADR-0023): Filter auf `Finding.application_group_id`. `None`
+    # bedeutet "kein Filter" — wir filtern KEIN ungrouped (das macht eine
+    # separate "Pending grouping"-Sektion). Wert `0` ist semantisch nicht
+    # erlaubt (Schema haelt `ge=1`).
+    application_group_id: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +253,13 @@ _SORT_COLUMNS: dict[str, Any] = {
     "sev": _severity_rank_expr(),
     "status": _status_rank_expr(),
     "first_seen": Finding.first_seen_at,
+    # Block P (ADR-0023): Sort nach ApplicationGroup.label. Findings ohne
+    # zugewiesene Group haben `application_group_id IS NULL` und landen
+    # via `nullslast()` (siehe `list_findings()`) im asc/desc-Tail. Der
+    # Outer-Join auf `ApplicationGroup` muss in der jeweiligen Query
+    # explizit angefuegt werden — siehe `list_findings()` /
+    # `list_findings_cross_server()`.
+    "group": ApplicationGroup.label,
 }
 
 
@@ -267,6 +309,10 @@ def _apply_filters(stmt: Any, server_id: int, filt: FindingsFilter) -> Any:
         stmt = stmt.where(Finding.risk_band.in_(yes_band_values()))
     elif filt.action_required == "no":
         stmt = stmt.where(Finding.risk_band.in_(no_band_values()))
+
+    # Block P (ADR-0023): application_group_id-Filter.
+    if filt.application_group_id is not None:
+        stmt = stmt.where(Finding.application_group_id == filt.application_group_id)
 
     if filt.search:
         # Case-insensitive substring auf identifier_key, package_name, title.
@@ -356,6 +402,13 @@ def list_findings(
     geoeffnet wird.
     """
     stmt = select(Finding).options(selectinload(Finding.notes))
+    # Block P (ADR-0023): Outer-Join auf ApplicationGroup nur wenn nach
+    # `group` sortiert wird — sonst spart der Plan einen Join.
+    if sort == "group":
+        stmt = stmt.outerjoin(
+            ApplicationGroup,
+            ApplicationGroup.id == Finding.application_group_id,
+        )
     stmt = _apply_filters(stmt, server_id, filt)
     if sort is None or sort not in _SORT_COLUMNS:
         stmt = stmt.order_by(*_order_clauses(filt))
@@ -573,8 +626,18 @@ def list_findings_cross_server(
     # waere keine Alternative — die WHERE-/ORDER-BY-Klausel braucht den JOIN
     # in derselben Statement-Scope).
     base_stmt = select(Finding).join(Server, Server.id == Finding.server_id)
+    # Block P (ADR-0023): Outer-Join auf ApplicationGroup defensiv anlegen,
+    # weil entweder der Sort `"group"` oder die Group-Spalten-Anzeige
+    # (eager_load via selectinload) die Tabelle braucht. Outer, weil
+    # Findings ohne Zuordnung in der Liste auftauchen muessen.
+    base_stmt = base_stmt.outerjoin(
+        ApplicationGroup, ApplicationGroup.id == Finding.application_group_id
+    )
     base_stmt = base_stmt.options(
-        selectinload(Finding.server).selectinload(Server.tag_links).selectinload(ServerTag.tag)
+        selectinload(Finding.server).selectinload(Server.tag_links).selectinload(ServerTag.tag),
+        # Eager-Load der Group fuer die Dashboard-Spalte. Block-P-Render
+        # zeigt `f.application_group.label` direkt — kein N+1.
+        selectinload(Finding.application_group),
     )
 
     # Tag-Filter (OR).
@@ -627,6 +690,10 @@ def list_findings_cross_server(
         base_stmt = base_stmt.where(Finding.risk_band.in_(yes_band_values()))
     elif filt.action_required == "no":
         base_stmt = base_stmt.where(Finding.risk_band.in_(no_band_values()))
+
+    # Block P (ADR-0023): Application-Group-ID-Filter.
+    if filt.application_group_id is not None:
+        base_stmt = base_stmt.where(Finding.application_group_id == filt.application_group_id)
 
     # `total_count` — exakter COUNT(*) ueber das gefilterte Subselect. Wir
     # bauen das Subselect aus dem aktuellen Statement ohne ORDER BY/LIMIT

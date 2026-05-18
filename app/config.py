@@ -90,6 +90,33 @@ class Settings(BaseSettings):
     # ----- Session-Konfiguration -----
     session_lifetime_days: int = Field(default=7, ge=1, le=90)
 
+    # ----- Block P (ADR-0023) — LLM-Risk-Reviewer-Settings -----
+    # TTL in Tagen fuer `llm_risk_cache`-Eintraege (Read-Side-Check, kein
+    # aktives Loeschen). Eintraege aelter als TTL gelten als invalid und
+    # triggern einen neuen LLM-Call.
+    llm_cache_ttl_days: int = Field(default=30, ge=1, le=3650)
+    # LRU-Hard-Limit fuer `llm_risk_cache`. Hintergrund-Job loescht aelteste
+    # `last_used_at` wenn die Tabelle die Grenze ueberschreitet.
+    llm_cache_max_rows: int = Field(default=100_000, ge=100, le=10_000_000)
+    # Max-Token-Budget pro Pass-1- und Pass-2-Call (Out-Token, Defense-in-
+    # Depth gegen runaway-Outputs).
+    llm_pass1_max_tokens: int = Field(default=4096, ge=256, le=32768)
+    llm_pass2_max_tokens: int = Field(default=2048, ge=256, le=32768)
+
+    # ----- Block P (ADR-0023) — Worker- und Token-Budget-Settings -----
+    # Tages-Token-Budget. Worker pausiert beim Erreichen des Limits bis zum
+    # naechsten 00:00-UTC-Reset. Default 1M Tokens analog ADR-0023 §"Token-
+    # Budget".
+    llm_token_budget_daily: int = Field(default=1_000_000, ge=1000, le=10_000_000_000)
+    # Worker-Poll-Intervall (Sekunden). Default 2s — laut ADR irrelevant
+    # gegenueber LLM-Latenzen von 30-90s, aber bei `mode=off`/empty-queue
+    # die dominante Backoff-Latenz.
+    worker_poll_interval_sec: float = Field(default=2.0, ge=0.1, le=60.0)
+    # Stale-Timeout fuer `in_progress`-Jobs in Minuten. Nach Ablauf reaped
+    # der Stale-Reaper-Sub-Tick die Jobs zurueck in die Queue oder auf
+    # `failed` (bei `attempts >= 3`).
+    worker_stale_timeout_min: int = Field(default=10, ge=1, le=1440)
+
     # ----- Agent- und Trivy-Versionen (Block N / ADR-0021) -----
     # Class-Level-Konstanten — NICHT als BaseSettings-Field deklariert, weil
     # sie ausdruecklich NICHT per `SECSCAN_*`-Env-Var ueberschrieben werden

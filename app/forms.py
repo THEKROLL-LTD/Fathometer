@@ -166,6 +166,52 @@ class MasterKeyRotateForm(FlaskForm):
     """
 
 
+class LlmReviewerModeForm(FlaskForm):
+    """Mode-Wechsel-Form fuer den LLM-Risk-Reviewer (Block P, ADR-0023).
+
+    Felder:
+      - `new_mode`   : off/observation/live — Whitelist im SelectField.
+      - `master_key` : Klartext-Master-Key zur Bestaetigung (analog
+                       Master-Key-Pattern aus §8).
+
+    Beide Felder sind required; CSRF kommt automatisch.
+    """
+
+    new_mode = SelectField(
+        "Neuer Mode",
+        choices=[
+            ("off", "off"),
+            ("observation", "observation"),
+            ("live", "live"),
+        ],
+        validators=[DataRequired()],
+    )
+    master_key = PasswordField(
+        "Master-Key",
+        validators=[
+            DataRequired(),
+            Length(min=10, max=128),
+        ],
+    )
+
+
+class LlmReviewerRequeueForm(FlaskForm):
+    """Backlog-Re-queue-Form (Block P, ADR-0023).
+
+    Nur `master_key` als Bestaetigung — `new_mode` waere hier sinnlos, weil
+    Re-queue nur im `live`-Mode aufgerufen werden soll (View prueft den
+    aktuellen Mode-Wert).
+    """
+
+    master_key = PasswordField(
+        "Master-Key",
+        validators=[
+            DataRequired(),
+            Length(min=10, max=128),
+        ],
+    )
+
+
 # Max-Laenge fuer Notiz-/Kommentar-Texte aus ARCHITECTURE.md §10: max 8 KB
 # pro Notiz. Wir setzen das als WTForms-Validator und verlassen uns nicht
 # auf die DB allein.

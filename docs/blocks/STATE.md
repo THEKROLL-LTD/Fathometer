@@ -4,6 +4,101 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
+**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer + ADR-0022-Risk-Engine + ADR-0023-LLM-Risk-Reviewer — v0.9.0 (2026-05-19).**
+
+Block P (ADR-0023) abgeschlossen: LLM-basierte Final-Bewertung pro
+Application-Group als Two-Pass-Architektur, asynchron in eigenem
+Worker-Container. Pass 1 (`group_detection`) erzeugt aus ungroupierten
+`pending`-Findings neue `application_groups`-Eintraege mit wieder-
+verwendbaren Match-Patterns (`path_prefixes` / `pkg_name_exact` /
+`pkg_name_glob` / `pkg_purl_pattern`). Pass 2 (`risk_evaluation`)
+bewertet pro Group das `risk_band` mit Server-Kontext (compact-form
+ohne PIDs/args/timestamps, ~2-4K Tokens). Worker `secscan-llm-worker`
+laeuft in eigenem Container (entrypoint `python -m app.workers.llm_worker`,
+keine eingehenden Ports, nur DB-Connect + LLM-Provider-Egress), Single-
+Concurrency-Default, 2s-Polling auf `llm_jobs` mit
+`SELECT FOR UPDATE SKIP LOCKED`, Dependency-Check (Pass-2-Jobs warten
+auf Pass-1 via `depends_on`), Stale-Reaper alle 60s reset `in_progress`-
+Jobs aelter als 10 min auf `queued` mit exponential backoff (max 3
+Attempts → `failed`). Heartbeat alle 10s in `settings.llm_worker_heartbeat_at`,
+Healthcheck-Skript `app/workers/healthcheck.py` exit 0/1 abhaengig von
+< 30s Heartbeat-Alter. Two-Level-Caching: Pass-1-Cache *ist* die
+`application_groups`-Library (deterministischer Pattern-Match via
+`GroupMatcher`-Singleton mit `_lock`); Pass-2-Cache als
+`llm_risk_cache`-Tabelle mit SHA256-Key ueber
+`(group_id, group_findings_fp, cve_data_fp, server_context_fp)`,
+TTL 30 Tage + LRU bei > 100K Rows. Feature-Flag `BLOCK_P_LLM_MODE`
+(Settings-Spalte, CheckConstraint `off`/`observation`/`live`) fuer
+stufenweise Inbetriebnahme. `observation`-Mode schreibt
+`would_call`-Marker statt echter LLM-Calls — ermoeglicht
+Cache-Befuellung und Cost-Math vor Scharfschaltung. Token-Budget
+`SECSCAN_LLM_TOKEN_BUDGET_DAILY` (Default 1M) mit 00:00-UTC-Reset;
+sowohl Pass-1- als auch Pass-2-Verbrauch wird verbucht (post-Security-
+Auditor-Hotfix). Bei Budget-Erschoepfung: Worker pausiert, einmaliges
+Audit `llm.budget_exhausted` pro Reset-Zyklus. UI: Findings auf
+Server-Detail werden zukuenftig nach `application_group_id` gruppiert
+(Group-Cards mit Label/Risk-Pill/Findings-Count/Reason-Mono-Box/
+Worst-Finding-Anker/Drill-down-`<details>`), default-expanded ab
+`pending` aufwaerts, default-collapsed fuer `monitor`/`noise`.
+Ungroupierte Findings landen in „Pending grouping"-Sektion am Ende.
+`evaluating`-State mit Spinner solange Worker arbeitet. Dashboard-
+Findings-Tabelle bekommt `Group`-Spalte (zwischen Risk und Severity)
+und `application_group`-Filter-Select. Settings-Tab `/settings/llm-reviewer`
+zeigt Mode + Queue-/Library-/Cache-/Token-Stats + Worker-Liveness mit
+Master-Key-gated Mode-Wechsel und DSGVO-Privacy-Notice (Modal mit
+Confirm-Checkbox) beim Wechsel auf `live`; Re-queue-Backlog-Button
+fuer observation→live-Transition. LLM-Output-Validierung strikt:
+JSON-Schema, Label-Regex `^[a-z0-9][a-z0-9_-]{0,63}$`, Vollstaendigkeits-
+Check Pass-1 (jedes Input-Finding in genau einer Group ODER
+`ungrouped`), `risk_band ∈ {escalate,act,mitigate,monitor,noise}` —
+`pending`/`unknown` LLM-verboten via Pydantic-Literal + Backend-Set-Check
++ DB-CheckConstraints (Defense-in-Depth dreifach). `worst_finding_id`
+muss Group-Mitglied sein, `reason` ≤ 256 chars, NUL-frei. Pattern-
+Defensiv-Trim gegen Injection (`/etc/passwd`-Pfade technisch erlaubt
+aber harmlos; `*`-only, `"/"`-allein, leerer String, Non-ASCII werden
+gedroppt). LLM-Output ueberschreibt Pre-Triage-Bands nicht direkt —
+Pass 2 setzt `Finding.risk_band_source='llm'`, Block-O-Pre-Triage-Loop
+im Ingest skipt diese Findings beim Re-Ingest. Provider-Wiederverwendung
+des Block-G-LLM-Wrappers (DeepSeek-V3 default). **Bewusst weggelassen:**
+konkrete Update-Befehle in Reason-Texten, konkrete Versions-Empfehlungen,
+manueller Risk-Band-Override per UI, manueller Group-Merge/Split per UI,
+Multi-Provider-LLM-Switch fuer Risk-Reviewer, Detail-LLM-Begruendung
+pro Finding (Reasoning lebt auf Group-Ebene), Daily-Re-Eval-Job fuer
+stale Cache-Eintraege, Group-Trend-Reports, DSGVO-Notice in
+README/Bootstrap-Installer (nur Settings-Tab beim Mode-Wechsel) —
+alle in §17 nachgetragen. MIN_AGENT_VERSION bleibt 0.1.0.
+
+1477 Tests gruen (vorher 1226; +251 neue Phase-A-bis-H-Tests: 33 Phase A
++ 46 Phase B + 21 Phase C + 8 Phase D + 25 Phase E + 13 Phase F +
+0 Phase G + 105 Phase H). Coverage **91.70 %** (Threshold 85 %); 421
+adversarial PASS (+95 Block-P-Cases: Pass-1-Halluzination/Missing/
+Label-Regex, Pass-2-Halluzination/Invalid-Band/Worst-Not-In-Group/
+NUL-Reason, Worker-Race-SKIP-LOCKED, Worker-Corrupted-Payload,
+Cache-Key-Collision). Block-P-Module-Coverage: `group_matcher` 97 %,
+`llm_cache` 97 %, `llm_fingerprints` 100 %, `llm_risk_reviewer` 87 %,
+`llm_budget` 95 %, `workers/llm_worker` 83 %, `workers/healthcheck` 92 %.
+`ruff check`/`ruff format --check`/`mypy app/` (68 source files)/
+`shellcheck agent/*.sh` PASS. Alembic-Roundtrip (0004 ↔ 0005 ↔ 0006)
+PASS gegen Postgres-17-Container. `docker build` + `docker compose up
+--build` startet drei Container (`db`, `app`, `secscan-llm-worker`)
+alle healthy nach ~30s, `/healthz` 200, `/settings/llm-reviewer` 302
+(Login-Redirect erwartet). Image-Size **192 MB** (Delta +1 MB vs.
+v0.8.0 — Worker-Modul + Healthcheck). Reviewer APPROVE; Security-
+Auditor **ACCEPTABLE WITH NOTES → SECURITY APPROVED** (alle 10 Pflicht-
+Punkte PASS: LLM-Output-Validation strikt, pending/unknown dreifach
+verboten, Worker-Container ohne eingehende Ports, Mode-Wechsel master_key-
+gated mit Audit, Token-Budget-Cap funktioniert, `risk_band` hat keinen
+direkten User-Input-Pfad, Worker-Race mit SKIP-LOCKED bewiesen,
+DSGVO-Notice via Frontend-Modal mit Confirm-Checkbox plus Master-Key-
+Backend-Gate, Pattern-Defensiv-Trim gegen Injection, Cache-Key
+deterministisch und Reihenfolge-sensitiv. **Pre-Tag-Hotfix:**
+Pass-1-Token-Buchung in `_do_pass1` ergaenzt — Tages-Cap deckt jetzt
+auch Pass-1-LLM-Calls). Drei Re-Open-Trigger als optionale Folge-PRs:
+Worker auf structlog umstellen, `ON CONFLICT DO NOTHING` in
+`_persist_pass1_groups` fuer Multi-Worker-Skalierung, Setup-Wizard-
+DSGVO-Notice mit konkreter Feld-Liste. Tag `v0.9.0` zu setzen.
+## Status
+
 **MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer + ADR-0022-Risk-Engine — v0.8.0 (2026-05-18).**
 
 Block O (ADR-0022) abgeschlossen: Deterministische Pre-Triage-Risk-
@@ -175,13 +270,16 @@ PASS. Performance-Bench Daily-Snapshots 10k Findings × 50 Tage
 standalone ~80–100 ms (ADR-0018-Schwelle), unter Suite-Last
 moderater Slack. Tag `v0.4.0` zu setzen.
 
+
 ## Aktueller Block
 
-**P — LLM-Risk-Reviewer mit Application-Grouping (Two-Pass) und asynchroner Job-Queue** · gestartet 2026-05-18 · Branch `feat/block-p` · Spec [ADR-0023](../decisions/0023-llm-risk-reviewer-and-application-grouping.md) · Brief [P-llm-risk-reviewer.md](P-llm-risk-reviewer.md) · Zielversion v0.9.0.
-
-Fünf Bausteine: (1) Application-Group-Schicht — neue Tabelle `application_groups` plus FK `Finding.application_group_id`, Findings nach Owner-Application (k3s, openssh-server, etc.) gruppiert, Group-Bewertung wird auf alle enthaltenen Findings vererbt (Worst-Case-Band); (2) Two-Pass-LLM-Architektur — Pass 1 detect Groups mit wiederverwendbaren Match-Patterns (Path-Prefix / pkg_name_exact / pkg_name_glob / pkg_purl_pattern), Pass 2 bewertet pro Group mit Server-Kontext (compact-form, ~2-4K Tokens); (3) asynchroner Worker via `llm_jobs`-Tabelle in separatem Container `secscan-llm-worker`, Single-Concurrency-Default, 2s-Polling mit `SELECT FOR UPDATE SKIP LOCKED`, Pass-2-Jobs warten via `depends_on` auf Pass-1; (4) Two-Level-Caching — Pass-1-Cache *ist* die `application_groups`-Library, Pass-2-Cache als `llm_risk_cache`-Tabelle mit `(group_id, group_findings_fp, cve_data_fp, server_context_fp)`-Key, TTL 30d + LRU 100K; (5) UI-Redesign auf Group-Cards mit `evaluating`-State und Feature-Flag `BLOCK_P_LLM_MODE ∈ {off, observation, live}` für stufenweise Inbetriebnahme. Reasons bleiben deskriptiv — keine konkreten Update-Befehle, keine spezifischen Application-Version-Empfehlungen.
+(keiner — Block P abgeschlossen 2026-05-19, naechster Block per User-Entscheidung. Block Q wuerde z.B. konkrete Update-Befehl-Mapping pro Group oder Container-Image-Scans aufgreifen.)
 
 ## Completed
+
+- **P — LLM-Risk-Reviewer mit Application-Grouping (Two-Pass) und async Worker (ADR-0023)** · abgeschlossen 2026-05-19 · Branch `feat/block-p` · Reviewer **APPROVE** (alle DoD-Items PASS: Datei-Existenz, ruff/format/mypy/shellcheck/pytest-cov 91.70 %, Adversarial +95 Cases, Block-P-E2E 10 grün, Alembic-Roundtrip 0004↔0005↔0006, Docker-Build 192 MB, drei-Container-Compose-Up healthy). Security-Auditor: **ACCEPTABLE WITH NOTES → SECURITY APPROVED** (10/10 Pflicht-Punkte PASS, drei optionale Re-Open-Trigger als Folge-PR-Kandidaten; Pre-Tag-Hotfix Pass-1-Token-Buchung in `_do_pass1` implementiert). 1477 Tests grün (+251 vs. v0.8.0), Coverage **91.70 %**; 421 adversarial PASS (+95 Block-P-Cases). **Neu:** `app/services/llm_risk_reviewer.py` (`LLMRiskReviewer` mit `pass1_detect_groups()`/`pass2_evaluate_groups()`, `PASS1_RESPONSE_SCHEMA`/`PASS2_RESPONSE_SCHEMA`, Pydantic-Output-Modelle `Pass1Group`/`Pass1Result`/`Pass2Evaluation`/`Pass2Result`, `LABEL_PATTERN`, `MAX_REASON_LEN`, `VALID_RISK_BANDS`, `LLMInvalidResponseError`/`LLMTimeoutError`, Pattern-Defensiv-Trim mit `_sanitize_path_prefix`/`_sanitize_pkg_*`/`_sanitize_purl_pattern`), `app/services/group_matcher.py` (`GroupMatcher` Singleton mit `_lock`, `reload(session)`, `match(finding)` mit 4-stufiger Reihenfolge inkl. ADR-0011-`@target`-Suffix-Strip, `apply_matches_for_server(session, server_id) -> int`), `app/services/llm_cache.py` (`lookup`/`record_hit`/`store`/`lru_evict_if_needed`), `app/services/llm_fingerprints.py` (`group_findings_fingerprint`/`cve_data_fingerprint`/`server_context_fingerprint(server, session=None)`/`make_cache_key`; PIDs/args/snapshot_at NICHT im Server-Context-FP), `app/services/llm_budget.py` (`budget_check`/`budget_consume`/`maybe_reset_budget`/`mark_exhausted_audit_once`/`estimate_tokens`), `app/workers/llm_worker.py` (Worker-Hauptschleife mit Pickup `SELECT FOR UPDATE SKIP LOCKED`, Mode-Branches off/observation/live, Pass-1/Pass-2-Handler mit Cache-Lookup vor LLM-Call, Heartbeat, Stale-Reaper, `_build_reviewer`-Test-Hook), `app/workers/healthcheck.py` (Standalone-Script, < 30s Heartbeat-Check), `app/workers/__init__.py`, `alembic/versions/0005_block_p_llm_groups_jobs_cache.py` (3 create_table + 1 add_column + 1 create_index + Settings-Spalten via Mini-Migration 0006), `alembic/versions/0006_block_p_token_reset_at.py` (Mini-Migration fuer `settings.llm_token_budget_reset_at`-Spalte), `app/templates/_partials/{application_group_card,group_evaluating_card,group_findings_table}.html`, `app/templates/servers/_view_groups.html`, `app/templates/settings/llm_reviewer.html` (Mode-Wechsel-Modal mit Master-Key + DSGVO-Privacy-Notice + Confirm-Checkbox, Stats-Block, Re-queue-Action), `app/static/js/llm_reviewer.js` (Alpine-Komponenten fuer Modal-State), 18 neue Test-Dateien (4 Models, 1 Migration, 5 Services, 1 API-Integration, 2 Workers, 4 Views, 1 Integration-conftest + 3 E2E, 9 Adversarial), 13 Adversarial-Files in Phase H. **Geaendert:** `app/models.py` (`ApplicationGroup`/`LLMJob`/`LLMRiskCache` neue Klassen, `Finding.application_group_id` FK ON DELETE SET NULL plus Relationship, `Setting.block_p_llm_mode`/`.llm_worker_heartbeat_at`/`.llm_token_budget_used_today`/`.llm_token_budget_reset_at`-Spalten mit CheckConstraints), `app/api/scans.py` (Block-P-Hook nach Block-O-Pre-Triage und vor `scan.ingested`: `GroupMatcher.reload(session)` + `apply_matches_for_server` + Pass-1-Job-Insert fuer ungrouped-pending-Findings + Pass-2-Jobs fuer affected Groups mit `depends_on=Pass-1-Job-ID` + `llm.jobs_queued`-Audit), `app/api/bulk.py` (unveraendert — Block-P-Bulk-Ack-Noise nutzt weiterhin Finding-Ebenen-Filter), `app/views/settings.py` (drei neue Routen `/settings/llm-reviewer` GET + POST mode + POST requeue-backlog mit Master-Key-Gate via `_verify_master_key_from_form`), `app/views/dashboard.py` (`available_application_groups`-Context), `app/views/server_detail.py` (`_load_application_groups_for_server` + `_load_ungrouped_findings_for_server`), `app/services/findings_query.py` (`application_group_id`-Filter, `"group"`-Sort-Key mit outer-Join auf `ApplicationGroup.label`), `app/schemas/{dashboard_filter,findings_view_filter}.py` (`application_group_id: int | None`, `"group"`-Sort-Whitelist), `app/forms.py` (`LlmReviewerModeForm`, `LlmReviewerRequeueForm`), `app/templates/dashboard/_findings_section.html` (Group-Spalte nach Risk), `app/templates/dashboard/_findings_filter_bar.html` (Application-Group-Select), `app/templates/servers/_findings_section.html` (Group-Cards-Render mit Filter-Fallback auf flache Liste), `app/templates/settings/_nav.html` (LLM-Reviewer-Eintrag), `app/templates/_macros.html` (`"group"`-Sort-Default-Dir), `docker-compose.yml` (Service `secscan-llm-worker` mit `python -m app.workers.llm_worker`-Entrypoint, depends_on db service_healthy, Healthcheck `python -m app.workers.healthcheck` 30s interval, keine ports), `app/config.py` (`llm_cache_ttl_days`/`llm_cache_max_rows`/`llm_pass1_max_tokens`/`llm_pass2_max_tokens`/`llm_token_budget_daily`/`worker_poll_interval_sec`/`worker_stale_timeout_min`), ARCHITECTURE.md §6 (Envelope unchanged)/§7 (Group-Spalte + Filter)/§7a (Server-Detail Group-Layer)/§12 (neuer Risk-Reviewer-Subabschnitt: Two-Pass-Architektur, Worker-Pattern, Mode-Flag, Token-Budget, Two-Level-Caching, Validierung, LLM-Override-Schutz)/§13 (neue Audit-Actions `llm.mode_changed`/`llm.budget_exhausted`/`risk.llm_group_skipped`)/§17 (sieben neue Out-of-Scope-Punkte), `docs/decisions/0022-risk-based-prioritization.md` (Re-Open-Trigger zeigt jetzt auf ADR-0023), `docs/decisions/0023-...md` Status „Akzeptiert", `docs/decisions/README.md` Index, CHANGELOG.md v0.9.0-Eintrag. **Tag `v0.9.0` zu setzen.**
+
+
 
 - **O — Pre-Triage-Risk-Engine + Host-Snapshot + Vendor-Severity + UI-Redesign (ADR-0022)** · abgeschlossen 2026-05-18 · Branch `feat/block-o` · Reviewer APPROVE nach drei mechanischen Fixes (ruff RUF003/S104/I001 in sechs neuen Adversarial-Test-Files, ruff format auf vier davon, CHANGELOG-v0.8.0-Eintrag mit allen vier Bausteinen). Security-Auditor: **ACCEPTABLE WITH NOTES → SECURITY APPROVED** (alle 8 Pflicht-Punkte PASS: Pre-Triage-Cuts schlucken keine Eskalationen, `unknown`-Default ist `action_required=yes`, Bulk-Ack-Server-Side-Filter `risk_band == "noise"` unumgehbar via Request-Manipulation, Pydantic-Validatoren strikt fuer IP-Literal/Port-Range/ASCII/NUL/Length-Bounds, `risk_band`-Spalte hat genau einen Schreibpfad in `app/api/scans.py` Pre-Triage-Schleife nach Auth, alle Band-Bewegungen produzieren `risk.band_changed`-Audit, DSGVO-Aspekt der Process-Args als bewusste MVP-Entscheidung in ARCHITECTURE §9 dokumentiert mit README-Notice als optionaler Re-Open-Trigger, LLM-gesetzte Bands mit `risk_band_source="llm"` ueberleben Re-Ingest). 1226 Tests gruen (+234 vs. v0.7.0; +90 erwartete + Adversarial-Surplus), Coverage **92.42 %**; 326 adversarial PASS (+69 Block-O-Cases). `ruff check`/`ruff format --check`/`mypy app/` (60 source files)/`shellcheck agent/*.sh` PASS, Alembic-Roundtrip (0004 ↔ 0003) PASS, `docker build` + `docker compose up --build` + `/healthz` PASS, Image **191 MB** (Delta 0 MB vs. v0.7.0). **Neu:** `app/services/risk_engine.py` (`RiskBand`/`ActionRequired`/`ACTION_REQUIRED_MAP`/`RISK_BAND_SORT_RANK`/`EPSS_PENDING_THRESHOLD=0.1`/`pretriage()`/`RiskEvaluation`/`normalize_vendor_status()`/`VENDOR_SEVERITY_INT_MAP`/`yes_band_values()`/`no_band_values()`), `app/services/severity_resolver.py` (`severity_for()` mit 13 Distro-Profilen + GHSA-Prio fuer lang-pkgs, `max_severity_across_providers()`, `_score_to_severity()`), `app/services/host_state_ingest.py` (`persist_host_state()` mit truncate+insert pro Server, Dedup auf `(proto,addr,port)`/`pid`/`name`), `agent/lib_host_state.sh` (~330 LOC sourcable Lib mit `collect_listeners`/`collect_processes`/`collect_kernel_modules`/`collect_services` + `build_host_state_json`, POSIX-awk, `ss`/`netstat`-Fallback, `LC_ALL=C`), `alembic/versions/0004_block_o_risk_and_host_state.py` (4 create_table + 7 add_column + 4 create_index), `app/templates/_partials/{host_snapshot,risk_band_pill,action_required_pill,action_required_card}.html`, `app/templates/servers/_bulk_ack_noise_modal.html`, `app/static/js/bulk_ack_noise.js` (Alpine-Komponente, postet `risk_band_filter="noise"`), 13 neue Test-Dateien (3 Schemas, 1 Migration, 5 Services, 2 API-Integration, 1 Agent-Subprocess, 4 Views, 7 Adversarial). **Geaendert:** `app/models.py` (vier Snapshot-Modelle, `Server.host_state_snapshot_at`, sechs Finding-Spalten plus zwei Indizes), `app/api/scans.py` (Reihenfolge Auth → Body → Findings-UPSERT → Snapshot-Persist → Pre-Triage-Schleife → `scan.ingested`; mit `host_state.snapshot_received`/`host_state.parse_failed`/`risk.band_changed`/`risk.pretriage_evaluated` Audit-Events; LLM-Override-Skip `if finding.risk_band_source == "llm": continue`), `app/api/bulk.py` (`risk_band_filter="noise"`-Form-Field, server-side `Finding.risk_band == "noise"`-Drop, `skipped_non_noise_ids` in Response + Audit), `app/schemas/scan_envelope.py` (`HostStateBlock`/`ListenerEntry`/`ProcessEntry` mit IP-Literal/Port-Range/ASCII/NUL-/Length-Validatoren, `TrivyVulnerability.vendor_severity` mit Numeric-zu-String-Normalisierung), `app/schemas/{dashboard_filter,findings_view_filter,bulk_request}.py` (Literal-Felder `risk_band`/`action_required`/`risk_band_filter`), `app/services/findings_ingest.py` (Mapper schreibt `vendor_status` + `severity_by_provider`), `app/services/findings_query.py` (`risk`-Sort-Key mit `case()`-Expression, Filter fuer `risk_band`/`action_required`), `app/views/dashboard.py` (`RiskKpiCounters` + `_load_risk_kpi_counters()`), `app/views/server_detail.py` (`_load_action_required_counts()` + `_load_host_snapshot()` + noise-Findings fuer Modal), `agent/secscan-agent.sh` (`AGENT_VERSION="0.3.0"`, Lib-Source ueber `BASH_SOURCE`-relativen Pfad, host_state-Build im Envelope), Templates `dashboard/_kpi_cards.html` (Tier-Umbau), `dashboard/_findings_filter_bar.html` (zwei neue Selects), `dashboard/_findings_section.html` (Risk-Spalte), `servers/detail.html` (Action-Required-Pill als erste Header-Pill + Host-Snapshot-Sektion), `servers/_view_list.html` (`risk_band`-Gruppierung mit Alpine-Collapsible), `servers/_findings_section.html` (Bulk-Ack-Noise-Button), `base.html`/`base_app.html` (`bulk_ack_noise.js`-Include), ARCHITECTURE.md §6/§7/§7a/§9/§11/§15/§17, `docs/decisions/0022-risk-based-prioritization.md` Status „Akzeptiert", `docs/decisions/README.md` Index, CHANGELOG.md v0.8.0-Eintrag, sechs angepasste Block-M/K-Tests, `tests/views/test_agent_install.py` AGENT_VERSION-Erwartung 0.2.0→0.3.0, `tests/schemas/test_dashboard_filter.py` Default-Sort `sev`→`risk`. **MIN_AGENT_VERSION** bleibt `0.1.0` — alte Agents 0.2.0 weiter akzeptiert, Findings landen ohne `host_state` in `risk_band="unknown"` mit Reason „host snapshot missing — update agent to >= 0.3.0". **Bewusst weggelassen:** LLM-Risk-Reasoning (Block P), Host-Snapshot-Historisierung, manueller Risk-Override, Patch-Alter-Eskalation, Exposure-Mapping als statisches Asset, OpenRC-/Alpine-Services, Daily-Re-Eval-Job, README-Privacy-Notice (vom Security-Auditor als optionaler Re-Open-Trigger benannt). **Tag `v0.8.0` zu setzen.**
 
@@ -224,7 +322,7 @@ Fünf Bausteine: (1) Application-Group-Schicht — neue Tabelle `application_gro
 | M | [M-dashboard-findings.md](M-dashboard-findings.md) | completed 2026-05-16 — **v0.6.0** (ADR-0020 Cross-Server-Findings + KPI-Sparklines, /findings/search-Removal) |
 | N | [N-agent-installer.md](N-agent-installer.md) | completed 2026-05-18 — **v0.7.0** (ADR-0021 Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding) |
 | O | [O-risk-engine.md](O-risk-engine.md) | completed 2026-05-18 — **v0.8.0** (ADR-0022 Pre-Triage-Risk-Engine + Host-Snapshot + Vendor-Severity + Risk-zentrisches UI) |
-| P | [P-llm-risk-reviewer.md](P-llm-risk-reviewer.md) | in progress (gestartet 2026-05-18) — Zielversion v0.9.0 (ADR-0023 LLM-Risk-Reviewer + Application-Grouping + async Worker) |
+| P | [P-llm-risk-reviewer.md](P-llm-risk-reviewer.md) | completed 2026-05-19 — **v0.9.0** (ADR-0023 LLM-Risk-Reviewer + Application-Grouping + async Worker) |
 
 ## Aktive Blocker
 
@@ -232,7 +330,7 @@ Fünf Bausteine: (1) Application-Group-Schicht — neue Tabelle `application_gro
 
 ## Offene ADR-Wünsche
 
-(keine — ADR-0023 deckt Block P komplett ab inklusive Application-Group-Schicht, Two-Pass-LLM-Architektur, asynchroner Worker-Pattern und UI-Redesign. Wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird.)
+(keine — ADR-0023 deckt Block P komplett ab. Drei optionale Re-Open-Trigger aus Security-Auditor-Bericht: Worker auf structlog umstellen, `ON CONFLICT DO NOTHING` in `_persist_pass1_groups` fuer Multi-Worker-Skalierung, Setup-Wizard-DSGVO-Notice mit konkreter Feld-Liste. Wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird.)
 
 ## Update-Konvention
 

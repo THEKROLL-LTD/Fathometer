@@ -21,20 +21,35 @@ from __future__ import annotations
 import importlib.metadata as ilm
 import os
 import sys
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import structlog
 from flask import Blueprint, flash, make_response, redirect, url_for
 from flask_login import login_required
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from werkzeug.wrappers import Response as WerkzeugResponse
 
 from app.audit import log_event
-from app.auth import generate_master_key, hash_master_key
+from app.auth import generate_master_key, hash_master_key, verify_master_key
+from app.config import load_settings
 from app.db import get_session
-from app.forms import CSRFOnlyForm, MasterKeyRotateForm, TagForm
-from app.models import AuditEvent, Server, Tag
+from app.forms import (
+    CSRFOnlyForm,
+    LlmReviewerModeForm,
+    LlmReviewerRequeueForm,
+    MasterKeyRotateForm,
+    TagForm,
+)
+from app.models import (
+    ApplicationGroup,
+    AuditEvent,
+    LLMJob,
+    LLMRiskCache,
+    Server,
+    Tag,
+)
 from app.services.stale_detection import is_db_stale
 from app.settings_service import get_settings_row
 from app.views._settings_shell import render_settings
@@ -275,6 +290,296 @@ def master_key_rotate() -> Any:
         last_rotated_at=last,
         new_master_key=new_master,
     )
+
+
+# ---------------------------------------------------------------------------
+# LLM Risk Reviewer (Block P, ADR-0023) — `/settings/llm-reviewer`.
+#
+# Drei Routen:
+#   - GET  /settings/llm-reviewer            — Tab rendern (Stats + Mode).
+#   - POST /settings/llm-reviewer/mode       — Mode-Wechsel (Master-Key).
+#   - POST /settings/llm-reviewer/requeue-backlog
+#     — Observation-Backlog auf `queued` zuruecksetzen (Master-Key).
+#
+# Mode-Wechsel ist eine sensible Aktion (DSGVO/Cost-Implikation bei `live`),
+# darum dieselbe Master-Key-Bestaetigung wie `/settings/master-key` (siehe
+# ADR-0023 §"Mode-Wechsel-Workflow").
+# ---------------------------------------------------------------------------
+
+
+_LLM_MODE_VALUES: tuple[str, ...] = ("off", "observation", "live")
+
+
+def _llm_reviewer_stats(sess: Any) -> dict[str, Any]:
+    """Sammelt die Stats fuer das Settings-Tab.
+
+    Eine Mehrzahl-Aggregation-Query, leicht im Lesefluss zerlegt:
+
+      1. ``llm_jobs``-Status-Counts der letzten 24h (queued/in_progress/done/
+         failed).
+      2. ``llm_jobs`` mit ``result.would_call=true`` Count (Observation-
+         Backlog-Indikator) und Token-Schaetzungs-Summe.
+      3. ``application_groups`` Library: Total + Top-5 by ``last_used_at``.
+      4. ``llm_risk_cache`` Total-Count.
+      5. Token-Budget aus der Settings-Singleton-Row + Daily-Cap aus der
+         App-Settings.
+      6. Worker-Heartbeat-Alter.
+    """
+    now = datetime.now(tz=UTC)
+    since_24h = now - timedelta(hours=24)
+
+    # 1. Queue-Status-Counts (letzte 24h).
+    job_counts: dict[str, int] = {
+        "queued": 0,
+        "in_progress": 0,
+        "done": 0,
+        "failed": 0,
+    }
+    status_stmt = (
+        select(LLMJob.status, func.count(LLMJob.id))
+        .where(LLMJob.created_at >= since_24h)
+        .group_by(LLMJob.status)
+    )
+    for status_value, n in sess.execute(status_stmt).all():
+        if status_value in job_counts:
+            job_counts[status_value] = int(n)
+    # `queued` zaehlen wir komplett (nicht nur letzte 24h), damit der
+    # Operator das aktuelle Backlog sieht.
+    open_queued_stmt = select(func.count(LLMJob.id)).where(LLMJob.status == "queued")
+    job_counts["queued"] = int(sess.execute(open_queued_stmt).scalar() or 0)
+    open_inprogress_stmt = select(func.count(LLMJob.id)).where(LLMJob.status == "in_progress")
+    job_counts["in_progress"] = int(sess.execute(open_inprogress_stmt).scalar() or 0)
+
+    # 2. Observation-Backlog: done-Jobs mit `result.would_call=true`.
+    # JSONB-Pfad-Operator `->>` liefert Text; Vergleich gegen "true".
+    would_call_stmt = select(func.count(LLMJob.id)).where(
+        LLMJob.status == "done",
+        text("(result ->> 'would_call') = 'true'"),
+    )
+    would_call_count = int(sess.execute(would_call_stmt).scalar() or 0)
+
+    # 3. Library-Stats.
+    groups_total_stmt = select(func.count(ApplicationGroup.id))
+    groups_total = int(sess.execute(groups_total_stmt).scalar() or 0)
+    top_groups_stmt = (
+        select(ApplicationGroup).order_by(ApplicationGroup.last_used_at.desc().nullslast()).limit(5)
+    )
+    top_groups = list(sess.execute(top_groups_stmt).scalars().all())
+
+    # 4. Cache-Stats.
+    cache_total_stmt = select(func.count(LLMRiskCache.cache_key))
+    cache_total = int(sess.execute(cache_total_stmt).scalar() or 0)
+
+    # 5. Token-Budget.
+    setting_row = get_settings_row(sess)
+    app_settings = load_settings()
+    token_budget = {
+        "used_today": int(setting_row.llm_token_budget_used_today or 0),
+        "daily_limit": int(app_settings.llm_token_budget_daily),
+        "resets_at": setting_row.llm_token_budget_reset_at,
+    }
+
+    # 6. Heartbeat.
+    heartbeat_at = setting_row.llm_worker_heartbeat_at
+    if heartbeat_at is None:
+        heartbeat_age_s: float | None = None
+        heartbeat_healthy = False
+    else:
+        if heartbeat_at.tzinfo is None:
+            heartbeat_at = heartbeat_at.replace(tzinfo=UTC)
+        heartbeat_age_s = (now - heartbeat_at).total_seconds()
+        # `30s`-Frische-Schwelle: Worker-Polling-Intervall ist 2s, Heartbeat
+        # alle paar Ticks — < 30s ist gemuetlich, daruber als stale anzeigen.
+        heartbeat_healthy = heartbeat_age_s < 30.0
+
+    return {
+        "current_mode": setting_row.block_p_llm_mode,
+        "job_counts": job_counts,
+        "would_call_count": would_call_count,
+        "groups_total": groups_total,
+        "top_groups": top_groups,
+        "cache_total": cache_total,
+        "token_budget": token_budget,
+        "heartbeat_at": setting_row.llm_worker_heartbeat_at,
+        "heartbeat_age_s": heartbeat_age_s,
+        "heartbeat_healthy": heartbeat_healthy,
+    }
+
+
+@settings_bp.get("/llm-reviewer")
+@login_required
+def llm_reviewer_view() -> Any:
+    """Rendert den LLM-Reviewer-Settings-Tab (Mode + Stats)."""
+    sess = get_session()
+    stats = _llm_reviewer_stats(sess)
+    return render_settings(
+        active="llm_reviewer",
+        content_template="settings/llm_reviewer.html",
+        mode_form=LlmReviewerModeForm(),
+        requeue_form=LlmReviewerRequeueForm(),
+        **stats,
+    )
+
+
+def _verify_master_key_from_form(sess: Any, plain_master_key: str | None) -> bool:
+    """Prueft den im POST mitgegebenen Klartext-Master-Key gegen den Hash.
+
+    Liefert False bei fehlendem Hash, fehlendem Klartext oder Mismatch.
+    Vergleich ueber `verify_master_key` (HMAC.compare_digest).
+    """
+    if not plain_master_key:
+        return False
+    setting_row = get_settings_row(sess)
+    if not setting_row.master_key_hash:
+        return False
+    return verify_master_key(setting_row.master_key_hash, plain_master_key)
+
+
+@settings_bp.post("/llm-reviewer/mode")
+@login_required
+def llm_reviewer_change_mode() -> Any:
+    """Setzt `block_p_llm_mode` neu (mit Master-Key-Bestaetigung).
+
+    Erfolg: 302-Redirect auf den Tab; Flash mit Success-Meldung. Audit-
+    Event `llm.mode_changed` mit `from`/`to`/Actor-Metadata.
+
+    Fehler:
+      - CSRF-Fehler -> 400 + Render mit Form-Errors.
+      - Master-Key falsch -> 403 + Render mit Form-Error.
+      - Unbekannter Mode -> 400 (durch SelectField-Whitelist eigentlich nicht
+        erreichbar; defensiv abgefangen).
+    """
+    sess = get_session()
+    form = LlmReviewerModeForm()
+    if not form.validate_on_submit():
+        flash("Ungueltiger CSRF-Token oder Pflichtfelder fehlen.", "error")
+        stats = _llm_reviewer_stats(sess)
+        return make_response(
+            render_settings(
+                active="llm_reviewer",
+                content_template="settings/llm_reviewer.html",
+                mode_form=form,
+                requeue_form=LlmReviewerRequeueForm(),
+                **stats,
+            ),
+            400,
+        )
+
+    new_mode = (form.new_mode.data or "").strip()
+    if new_mode not in _LLM_MODE_VALUES:
+        flash("Unbekannter Mode.", "error")
+        stats = _llm_reviewer_stats(sess)
+        return make_response(
+            render_settings(
+                active="llm_reviewer",
+                content_template="settings/llm_reviewer.html",
+                mode_form=form,
+                requeue_form=LlmReviewerRequeueForm(),
+                **stats,
+            ),
+            400,
+        )
+
+    if not _verify_master_key_from_form(sess, form.master_key.data):
+        flash("Master-Key falsch.", "error")
+        stats = _llm_reviewer_stats(sess)
+        return make_response(
+            render_settings(
+                active="llm_reviewer",
+                content_template="settings/llm_reviewer.html",
+                mode_form=form,
+                requeue_form=LlmReviewerRequeueForm(),
+                **stats,
+            ),
+            403,
+        )
+
+    setting_row = get_settings_row(sess)
+    old_mode = setting_row.block_p_llm_mode
+    if old_mode == new_mode:
+        flash(f"Mode ist bereits '{new_mode}'.", "info")
+        return redirect(url_for("settings.llm_reviewer_view"))
+
+    setting_row.block_p_llm_mode = new_mode
+    log_event(
+        "llm.mode_changed",
+        target_type="settings",
+        target_id="1",
+        metadata={"from": old_mode, "to": new_mode},
+        session=sess,
+    )
+    sess.commit()
+    flash(f"LLM-Mode auf '{new_mode}' gesetzt.", "success")
+    return redirect(url_for("settings.llm_reviewer_view"))
+
+
+@settings_bp.post("/llm-reviewer/requeue-backlog")
+@login_required
+def llm_reviewer_requeue_backlog() -> Any:
+    """Setzt alle Observation-`would_call`-Jobs zurueck auf `queued`.
+
+    Pre-Conditions:
+      - CSRF gueltig.
+      - Master-Key korrekt.
+      - Aktueller Mode ist `live` (sonst macht das Re-Queue keinen Sinn —
+        Observation wuerde dieselben would-call-Jobs erneut erzeugen).
+
+    Effekt:
+      - `UPDATE llm_jobs SET status='queued', attempts=0, result=NULL
+        WHERE status='done' AND result->>'would_call' = 'true'`.
+      - Audit-Event `llm.backlog_requeued` mit `count`-Metadata.
+    """
+    sess = get_session()
+    form = LlmReviewerRequeueForm()
+    if not form.validate_on_submit():
+        flash("Ungueltiger CSRF-Token.", "error")
+        return redirect(url_for("settings.llm_reviewer_view"))
+
+    setting_row = get_settings_row(sess)
+    if setting_row.block_p_llm_mode != "live":
+        flash(
+            "Re-queue ist nur im 'live'-Mode erlaubt. Schalte erst auf live.",
+            "error",
+        )
+        return redirect(url_for("settings.llm_reviewer_view"))
+
+    if not _verify_master_key_from_form(sess, form.master_key.data):
+        flash("Master-Key falsch.", "error")
+        return redirect(url_for("settings.llm_reviewer_view"))
+
+    # Welche Jobs sind "would_call"? — done + result.would_call=true.
+    target_ids_stmt = select(LLMJob.id).where(
+        LLMJob.status == "done",
+        text("(result ->> 'would_call') = 'true'"),
+    )
+    target_ids = [int(row) for row in sess.execute(target_ids_stmt).scalars().all()]
+
+    if not target_ids:
+        flash("Kein Observation-Backlog zum Re-queuen vorhanden.", "info")
+        return redirect(url_for("settings.llm_reviewer_view"))
+
+    # Reset: status=queued, attempts=0, result=NULL. `next_attempt_at` setzen
+    # wir auf `now()` damit der Worker sofort picken kann.
+    for job in sess.execute(select(LLMJob).where(LLMJob.id.in_(target_ids))).scalars():
+        job.status = "queued"
+        job.attempts = 0
+        job.result = None
+        job.next_attempt_at = datetime.now(tz=UTC)
+        job.picked_up_by = None
+        job.picked_up_at = None
+        job.completed_at = None
+
+    count = len(target_ids)
+    log_event(
+        "llm.backlog_requeued",
+        target_type="settings",
+        target_id="1",
+        metadata={"count": count},
+        session=sess,
+    )
+    sess.commit()
+    flash(f"{count} Observation-Job(s) wieder eingereiht.", "success")
+    return redirect(url_for("settings.llm_reviewer_view"))
 
 
 # ---------------------------------------------------------------------------

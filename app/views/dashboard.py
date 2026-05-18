@@ -31,7 +31,15 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_session
 from app.forms import BulkActionForm, CSRFOnlyForm
-from app.models import Finding, FindingStatus, Server, ServerTag, Severity, Tag
+from app.models import (
+    ApplicationGroup,
+    Finding,
+    FindingStatus,
+    Server,
+    ServerTag,
+    Severity,
+    Tag,
+)
 from app.schemas.dashboard_filter import DashboardFilter
 from app.services.findings_query import list_findings_cross_server
 from app.services.risk_engine import RiskBand, yes_band_values
@@ -282,6 +290,15 @@ def _build_pane_context(
     # Risk-Band-Pills und Severity-Strip.
     risk_kpis = _load_risk_kpi_counters(sess)
 
+    # Block P (ADR-0023): Application-Group-Library fuer den Filter-Bar-
+    # Select. Alphabetisch, Cap auf 100 Eintraege — bei groesseren
+    # Libraries ist der URL-Filter ohnehin der bessere Pfad.
+    available_application_groups = list(
+        sess.execute(select(ApplicationGroup).order_by(ApplicationGroup.label.asc()).limit(100))
+        .scalars()
+        .all()
+    )
+
     return {
         "servers": visible,
         "filter": filt,
@@ -300,6 +317,8 @@ def _build_pane_context(
         "csrf_form": CSRFOnlyForm(),
         # Block O (ADR-0022).
         "risk_kpis": risk_kpis,
+        # Block P (ADR-0023).
+        "available_application_groups": available_application_groups,
     }
 
 

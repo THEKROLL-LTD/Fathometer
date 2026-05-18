@@ -380,9 +380,22 @@ class Finding(Base):
     acknowledged_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Block P (ADR-0023): Zuordnung zur Application-Group. NULL bedeutet noch
+    # nicht durch Pass 1 zugeordnet ("Pending grouping"-Sektion in der UI).
+    # ON DELETE SET NULL: bei Group-Loeschung verlieren die Findings nur den
+    # Verweis, bleiben aber erhalten.
+    application_group_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("application_groups.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     server: Mapped[Server] = relationship("Server", back_populates="findings")
     notes: Mapped[list[FindingNote]] = relationship(
         "FindingNote", back_populates="finding", cascade="all, delete-orphan"
+    )
+    application_group: Mapped[ApplicationGroup | None] = relationship(
+        "ApplicationGroup", back_populates="findings"
     )
 
     __table_args__ = (
@@ -440,6 +453,9 @@ class Finding(Base):
             "server_id",
             "risk_band",
         ),
+        # Block P (ADR-0023): Drill-down-Index fuer Application-Group-Filter
+        # auf der Server-Detail-View und Dashboard-Filter-Bar.
+        Index("ix_findings_application_group", "application_group_id"),
     )
 
 
@@ -611,11 +627,37 @@ class Setting(Base):
         onupdate=func.now(),
     )
 
+    # Block P (ADR-0023): LLM-Risk-Reviewer-Feature-Flag + Worker-Heartbeat +
+    # Token-Budget-Tageszaehler. Die drei Felder leben auf der Singleton-Row
+    # damit Worker und Web-Container denselben Status sehen.
+    block_p_llm_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="off")
+    llm_worker_heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    llm_token_budget_used_today: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # Naechster Token-Budget-Reset (00:00 UTC). Worker setzt das Feld in
+    # `maybe_reset_budget`. Default per server_default `now()` damit
+    # bestehende Zeilen einen verarbeitbaren (sofort-faelligen) Wert haben.
+    llm_token_budget_reset_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
     __table_args__ = (
         CheckConstraint("id = 1", name="ck_settings_singleton"),
         CheckConstraint(
             "default_theme IN ('light', 'dark', 'auto')",
             name="ck_settings_theme",
+        ),
+        # Block P: Mode-Whitelist.
+        CheckConstraint(
+            "block_p_llm_mode IN ('off', 'observation', 'live')",
+            name="ck_settings_block_p_llm_mode",
+        ),
+        CheckConstraint(
+            "llm_token_budget_used_today >= 0",
+            name="ck_settings_llm_token_budget_used_today_nonneg",
         ),
     )
 
@@ -692,6 +734,197 @@ class ServerService(Base):
     name: Mapped[str] = mapped_column(String(128), primary_key=True)
 
 
+# ---------------------------------------------------------------------------
+# Block P (ADR-0023) — Application-Groups, LLM-Job-Queue, LLM-Risk-Cache.
+#
+# Drei neue Tabellen plus FK `findings.application_group_id` (siehe oben in
+# der `Finding`-Klasse). Modellierung folgt ADR-0023 §"Application-Group-
+# Schicht", §"Asynchroner Worker via llm_jobs" und §"Two-Level-Caching".
+#
+# - `application_groups` lebt unabhaengig vom Finding-Lifecycle. `risk_band`
+#   nur final-LLM-Bands (kein `pending`/`unknown` — die sind Pre-Triage-only).
+# - `llm_jobs` ist die Job-Queue mit `SELECT ... FOR UPDATE SKIP LOCKED`-
+#   Pickup-Pattern und drei Partial-Indizes (Pickup, Stale, Server-Lookup).
+# - `llm_risk_cache` Cache-Key ist SHA256-hex (64 chars), Fingerprint-Felder
+#   bleiben 16-char-Truncates fuer Inspection.
+# ---------------------------------------------------------------------------
+
+
+class ApplicationGroup(Base):
+    """Owner-Application-Group fuer Findings (k3s, openssh-server, ...).
+
+    Match-Patterns persistieren die Pass-1-LLM-Lernerfahrung. Bewertungs-
+    Felder werden in Pass 2 gesetzt und auf alle enthaltenen Findings
+    vererbt (Worst-Case-Band).
+
+    `worst_finding_id` ist bewusst KEIN ForeignKey — die Group ueberlebt
+    Finding-Deletes, und ein stale Verweis ist akzeptabel (UI fallback'd
+    auf "Worst-Finding nicht mehr vorhanden").
+    """
+
+    __tablename__ = "application_groups"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    label: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    explanation: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    # Match-Patterns. ARRAY-Felder defaulten zu `[]` damit das Backend immer
+    # einen iterierbaren Wert sieht (kein NULL-vs-empty-Edge-Case).
+    path_prefixes: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    pkg_name_exact: Mapped[list[str]] = mapped_column(
+        ARRAY(String(256)), nullable=False, default=list
+    )
+    pkg_name_glob: Mapped[list[str]] = mapped_column(
+        ARRAY(String(256)), nullable=False, default=list
+    )
+    pkg_purl_pattern: Mapped[list[str]] = mapped_column(
+        ARRAY(String(512)), nullable=False, default=list
+    )
+
+    # Bewertung — von Pass 2 (LLM) oder manuellem Override gesetzt.
+    risk_band: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    risk_band_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    risk_band_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    risk_band_computed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    worst_finding_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    group_findings_fingerprint: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    # Lifecycle / Audit.
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="llm")
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    findings: Mapped[list[Finding]] = relationship("Finding", back_populates="application_group")
+
+    __table_args__ = (
+        # Wichtig: nur die finalen LLM-Bands. `pending`/`unknown` sind reine
+        # Pre-Triage-Werte aus Block O und duerfen hier nicht erscheinen.
+        CheckConstraint(
+            "risk_band IS NULL OR risk_band IN ('escalate','act','mitigate','monitor','noise')",
+            name="ck_application_groups_band",
+        ),
+        CheckConstraint(
+            "source IN ('llm','manual')",
+            name="ck_application_groups_source",
+        ),
+    )
+
+
+class LLMJob(Base):
+    """Asynchrone LLM-Job-Queue (Pass 1 Group-Detection / Pass 2 Risk-Eval).
+
+    Pickup-Pattern: `SELECT ... FROM llm_jobs WHERE status='queued' AND
+    next_attempt_at <= now() ORDER BY created_at LIMIT 1 FOR UPDATE SKIP
+    LOCKED`. `depends_on` modelliert Pass-2-wartet-auf-Pass-1 (ON DELETE
+    SET NULL — wenn der Parent-Job geloescht wird, bleiben Kinder mit
+    `depends_on = NULL` lebend, koennen also direkt picken).
+    """
+
+    __tablename__ = "llm_jobs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    job_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    server_id: Mapped[int | None] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), nullable=True
+    )
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    depends_on: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("llm_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    picked_up_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    picked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "job_type IN ('group_detection','risk_evaluation')",
+            name="ck_llm_jobs_type",
+        ),
+        CheckConstraint(
+            "status IN ('queued','in_progress','done','failed')",
+            name="ck_llm_jobs_status",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_llm_jobs_attempts"),
+        # Pickup-Index — Partial auf `queued`, deckt die heisseste Query.
+        Index(
+            "ix_llm_jobs_pickup",
+            "status",
+            "next_attempt_at",
+            postgresql_where="status = 'queued'",
+        ),
+        # Stale-Reaper-Index — Partial auf `in_progress`.
+        Index(
+            "ix_llm_jobs_stale",
+            "status",
+            "picked_up_at",
+            postgresql_where="status = 'in_progress'",
+        ),
+        # Server-Aufschluesselung fuer UI-Stats.
+        Index("ix_llm_jobs_server", "server_id", "status"),
+    )
+
+
+class LLMRiskCache(Base):
+    """Pass-2-Result-Cache mit `(group_id, group_findings_fp, cve_data_fp,
+    server_context_fp)`-Key. TTL 30 Tage (Read-Side), LRU bei > 100K Rows.
+
+    `cache_key` ist SHA256-hex (64 chars) ueber die vier Inputs; die drei
+    fp-Spalten bleiben truncate-16-chars fuer DB-Inspection.
+    """
+
+    __tablename__ = "llm_risk_cache"
+
+    cache_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    group_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("application_groups.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    group_findings_fp: Mapped[str] = mapped_column(String(16), nullable=False)
+    cve_data_fp: Mapped[str] = mapped_column(String(16), nullable=False)
+    server_context_fp: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    risk_band: Mapped[str] = mapped_column(String(16), nullable=False)
+    # `worst_finding_id` bewusst kein FK (Finding-Lifecycle entkoppelt).
+    worst_finding_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    llm_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    used_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        # Auch hier nur die finalen LLM-Bands.
+        CheckConstraint(
+            "risk_band IN ('escalate','act','mitigate','monitor','noise')",
+            name="ck_llm_risk_cache_band",
+        ),
+        Index("ix_llm_risk_cache_lru", "last_used_at"),
+        Index("ix_llm_risk_cache_group", "group_id"),
+    )
+
+
 __all__ = [
     "ATTACK_VECTOR_ENUM_NAME",
     "FINDING_CLASS_ENUM_NAME",
@@ -700,6 +933,7 @@ __all__ = [
     "LLM_CONVERSATION_STATUS_ENUM_NAME",
     "LLM_MESSAGE_ROLE_ENUM_NAME",
     "SEVERITY_ENUM_NAME",
+    "ApplicationGroup",
     "AttackVector",
     "AuditEvent",
     "Base",
@@ -708,6 +942,8 @@ __all__ = [
     "FindingNote",
     "FindingStatus",
     "FindingType",
+    "LLMJob",
+    "LLMRiskCache",
     "LlmConversation",
     "LlmConversationFinding",
     "LlmConversationStatus",
