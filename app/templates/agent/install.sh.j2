@@ -1,0 +1,721 @@
+#!/usr/bin/env bash
+#
+# secscan-agent bootstrap installer
+# Generated at backend render time. Do not edit on the host.
+#
+# Usage (recommended):
+#   curl -fsSL {{ secscan_url }}/install.sh | sudo bash
+#
+# Or, to keep stdin attached to your terminal:
+#   sudo bash <(curl -fsSL {{ secscan_url }}/install.sh)
+#
+# Unattended mode (CI/Provisioning):
+#   SECSCAN_UNATTENDED=1 SECSCAN_MASTER_KEY=... SECSCAN_SERVER_NAME=host01 \
+#     sudo -E bash <(curl -fsSL {{ secscan_url }}/install.sh)
+#
+
+set -euo pipefail
+
+readonly SECSCAN_URL="{{ secscan_url }}"
+readonly RECOMMENDED_TRIVY_VERSION="{{ recommended_trivy_version }}"
+readonly MIN_TRIVY_VERSION="{{ min_trivy_version }}"
+# CURRENT_AGENT_VERSION is rendered for operator inspection (the running
+# agent reads its own version, not this constant).
+# shellcheck disable=SC2034
+readonly CURRENT_AGENT_VERSION="{{ current_agent_version }}"
+readonly TRIVY_RELEASE_URL_TEMPLATE="{{ trivy_release_url_template }}"
+
+readonly SECSCAN_PREFIX="/opt/secscan"
+readonly SECSCAN_BIN_DIR="${SECSCAN_PREFIX}/bin"
+readonly SECSCAN_CONF_DIR="/etc/secscan"
+readonly SECSCAN_ENV_FILE="${SECSCAN_CONF_DIR}/agent.env"
+
+# --- TTY handling --------------------------------------------------------
+# When invoked via `curl | bash`, stdin is the pipe. We read prompts from
+# /dev/tty explicitly so the wizard still works. If no TTY is available at
+# all, we fall back to unattended mode.
+if [[ -t 0 ]]; then
+  TTY_INPUT=/dev/stdin
+elif [[ -r /dev/tty ]]; then
+  TTY_INPUT=/dev/tty
+else
+  : "${SECSCAN_UNATTENDED:=1}"
+  TTY_INPUT=/dev/null
+fi
+readonly TTY_INPUT
+readonly UNATTENDED="${SECSCAN_UNATTENDED:-0}"
+
+# --- Output helpers (Box + colors) ---------------------------------------
+# Detect color support; respect NO_COLOR (https://no-color.org/).
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  C_RESET=$'\033[0m'
+  C_BOLD=$'\033[1m'
+  C_DIM=$'\033[2m'
+  C_OK=$'\033[32m'
+  C_WARN=$'\033[33m'
+  C_FAIL=$'\033[31m'
+  C_INFO=$'\033[36m'
+else
+  C_RESET=""
+  C_BOLD=""
+  C_DIM=""
+  C_OK=""
+  C_WARN=""
+  C_FAIL=""
+  C_INFO=""
+fi
+
+box_header() {
+  local title="$1"
+  local subtitle="$2"
+  local title_len subtitle_len pad_l pad_r
+  {% raw %}title_len=${#title}
+  subtitle_len=${#subtitle}{% endraw %}
+  printf "\n%s" "${C_BOLD}"
+  printf '+--------------------------------------------------------------+\n'
+  pad_l=$(( (62 - title_len) / 2 ))
+  pad_r=$(( 62 - title_len - pad_l ))
+  printf '|%*s%s%*s|\n' "$pad_l" "" "$title" "$pad_r" ""
+  if [[ -n "$subtitle" ]]; then
+    pad_l=$(( (62 - subtitle_len) / 2 ))
+    pad_r=$(( 62 - subtitle_len - pad_l ))
+    printf '|%*s%s%*s|\n' "$pad_l" "" "$subtitle" "$pad_r" ""
+  fi
+  printf '+--------------------------------------------------------------+\n'
+  printf "%s\n" "${C_RESET}"
+}
+
+phase() {
+  local n="$1" total="$2" title="$3"
+  printf "\n%s[phase %s %s] %s%s\n" "${C_BOLD}" "$n" "$total" "$title" "${C_RESET}"
+}
+ok()   { printf "  %s[ok]%s    %s\n" "${C_OK}"   "${C_RESET}" "$*"; }
+info() { printf "  %s[..]%s    %s\n" "${C_INFO}" "${C_RESET}" "$*"; }
+warn() { printf "  %s[warn]%s  %s\n" "${C_WARN}" "${C_RESET}" "$*" >&2; }
+fail() { printf "  %s[fail]%s  %s\n" "${C_FAIL}" "${C_RESET}" "$*" >&2; }
+dim()  { printf "  %s%s%s\n" "${C_DIM}" "$*" "${C_RESET}"; }
+
+abort() {
+  fail "$*"
+  exit 1
+}
+
+# --- Interactive prompt helper ------------------------------------------
+# ask <prompt> <default> [silent]
+# - Always reads from $TTY_INPUT (never relies on stdin redirection).
+# - In UNATTENDED mode returns the default immediately and never blocks.
+# - silent=1 suppresses echo (used for the master key prompt).
+ask() {
+  local prompt="$1"
+  local default="${2:-}"
+  local silent="${3:-0}"
+  local answer=""
+
+  if [[ "$UNATTENDED" == "1" ]]; then
+    printf '%s\n' "$default"
+    return 0
+  fi
+
+  if [[ "$silent" == "1" ]]; then
+    # shellcheck disable=SC2229
+    read -rsp "  ${prompt}: " answer < "$TTY_INPUT"
+    printf '\n' >&2
+  else
+    if [[ -n "$default" ]]; then
+      printf "  %s [%s]: " "$prompt" "$default" >&2
+    else
+      printf "  %s: " "$prompt" >&2
+    fi
+    read -r answer < "$TTY_INPUT" || answer=""
+  fi
+
+  if [[ -z "$answer" && -n "$default" ]]; then
+    printf '%s\n' "$default"
+  else
+    printf '%s\n' "$answer"
+  fi
+}
+
+# Yes/no helper. Default is taken from arg #2 ('y' or 'n').
+ask_yes_no() {
+  local prompt="$1"
+  local default="${2:-y}"
+  local hint
+  if [[ "$default" == "y" ]]; then
+    hint="[Y/n]"
+  else
+    hint="[y/N]"
+  fi
+  local raw
+  raw="$(ask "${prompt} ${hint}" "$default")"
+  case "$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')" in
+    y|yes) return 0 ;;
+    n|no)  return 1 ;;
+    *)
+      [[ "$default" == "y" ]]
+      return $?
+      ;;
+  esac
+}
+
+# --- Semver helpers ------------------------------------------------------
+# version_ge "0.70.2" "0.70.0" → 0 (true) wenn arg1 >= arg2.
+version_ge() {
+  printf '%s\n%s\n' "$2" "$1" | sort -V -C 2>/dev/null
+}
+
+require_root() {
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    abort "this installer must run as root (sudo)"
+  fi
+}
+
+# --- Global state set by phases -----------------------------------------
+DISTRO_ID=""
+DISTRO_LIKE=""
+DISTRO_VERSION=""
+DISTRO_PRETTY=""
+ARCH_RAW=""
+ARCH_TRIVY=""
+PKG_MGR=""
+HAS_SYSTEMD=0
+TRIVY_PATH=""
+SERVER_ID=""
+
+# ============================================================================
+# Phase 1 — System detection
+# ============================================================================
+detect_system() {
+  phase 1 6 "System detection"
+
+  if [[ ! -r /etc/os-release ]]; then
+    fail "/etc/os-release not readable; cannot detect distribution"
+    abort "unsupported system"
+  fi
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  DISTRO_ID="${ID:-unknown}"
+  # DISTRO_LIKE is captured for fallback distro-family detection; future
+  # phases may consult it to map e.g. "ubuntu" via ID_LIKE="debian".
+  # shellcheck disable=SC2034
+  DISTRO_LIKE="${ID_LIKE:-}"
+  DISTRO_VERSION="${VERSION_ID:-unknown}"
+  _name_fallback="${NAME:-unknown}"
+  DISTRO_PRETTY="${PRETTY_NAME:-$_name_fallback}"
+  unset _name_fallback
+  ok "${DISTRO_PRETTY} (ID=${DISTRO_ID}, VERSION_ID=${DISTRO_VERSION})"
+
+  ARCH_RAW="$(uname -m)"
+  case "$ARCH_RAW" in
+    x86_64|amd64) ARCH_TRIVY="64bit" ;;
+    aarch64|arm64) ARCH_TRIVY="ARM64" ;;
+    *)
+      fail "unsupported architecture: ${ARCH_RAW}"
+      abort "only x86_64 and aarch64 are supported"
+      ;;
+  esac
+  ok "architecture ${ARCH_RAW} (trivy asset: ${ARCH_TRIVY})"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    HAS_SYSTEMD=1
+    ok "systemd available"
+  else
+    HAS_SYSTEMD=0
+    info "systemd not found, will use cron fallback for the scheduler"
+  fi
+
+  case "$DISTRO_ID" in
+    ubuntu|debian)
+      PKG_MGR="apt"
+      ;;
+    almalinux|rocky|rhel|centos|fedora|amazon|oracle|amzn)
+      if command -v dnf >/dev/null 2>&1; then
+        PKG_MGR="dnf"
+      else
+        PKG_MGR="yum"
+      fi
+      ;;
+    opensuse-leap|opensuse-tumbleweed|sles)
+      PKG_MGR="zypper"
+      ;;
+    *)
+      warn "distribution '${DISTRO_ID}' is not in the supported list"
+      if [[ "$UNATTENDED" == "1" ]]; then
+        abort "unsupported distribution in unattended mode"
+      fi
+      if ! ask_yes_no "Continue with manual dependency install?" "n"; then
+        abort "aborted by user"
+      fi
+      PKG_MGR="manual"
+      ;;
+  esac
+  ok "package manager: ${PKG_MGR}"
+}
+
+# ============================================================================
+# Phase 2 — Dependencies
+# ============================================================================
+install_pkg() {
+  local pkg="$1"
+  case "$PKG_MGR" in
+    apt)    DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y "$pkg" ;;
+    dnf)    dnf install -y "$pkg" ;;
+    yum)    yum install -y "$pkg" ;;
+    zypper) zypper --non-interactive install -y "$pkg" ;;
+    manual)
+      fail "cannot install '${pkg}' on this system automatically; install it manually and re-run"
+      return 1
+      ;;
+    *)
+      fail "unknown package manager: ${PKG_MGR}"
+      return 1
+      ;;
+  esac
+}
+
+ensure_dependency() {
+  local cmd="$1"
+  local pkg="${2:-$1}"
+  if command -v "$cmd" >/dev/null 2>&1; then
+    ok "${cmd} already present"
+    return 0
+  fi
+  while true; do
+    info "installing ${pkg} via ${PKG_MGR}"
+    if install_pkg "$pkg"; then
+      if command -v "$cmd" >/dev/null 2>&1; then
+        ok "${cmd} installed"
+        return 0
+      fi
+      fail "package '${pkg}' installed but '${cmd}' still not in PATH"
+    else
+      fail "failed to install ${pkg}"
+    fi
+    if [[ "$UNATTENDED" == "1" ]]; then
+      abort "dependency install failed in unattended mode: ${pkg}"
+    fi
+    local choice
+    choice="$(ask "[r]etry / [s]kip / [a]bort" "r")"
+    case "$(printf '%s' "$choice" | tr '[:upper:]' '[:lower:]')" in
+      s|skip)
+        if [[ "$cmd" == "curl" ]]; then
+          warn "skipping curl — the installer cannot continue without it"
+          abort "curl is required"
+        fi
+        warn "skipping ${pkg} — later phases may fail"
+        return 0
+        ;;
+      a|abort)
+        abort "aborted by user"
+        ;;
+      *)
+        continue
+        ;;
+    esac
+  done
+}
+
+install_dependencies() {
+  phase 2 6 "Dependencies"
+  ensure_dependency curl
+  ensure_dependency jq
+  ensure_dependency gzip
+  ensure_dependency tar
+}
+
+# ============================================================================
+# Phase 3 — Trivy
+# ============================================================================
+download_pinned_trivy() {
+  local version="$RECOMMENDED_TRIVY_VERSION"
+  local arch="$ARCH_TRIVY"
+  # Substitute {version} and {arch} into the configured URL template.
+  local url="$TRIVY_RELEASE_URL_TEMPLATE"
+  url="${url//\{version\}/$version}"
+  url="${url//\{arch\}/$arch}"
+
+  # Aqua release layout: per-asset checksum file `<tarball>.sha256` and a
+  # combined `trivy_<version>_checksums.txt`. We use the combined file
+  # because it covers every asset for the release and is small (< 2 KB).
+  local checksums_url
+  checksums_url="$(printf '%s' "$url" | sed -E "s#trivy_${version}_Linux-${arch}\\.tar\\.gz#trivy_${version}_checksums.txt#")"
+
+  local tmp
+  tmp="$(mktemp -d -t secscan-trivy.XXXXXX)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  local tarball="${tmp}/trivy.tar.gz"
+  local checksums="${tmp}/checksums.txt"
+
+  info "downloading ${url}"
+  if ! curl -fsSL -o "$tarball" "$url"; then
+    fail "failed to download trivy tarball"
+    return 1
+  fi
+
+  info "downloading ${checksums_url}"
+  if ! curl -fsSL -o "$checksums" "$checksums_url"; then
+    fail "failed to download trivy checksums"
+    return 1
+  fi
+
+  info "verifying sha256"
+  local expected
+  expected="$(grep -F "trivy_${version}_Linux-${arch}.tar.gz" "$checksums" | awk '{print $1}' | head -1)"
+  if [[ -z "$expected" ]]; then
+    fail "no checksum entry found for trivy_${version}_Linux-${arch}.tar.gz"
+    return 1
+  fi
+  local actual
+  actual="$(sha256sum "$tarball" | awk '{print $1}')"
+  if [[ "$expected" != "$actual" ]]; then
+    fail "sha256 mismatch: expected ${expected}, got ${actual}"
+    return 1
+  fi
+  ok "sha256 verified"
+
+  info "extracting tarball to ${SECSCAN_BIN_DIR}"
+  install -d -m 0755 "$SECSCAN_BIN_DIR"
+  if ! tar -xzf "$tarball" -C "$tmp" trivy; then
+    fail "failed to extract trivy binary from tarball"
+    return 1
+  fi
+  install -m 0755 -o root -g root "$tmp/trivy" "${SECSCAN_BIN_DIR}/trivy"
+  ok "trivy ${version} installed to ${SECSCAN_BIN_DIR}/trivy"
+  TRIVY_PATH="${SECSCAN_BIN_DIR}/trivy"
+  return 0
+}
+
+setup_trivy() {
+  phase 3 6 "Trivy"
+
+  local existing_trivy=""
+  local existing_version=""
+  if command -v trivy >/dev/null 2>&1; then
+    existing_trivy="$(command -v trivy)"
+    existing_version="$(trivy --version 2>/dev/null | head -1 | awk '{print $2}' | sed 's/^v//')"
+    if [[ -z "$existing_version" ]]; then
+      existing_version="unknown"
+    fi
+  fi
+
+  if [[ -z "$existing_trivy" ]]; then
+    info "no trivy found in PATH"
+    local do_install="y"
+    if [[ "$UNATTENDED" == "1" ]]; then
+      do_install="${SECSCAN_INSTALL_TRIVY:-yes}"
+    else
+      if ask_yes_no "Install pinned trivy ${RECOMMENDED_TRIVY_VERSION} to ${SECSCAN_BIN_DIR}/trivy?" "y"; then
+        do_install="yes"
+      else
+        do_install="no"
+      fi
+    fi
+    case "$(printf '%s' "$do_install" | tr '[:upper:]' '[:lower:]')" in
+      y|yes|1)
+        download_pinned_trivy || abort "trivy install failed"
+        ;;
+      *)
+        abort "trivy is required — install it manually and re-run"
+        ;;
+    esac
+    return 0
+  fi
+
+  if version_ge "$existing_version" "$MIN_TRIVY_VERSION"; then
+    ok "trivy ${existing_version} found at ${existing_trivy} (>= ${MIN_TRIVY_VERSION})"
+    TRIVY_PATH="$existing_trivy"
+    return 0
+  fi
+
+  warn "trivy ${existing_version} is older than required ${MIN_TRIVY_VERSION}"
+  local install_alongside="y"
+  if [[ "$UNATTENDED" == "1" ]]; then
+    install_alongside="${SECSCAN_INSTALL_TRIVY:-yes}"
+  else
+    if ask_yes_no "Install pinned ${RECOMMENDED_TRIVY_VERSION} alongside?" "y"; then
+      install_alongside="yes"
+    else
+      install_alongside="no"
+    fi
+  fi
+  case "$(printf '%s' "$install_alongside" | tr '[:upper:]' '[:lower:]')" in
+    y|yes|1)
+      download_pinned_trivy || abort "trivy install failed"
+      ;;
+    *)
+      warn "using system trivy ${existing_version} — scans may fail or be incomplete"
+      TRIVY_PATH="$existing_trivy"
+      ;;
+  esac
+}
+
+# ============================================================================
+# Phase 4 — Server registration
+# ============================================================================
+write_agent_env() {
+  local api_key="$1"
+  install -d -m 0755 "$SECSCAN_CONF_DIR"
+  umask 077
+  cat > "$SECSCAN_ENV_FILE" <<EOF
+# Managed by secscan installer. Do not edit by hand — re-run the installer.
+SECSCAN_URL=${SECSCAN_URL}
+SECSCAN_API_KEY=${api_key}
+SECSCAN_TRIVY_PATH=${TRIVY_PATH}
+EOF
+  chmod 0600 "$SECSCAN_ENV_FILE"
+  chown root:root "$SECSCAN_ENV_FILE"
+  ok "wrote ${SECSCAN_ENV_FILE} (mode 0600)"
+}
+
+register_server() {
+  phase 4 6 "Server registration"
+
+  if [[ -f "$SECSCAN_ENV_FILE" ]] && grep -q '^SECSCAN_API_KEY=' "$SECSCAN_ENV_FILE"; then
+    info "existing registration found at ${SECSCAN_ENV_FILE}"
+    if [[ "$UNATTENDED" == "1" ]]; then
+      ok "skipping re-registration in unattended mode (key already present)"
+      return 0
+    fi
+    if ! ask_yes_no "Already registered. Re-register and rotate key?" "n"; then
+      ok "keeping existing registration"
+      return 0
+    fi
+  fi
+
+  local default_name
+  default_name="$(hostname -s 2>/dev/null || hostname)"
+
+  local server_name=""
+  local interval_h=""
+  local master_key=""
+
+  if [[ "$UNATTENDED" == "1" ]]; then
+    server_name="${SECSCAN_SERVER_NAME:-$default_name}"
+    interval_h="${SECSCAN_INTERVAL_HOURS:-24}"
+    master_key="${SECSCAN_MASTER_KEY:-}"
+    if [[ -z "$master_key" ]]; then
+      fail "missing env var SECSCAN_MASTER_KEY"
+      exit 2
+    fi
+  else
+    while true; do
+      server_name="$(ask "Server name (a-z, 0-9, ._- and spaces)" "$default_name")"
+      if [[ "$server_name" =~ ^[a-zA-Z0-9._\ -]{1,64}$ ]]; then
+        break
+      fi
+      warn "invalid server name; allowed: a-z, 0-9, dot, underscore, dash, space (1-64 chars)"
+    done
+
+    while true; do
+      interval_h="$(ask "Expected scan interval in hours" "24")"
+      if [[ "$interval_h" =~ ^[0-9]+$ ]] && [[ "$interval_h" -ge 1 ]] && [[ "$interval_h" -le 168 ]]; then
+        break
+      fi
+      warn "interval must be an integer between 1 and 168"
+    done
+
+    while true; do
+      master_key="$(ask "Master-Key (input hidden)" "" 1)"
+      if [[ -n "$master_key" ]]; then
+        break
+      fi
+      warn "master key must not be empty"
+    done
+  fi
+
+  local response_body
+  response_body="$(mktemp -t secscan-reg.XXXXXX)"
+  local request
+  request="$(jq -n \
+    --arg master_key "$master_key" \
+    --arg name "$server_name" \
+    --argjson interval "$interval_h" \
+    '{master_key: $master_key, name: $name, expected_scan_interval_h: $interval}')"
+
+  local attempts=0
+  while true; do
+    attempts=$((attempts + 1))
+    info "POST ${SECSCAN_URL}/api/register"
+    local http_status
+    http_status="$(curl -sS \
+      --max-time 30 \
+      -o "$response_body" -w '%{http_code}' \
+      -X POST "${SECSCAN_URL%/}/api/register" \
+      -H "Content-Type: application/json" \
+      --data-binary "$request" || echo "000")"
+
+    if [[ "$http_status" == "200" || "$http_status" == "201" ]]; then
+      break
+    fi
+
+    fail "registration failed (HTTP ${http_status})"
+    if [[ -s "$response_body" ]]; then
+      dim "$(head -c 1024 "$response_body")"
+    fi
+
+    if [[ "$UNATTENDED" == "1" ]]; then
+      rm -f "$response_body"
+      abort "registration failed in unattended mode"
+    fi
+
+    local retry_choice
+    retry_choice="$(ask "[r]etry / [a]bort" "r")"
+    case "$(printf '%s' "$retry_choice" | tr '[:upper:]' '[:lower:]')" in
+      a|abort)
+        rm -f "$response_body"
+        abort "aborted by user"
+        ;;
+      *)
+        if [[ "$attempts" -ge 5 ]]; then
+          rm -f "$response_body"
+          abort "too many failed registration attempts"
+        fi
+        ;;
+    esac
+  done
+
+  local api_key
+  api_key="$(jq -r '.api_key // empty' < "$response_body")"
+  SERVER_ID="$(jq -r '.server_id // empty' < "$response_body")"
+  rm -f "$response_body"
+
+  if [[ -z "$api_key" ]]; then
+    abort "server response did not contain api_key"
+  fi
+  ok "registered (server_id=${SERVER_ID})"
+  write_agent_env "$api_key"
+}
+
+# ============================================================================
+# Phase 5 — Scheduler
+# ============================================================================
+download_agent_script() {
+  install -d -m 0755 "$SECSCAN_BIN_DIR"
+  info "downloading ${SECSCAN_URL}/agent/files/secscan-agent.sh"
+  local tmp
+  tmp="$(mktemp -t secscan-agent.XXXXXX)"
+  if ! curl -fsSL -o "$tmp" "${SECSCAN_URL%/}/agent/files/secscan-agent.sh"; then
+    rm -f "$tmp"
+    abort "failed to download secscan-agent.sh"
+  fi
+  install -m 0755 -o root -g root "$tmp" "${SECSCAN_BIN_DIR}/secscan-agent.sh"
+  rm -f "$tmp"
+  ok "installed ${SECSCAN_BIN_DIR}/secscan-agent.sh"
+}
+
+write_systemd_units() {
+  local svc="/etc/systemd/system/secscan-agent.service"
+  local tmr="/etc/systemd/system/secscan-agent.timer"
+
+  cat > "$svc" <<EOF
+[Unit]
+Description=secscan agent (trivy rootfs scan + upload)
+Documentation={{ secscan_url }}/
+
+[Service]
+Type=oneshot
+EnvironmentFile=${SECSCAN_ENV_FILE}
+ExecStart=${SECSCAN_BIN_DIR}/secscan-agent.sh
+Nice=10
+IOSchedulingClass=idle
+EOF
+  ok "wrote ${svc}"
+
+  cat > "$tmr" <<'EOF'
+[Unit]
+Description=Daily secscan agent run
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+  ok "wrote ${tmr}"
+
+  info "systemctl daemon-reload"
+  systemctl daemon-reload
+  info "systemctl enable --now secscan-agent.timer"
+  systemctl enable --now secscan-agent.timer
+  ok "secscan-agent.timer enabled"
+}
+
+write_cron_unit() {
+  local cron_file="/etc/cron.d/secscan-agent"
+  cat > "$cron_file" <<'EOF'
+# Daily secscan agent run with 2h jitter
+SHELL=/bin/bash
+0 3 * * * root sleep $((RANDOM \% 7200)); . /etc/secscan/agent.env; /opt/secscan/bin/secscan-agent.sh
+EOF
+  chmod 0644 "$cron_file"
+  ok "wrote ${cron_file}"
+}
+
+setup_scheduler() {
+  phase 5 6 "Scheduler"
+  download_agent_script
+  if [[ "$HAS_SYSTEMD" -eq 1 ]]; then
+    write_systemd_units
+  else
+    write_cron_unit
+  fi
+}
+
+# ============================================================================
+# Phase 6 — Probe scan
+# ============================================================================
+probe_scan() {
+  phase 6 6 "Probe scan"
+  info "running ${SECSCAN_BIN_DIR}/secscan-agent.sh (this can take 1-5 minutes)"
+  # Run the agent synchronously, streaming stderr to the operator.
+  # `set +e` so we can report a non-zero exit cleanly.
+  local rc=0
+  set +e
+  (
+    set -a
+    # shellcheck disable=SC1090
+    . "$SECSCAN_ENV_FILE"
+    set +a
+    "${SECSCAN_BIN_DIR}/secscan-agent.sh"
+  )
+  rc=$?
+  set -e
+
+  if [[ "$rc" -eq 0 ]]; then
+    ok "probe scan succeeded"
+    if [[ -n "$SERVER_ID" ]]; then
+      printf "\n%sDone.%s View server: %s/servers/%s\n" "${C_BOLD}" "${C_RESET}" "${SECSCAN_URL%/}" "$SERVER_ID"
+    else
+      printf "\n%sDone.%s View dashboard: %s/\n" "${C_BOLD}" "${C_RESET}" "${SECSCAN_URL%/}"
+    fi
+  else
+    warn "probe scan exited with code ${rc}"
+    if [[ "$HAS_SYSTEMD" -eq 1 ]]; then
+      info "the systemd timer is still armed — the next scheduled run will retry"
+    else
+      info "the cron entry is still in place — the next scheduled run will retry"
+    fi
+  fi
+}
+
+# ============================================================================
+# Main
+# ============================================================================
+main() {
+  require_root
+  box_header "secscan-agent installer" "Backend: ${SECSCAN_URL}"
+  if [[ "$UNATTENDED" == "1" ]]; then
+    info "unattended mode (no prompts will be shown)"
+  fi
+  detect_system
+  install_dependencies
+  setup_trivy
+  register_server
+  setup_scheduler
+  probe_scan
+}
+
+main "$@"

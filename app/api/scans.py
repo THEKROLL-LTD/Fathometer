@@ -45,6 +45,7 @@ from app.middleware.gzip import (
 )
 from app.models import Server
 from app.schemas.scan_envelope import Envelope
+from app.services.agent_version import version_lt
 from app.services.findings_ingest import ingest_scan as run_ingest
 from app.services.findings_ingest import server_is_active
 
@@ -238,6 +239,33 @@ def ingest_scan() -> Response | tuple[Response, int]:
             "validation_error",
             "Envelope-Validierung fehlgeschlagen",
             details=format_pydantic_errors(exc),
+        )
+
+    # ---- 4b. Agent-Version-Gate (ADR-0021) ----------------------------
+    # Reihenfolge: Auth (Schritt 1) hat Vorrang vor Body-Parse (Schritt 4);
+    # die Version-Pruefung kann erst nach erfolgreichem Parse erfolgen,
+    # weil `agent_version` aus dem Envelope kommt. Bei "veraltet" → 400.
+    if version_lt(envelope.agent_version, Settings.MIN_AGENT_VERSION):
+        sess = get_session()
+        log_event(
+            "agent.rejected_outdated",
+            target_type="server",
+            target_id=server.id,
+            metadata={
+                "agent_version": envelope.agent_version,
+                "min_agent_version": Settings.MIN_AGENT_VERSION,
+            },
+            actor=server.name,
+            session=sess,
+        )
+        sess.commit()
+        return json_error(
+            400,
+            "agent_outdated",
+            (
+                f"agent version {envelope.agent_version} is below minimum "
+                f"{Settings.MIN_AGENT_VERSION}, please update"
+            ),
         )
 
     # ---- 5. Findings-Ingest -------------------------------------------

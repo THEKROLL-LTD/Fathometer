@@ -81,6 +81,30 @@
             db veraltet
           </span>
         {% endif %}
+        {# Block N (ADR-0021): drei Outdated-Pills. `is_agent_outdated` etc.
+           kommen aus `_inject_agent_version_helpers`. Tooltips erklaeren
+           den Schwellwert und nennen den Update-Befehl. #}
+        {% if is_agent_outdated(server) %}
+          <span class="badge badge-sm badge-error font-mono tooltip tooltip-bottom"
+                data-tip="Agent {{ server.agent_version or 'unknown' }} is below minimum {{ min_agent_version }}. Run: curl -fsSL {{ external_base_url }}/install.sh | sudo bash"
+                data-test="pill-agent-outdated">
+            ⚠ agent {{ server.agent_version or '?' }}
+          </span>
+        {% endif %}
+        {% if is_trivy_outdated(server) %}
+          <span class="badge badge-sm badge-warning font-mono tooltip tooltip-bottom"
+                data-tip="Trivy {{ server.trivy_version or 'unknown' }} is below minimum {{ min_trivy_version }}. Re-run installer to update."
+                data-test="pill-trivy-outdated">
+            ⚠ trivy {{ server.trivy_version or '?' }}
+          </span>
+        {% endif %}
+        {% if is_trivy_db_outdated(server) %}
+          <span class="badge badge-sm badge-warning font-mono tooltip tooltip-bottom"
+                data-tip="Trivy DB last updated {{ server.trivy_db_updated_at | humanize_delta }}. Threshold: {{ trivy_db_stale_threshold_days }} days."
+                data-test="pill-trivy-db-stale">
+            ⚠ trivy-db stale
+          </span>
+        {% endif %}
       </div>
       <p class="font-mono text-xs opacity-60 mt-2">
         {% if server.os_pretty_name %}{{ server.os_pretty_name }}{% endif %}

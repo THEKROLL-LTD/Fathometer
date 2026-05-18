@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -114,12 +115,50 @@ def _is_older_than_h(value: datetime | None, hours: int) -> bool:
     return delta.total_seconds() > hours * 3600
 
 
+def _humanize_delta(value: datetime | None) -> str:
+    """Render die Differenz zu jetzt als kurze Englisch-Phrase ("3 days ago").
+
+    Wird in den Outdated-Pill-Tooltips (Block N, ADR-0021) verwendet. Bei
+    `None` -> "never". Bewusst eigene Implementierung statt `relative_time`,
+    weil die Tooltips dort Englisch sind (passt zum "Update required" /
+    "Run: curl …"-Kontext).
+    """
+    if value is None:
+        return "never"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    delta = datetime.now(tz=UTC) - value
+    seconds = int(delta.total_seconds())
+    if seconds < 0 or seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} minute{'' if minutes == 1 else 's'} ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} hour{'' if hours == 1 else 's'} ago"
+    days = hours // 24
+    if days < 30:
+        return f"{days} day{'' if days == 1 else 's'} ago"
+    months = days // 30
+    if months < 12:
+        return f"{months} month{'' if months == 1 else 's'} ago"
+    years = days // 365
+    return f"{years} year{'' if years == 1 else 's'} ago"
+
+
 # Pfade, die ohne abgeschlossenes Setup erreichbar bleiben muessen.
 _SETUP_EXEMPT_PREFIXES: tuple[str, ...] = (
     "/setup",
     "/static",
     "/healthz",
     "/readyz",
+    # Block N (ADR-0021) — Bootstrap-Installer-Endpoints sind bewusst ohne
+    # Auth und ohne Setup-Gate erreichbar. Inhalt ist kein Geheimnis, der
+    # Operator soll das Skript vor dem Pipen in `bash` inspizieren koennen.
+    "/install.sh",
+    "/agent/version",
+    "/agent/files/",
 )
 
 
@@ -163,11 +202,19 @@ def create_app() -> Flask:
 
     # 3. Flask-App.
     app = Flask(__name__)
+    # Block N (ADR-0021): Verzeichnis fuer die statischen Agent-Skripte.
+    # Im Repo-/Dev-Layout liegt das unter `<repo>/agent/`; in der Docker-
+    # Image-Variante kopiert das Dockerfile dasselbe Verzeichnis nach
+    # `/app/agent`. Wir leiten den Pfad relativ zum `app/`-Package ab,
+    # damit beide Setups ohne extra ENV-Var funktionieren.
+    agent_files_dir = (Path(__file__).resolve().parent.parent / "agent").as_posix()
+
     app.config.update(
         SECRET_KEY=settings.secret_key.get_secret_value() or "dev-only-insecure",
         MAX_CONTENT_LENGTH=settings.max_body_bytes,  # 10 MB Default — §9.
         SECSCAN_DATABASE_URL=settings.database_url,
         SECSCAN_SETTINGS=settings,
+        AGENT_FILES_DIR=agent_files_dir,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=False,  # in Produktion via Reverse-Proxy auf True.
@@ -188,6 +235,7 @@ def create_app() -> Flask:
     app.jinja_env.filters["relative_time"] = _relative_time
     app.jinja_env.filters["is_older_than_h"] = _is_older_than_h
     app.jinja_env.filters["iso_or_empty"] = _iso_or_empty
+    app.jinja_env.filters["humanize_delta"] = _humanize_delta
 
     # Markdown-Safe Filter fuer Notizen — `nh3.clean(...)` ist in der
     # Pipeline. Template ruft `{{ note.text | markdown_safe }}` auf, ohne
@@ -231,6 +279,7 @@ def create_app() -> Flask:
 
     from app.api.llm_chat import llm_chat_bp
     from app.views._sidebar_context import sidebar_partials_bp
+    from app.views.agent_install import agent_install_bp
     from app.views.audit_view import audit_bp
     from app.views.auth import auth_bp
     from app.views.dashboard import dashboard_bp
@@ -252,6 +301,7 @@ def create_app() -> Flask:
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(llm_chat_bp)
     app.register_blueprint(sidebar_partials_bp)
+    app.register_blueprint(agent_install_bp)
 
     # API-Blueprint (Block C). Routes werden in `register_api_routes`
     # importiert (lazy, vermeidet Zirkulaere durch `from app import csrf,
@@ -290,6 +340,45 @@ def create_app() -> Flask:
             }
         except Exception:  # pragma: no cover — DB/Setup-Edge-Case
             return {"llm_configured": False}
+
+    @app.context_processor
+    def _inject_agent_version_helpers() -> dict[str, Any]:
+        """Block N (ADR-0021) — Outdated-Helper + Konstanten + Finding-Cause.
+
+        Exponiert die Heuristik-Funktionen aus `app.services.agent_version`
+        als Jinja-Globals (`is_agent_outdated`, `is_trivy_outdated`,
+        `is_trivy_db_outdated`) plus die zugehoerigen Schwellwerte fuer
+        Tooltip-Strings. `format_finding_cause` rendert die Ursachen-Sub-
+        Zeile pro Finding (Task #12a).
+
+        `external_base_url` liefert die im Setup-Wizard hinterlegte Public-
+        URL — Fallback auf `request.host_url`, damit Dev-Setups ohne
+        Konfiguration einen sinnvollen Wert anzeigen.
+        """
+        from app.services.agent_version import (
+            is_agent_outdated,
+            is_trivy_db_outdated,
+            is_trivy_outdated,
+        )
+        from app.services.finding_display import format_finding_cause
+
+        external_base_url = app.config.get("EXTERNAL_BASE_URL")
+        if not external_base_url:
+            try:
+                external_base_url = request.host_url.rstrip("/")
+            except RuntimeError:  # outside request context
+                external_base_url = ""
+
+        return {
+            "is_agent_outdated": is_agent_outdated,
+            "is_trivy_outdated": is_trivy_outdated,
+            "is_trivy_db_outdated": is_trivy_db_outdated,
+            "format_finding_cause": format_finding_cause,
+            "min_agent_version": Settings.MIN_AGENT_VERSION,
+            "min_trivy_version": Settings.MIN_TRIVY_VERSION,
+            "trivy_db_stale_threshold_days": Settings.TRIVY_DB_STALE_THRESHOLD_DAYS,
+            "external_base_url": external_base_url,
+        }
 
     @app.context_processor
     def _inject_sidebar_context() -> dict[str, Any]:

@@ -31,7 +31,7 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106"]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607"]
 "alembic/env.py" = ["E402"]
 
 [format]

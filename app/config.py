@@ -7,6 +7,8 @@ App-Factory zu einem Start-Refusal — siehe `app/__init__.py`.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -66,6 +68,22 @@ class Settings(BaseSettings):
 
     # ----- Session-Konfiguration -----
     session_lifetime_days: int = Field(default=7, ge=1, le=90)
+
+    # ----- Agent- und Trivy-Versionen (Block N / ADR-0021) -----
+    # Class-Level-Konstanten — NICHT als BaseSettings-Field deklariert, weil
+    # sie ausdruecklich NICHT per `SECSCAN_*`-Env-Var ueberschrieben werden
+    # sollen. Ein User-Setting fuer die Mindest-Version waere eine
+    # Selbstabschaltungs-Falle (siehe ADR-0021). Version-Bumps geschehen
+    # gemeinsam mit dem Agent-Skript im selben Commit.
+    MIN_AGENT_VERSION: ClassVar[str] = "0.1.0"
+    CURRENT_AGENT_VERSION: ClassVar[str] = "0.2.0"
+    MIN_TRIVY_VERSION: ClassVar[str] = "0.70.0"
+    RECOMMENDED_TRIVY_VERSION: ClassVar[str] = "0.70.2"
+    TRIVY_RELEASE_URL_TEMPLATE: ClassVar[str] = (
+        "https://github.com/aquasecurity/trivy/releases/download/"
+        "v{version}/trivy_{version}_Linux-{arch}.tar.gz"
+    )
+    TRIVY_DB_STALE_THRESHOLD_DAYS: ClassVar[int] = 7
 
     @property
     def max_body_bytes(self) -> int:

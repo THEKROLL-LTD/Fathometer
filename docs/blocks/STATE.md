@@ -4,6 +4,46 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
+**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer — v0.7.0 (2026-05-18).**
+
+Block N (ADR-0021) abgeschlossen: Backend-gehosteter interaktiver
+Bootstrap-Installer ueber `curl -fsSL .../install.sh | sudo bash`
+mit sechs-Phasen-Wizard (Jinja-Template ~720 Bash-Zeilen, englische
+TTY-UI, Master-Key silent via `/dev/tty`, Trivy-SHA256-Verifikation,
+systemd-Timer plus Cron-Fallback, Unattended-Modus). Drei neue
+Public-Endpoints `/install.sh`, `/agent/files/<name>`, `/agent/version`
+in PUBLIC_PATHS-Allowlist. Veraltet-Indikatoren im Server-Detail-Header
+(drei conditional Pills) und Sidebar-Server-Liste (`⚠`-Sub-Marker)
+basierend auf `agent_version`/`trivy_version`/`trivy_db_updated_at`
+gegen Code-Konstanten `MIN_AGENT_VERSION="0.1.0"`/
+`MIN_TRIVY_VERSION="0.70.0"`/`TRIVY_DB_STALE_THRESHOLD_DAYS=7`.
+Agent-Skript auf `0.2.0` mit `host.trivy_version` im Envelope und
+`jq 'del(.Results[].Packages)'`-Strip (raw 4.95 MB → 400–700 KB,
+Fallback auf ungestripped bei jq-Fehler). Fuenf neue Ursachen-Felder
+pro Finding (`package_purl`, `target_path`, `result_type`,
+`severity_source`, `vendor_ids`) extrahiert aus `Vulnerability.
+PkgIdentifier`/`SeveritySource`/`VendorIDs`/`Result.Type`/`Target`.
+UI-Sub-Zeile in beiden Findings-Tabellen mit Distro-Pill plus
+Vendor-IDs fuer os-pkgs bzw. Library-Type-Pill plus Datei-Pfad in
+Mono-Font fuer lang-pkgs, Fallback aus `package_name`-`@`-Split fuer
+Alt-Daten (ADR-0011-Uebergangsformat). **Bewusst weggelassen:**
+statisches Update-Befehl-Mapping — kommt als eigener LLM-basierter
+Block nach v0.7.0.
+
+992 Tests grün (vorher 884; +108 neue Block-N-Tests), Coverage
+**92.16 %** (Threshold 85 %); 254 adversarial PASS (+14 Block-N-Cases:
+Path-Traversal, no-secrets in /install.sh, outdated-Agent-Reject,
+public-no-auth-Garantie, PURL-XSS, VendorIDs-Injection). `ruff check`
+/ `ruff format --check` / `mypy app/` / `shellcheck agent/*.sh` PASS,
+Alembic-Roundtrip (0003 ↔ 0002) PASS im Container,
+`docker compose up --build` + `/healthz` + `/install.sh` + `/agent/
+version` + `/agent/files/secscan-agent.sh` PASS, Image-Size 191 MB
+(unveraendert vs. v0.6.x). Reviewer APPROVE nach `.dockerignore`-Fix
+(`agent` aus der Exclude-Liste entfernt), Security-Auditor
+ACCEPTABLE WITH NOTES (alle 8 Pflicht-Punkte PASS, zwei optionale
+Doku-Notes: Rate-Limit auf `/install.sh`/`/agent/files/` als Reverse-
+Proxy-Aufgabe + README-Hinweis dazu). Tag `v0.7.0` zu setzen.
+
 **MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign — v0.6.0 (2026-05-16).**
 
 Block M (ADR-0020) abgeschlossen: Dashboard-Pane umgebaut auf KPI-Cards
@@ -62,11 +102,11 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Aktueller Block
 
-**N — Agent-Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding** · gestartet 2026-05-17 · Branch `feat/block-n-agent-installer` (vom User extern angelegt) · Spec [ADR-0021](../decisions/0021-agent-bootstrap-installer.md) · Brief [N-agent-installer.md](N-agent-installer.md) · Zielversion v0.7.0.
-
-Vier zusammenhängende Teile: (1) Backend-gehosteter interaktiver Bootstrap-Installer (`curl -fsSL .../install.sh | sudo bash`, sechs-Phasen-Wizard, englische TTY-UI, Master-Key interaktiv abgefragt, kein Auto-Update); (2) Veraltet-Indikatoren im Server-Detail-Header und in der Sidebar-Server-Liste basierend auf `agent_version`/`trivy_version`/`trivy_db_updated_at` gegen Code-Konstanten `MIN_AGENT_VERSION`/`MIN_TRIVY_VERSION`/`TRIVY_DB_STALE_THRESHOLD_DAYS=7`; (3) Agent-side Trivy-Output-Strip via `jq 'del(.Results[].Packages)'` mit Fallback auf ungestripped bei `jq`-Fehler; (4) Ursachen-Felder pro Finding (`package_purl`, `target_path`, `result_type`, `severity_source`, `vendor_ids`) plus UI-Sub-Zeile in der Findings-Tabelle. **Bewusst weggelassen:** statisches Update-Befehl-Mapping (`apt`/`dnf`/`apk`-Snippets) — kommt als eigener LLM-basierter Block nach v0.7.0. ADR-0011 wird teilweise abgelöst (eigene `target_path`-Spalte ersetzt die `@target`-Codierung im `package_name` für neue Findings, via natürliche Re-Ingest-Konsolidierung — kein Daten-Migration im Block).
+(keiner — Block N abgeschlossen 2026-05-18, naechster Block per User-Entscheidung)
 
 ## Completed
+
+- **N — Agent-Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding (ADR-0021)** · abgeschlossen 2026-05-18 · Branch `feat/block-n-agent-installer` · Reviewer-Freigabe nach `.dockerignore`-Fix (Zeile `agent` entfernt — sonst war das Runtime-Image ohne `agent/`-Verzeichnis und die drei neuen Public-Endpoints 404). Security-Auditor: **ACCEPTABLE WITH NOTES** (alle 8 Pflicht-Punkte PASS — no-secrets in /install.sh, Path-Traversal, PUBLIC_PATHS minimal, Pill-Tooltip-XSS via DaisyUI-CSS-`::before`, outdated-Agent-Reject + Audit, agent.env mode 0600 root:root, Trivy-SHA256-fail-stop, Master-Key niemals in Argv/History/Files; zwei optionale Doku-Notes als Re-Open-Trigger: `@limiter.limit("60/minute")` auf `/install.sh`/`/agent/files/` und README-Hinweis fuer Reverse-Proxy-Allowlist). 992 Tests grün (+108 neue Block-N-Tests), Coverage **92.16 %**; 254 adversarial PASS (+14 neue: Path-Traversal × 9, no-secrets, outdated-Reject, public-no-auth × 3, PURL-XSS, VendorIDs-Injection × 9). `ruff check`/`ruff format --check`/`mypy app/`/`shellcheck agent/*.sh` PASS, Alembic-Roundtrip (0003 ↔ 0002) PASS, `docker compose up --build` + `/healthz` + `/install.sh` + `/agent/version` + `/agent/files/secscan-agent.sh` PASS, Image 191 MB (Delta 0 vs. v0.6.x). Neu: `app/views/agent_install.py` (3 Routes), `app/templates/agent/install.sh.j2` (~720 Bash-Zeilen, sechs-Phasen-Wizard mit TTY/Color/Box-Helpers, `/dev/tty`-Master-Key-Prompt, Trivy-`sha256sum -c`, systemd+Cron-Fallback, Unattended-Modus), `app/services/agent_version.py` (`version_lt`/`is_*_outdated`), `app/services/finding_display.py` (`format_finding_cause()` mit ADR-0011-Fallback-Split), `alembic/versions/0003_block_n_agent_and_finding_cause.py` (7 add_column: 2 Server + 5 Finding — `Server.agent_version` existierte bereits aus 0002), `tests/integration/installer/` (Ubuntu-24.04 + AlmaLinux-9 Dockerfiles + run.sh + Make-Target `test-installer`, alle unter `@pytest.mark.integration`). Geaendert: `agent/secscan-agent.sh` AGENT_VERSION 0.1.0→0.2.0 + `host.trivy_version` + `jq`-Strip mit Raw-Fallback + Englisch, `agent/secscan-register.sh` Englisch, `app/api/scans.py` Agent-Version-Reject (400 + Audit `agent.rejected_outdated`, 401-vor-400-Reihenfolge erhalten), `app/services/findings_ingest.py` `_extract_cause_fields` + UPSERT-Pfad schreibt fuenf Cause-Spalten, `app/schemas/scan_envelope.py` `HostBlock.trivy_version` + `TrivyPkgIdentifier` + `TrivyVulnerability.{pkg_identifier,severity_source,vendor_ids}` + `package_purl`-Property + `MAX_VENDOR_IDS_PER_VULN=32`, `app/__init__.py` Context-Processor + PUBLIC_PATHS-Allowlist um drei Routes + `humanize_delta`-Filter, `app/templates/servers/detail.html` (drei conditional Pills mit Tooltips), `app/templates/sidebar/_server_row.html` (`⚠`-Marker), `app/templates/servers/_view_list.html` + `dashboard/_findings_section.html` (Ursachen-Sub-Zeile). ADR-0011 bleibt waehrend natuerlicher Re-Ingest-Konsolidierung aktiv — `_disambiguated_package_name()` unveraendert, Alt-Daten ohne `target_path` rendert UI per `package_name`-`@`-Split-Fallback. ARCHITECTURE §6 + §11 + §17 aktualisiert. `.dockerignore` `agent` raus. **Tag `v0.7.0` zu setzen.**
 
 - **A — Skelett und Basis** · abgeschlossen 2026-05-14 · Branch `feat/block-a` · Reviewer-Freigabe nach Re-Review (Gunicorn `HOME=/app` + `--worker-tmp-dir /dev/shm`-Fix).
 - **B — Datenmodell, Setup-Wizard und Auth** · abgeschlossen 2026-05-14 · Branch `feat/block-b` · Reviewer-Freigabe nach Template-Fix (Pattern-Escape) und Re-Run der adversarial-Tests. 96 Tests grün. Setup-Flow-Screenshot unter `docs/blocks/B-evidence/setup-flow.png`.
@@ -103,7 +143,7 @@ Vier zusammenhängende Teile: (1) Backend-gehosteter interaktiver Bootstrap-Inst
 | K | [K-server-detail-visual.md](K-server-detail-visual.md) | completed 2026-05-16 — **v0.4.0** (ADR-0018 Server-Detail-Redesign) |
 | L | [L-dashboard-polling.md](L-dashboard-polling.md) | completed 2026-05-16 — **v0.5.0** (ADR-0019 Dashboard-SSE → HTMX-Polling, LLM-Stream-SSE bleibt) |
 | M | [M-dashboard-findings.md](M-dashboard-findings.md) | completed 2026-05-16 — **v0.6.0** (ADR-0020 Cross-Server-Findings + KPI-Sparklines, /findings/search-Removal) |
-| N | [N-agent-installer.md](N-agent-installer.md) | in progress (gestartet 2026-05-17) — Zielversion v0.7.0 (ADR-0021 Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding) |
+| N | [N-agent-installer.md](N-agent-installer.md) | completed 2026-05-18 — **v0.7.0** (ADR-0021 Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding) |
 
 ## Aktive Blocker
 

@@ -70,6 +70,18 @@
     {% endif %}
   </a>
 
+  {# Block N (ADR-0021): Outdated-Marker. Sichtbar wenn Agent, Trivy oder
+     Trivy-DB veraltet sind — der Operator sieht in der Sidebar sofort, dass
+     der Server-Detail "Update required" anzeigt. #}
+  {% if is_agent_outdated(server) or is_trivy_outdated(server) or is_trivy_db_outdated(server) %}
+    <span class="shrink-0 text-warning text-xs tooltip tooltip-left"
+          data-tip="Update required — see server detail"
+          data-test="sidebar-marker-outdated-{{ server.id }}"
+          aria-label="Update erforderlich">
+      ⚠
+    </span>
+  {% endif %}
+
   {# Heartbeat-Bar rechts. `cells` kommt aus dem Outer-with-Block. #}
   <span class="shrink-0 ml-1" aria-label="Heartbeat letzte {{ cells | length }} Tage">
     {% include "sidebar/_heartbeat_bar.html" %}

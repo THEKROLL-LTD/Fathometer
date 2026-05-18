@@ -137,6 +137,9 @@ WORKDIR /app
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
+# Block N (ADR-0021): `/agent/*.sh` werden ueber `/agent/files/<name>`
+# vom Backend ausgeliefert (`AGENT_FILES_DIR` zeigt auf `/app/agent`).
+COPY agent ./agent
 COPY scripts/entrypoint.sh /usr/local/bin/secscan-entrypoint
 
 RUN chmod +x /usr/local/bin/secscan-entrypoint && \

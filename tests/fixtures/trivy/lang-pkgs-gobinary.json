@@ -1,0 +1,30 @@
+{
+  "_NOTE": "Block N (ADR-0021) — Minimal-Fixture fuer lang-pkgs (gobinary) mit allen drei Ursachen-Feldern (PkgIdentifier.PURL, SeveritySource, VendorIDs). Die grosse ubuntu-22.04-rke2.json deckt das ebenfalls ab; diese Fixture ist die handlichere Variante fuer Schema-/Mapping-Tests.",
+  "SchemaVersion": 2,
+  "Trivy": {"Version": "0.70.2"},
+  "ArtifactName": "lang-pkgs-fixture",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "usr/local/bin/kubelet",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-99999",
+          "PkgName": "golang.org/x/net",
+          "PkgIdentifier": {
+            "PURL": "pkg:golang/golang.org/x/net@v0.17.0",
+            "UID": "lang-pkgs-uid-1"
+          },
+          "InstalledVersion": "v0.17.0",
+          "FixedVersion": "v0.23.0",
+          "Severity": "HIGH",
+          "SeveritySource": "ghsa",
+          "Title": "golang.org/x/net: HTTP/2 RST stream flood",
+          "VendorIDs": ["GHSA-4374-p667-p6c8"]
+        }
+      ]
+    }
+  ]
+}

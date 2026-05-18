@@ -1,0 +1,17 @@
+# Block N (ADR-0021, Task #18) — Installer-E2E auf AlmaLinux 9.
+#
+# Minimaler Container fuer `tests/integration/test_installer_e2e.py`.
+# AlmaLinux deckt den dnf-/RHEL-Pfad ab (Phase 2: jq via dnf, Phase 5:
+# systemd verfuegbar fuer Timer-Test).
+FROM almalinux:9
+
+RUN dnf install -y --setopt=install_weak_deps=False \
+        bash \
+        curl \
+        sudo \
+        ca-certificates \
+        systemd \
+    && dnf clean all
+
+WORKDIR /tmp/installer
+CMD ["/bin/bash", "-c", "curl -fsSL ${SECSCAN_URL}/install.sh | bash"]

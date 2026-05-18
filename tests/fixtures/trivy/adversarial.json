@@ -105,6 +105,27 @@
           "Severity": "LOW",
           "Title": "Bad reference",
           "References": ["javascript:alert(1)", "file:///etc/passwd", "https://example.com/ok"]
+        },
+        {
+          "_attack": "15: PURL with <script> XSS-Payload",
+          "VulnerabilityID": "CVE-2026-00015",
+          "PkgName": "test-pkg-purl-xss",
+          "InstalledVersion": "1.0",
+          "Severity": "MEDIUM",
+          "Title": "Bad PURL",
+          "PkgIdentifier": {
+            "PURL": "pkg:deb/ubuntu/<script>alert(1)</script>@1.0",
+            "UID": "abc123"
+          }
+        },
+        {
+          "_attack": "16: VendorIDs with NUL byte and oversized item",
+          "VulnerabilityID": "CVE-2026-00016",
+          "PkgName": "test-pkg-vendor-ids",
+          "InstalledVersion": "1.0",
+          "Severity": "MEDIUM",
+          "Title": "Bad VendorIDs",
+          "VendorIDs": ["USN-1234-1", "USN-with-NUL\u0000inside", "RHSA-2024:1234"]
         }
       ]
     }

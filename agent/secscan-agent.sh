@@ -2,43 +2,52 @@
 #
 # secscan-agent.sh
 # ----------------
-# Sammelt OS-/Kernel-Info, läuft `trivy rootfs /` und sendet das Resultat
-# als Wrapper-Envelope an einen secscan-Server.
+# Collects OS/kernel info, runs `trivy rootfs /` and uploads the result
+# as a wrapper envelope to a secscan backend.
 #
-# Subcommand-Wahl: `rootfs` (NICHT `fs`). Begruendung:
-#   - `trivy fs <dir>` ist fuer Source-Repos/vendored Deps gedacht und
-#     scannt auf einem Live-System nur die OS-Package-DB (apt/dpkg) —
-#     Go-Binaries unter /usr/local/bin, /var/lib/rancher etc. werden
-#     uebersprungen. Auf einem k3s-Node hiessen das praktisch alle
-#     HIGH/CRITICAL aus den Cluster-Komponenten fehlen.
-#   - `trivy rootfs <dir>` ist explizit fuer Live-Root-Filesystems und
-#     fuehrt zusaetzlich `gobinary`/`jar`/etc-Analyzer aus.
-# Siehe https://trivy.dev/docs/v0.70/coverage/others/standalone/
+# Subcommand: `rootfs` (NOT `fs`). Rationale:
+#   - `trivy fs <dir>` is meant for source repos / vendored deps and on a
+#     live system only inspects the OS package DB (apt/dpkg) — Go binaries
+#     under /usr/local/bin, /var/lib/rancher etc. are skipped. On a k3s
+#     node that effectively misses every HIGH/CRITICAL from the cluster
+#     components.
+#   - `trivy rootfs <dir>` is explicitly for live root filesystems and
+#     additionally runs the gobinary/jar/etc analyzers.
+# See https://trivy.dev/docs/v0.70/coverage/others/standalone/
 #
-# Voraussetzungen: bash >= 4, curl, jq, gzip, trivy (>= 0.70.0)
-#                  (https://aquasecurity.github.io/trivy/)
+# Block N (ADR-0021) — v0.2.0 changes:
+#   - `host.trivy_version` is collected from `trivy --version` and added
+#     to the envelope. Optional in the backend schema (older backends
+#     ignore it via `extra="ignore"`).
+#   - `Results[].Packages` is stripped via `jq` before the upload to
+#     reduce bandwidth by 80-90% (the inventory block is unused by the
+#     backend). Falls back to the raw output if `jq` cannot apply the
+#     filter — backend handles both shapes identically.
 #
-# Pflicht-ENV:
-#   SECSCAN_URL       z.B. https://secscan.example.com
-#   SECSCAN_API_KEY   Server-Key, der per ./secscan-register.sh erzeugt wurde
+# Requirements: bash >= 4, curl, jq, gzip, trivy (>= 0.70.0)
+#               (https://aquasecurity.github.io/trivy/)
 #
-# Optional ENV:
-#   SECSCAN_TRIVY_PATH    Pfad zur Trivy-Binary (Default: aus $PATH)
-#   SECSCAN_SCAN_PATH     Was gescannt wird (Default: /)
-#   SECSCAN_TIMEOUT_SEC   Upload-Timeout (Default: 60)
+# Required env:
+#   SECSCAN_URL       e.g. https://secscan.example.com
+#   SECSCAN_API_KEY   server key produced by ./secscan-register.sh
 #
-# Aufruf als root, typisch via cron oder systemd-Timer.
+# Optional env:
+#   SECSCAN_TRIVY_PATH    path to the trivy binary (default: from $PATH)
+#   SECSCAN_SCAN_PATH     what to scan (default: /)
+#   SECSCAN_TIMEOUT_SEC   upload timeout (default: 60)
 #
-# Exit-Codes:
-#   0  Erfolg
-#   1  fehlende Voraussetzungen oder Konfiguration
-#   2  Trivy-Scan fehlgeschlagen
-#   3  Upload fehlgeschlagen
+# Run as root, typically via cron or a systemd timer.
+#
+# Exit codes:
+#   0  success
+#   1  missing requirements or configuration
+#   2  trivy scan failed
+#   3  upload failed
 #
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.1.0"
+readonly AGENT_VERSION="0.2.0"
 readonly TRIVY_BIN="${SECSCAN_TRIVY_PATH:-trivy}"
 readonly SCAN_PATH="${SECSCAN_SCAN_PATH:-/}"
 readonly TIMEOUT_SEC="${SECSCAN_TIMEOUT_SEC:-60}"
@@ -47,29 +56,29 @@ log() { printf '[secscan-agent] %s\n' "$*" >&2; }
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 \
-    || { log "Fehler: '$1' nicht im PATH gefunden"; exit 1; }
+    || { log "Error: '$1' not found in PATH"; exit 1; }
 }
 
-# ----- Voraussetzungen ---------------------------------------------------
+# ----- Prerequisites -----------------------------------------------------
 require_cmd curl
 require_cmd jq
 require_cmd gzip
 require_cmd "$TRIVY_BIN"
 
-: "${SECSCAN_URL:?SECSCAN_URL ist nicht gesetzt}"
-: "${SECSCAN_API_KEY:?SECSCAN_API_KEY ist nicht gesetzt}"
+: "${SECSCAN_URL:?SECSCAN_URL is not set}"
+: "${SECSCAN_API_KEY:?SECSCAN_API_KEY is not set}"
 
-# ----- Host-Info sammeln -------------------------------------------------
+# ----- Host info ---------------------------------------------------------
 if [[ -r /etc/os-release ]]; then
-  # /etc/os-release ist von freedesktop.org standardisiert (ID, VERSION_ID, …)
+  # /etc/os-release is standardized by freedesktop.org (ID, VERSION_ID, …)
   # shellcheck disable=SC1091
   . /etc/os-release
   os_family="${ID:-unknown}"
   os_version="${VERSION_ID:-unknown}"
   os_pretty="${PRETTY_NAME:-${NAME:-unknown}}"
 else
-  # Non-Linux (z.B. macOS, FreeBSD): kein /etc/os-release. Wir mappen
-  # `uname -s` auf eine sinnvolle os_family.
+  # Non-Linux (e.g. macOS, FreeBSD): no /etc/os-release. We map
+  # `uname -s` to a sensible os_family.
   uname_s="$(uname -s)"
   case "$uname_s" in
     Darwin)      os_family="darwin" ;;
@@ -87,33 +96,53 @@ else
 fi
 kernel_version="$(uname -r)"
 arch="$(uname -m)"
-# Backend normalisiert `arm64`/`amd64`/`x86`/`i386` automatisch zu den
-# Linux-Canonical-Formen; keine Client-seitige Normalisierung noetig.
+# Backend normalizes `arm64`/`amd64`/`x86`/`i386` to the Linux canonical
+# forms; no client-side normalization needed.
 
-log "Host: ${os_pretty} (kernel ${kernel_version}, ${arch})"
+# Block N (ADR-0021) — capture the trivy CLI version for the envelope.
+trivy_version="$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo "unknown")"
 
-# ----- Trivy-Scan --------------------------------------------------------
+log "Host: ${os_pretty} (kernel ${kernel_version}, ${arch}, trivy ${trivy_version})"
+
+# ----- Trivy scan + Packages[] strip -------------------------------------
+trivy_raw="$(mktemp -t secscan-trivy-raw.XXXXXX.json)"
 trivy_out="$(mktemp -t secscan-trivy.XXXXXX.json)"
-trap 'rm -f "$trivy_out"' EXIT
+response_body="$(mktemp -t secscan-resp.XXXXXX)"
+trap 'rm -f "$trivy_raw" "$trivy_out" "$response_body"' EXIT
 
-log "Starte Trivy-Scan auf ${SCAN_PATH} ..."
+log "Starting trivy scan on ${SCAN_PATH} ..."
 if ! "$TRIVY_BIN" rootfs "$SCAN_PATH" \
        --format json \
        --quiet \
        --scanners vuln \
-       --output "$trivy_out"; then
-  log "Fehler: Trivy-Scan fehlgeschlagen"
+       --output "$trivy_raw"; then
+  log "Error: trivy scan failed"
   exit 2
 fi
 
-# Trivy schreibt selbst bei "keine Findings" valides JSON. Falls die Datei
-# leer ist, ist etwas grob schiefgelaufen.
-if [[ ! -s "$trivy_out" ]]; then
-  log "Fehler: Trivy-Output ist leer"
+# Trivy writes valid JSON even when there are no findings. An empty file
+# means something went badly wrong.
+if [[ ! -s "$trivy_raw" ]]; then
+  log "Error: trivy output is empty"
   exit 2
 fi
 
-# ----- Envelope bauen ----------------------------------------------------
+# Block N (ADR-0021) — strip the `Results[].Packages` inventory block.
+# It contributes 80-90% of the JSON bytes and is unused by the backend.
+# `PkgIdentifier`/`SeveritySource`/`VendorIDs` are duplicated per
+# Vulnerability so the strip does not lose information used downstream.
+# Fallback: if `jq` cannot apply the filter (old jq, unexpected schema),
+# send the raw output — the backend tolerates both shapes.
+if jq 'del(.Results[].Packages)' "$trivy_raw" > "$trivy_out" 2>/dev/null; then
+  raw_size="$(wc -c < "$trivy_raw")"
+  stripped_size="$(wc -c < "$trivy_out")"
+  log "Stripped Packages[] block (${raw_size} -> ${stripped_size} bytes)"
+else
+  log "Warning: jq strip failed, sending raw trivy output"
+  cp "$trivy_raw" "$trivy_out"
+fi
+
+# ----- Build envelope ----------------------------------------------------
 payload="$(jq -n \
   --arg agent_version "$AGENT_VERSION" \
   --arg os_family     "$os_family" \
@@ -121,6 +150,7 @@ payload="$(jq -n \
   --arg os_pretty     "$os_pretty" \
   --arg kernel        "$kernel_version" \
   --arg arch          "$arch" \
+  --arg trivy_ver     "$trivy_version" \
   --slurpfile scan    "$trivy_out" \
   '{
     agent_version: $agent_version,
@@ -129,17 +159,15 @@ payload="$(jq -n \
       os_version:     $os_version,
       os_pretty_name: $os_pretty,
       kernel_version: $kernel,
-      architecture:   $arch
+      architecture:   $arch,
+      trivy_version:  $trivy_ver
     },
     scan: $scan[0]
   }')"
 
-# ----- Senden (gzipped) --------------------------------------------------
-# Komprimiert typisch 8-10x. Server akzeptiert Content-Encoding: gzip
-# und dekomprimiert mit Streaming-Limit (siehe ARCHITECTURE.md, Sektion 9).
-response_body="$(mktemp -t secscan-resp.XXXXXX)"
-trap 'rm -f "$trivy_out" "$response_body"' EXIT
-
+# ----- Upload (gzipped) --------------------------------------------------
+# Compresses typically 8-10x. Backend accepts Content-Encoding: gzip and
+# decompresses with a streaming limit (see ARCHITECTURE.md §9).
 http_status="$(printf '%s' "$payload" | gzip -c | curl -sS \
   --max-time "$TIMEOUT_SEC" \
   -o "$response_body" -w '%{http_code}' \
@@ -150,10 +178,10 @@ http_status="$(printf '%s' "$payload" | gzip -c | curl -sS \
   --data-binary @- || echo "000")"
 
 if [[ "$http_status" != "200" && "$http_status" != "202" ]]; then
-  log "Fehler: Upload fehlgeschlagen (HTTP ${http_status})"
-  log "Server-Response:"
+  log "Error: upload failed (HTTP ${http_status})"
+  log "Server response:"
   cat "$response_body" >&2 || true
   exit 3
 fi
 
-log "Scan erfolgreich übertragen (HTTP ${http_status})"
+log "Scan uploaded successfully (HTTP ${http_status})"

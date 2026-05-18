@@ -231,6 +231,30 @@
                 {{ package_cell(f.package_name, f.finding_class) }}
                 {{ quick_copy(f.package_name, label='Paket-Name kopieren') }}
               </div>
+              {# Block N (ADR-0021): Ursachen-Sub-Zeile (siehe
+                 `servers/_view_list.html` fuer den Vertrag). #}
+              {% set cause = format_finding_cause(f) %}
+              <div class="text-xs opacity-70 mt-0.5">
+                {% if cause.kind == "lang" %}
+                  <span class="badge badge-ghost badge-xs uppercase tracking-wider">{{ cause.type_label }}</span>
+                  {% if cause.path %}
+                    <span class="font-mono">in /{{ cause.path | trim('/') }}</span>
+                  {% endif %}
+                {% elif cause.kind == "os" %}
+                  <span class="badge badge-ghost badge-xs uppercase tracking-wider">{{ cause.type_label }}</span>
+                  {% if f.installed_version %}
+                    <span>{{ f.installed_version }}</span>
+                  {% endif %}
+                  {% for vid in cause.vendor_ids[:3] %}
+                    <span class="badge badge-outline badge-xs" data-test="finding-vendor-id">{{ vid }}</span>
+                  {% endfor %}
+                {% endif %}
+              </div>
+              {% if cause.purl or cause.severity_source %}
+                <div class="hidden" data-test="finding-row-tooltip-data"
+                     data-purl="{{ cause.purl or '' }}"
+                     data-severity-source="{{ cause.severity_source or '' }}"></div>
+              {% endif %}
             </td>
 
             <td>{{ epss_pill(f.epss_score) }}</td>

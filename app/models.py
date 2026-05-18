@@ -188,6 +188,13 @@ class Server(Base):
     kernel_version: Mapped[str | None] = mapped_column(String(128))
     architecture: Mapped[str | None] = mapped_column(String(16))
     agent_version: Mapped[str | None] = mapped_column(String(32))
+    # Block N (ADR-0021): zuletzt beobachtete Trivy-Version aus dem Envelope
+    # (Agent ab v0.2.0 sendet `host.trivy_version`).
+    trivy_version: Mapped[str | None] = mapped_column(String(32))
+    # Zeitstempel des letzten Envelope-Empfangs mit `agent_version` — der
+    # UI-Indikator fuer "veraltet" soll nicht auf einem 6-Monate-alten Wert
+    # haengen, wenn der Server selbst stale ist.
+    agent_version_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Trivy-DB-Frische.
     trivy_db_version: Mapped[str | None] = mapped_column(String(64))
@@ -312,6 +319,17 @@ class Finding(Base):
         default=AttackVector.UNKNOWN,
     )
     references: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+
+    # Block N (ADR-0021): Ursachen-Felder pro Finding. Werden bei jedem
+    # Re-Ingest geschrieben (auch beim Update — kein historisches Bewahren).
+    # `package_name` enthaelt weiterhin das ADR-0011-`@target`-Suffix fuer
+    # lang-pkgs, damit der UNIQUE-Constraint nicht bricht; `target_path`
+    # ist die strukturierte Form fuer die UI.
+    package_purl: Mapped[str | None] = mapped_column(String(512))
+    target_path: Mapped[str | None] = mapped_column(String(512))
+    result_type: Mapped[str | None] = mapped_column(String(64))
+    severity_source: Mapped[str | None] = mapped_column(String(64))
+    vendor_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String(128)))
 
     # Generierte Spalte — Postgres berechnet bei jedem Insert/Update.
     has_fix: Mapped[bool] = mapped_column(

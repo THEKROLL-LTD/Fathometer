@@ -50,7 +50,7 @@ def test_register_script_returns_server_key(tmp_path: Path) -> None:
     """`secscan-register.sh` druckt den Server-Key auf stdout."""
     env = dict(os.environ)
     env["SECSCAN_MASTER_KEY"] = _master_key()
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [
             str(AGENT_DIR / "secscan-register.sh"),
             _server_url(),
@@ -76,7 +76,7 @@ def test_agent_script_pushes_real_fixture(tmp_path: Path) -> None:
     # Schritt 1: registrieren -> Server-Key holen.
     env = dict(os.environ)
     env["SECSCAN_MASTER_KEY"] = _master_key()
-    reg = subprocess.run(  # noqa: S603
+    reg = subprocess.run(
         [
             str(AGENT_DIR / "secscan-register.sh"),
             _server_url(),
@@ -115,7 +115,7 @@ def test_agent_script_pushes_real_fixture(tmp_path: Path) -> None:
     env["SECSCAN_API_KEY"] = api_key
     env["SECSCAN_TRIVY_PATH"] = str(mock_trivy)
     env["SECSCAN_SCAN_PATH"] = str(tmp_path)
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [str(AGENT_DIR / "secscan-agent.sh")],
         env=env,
         capture_output=True,
@@ -171,7 +171,7 @@ def test_run_adversarial_script_passes() -> None:
     """Das `run_adversarial.sh` muss erfolgreich (exit 0) durchlaufen."""
     env = dict(os.environ)
     env["SECSCAN_URL"] = _server_url()
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [str(REPO_ROOT / "tests" / "adversarial" / "run_adversarial.sh")],
         env=env,
         capture_output=True,

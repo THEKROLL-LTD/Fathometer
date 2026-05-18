@@ -48,9 +48,9 @@ log = structlog.get_logger(__name__)
 
 
 # Postgres-Hard-Limit fuer Bind-Parameter pro Query: 65535 (uint16). Eine
-# Finding-Row bindet 22 Spalten — wir batchen daher in 1000er-Schritten und
-# haben damit ~22000 Parameter pro Statement, also komfortabel unter dem
-# Limit auch wenn jemand spaeter Spalten ergaenzt.
+# Finding-Row bindet ~27 Spalten (nach Block N) — wir batchen daher in
+# 1000er-Schritten und haben damit ~27000 Parameter pro Statement, also
+# komfortabel unter dem Limit auch wenn weitere Spalten dazukommen.
 FINDINGS_INSERT_CHUNK_SIZE = 1000
 
 
@@ -123,6 +123,23 @@ def _safe_vuln(raw_vuln: Any, *, server_name: str) -> TrivyVulnerability | None:
 _TARGET_MAX_LEN = 160  # bleibt mit pkg_name unter 256.
 
 
+def _extract_cause_fields(vuln: TrivyVulnerability, result: TrivyResult) -> dict[str, Any]:
+    """Block N (ADR-0021): zieht die fuenf Ursachen-Felder pro Finding.
+
+    Wird sowohl bei Insert als auch bei Update gesetzt — wenn ein Feld jetzt
+    `None` ist und vorher gefuellt war, wird die DB-Spalte auf NULL
+    aktualisiert. Bewusst: der aktuelle Scan ist die Quelle der Wahrheit,
+    historische Werte werden nicht bewahrt.
+    """
+    return {
+        "package_purl": vuln.package_purl,
+        "target_path": result.target,
+        "result_type": result.type_,
+        "severity_source": vuln.severity_source,
+        "vendor_ids": vuln.vendor_ids,
+    }
+
+
 def _disambiguated_package_name(
     pkg_name: str, target: str | None, finding_class: FindingClass
 ) -> str:
@@ -150,6 +167,7 @@ def _build_finding_row(
     vuln: TrivyVulnerability,
     finding_class: FindingClass,
     target: str | None,
+    result: TrivyResult,
     now: datetime,
 ) -> dict[str, Any]:
     """Erzeugt das dict fuer den Bulk-Insert einer Finding-Zeile."""
@@ -157,6 +175,7 @@ def _build_finding_row(
     attack_vector_str = vuln.attack_vector_from_cvss()
     severity = _SEVERITY_MAP[vuln.severity]
     pkg_disamb = _disambiguated_package_name(vuln.pkg_name, target, finding_class)
+    cause = _extract_cause_fields(vuln, result)
 
     return {
         "server_id": server_id,
@@ -178,6 +197,12 @@ def _build_finding_row(
         "cwe_ids": vuln.cwe_ids or None,
         "attack_vector": _ATTACK_VECTOR_MAP[attack_vector_str].value,
         "references": vuln.references or None,
+        # Block N (ADR-0021) — Ursachen-Felder.
+        "package_purl": cause["package_purl"],
+        "target_path": cause["target_path"],
+        "result_type": cause["result_type"],
+        "severity_source": cause["severity_source"],
+        "vendor_ids": cause["vendor_ids"],
         "status": FindingStatus.OPEN.value,
         "first_seen_at": now,
         "last_seen_at": now,
@@ -240,6 +265,7 @@ def ingest_scan(
                     vuln=vuln,
                     finding_class=finding_class,
                     target=target,
+                    result=trivy_result,
                     now=now,
                 )
             )
@@ -255,8 +281,8 @@ def ingest_scan(
     updated_count = 0
 
     if rows:
-        # Postgres-Limit: max 65535 Bind-Parameter pro Query. Bei 22 Spalten
-        # pro Row passt das fuer ~2978 Rows; ein grosser Server-Scan (Ubuntu
+        # Postgres-Limit: max 65535 Bind-Parameter pro Query. Bei ~27 Spalten
+        # pro Row passt das fuer ~2400 Rows; ein grosser Server-Scan (Ubuntu
         # /-Root) liefert aber leicht 5000+ Findings. Daher in Batches von
         # FINDINGS_INSERT_CHUNK_SIZE Rows upserten und Ergebnisse aggregieren.
         for chunk_start in range(0, len(rows), FINDINGS_INSERT_CHUNK_SIZE):
@@ -279,6 +305,14 @@ def ingest_scan(
                 "references": stmt.excluded.references,
                 "last_seen_at": stmt.excluded.last_seen_at,
                 "finding_class": stmt.excluded.finding_class,
+                # Block N (ADR-0021) — Ursachen-Felder: bei jedem Re-Ingest
+                # ueberschreiben (auch auf NULL), aktueller Scan ist Quelle
+                # der Wahrheit.
+                "package_purl": stmt.excluded.package_purl,
+                "target_path": stmt.excluded.target_path,
+                "result_type": stmt.excluded.result_type,
+                "severity_source": stmt.excluded.severity_source,
+                "vendor_ids": stmt.excluded.vendor_ids,
             }
             upsert = stmt.on_conflict_do_update(
                 constraint="uq_findings_natural_key",
@@ -348,6 +382,10 @@ def ingest_scan(
     server.kernel_version = envelope.host.kernel_version
     server.architecture = envelope.host.architecture
     server.agent_version = envelope.agent_version
+    # Block N (ADR-0021): zuletzt beobachtete Trivy-CLI-Version aus dem
+    # `host`-Block (optional — Agent v0.1.0 sendet das Feld nicht).
+    server.trivy_version = envelope.host.trivy_version
+    server.agent_version_seen_at = now
     if trivy_db_version is not None:
         server.trivy_db_version = trivy_db_version
     if trivy_db_updated_at is not None:

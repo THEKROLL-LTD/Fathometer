@@ -4,6 +4,147 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.7.0] — 2026-05-18
+
+Block N aus [ADR-0021](docs/decisions/0021-agent-bootstrap-installer.md):
+Backend-gehosteter interaktiver Bootstrap-Installer, Veraltet-Indikatoren
+im UI, Agent-side Trivy-Output-Strip, Ursachen-Felder pro Finding.
+Funktional ein groesseres Operator-UX-Update; DB-Schema-Erweiterung um
+acht nullable Spalten (zwei Server + fuenf Finding plus der bereits aus
+0002 vorhandene `agent_version`), kein Bruch.
+
+### Neu
+
+- **Bootstrap-Installer.** Neuer Operator-Standardpfad fuer die
+  Agent-Installation: `curl -fsSL https://secscan.example.com/install.sh |
+  sudo bash`. Backend rendert ein Jinja-Template (~720 Bash-Zeilen) mit
+  sechs sichtbaren Phasen (System detection / Dependencies / Trivy /
+  Server registration / Scheduler / Probe scan), englischsprachiger
+  TTY-UI mit Box-Bordern, ANSI-Farben (`NO_COLOR`-respektierend) und
+  Status-Symbolen `[ok]` / `[..]` / `[fail]`. Master-Key wird interaktiv
+  ueber `/dev/tty` silent abgefragt — kein Argv, keine Shell-History,
+  keine ENV-Var. Trivy wird per `sha256sum -c` gegen das `checksums.txt`
+  des GitHub-Releases verifiziert. systemd-Service plus -Timer (daily,
+  `RandomizedDelaySec=2h`) als Default; Cron-Fallback mit Jitter wenn
+  `systemctl` fehlt. Unattended-Modus via `SECSCAN_UNATTENDED=1` plus
+  `SECSCAN_MASTER_KEY`/`SECSCAN_SERVER_NAME` fuer Ansible/Cloud-Init.
+- **Drei neue Public-Endpoints.** `GET /install.sh` rendert das Wizard-
+  Template mit eingebackener `SECSCAN_URL`. `GET /agent/files/<name>`
+  liefert `secscan-agent.sh`/`secscan-register.sh` ueber strikte
+  Whitelist plus `send_from_directory`. `GET /agent/version` liefert
+  JSON mit `current_agent_version`, `min_agent_version`,
+  `recommended_trivy_version`, `min_trivy_version`,
+  `trivy_release_url_template`. Alle drei in `PUBLIC_PATHS`-Allowlist,
+  ohne Auth/CSRF.
+- **Veraltet-Indikatoren im UI.** Server-Detail-Header bekommt drei
+  conditional Pills (`pill-agent-outdated`, `pill-trivy-outdated`,
+  `pill-trivy-db-stale`) mit Tooltips, die den konkreten Update-Befehl
+  zeigen. Sidebar-Server-Liste bekommt einen `⚠`-Sub-Marker pro Server,
+  falls einer der drei Indikatoren greift. Polling-Wrapper aus Block L
+  sorgt fuer automatische Aktualisierung. Schwellen sind Code-Konstanten
+  in `app/config.py` (`MIN_AGENT_VERSION="0.1.0"`,
+  `MIN_TRIVY_VERSION="0.70.0"`, `TRIVY_DB_STALE_THRESHOLD_DAYS=7`) —
+  bewusst nicht UI-aenderbar (Selbstabschaltungs-Falle).
+- **Ursachen-Felder pro Finding.** Fuenf neue nullable Finding-Spalten
+  `package_purl`, `target_path`, `result_type`, `severity_source`,
+  `vendor_ids` werden aus `Vulnerability.PkgIdentifier.PURL`,
+  `Result.Target`, `Result.Type`, `Vulnerability.SeveritySource`,
+  `Vulnerability.VendorIDs` extrahiert. Findings-Tabelle (Server-Detail
+  und Dashboard) zeigt eine Sub-Zeile mit Distro-Pill plus Vendor-IDs
+  fuer `os-pkgs` bzw. Library-Type-Pill plus Datei-Pfad in Mono-Font
+  fuer `lang-pkgs`. Tooltip mit PURL/Severity-Source. Fallback fuer
+  Alt-Daten ohne `target_path` aus dem `@`-Split im `package_name`
+  (ADR-0011-Uebergangsformat). **Bewusst weggelassen:** statisches
+  Update-Befehl-Mapping (`apt`/`dnf`/`apk`-Snippets) — kommt als
+  eigener LLM-basierter Block nach v0.7.0.
+
+### Geaendert
+
+- **Agent-Skript `secscan-agent.sh`** auf Version `0.2.0` gebumpt.
+  Sendet `host.trivy_version` zusaetzlich im Envelope. Strippt
+  `Results[].Packages` per `jq 'del(.Results[].Packages)'` vor dem
+  Envelope-Build (raw ~4.95 MB → 400–700 KB, gzipped ~560 KB →
+  100–200 KB; Vuln-Counts und `PkgIdentifier`/`SeveritySource`/
+  `VendorIDs` pro Vuln bleiben intakt). Fallback auf ungestripped bei
+  `jq`-Fehler — Backend toleriert beides per `extra="ignore"`. Alle
+  User-sichtbaren Strings auf Englisch normalisiert.
+- **Agent-Skript `secscan-register.sh`** User-Strings auf Englisch
+  normalisiert. Aufruf-Hinweis erwaehnt jetzt zusaetzlich
+  `curl -fsSL .../install.sh | sudo bash` als bevorzugten Standardpfad.
+- **Envelope-Schema.** `HostBlock.trivy_version: str | None`,
+  Sub-Modell `TrivyPkgIdentifier(PURL, UID)`, `TrivyVulnerability`
+  um `pkg_identifier`/`severity_source`/`vendor_ids` plus Convenience-
+  Property `package_purl`. `MAX_VENDOR_IDS_PER_VULN=32`,
+  `MAX_VENDOR_ID_LENGTH=128`. Validatoren analog `cwe_ids`/`references`
+  — defensives Trim, ASCII-Only, NUL-frei. Forward-Compat via
+  `extra="ignore"` unveraendert.
+- **Ingest** in `app/api/scans.py` extrahiert `agent_version` und
+  `host.trivy_version` aus dem Envelope und schreibt sie auf
+  `Server.trivy_version`/`Server.agent_version_seen_at`. Bei
+  `version_lt(envelope.agent_version, MIN_AGENT_VERSION)` → 400 mit
+  Audit-Event `agent.rejected_outdated`. Auth-Reihenfolge (401 vor
+  400) bleibt erhalten.
+- **`findings_ingest`** persistiert die fuenf Ursachen-Felder bei
+  jedem UPSERT (auch auf Update — Re-Ingest-Konsolidierung). Wenn
+  `vuln.severity_source` neu None ist, wird die Spalte auf NULL
+  gesetzt (kein historisches Bewahren). `_disambiguated_package_name`
+  unveraendert (ADR-0011-Uebergangsformat).
+- **`.dockerignore`** `agent/` entfernt — Runtime-Image enthaelt
+  jetzt das `agent/`-Verzeichnis, damit `GET /agent/files/<name>`
+  in Produktion auch tatsaechlich Inhalte liefert.
+- **ARCHITECTURE.md §6** Envelope-Beispiel auf Agent 0.2.0 plus
+  `host.trivy_version` plus Ursachen-Feld-Hinweis aktualisiert.
+- **ARCHITECTURE.md §11** Installer-Flow als Standardpfad
+  dokumentiert; Power-User-Pfad (Repo-Klonen) bleibt als Alternative;
+  Forward-Compat-Absatz um UI-Indikatoren ergaenzt. Neue Subsektion
+  „Backend-hosted bootstrap installer" mit den drei Routes.
+- **ARCHITECTURE.md §17** „LLM-basierte Update-Befehl-Empfehlung pro
+  Finding" als expliziter Out-of-Scope-Punkt fuer v0.7.0 ergaenzt.
+
+### DB-Migration
+
+- `alembic/versions/0003_block_n_agent_and_finding_cause.py`. Sieben
+  `add_column` (zwei `servers`, fuenf `findings`) — `Server.agent_version`
+  existierte bereits aus Migration 0002. Alle nullable, kein Backfill.
+  UNIQUE-Constraint `uq_findings_natural_key` unveraendert.
+  `alembic upgrade head && alembic downgrade -1 && alembic upgrade head`
+  durchlaeuft sauber.
+
+### Tests
+
+- 992 Tests grün (vorher 884), 5 e2e SKIPPED, 4 deselected
+  (Bench + Integration). 254 adversarial PASS (+14 Block-N-Cases:
+  Path-Traversal, no-secrets, outdated-reject, public-no-auth,
+  PURL-XSS, VendorIDs-Injection). Coverage **92.16 %** (Threshold 85 %).
+- `tests/integration/installer/` mit Ubuntu 24.04- und AlmaLinux-9-
+  Dockerfiles plus `run.sh`. Marker `@pytest.mark.integration`, aus
+  Default-Suite via `pyproject.toml`/`pytest.ini` ausgeschlossen.
+  Make-Target `make test-installer`.
+- Block-N-spezifische Test-Module: `test_agent_constants`,
+  `test_agent_version`, `test_scans_envelope_trivy_version`,
+  `test_envelope_cause_fields`, `test_findings_ingest_cause_mapping`,
+  `test_agent_install`, `test_agent_install_render`,
+  `test_agent_install_smoke`, `test_agent_strip`,
+  `test_block_n_columns`, `test_finding_display`,
+  `test_server_detail_outdated_pills`, `test_sidebar_outdated_marker`,
+  `test_findings_section_cause_row`.
+- `ruff check`/`ruff format --check`/`mypy app/` PASS;
+  `shellcheck agent/*.sh` PASS;
+  `docker build` + `docker compose up --build` + `/healthz`/`/install.sh`/
+  `/agent/version`/`/agent/files/secscan-agent.sh` PASS;
+  Image-Size 191 MB (unveraendert vs. v0.6.x).
+
+### Migrationen / Operations
+
+- `alembic upgrade head` automatisch beim Container-Start
+  (Entrypoint unveraendert).
+- Bestehende v0.1.0-Agents werden **nicht** abgewiesen
+  (`MIN_AGENT_VERSION="0.1.0"`), bekommen aber die Veraltet-Pill in
+  der UI sobald `CURRENT_AGENT_VERSION` gebumpt wird. Operator
+  migriert via Re-Run des Einzeilers
+  `curl -fsSL .../install.sh | sudo bash` — der Installer erkennt
+  bestehende Registrierung und ueberspringt Phase 4.
+
 ## [v0.6.1] — 2026-05-17
 
 ### Fixed

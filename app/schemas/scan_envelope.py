@@ -48,10 +48,17 @@ Pragmatische Defaults wo §10 unscharf war:
   Trim-Validator und produzierte HTTP 422 statt das beabsichtigte Trim
   (Fix v0.6.1).
 - max 50 CweIDs pro Finding — analog defensiv getrimmt.
+- max 32 VendorIDs pro Finding — Block N (ADR-0021).
 - max 50.000 Vulnerabilities aggregiert ueber alle Results (§9).
 - max 1.000 Results pro Scan (§10 "Listen-Bounds").
 - max 64 KB pro einzelnem String-Feld (§9 "Trivy-JSON-Sanity-Checks") — wir
   reflektieren das per `max_length=65536` an Description.
+
+Block N (ADR-0021): `PkgIdentifier`/`SeveritySource`/`VendorIDs` werden ab
+v0.7.0 aktiv extrahiert und persistiert — frueher hat das Schema sie via
+`extra="ignore"` weggeworfen. Zusaetzlich liefert der Agent ab v0.2.0
+`host.trivy_version` und strippt den `Results[].Packages`-Inventarblock
+vor dem Upload (`extra="ignore"` toleriert beide Faelle).
 """
 
 from __future__ import annotations
@@ -114,6 +121,8 @@ MAX_VULNS_PER_SCAN = 50_000
 MAX_RESULTS_PER_SCAN = 1_000
 MAX_REFERENCES_PER_VULN = 100
 MAX_CWE_IDS_PER_VULN = 50
+MAX_VENDOR_IDS_PER_VULN = 32
+MAX_VENDOR_ID_LENGTH = 128
 MAX_STRING_LENGTH = 65_536  # 64 KB pro String-Feld (§9).
 MAX_REF_URL_LENGTH = 2_048  # §10 "max 2 KB pro URL".
 MAX_TITLE_LENGTH = 512
@@ -233,6 +242,31 @@ class TrivyCVSSEntry(BaseModel):
         return v
 
 
+class TrivyPkgIdentifier(BaseModel):
+    """`Vulnerability.PkgIdentifier` aus Trivy (ab Schema-Version 2).
+
+    Block N (ADR-0021): wir extrahieren `PURL` (canonical Package-URL) als
+    opaken String zur Anzeige in der UI-Ursachen-Zeile. Keine strukturierte
+    Validierung der PURL-Komponenten — das ist Sache eines spaeteren
+    Parsers, falls/wenn das Update-Befehl-Feature kommt.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    purl: str | None = Field(default=None, alias="PURL", max_length=512)
+    uid: str | None = Field(default=None, alias="UID", max_length=64)
+
+    @field_validator("purl", "uid")
+    @classmethod
+    def _validate_ascii(cls, v: str | None) -> str | None:
+        v = _no_nul_bytes(v)
+        if v is None or v == "":
+            return v
+        if not _PRINTABLE_ASCII_RE.match(v):
+            raise ValueError("Feld muss druckbares ASCII sein")
+        return v
+
+
 class TrivyEPSSBlock(BaseModel):
     """`EPSS: {Score, Percentile}` — gesehen in `adversarial.json`."""
 
@@ -299,6 +333,16 @@ class TrivyVulnerability(BaseModel):
     published_date: datetime | None = Field(default=None, alias="PublishedDate")
     last_modified_date: datetime | None = Field(default=None, alias="LastModifiedDate")
 
+    # Block N (ADR-0021): Ursachen-Felder. `pkg_identifier.purl` ist die
+    # canonical Package-URL; `severity_source` der Provider, der die
+    # Severity gemeldet hat (`ubuntu`/`nvd`/`ghsa`/...); `vendor_ids` sind
+    # Distro-Advisory-IDs (`USN-...`, `RHSA-...`).
+    pkg_identifier: TrivyPkgIdentifier | None = Field(default=None, alias="PkgIdentifier")
+    severity_source: str | None = Field(default=None, alias="SeveritySource", max_length=64)
+    # Wie `cwe_ids`/`references`: KEIN `max_length` am Field — der
+    # Validator trimmt defensiv. Cap-Quelle ist `MAX_VENDOR_IDS_PER_VULN`.
+    vendor_ids: list[str] | None = Field(default=None, alias="VendorIDs")
+
     # ---- Validators ------------------------------------------------------
 
     @field_validator("vulnerability_id")
@@ -318,7 +362,7 @@ class TrivyVulnerability(BaseModel):
             raise ValueError("PkgName enthaelt unzulaessige Zeichen")
         return v
 
-    @field_validator("installed_version", "fixed_version", "pkg_id", "status")
+    @field_validator("installed_version", "fixed_version", "pkg_id", "status", "severity_source")
     @classmethod
     def _validate_ascii_field(cls, v: str | None) -> str | None:
         v = _no_nul_bytes(v)
@@ -380,6 +424,32 @@ class TrivyVulnerability(BaseModel):
             cleaned.append(item)
         return cleaned[:MAX_REFERENCES_PER_VULN]
 
+    @field_validator("vendor_ids")
+    @classmethod
+    def _validate_vendor_ids(cls, v: list[str] | None) -> list[str] | None:
+        """Block N (ADR-0021): defensiver Trim analog `cwe_ids`/`references`.
+
+        Verwirft Items mit NUL-Byte, non-ASCII oder ueberlanger Laenge.
+        Cap auf `MAX_VENDOR_IDS_PER_VULN` (32) Items, jedes max
+        `MAX_VENDOR_ID_LENGTH` (128) Chars. KEIN `max_length` am Field —
+        sonst wuerde der Built-in-Constraint einen harten Reject ausloesen
+        statt das beabsichtigte Trim (siehe v0.6.1).
+        """
+        if v is None:
+            return None
+        cleaned: list[str] = []
+        for item in v:
+            if not isinstance(item, str):
+                continue
+            if "\x00" in item:
+                continue
+            if len(item) > MAX_VENDOR_ID_LENGTH:
+                continue
+            if not _PRINTABLE_ASCII_RE.match(item):
+                continue
+            cleaned.append(item)
+        return cleaned[:MAX_VENDOR_IDS_PER_VULN]
+
     @field_validator("primary_url")
     @classmethod
     def _validate_primary_url(cls, v: str | None) -> str | None:
@@ -440,6 +510,16 @@ class TrivyVulnerability(BaseModel):
             "L": "local",
             "P": "physical",
         }.get(m.group(1), "unknown")
+
+    @property
+    def package_purl(self) -> str | None:
+        """Convenience-Property fuer den Ingest-Mapper.
+
+        Liefert `pkg_identifier.purl` falls vorhanden, sonst `None`.
+        """
+        if self.pkg_identifier is None:
+            return None
+        return self.pkg_identifier.purl
 
 
 class TrivyResult(BaseModel):
@@ -515,6 +595,19 @@ class HostBlock(BaseModel):
     os_pretty_name: Annotated[str, Field(max_length=256)]
     kernel_version: Annotated[str, Field(max_length=128)]
     architecture: Annotated[str, Field(max_length=16)]
+    # Block N (ADR-0021): Agent ab v0.2.0 meldet die Trivy-CLI-Version.
+    # Optional fuer Forward-Compat — Agent v0.1.0 sendet das Feld nicht.
+    trivy_version: str | None = Field(default=None, max_length=64)
+
+    @field_validator("trivy_version")
+    @classmethod
+    def _validate_trivy_version(cls, v: str | None) -> str | None:
+        v = _no_nul_bytes(v)
+        if v is None or v == "":
+            return None
+        if not _PRINTABLE_ASCII_RE.match(v):
+            raise ValueError("trivy_version muss druckbares ASCII sein")
+        return v
 
     @field_validator("os_family")
     @classmethod
@@ -611,6 +704,8 @@ __all__: list[str] = [
     "MAX_CWE_IDS_PER_VULN",
     "MAX_REFERENCES_PER_VULN",
     "MAX_RESULTS_PER_SCAN",
+    "MAX_VENDOR_IDS_PER_VULN",
+    "MAX_VENDOR_ID_LENGTH",
     "MAX_VULNS_PER_SCAN",
     "Envelope",
     "HostBlock",
@@ -621,6 +716,7 @@ __all__: list[str] = [
     "TrivyEPSSBlock",
     "TrivyMetadata",
     "TrivyOSBlock",
+    "TrivyPkgIdentifier",
     "TrivyReport",
     "TrivyResult",
     "TrivyVersionBlock",

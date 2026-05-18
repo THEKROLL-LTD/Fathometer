@@ -40,7 +40,6 @@ from app.forms import (
 from app.models import Finding, FindingStatus, Server, ServerTag, Severity, Tag
 from app.schemas.findings_view_filter import FindingsViewFilter
 from app.services.diff_view import DiffSection, compute_diff
-from app.settings_service import get_settings_row
 from app.services.findings_query import (
     PackageGroup,
     count_findings,
@@ -55,6 +54,7 @@ from app.services.severity_history import (
     severity_snapshots_for_server,
 )
 from app.services.trend import Tendency, compute_tendency
+from app.settings_service import get_settings_row
 
 log = structlog.get_logger(__name__)
 
