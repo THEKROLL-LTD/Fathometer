@@ -62,7 +62,9 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Aktueller Block
 
-(keiner — Block M abgeschlossen 2026-05-16, nächster Block per User-Entscheidung)
+**N — Agent-Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding** · gestartet 2026-05-17 · Branch `feat/block-n-agent-installer` (vom User extern angelegt) · Spec [ADR-0021](../decisions/0021-agent-bootstrap-installer.md) · Brief [N-agent-installer.md](N-agent-installer.md) · Zielversion v0.7.0.
+
+Vier zusammenhängende Teile: (1) Backend-gehosteter interaktiver Bootstrap-Installer (`curl -fsSL .../install.sh | sudo bash`, sechs-Phasen-Wizard, englische TTY-UI, Master-Key interaktiv abgefragt, kein Auto-Update); (2) Veraltet-Indikatoren im Server-Detail-Header und in der Sidebar-Server-Liste basierend auf `agent_version`/`trivy_version`/`trivy_db_updated_at` gegen Code-Konstanten `MIN_AGENT_VERSION`/`MIN_TRIVY_VERSION`/`TRIVY_DB_STALE_THRESHOLD_DAYS=7`; (3) Agent-side Trivy-Output-Strip via `jq 'del(.Results[].Packages)'` mit Fallback auf ungestripped bei `jq`-Fehler; (4) Ursachen-Felder pro Finding (`package_purl`, `target_path`, `result_type`, `severity_source`, `vendor_ids`) plus UI-Sub-Zeile in der Findings-Tabelle. **Bewusst weggelassen:** statisches Update-Befehl-Mapping (`apt`/`dnf`/`apk`-Snippets) — kommt als eigener LLM-basierter Block nach v0.7.0. ADR-0011 wird teilweise abgelöst (eigene `target_path`-Spalte ersetzt die `@target`-Codierung im `package_name` für neue Findings, via natürliche Re-Ingest-Konsolidierung — kein Daten-Migration im Block).
 
 ## Completed
 
@@ -101,6 +103,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 | K | [K-server-detail-visual.md](K-server-detail-visual.md) | completed 2026-05-16 — **v0.4.0** (ADR-0018 Server-Detail-Redesign) |
 | L | [L-dashboard-polling.md](L-dashboard-polling.md) | completed 2026-05-16 — **v0.5.0** (ADR-0019 Dashboard-SSE → HTMX-Polling, LLM-Stream-SSE bleibt) |
 | M | [M-dashboard-findings.md](M-dashboard-findings.md) | completed 2026-05-16 — **v0.6.0** (ADR-0020 Cross-Server-Findings + KPI-Sparklines, /findings/search-Removal) |
+| N | [N-agent-installer.md](N-agent-installer.md) | in progress (gestartet 2026-05-17) — Zielversion v0.7.0 (ADR-0021 Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding) |
 
 ## Aktive Blocker
 
