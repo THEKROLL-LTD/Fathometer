@@ -16,7 +16,13 @@
 
 set -euo pipefail
 
-readonly SECSCAN_URL="{{ secscan_url }}"
+# SECSCAN_URL bewusst NICHT `readonly` — Phase 6 (probe scan) sourced
+# `/etc/secscan/agent.env` in einer Subshell, die diesselbe Variable per
+# `set -a; . agent.env` neu zuweist. `readonly` wird in Subshells geerbt
+# und wuerde das Re-Assignment mit 'readonly variable' abbrechen lassen,
+# obwohl die Werte identisch sind. Der Wert wird im Wizard ohnehin nie
+# veraendert — der Defense-Aspekt von `readonly` war hier ueberzogen.
+SECSCAN_URL="{{ secscan_url }}"
 readonly RECOMMENDED_TRIVY_VERSION="{{ recommended_trivy_version }}"
 readonly MIN_TRIVY_VERSION="{{ min_trivy_version }}"
 # CURRENT_AGENT_VERSION is rendered for operator inspection (the running

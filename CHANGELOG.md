@@ -4,6 +4,40 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.7.2] — 2026-05-18
+
+Punkt-Fix fuer Phase 6 (Probe-Scan) im Bootstrap-Installer.
+
+### Fixed
+
+- **`probe scan` schlug mit `SECSCAN_URL: readonly variable` fehl.**
+  Das Wizard-Toplevel hat `SECSCAN_URL="..."` mit `readonly`
+  deklariert. In Phase 6 sourced der Wizard `/etc/secscan/agent.env`
+  in einer Subshell (`( set -a; . agent.env; secscan-agent.sh )`).
+  Subshells erben `readonly`-Flags, und das `agent.env`-Re-Assignment
+  derselben Variable scheiterte sofort — der Probe-Scan endete mit
+  `exit 1`, obwohl die Werte identisch waren. Real beobachtet auf
+  `rke2-sv-0-1` (Ubuntu 22.04 aarch64) nach dem v0.7.1-Upgrade.
+- **Mitigation:** `SECSCAN_URL` wird nicht mehr als `readonly`
+  deklariert. Der Wert wird im Wizard ohnehin nirgends veraendert —
+  der Defense-Aspekt war ueberzogen. Alle anderen Wizard-Konstanten
+  (`RECOMMENDED_TRIVY_VERSION`, `MIN_TRIVY_VERSION`,
+  `CURRENT_AGENT_VERSION`, `TRIVY_RELEASE_URL_TEMPLATE`,
+  `SECSCAN_PREFIX`/`BIN_DIR`/`CONF_DIR`/`ENV_FILE`, `TTY_INPUT`,
+  `UNATTENDED`) bleiben `readonly`, weil sie nicht in `agent.env`
+  vorkommen.
+- **Operator-Workflow:** Falls Phase 6 bereits einmal mit dem Bug
+  durchlief, sind systemd-Unit + Timer in Phase 5 schon scharf —
+  der naechste regulaere Timer-Tick versucht es erneut, jetzt
+  korrekt. Manueller Trigger: `systemctl start secscan-agent.service`.
+
+### Tests
+
+- `tests/views/test_install_sh_public_url.py::test_install_sh_does_not_make_secscan_url_readonly`
+  — verifiziert dass das Template kein `readonly SECSCAN_URL=` mehr
+  enthaelt und die Variable als normales Assignment vorhanden ist.
+- 999 Tests gruen (+1 vs. v0.7.1), Coverage 92 %.
+
 ## [v0.7.1] — 2026-05-18
 
 Defect-Fix-Release fuer Block N. Drei verschraenkte Bugs, die zusammen

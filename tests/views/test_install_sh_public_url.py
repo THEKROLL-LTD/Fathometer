@@ -90,3 +90,29 @@ def test_register_script_uses_redirect_following() -> None:
     script = _REPO_ROOT / "agent" / "secscan-register.sh"
     content = script.read_text(encoding="utf-8")
     assert "--post301 --post302 --post303 -L" in content
+
+
+def test_install_sh_does_not_make_secscan_url_readonly() -> None:
+    """v0.7.2 — `SECSCAN_URL` darf nicht `readonly` sein.
+
+    Phase 6 (probe scan) sourced `/etc/secscan/agent.env` in einer
+    Subshell. Wenn das Wizard-Toplevel `readonly SECSCAN_URL=...`
+    deklariert, erbt die Subshell das `readonly`-Flag, und das
+    Re-Assignment aus `agent.env` schlaegt mit 'readonly variable'
+    fehl — der probe-scan endet mit exit 1, obwohl die Werte
+    identisch sind.
+
+    Real beobachtet auf rke2-sv-0-1 (Ubuntu 22.04 aarch64) nach dem
+    v0.7.1-Upgrade.
+    """
+    template = _REPO_ROOT / "app" / "templates" / "agent" / "install.sh.j2"
+    content = template.read_text(encoding="utf-8")
+    # Es darf keine `readonly SECSCAN_URL=`-Zeile geben — weder am
+    # Zeilenanfang noch nach Whitespace.
+    for line in content.splitlines():
+        stripped = line.lstrip()
+        assert not stripped.startswith("readonly SECSCAN_URL"), (
+            f"SECSCAN_URL must not be readonly, found: {line!r}"
+        )
+    # Aber die Variable muss als normales Assignment vorhanden sein.
+    assert 'SECSCAN_URL="{{ secscan_url }}"' in content
