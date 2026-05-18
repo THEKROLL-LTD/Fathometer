@@ -136,7 +136,7 @@ Das API hat zwei Aspekte: server-facing (für Trivy-Push-Clients) und browser-fa
 
 ```json
 {
-  "agent_version": "0.2.0",
+  "agent_version": "0.3.0",
   "host": {
     "os_family": "ubuntu",
     "os_version": "22.04",
@@ -145,12 +145,28 @@ Das API hat zwei Aspekte: server-facing (für Trivy-Push-Clients) und browser-fa
     "architecture": "x86_64",
     "trivy_version": "0.70.2"
   },
+  "host_state": {
+    "snapshot_at": "2026-05-18T03:14:22Z",
+    "tools_available": ["ss", "ps", "lsmod", "systemctl"],
+    "gaps": [],
+    "listeners": [
+      { "proto": "tcp", "addr": "0.0.0.0", "port": 22, "process": "sshd", "pid": 1234 },
+      { "proto": "tcp", "addr": "127.0.0.1", "port": 5432, "process": "postgres", "pid": 5678 }
+    ],
+    "processes": [
+      { "pid": 1234, "user": "root", "comm": "sshd", "args": "/usr/sbin/sshd -D" }
+    ],
+    "kernel_modules": ["ext4", "nf_conntrack", "br_netfilter", "overlay"],
+    "services": ["sshd.service", "postgresql.service", "nginx.service"]
+  },
   "scan": { /* trivy rootfs --format json Output; ab Agent v0.2.0 mit
               gestripptem `Results[].Packages[]` per `jq` */ }
 }
 ```
 
 `host.trivy_version` ist **optional** und wurde mit Agent v0.2.0 ergänzt (ADR-0021). Ältere Agents (v0.1.0) ohne das Feld werden weiter akzeptiert; das Pydantic-Schema typisiert es als `str | None = None`, sodass Envelope-Parses ohne das Feld nicht brechen (Forward-Compat).
+
+`host_state` ist **optional** und wurde mit Agent v0.3.0 ergänzt (ADR-0022). Ältere Agents ohne den Block werden weiter akzeptiert; das Pydantic-Schema typisiert ihn als `HostStateBlock | None = None`. Backend-Validatoren begrenzen die Listen defensiv: **max 4096 Einträge** pro `listeners`/`processes`, **max 1024** pro `kernel_modules`/`services`, **max 32** pro `tools_available`/`gaps`. `listeners[].addr` muss ein IPv4/IPv6-Literal sein (ASCII, NUL-frei), `proto ∈ {tcp,udp,tcp6,udp6}`, `port ∈ [0..65535]`. Schlägt die Validierung fehl, wird der `host_state`-Block verworfen (Audit-Event `host_state.parse_failed`), während der Findings-Ingest unverändert durchläuft; die Pre-Triage (§15) markiert in diesem Fall die Findings dieses Servers als `risk_band=unknown`.
 
 Die Trivy-DB-Frische (`trivy_db_version`, `trivy_db_updated_at`) extrahiert der Server aus `scan.Metadata.DataSource` bzw. `scan.Metadata.UpdatedAt` — der Agent muss nichts Zusätzliches sammeln.
 
@@ -190,11 +206,13 @@ Dashboard-Live-Updates laufen über **HTMX-Polling**, nicht über SSE (siehe ADR
 
 Die UI bleibt bewusst flach. Die obere Nav hat zwei sichtbare Items (Dashboard, Suche → führt seit ADR-0020 auf das Dashboard mit `?q=…`), rechts ein **Theme-Toggle** (Light/Dark/Auto, `localStorage` + `prefers-color-scheme` — DaisyUI macht das mit einem Klassen-Attribut trivial) und ein Profile-Dropdown mit Settings/Audit/Logout (ADR-0016 für den Header-Aufbau).
 
-**`/` (Dashboard)** zeigt seit Block M (ADR-0020) eine cross-server Findings-Triage-Surface in drei Sektionen — Server-Karten-Grid und „Aufmerksamkeit nötig"-Sektion sind in den Sidebar bzw. die KPI-Cards gewandert:
+**`/` (Dashboard)** zeigt seit Block O (ADR-0022) eine Risk-zentrische cross-server Triage-Surface in drei gestaffelten Tiers — die Block-M-KPI-Cards (`Total Open`, `KEV`, `Critical`, `High`, `Stale-Server` mit Sparklines) werden durch dieses Layout abgelöst; die CVSS-Sicht bleibt über die Tertiär-Severity-Strip und über die Filter-Bar zugänglich:
 
 1. **Header** — Eyebrow `DASHBOARD` + Title `Alle Findings`; rechts ein kleiner Counter `N Server sichtbar` plus `gefiltert`-Badge sobald `filter.is_active`.
-2. **KPI-Cards** — fünf Karten (`Total Open`, `KEV`, `Critical`, `High`, `Stale-Server`) mit großem Counter, Eyebrow-Label und 50-Tage-Sparkline. Counter sind **filter-unabhängige OPEN-Werte** (stabiles „big picture"), Sparklines sind ebenfalls flotten-weit über 50 Tage. Cards sind als `<a hx-get>` klickbar und setzen den passenden Quick-Filter (`/?kev_only=1`, `/?severity=critical`, `/?severity=high`, `/?stale_only=1`; die Total-Card resettet den Filter). Reuse des Block-K-`servers/_kpi_card.html`-Partials mit `link_url`-Parameter.
-3. **Findings-Section** — Eyebrow `TRIAGE QUEUE · ALLE SERVER` + Title `Findings`. Filter-Bar mit Hybrid-Auto-Submit: `q` (Volltext, Server-/CVE-/Paket-/Titel-Substring, debounced 400 ms), `tag`, `severity`-Threshold, `status` (offen/acknowledged/resolved/alle, Default `offen`), `kev_only`, `stale_only`, Reset-Link. Keine `Anwenden`-Schaltfläche; jede Eingabe triggert `hx-get`/`hx-select="#findings-section"`/`hx-push-url`. Tabelle mit Bulk-Select-Spalte ganz links, Server (sortierbar, plus Tag-Pills), CVE/Titel, Paket+Location, EPSS, CVSS, Severity, Status, Erstmals — alle Spalten sortierbar via `sort_header()`-Macro. Hartes Limit 200 Rows pro Render; bei Truncation erscheint unterhalb der Tabelle ein Hinweis `Anzeige auf 200 begrenzt — N weitere Treffer. Filter verfeinern oder CSV exportieren.` (CSV ist nicht limitiert). Bulk-Ack-Button erscheint sobald `selection > 0` und nutzt den Block-F-Endpoint `POST /api/findings/bulk-acknowledge` mit `finding_ids`-Flavor.
+2. **Tier 1 — Action-Required-Cards (prominent).** Zwei große Cards nebeneinander, die die Operator-Bauchgefühl-Frage „muss ich was tun?" binär beantworten. Linke Card `Action needed — N servers` zählt Server mit mindestens einem `escalate`/`act`/`mitigate`/`pending`/`unknown`-Finding und zeigt darunter Sub-Counters pro Yes-Band (Escalate · Act · Mitigate · Pending · Unknown). Rechte Card `Safe — N servers` zählt die übrigen aktiven Server (alle Findings in `monitor`/`noise` oder gar keine offenen Findings) mit Sub-Counters (Monitor · Noise). Beide Cards sind klickbar und setzen `?action_required=yes` bzw. `?action_required=no`.
+3. **Tier 2 — Risk-Band-Pills (sekundär).** Sieben kompakte Pills in fester Reihenfolge `Escalate · Act · Mitigate · Pending · Unknown · Monitor · Noise` mit jeweils dem Findings-Count (nicht Server-Count). `Escalate` pulsiert (Pulse-Animation) wenn der Count > 0 ist. Klick auf eine Pill setzt `?risk_band=<band>`.
+4. **Tier 3 — Severity-Strip (tertiär).** Kompakte horizontale Pill-Reihe `CRITICAL · HIGH · MEDIUM · LOW` mit den jeweiligen Findings-Counts. Keine Sparklines, **kein Klick-Filter** (Severity-Filter bleibt in der Filter-Bar erreichbar). Behält die CVSS-Sicht als Referenz neben dem Risk-Layout, ohne sie zur Primärnavigation zu machen.
+5. **Findings-Section** — Eyebrow `TRIAGE QUEUE · ALLE SERVER` + Title `Findings`. Filter-Bar mit Hybrid-Auto-Submit: `q` (Volltext, Server-/CVE-/Paket-/Titel-Substring, debounced 400 ms), `tag`, `severity`-Threshold, `status` (offen/acknowledged/resolved/alle, Default `offen`), **`risk_band`-Select** (Whitelist aus den sieben Bändern plus „alle"), **`action_required`-Select** (`yes`/`no`/„alle"), `kev_only`, `stale_only`, Reset-Link. Keine `Anwenden`-Schaltfläche; jede Eingabe triggert `hx-get`/`hx-select="#findings-section"`/`hx-push-url`. Tabelle mit Bulk-Select-Spalte ganz links, gefolgt von **`Risk` als erster sortierbarer Inhalts-Spalte** (Default-Sort DESC nach `RISK_BAND_SORT_RANK`), dann Server (sortierbar, plus Tag-Pills), CVE/Titel, Paket+Location, EPSS, **`Status`, dann `CVSS-Severity`** (zwischen Status und Erstmals — rutscht damit vom prominenten Anfang weg und ist nicht mehr Primary-Sort), Erstmals — alle Spalten sortierbar via `sort_header()`-Macro. Hartes Limit 200 Rows pro Render; bei Truncation erscheint unterhalb der Tabelle ein Hinweis `Anzeige auf 200 begrenzt — N weitere Treffer. Filter verfeinern oder CSV exportieren.` (CSV ist nicht limitiert). Bulk-Ack-Button erscheint sobald `selection > 0` und nutzt den Block-F-Endpoint `POST /api/findings/bulk-acknowledge` mit `finding_ids`-Flavor.
 
 Der Dashboard-Pane (`#dashboard-pane`) und die Sidebar-Server-Liste (`#server-list`, eigene Polling-Partial-Route `/_partials/sidebar`) pollen jeweils alle 10 s über `hx-get` ihre eigene Partial-Route, gedrosselt auf sichtbare Tabs (`document.visibilityState === 'visible'`). Auf beiden Polling-Containern ist `hx-disinherit="*"` Pflicht, damit die Polling-Attribute (`hx-target="this"`, `hx-swap="outerHTML"`) nicht an innere `<a hx-get>`-Klicks (KPI-Cards, Filter-Bar, Sidebar-Server-Links) vererbt werden. Filter-Submit aktualisiert die URL, der nächste Poll holt sich denselben URL — kein Race.
 
@@ -290,6 +308,15 @@ Statt "keine Daten"-Texten bekommt jeder Empty-State eine kleine Card mit Erklä
 - **Audit-Log leer**: "Noch keine Events. Die ersten kommen mit dem Setup-Wizard und der Server-Registrierung."
 - **Such-Treffer leer**: "Keine Treffer für `{query}`. Tipp: für CVE-IDs `CVE-2024-…` reicht ein Prefix; für Paketnamen reicht ein Fragment."
 
+### Server-Detail Risk-Layout (Block O)
+
+Block O erweitert die Server-Detail-View (`/servers/{id}` im UI-v2-Layout) um drei Bausteine, die das Risk-zentrische Layout aus §7 in die Pro-Server-Sicht spiegeln:
+
+- **Header — Action-Required-Pill als erste Pill.** **Vor** den bestehenden Status-Pills (Severity-Worst, Stale, DB-Stale aus Block D/H) und **vor** den Block-N-„veraltet"-Pills (`agent veraltet` / `trivy veraltet` / `trivy-db stale`) sitzt die neue Action-Required-Pill in drei Varianten: **rot** (`Action needed — 1 escalate · 2 act · 3 pending`, Sub-Counter klickbar als Pro-Band-Filter), **grün** (`Safe — 4 monitor · 96 noise`, ebenfalls mit Sub-Counter), **grau** (`Update agent — host snapshot missing`, Tooltip „Agent ≥ 0.3.0 nötig für kontext-basierte Risk-Bewertung"). Die Pill ist mit `risk_band_pill.html`-Partial gebaut, das CSS-Klassen je Band liefert.
+- **„Host snapshot"-Sektion direkt unter dem Header.** Eine neue collapsible Sektion `<section id="host-snapshot">` zwischen Header und Findings-Tabelle. Inhalt: kompakte Listener-Auflistung (Default zeigt die ersten 5 Zeilen `process · addr:port · proto`, mit „N more — show all"-Toggle), darunter eine einzeilige Service-Pill-Reihe (`Active services: nginx · postgresql · sshd · cron · systemd-logind  (+8)`). Wenn `host_state_snapshot_at` NULL ist (Agent < 0.3.0 oder Snapshot verworfen), zeigt die Sektion stattdessen einen Hint mit Update-Anleitung. Optional aufklappbar: Kernel-Module-Liste, vollständige Prozess-Tabelle. Default-Collapsed: ja, außer es gibt einen `escalate`/`act`-Finding im aktiven Filter.
+- **Findings-Tabelle gruppiert nach `risk_band` mit Section-Headers.** Statt einer flachen Tabelle rendert die Server-Detail-Findings-Section eine Reihe von Sub-Sektionen, eine pro Band in `RISK_BAND_SORT_RANK`-Reihenfolge (Escalate ganz oben, Noise unten). Section-Header zeigt Band-Name, Findings-Count und Expand/Collapse-Toggle. **Default-Expanded:** `escalate`, `act`, `mitigate`, `pending`. **Default-Collapsed:** `unknown`, `monitor`, `noise`. Innerhalb jeder Gruppe gilt die Block-K-Default-Tiebreak-Reihenfolge (KEV, EPSS, CVSS). Per-Finding-Detail-Box zeigt zusätzlich eine **Begründungs-Zeile** mit `risk_band_reason` in Mono-Font (z.B. `vendor (redhat) severity HIGH · pending LLM review`).
+- **Bulk-Ack-„noise"-Workflow.** Im Section-Header der `noise`-Gruppe (bzw. im Findings-Section-Header neben dem CSV-Dropdown) sitzt ein Button `Acknowledge all noise on this server (N)`. Klick öffnet ein Modal mit Liste der `noise`-Findings (max 50 inline plus „... and N more"-Truncation), Pflicht-Bestätigung, dann Aufruf des bestehenden Block-F-Endpoints `POST /findings/bulk-acknowledge` mit `finding_ids`-Flavor plus zusätzlichem `risk_band_filter="noise"`-Parameter. Der Endpoint **filtert server-side hart** auf `Finding.risk_band == "noise"` — eingeschleuste IDs aus anderen Bändern werden gedropt und in der Response gelistet (Adversarial-Hardening). `monitor`-Findings sind aus dem Bulk-Workflow ausgenommen (einzeln-Ack bleibt möglich).
+
 ### Was Block I bewusst NICHT macht
 
 - Kein Dark-Mode-Default-Wechsel (der Toggle aus §7 bleibt, Light bleibt Default — User-Setting im eigenen Theme-Cookie).
@@ -334,6 +361,8 @@ Die unauthenticated Endpunkte (`POST /api/scans` mit fehlendem oder ungültigem 
 **Worker-Tuning.** Im Container läuft die App per Gunicorn mit n Workern (Default 2, konfigurierbar via env). Pro Worker eine httpx-Verbindung zum aktiven LLM-Provider (async pool über das `openai`-SDK), sodass eine LLM-Anfrage nicht alle Worker blockiert. Provider-spezifische Timeouts (Default 120s pro Streaming-Request) verhindern Hänger bei einem überlasteten Backend. Postgres-Pool entsprechend dimensioniert (max 10 Connections per Worker).
 
 **Production-Empfehlung im README.** Explizit dokumentieren: die App allein ist gegen Layer-4-Angriffe nicht gehärtet. In Produktion gehört ein Reverse-Proxy davor (nginx, Caddy, Traefik) für TLS-Termination, Connection-Limits, Slow-Loris-Schutz und idealerweise IP-Allowlist auf `/api/scans` (nur die eigenen Server-IPs zulassen — eliminiert die unauth-Angriffsfläche fast vollständig).
+
+**Host-Snapshot-Bandbreite (ADR-0022).** Der ab Agent 0.3.0 zusätzlich gesendete `host_state`-Block (siehe §6) addiert typisch **+10–30 KB gzipped** pro Scan-Envelope (Listener, Prozesse, Kernel-Module, Services). Der Block läuft durch denselben Streaming-Decompress-Bound (`SECSCAN_MAX_DECOMPRESSED_MB`, Default 100 MB) und dieselben Pydantic-Length-Caps wie der Rest des Envelopes — kein neuer DoS-Schutz nötig, weil die Listen-Bounds (4096 Listener/Prozesse, 1024 Module/Services, 32 Tools/Gaps) den Worst-Case auf wenige MB Roh-JSON pro Block deckeln. **Privacy-Hinweis:** Prozess-`args`-Strings können sensitive Tokens enthalten (z.B. `mysql -u root -psecret` oder API-Keys aus Cmdline-Argumenten), die ungekürzt in `server_processes.args` landen. MVP-Mitigation: README-/Setup-Notice an den Operator (DSGVO-Hinweis und Empfehlung, Cmdline-Args für sensible Dienste über Env-Files statt CLI-Flags zu übergeben). **Kein Schema-Redaction im MVP** — eine Allowlist über akzeptable Arg-Patterns ist Re-Open-Trigger in ADR-0022, weil sie ohne Per-Site-Anpassung mehr verdeckt als hilft.
 
 ## 10. Input-Validierung und Sanitization
 
@@ -390,6 +419,15 @@ curl -fsSL https://secscan.example.com/install.sh | sudo bash
 Der Inhalt ist kein Geheimnis (keine API-Keys im Response, der Master-Key wird ohnehin erst im Wizard-Lauf abgefragt) und der Operator soll das Skript vor dem `| sudo bash` einsehen können. Re-Open-Trigger für eine optionale Auth-Schicht (z.B. IP-Allowlist auf nginx-Ebene): ADR-0021.
 
 **Agent v0.2.0-Erweiterungen.** Das Skript `agent/secscan-agent.sh` schreibt zusätzlich `host.trivy_version` ins Envelope (kleiner `trivy --version | awk`-Helper) und strippt vor dem Envelope-Build den Block `Results[].Packages[]` per `jq 'del(.Results[].Packages)'` aus dem Trivy-Output. Erwarteter Win: raw 4.95 MB → 400-700 KB (80-90% Reduktion); gzipped 560 KB → 100-200 KB. Begründung: die Packages-Inventarliste (`InstalledFiles`, `Maintainer`, `DependsOn`, `Licenses`) ist explizit out-of-scope nach §17 (SBOM/License-Findings) und wird im Ingest ohnehin per `extra="ignore"` verworfen — der Agent-side-Strip vermeidet den Bandbreiten- und Pydantic-Walk-Overhead. Fallback auf ungestripped bei `jq`-Fehler. **Wichtig:** Trivy schreibt `PkgIdentifier`/`SeveritySource`/`VendorIDs` zusätzlich in jeden Vulnerability-Eintrag, sodass der Strip die Ursachen-Felder (siehe nächster Absatz und §6) nicht entwertet.
+
+**Agent v0.3.0-Erweiterungen — Host-Snapshot (ADR-0022).** `AGENT_VERSION="0.3.0"`. Zusätzlich zum Trivy-Output sammelt der Agent vier Host-State-Blöcke und hängt sie als `host_state`-Feld an den Envelope (Größenordnung gzipped: +10–30 KB pro Scan, siehe §9). Die Sammlung läuft in einer sourcebaren Lib `agent/lib_host_state.sh` mit vier Collector-Funktionen, jeweils mit Tool-Verfügbarkeits-Check über `command -v`:
+
+- **`collect_listeners`** — bevorzugt `ss -tulpnH`, Fallback auf `netstat -tulpn`. Parser baut JSON-Items `{proto, addr, port, process, pid}`. Fehlt beides → leerer Block + `gaps+=("listeners")`.
+- **`collect_processes`** — `ps -eo pid,user,comm,args --no-headers`. Items `{pid, user, comm, args}` mit `args`-Cap auf 4096 Zeichen (Java-Cmdlines).
+- **`collect_kernel_modules`** — `lsmod` (Header-Skip), nur Modul-Namen als String-Array. Fehlt `lsmod` (z.B. Container ohne Host-Kernel-Zugriff) → leerer Block + `gaps+=("kernel_modules")`.
+- **`collect_services`** — `systemctl list-units --type=service --state=running --no-legend --plain`. Fehlt `systemctl` (Alpine/OpenRC, siehe §17) → leerer Block + `gaps+=("services")`.
+
+Beide Tracking-Arrays — `tools_available` und `gaps` — werden inkrementell befüllt und ans Envelope-`host_state`-Objekt gehängt, damit das Backend (und Block P im LLM-Prompt) weiß, welche Blöcke verlässlich sind. **ASCII-only-Garantie:** alle Collector-Funktionen laufen unter `LC_ALL=C`, und ein abschließender Non-ASCII-Drop (`tr -cd '\11\12\15\40-\176'` oder gleichwertig via `jq`) entfernt Reste — das Backend lehnt Non-ASCII in den relevanten Feldern strikt ab (siehe §10). Envelope-Builder verwendet `jq` für inkrementelle JSON-Assembly; bei `jq`-Fehler im Snapshot-Teil bleibt das Envelope ohne `host_state` (Findings-Push läuft trotzdem durch).
 
 **Ursachen-Felder pro Finding (ab v0.7.0).** Aus jedem Trivy-Vulnerability-Block werden fünf zusätzliche Werte persistiert (`package_purl`, `target_path`, `result_type`, `severity_source`, `vendor_ids` — siehe §6 für die Schema-Details). Die UI rendert sie als **Ursachen-Sub-Zeile** unter der Haupt-Zeile jeder Finding-Tabelle: bei OS-Pkg-Distros (`ubuntu`, `debian`, `rhel`, `alpine`, ...) als `{package_name} {installed_version} ({result_type})` plus VendorID-Pills daneben; bei Lang-Pkgs (`gobinary`, `jar`, `npm`, `pip`, ...) als `{package_name} {installed_version} in {target_path}` mit Mono-Font für den Pfad. Hover-Tooltip zeigt `PURL: {package_purl}` und `Quelle: {severity_source}`. Damit sieht der Operator auf einen Blick, ob es ein Distro-Paket (Update via Paketmanager) oder eine eingebettete Library (Update via App-Rebuild/Redeploy) ist — **ohne** dass das Backend einen konkreten Update-Befehl vorschlägt. Bewusst kein statisches `UPDATE_TEMPLATES`-Mapping: Distro-Familie alleine ist nicht genug Kontext (Snap/Flatpak/k3s/Container-Hosts/embedded `gobinary` brechen ein generisches Template). LLM-basierte Fix-Empfehlung als Re-Open-Trigger in ADR-0021 dokumentiert, eigene ADR nötig — siehe §17.
 
@@ -493,6 +531,38 @@ Die Default-Sortierung der Findings-Tabelle ist daher: KEV desc, EPSS desc, CVSS
 
 Auf der Server-Detail-View (Block K) sind die Spalten-Header sortierbar: `cve | pkg | epss | cvss | sev | status | first_seen`, Default `sev,desc` mit dem oben genannten Tiebreak. Auf der Dashboard-Findings-Tabelle (Block M, ADR-0020) kommt ein zusätzlicher Sort-Key `server` (alphabetisch nach `Server.name`) hinzu — alle anderen Keys teilen das Server-Detail-Mapping. `sort` und `dir` sind strikt Whitelist-validiert; ungültige Werte fallen still auf den Default zurück (`log.debug`).
 
+### Pre-Triage-Risk-Engine (Block O, ADR-0022)
+
+Mit Block O wird der **Risk-Band als neuer Primary-Sort-Key** eingeführt; CVSS-Severity bleibt erhalten, rutscht aber in den Tiebreak-Tail. Der `risk`-Sort verwendet das deterministische Mapping `RISK_BAND_SORT_RANK` aus `app/services/risk_engine.py`:
+
+```
+escalate = 70   # LLM-Output (Block P)
+act      = 60   # LLM-Output (Block P)
+mitigate = 50   # LLM-Output (Block P)
+pending  = 40   # Pre-Triage-Output
+unknown  = 30   # Pre-Triage-Output (kein Snapshot)
+monitor  = 20   # Pre-Triage- ODER LLM-Output
+noise    = 10   # Pre-Triage- ODER LLM-Output
+NULL     =  0   # noch nicht ausgewertet
+```
+
+Neue Default-Sortier-Kette für Dashboard- und Server-Detail-Tabellen: **`risk_band` DESC (via `RISK_BAND_SORT_RANK`) → KEV DESC → EPSS DESC → CVSS-Severity-Rank DESC → `identifier_key` ASC**. CVSS-Severity ist nicht mehr Primary-Key, bleibt aber als Tiebreak innerhalb desselben Bands — wertvoll wenn zwei Findings beide `pending` sind, aber CVSS 9.8 vs. CVSS 5.4 unterscheidet. `identifier_key` (stabiler Tiebreak) verhindert nicht-deterministische Sortier-Reihenfolge bei sonst identischen Schlüsseln.
+
+Zusätzlich zur Sortierung filtert die UI auf `?risk_band=<band>` (Einzel-Band) bzw. `?action_required=yes|no` (das aggregierte binäre Signal, das `escalate`/`act`/`mitigate`/`pending`/`unknown` zusammenfasst — siehe §7).
+
+**Pre-Triage-Algorithmus (deterministisch, kein Host-Kontext-Match, kein LLM-Aufruf).** Läuft beim Scan-Ingest pro offenem Finding direkt nach dem Snapshot-Persist (Reihenfolge: Auth → Body-Parse → Findings → Snapshot → Pre-Triage). Eingaben: `max_severity_across_providers(finding)` aus dem CVSS-Vendor-Resolver, `finding.epss_score`, `finding.is_kev`, plus das Boolean `snapshot_available` (= existiert ein `host_state`-Eintrag für diesen Server). Output: einer aus `{noise, monitor, pending, unknown}` plus ein menschlich-lesbarer `risk_band_reason`-String (max 256 Zeichen).
+
+Cuts in dieser Reihenfolge (erste Treffer-Regel gewinnt, defensiv-konservativ):
+
+1. **Ohne Snapshot** (`snapshot_available=False`) → **`unknown`** (Reason: `host snapshot missing — update agent to ≥ 0.3.0`).
+2. **KEV-gelistet** → **`pending`** (Reason enthält `KEV listed · pending LLM review`).
+3. **Max-Severity ≥ HIGH** (über alle Provider, inkl. NVD-Top-Level-Wert) → **`pending`** (Reason enthält `max-severity HIGH|CRITICAL`).
+4. **EPSS ≥ 0.1** (`EPSS_PENDING_THRESHOLD`, CISA-nahe Schwelle) → **`pending`** (Reason `EPSS 0.NN ≥ 0.1 · pending LLM review`).
+5. **Max-Severity == MEDIUM** → **`monitor`** (Reason `max-severity MEDIUM · EPSS 0.NNN · not KEV`).
+6. **Sonst** (alle Provider ≤ LOW, EPSS < 0.1, nicht KEV) → **`noise`** (Reason `all providers ≤ LOW · EPSS 0.NNN · not KEV`).
+
+Pre-Triage überschreibt LLM-gesetzte Bands **nicht**: Findings mit `risk_band_source='llm'` werden übersprungen; nur Block P (LLM) entscheidet bei diesen über Re-Eval. Konstanten (Severity-Schwellen, EPSS-Schwelle) leben im Code und können ohne Migration nachjustiert werden, falls die Realbetrieb-Verteilung der Bänder das fordert (siehe ADR-0022 Re-Open-Trigger).
+
 Im **LLM-System-Prompt** werden alle diese Signale dem Modell mitgegeben, damit es seine Empfehlung daran orientiert statt nur an der gröberen Severity-Bucket. Das ist eine der wichtigsten Qualitäts-Verbesserungen des LLM-Workflows.
 
 ## 16. Implementierungs-Reihenfolge
@@ -518,6 +588,16 @@ Die Reihenfolge baut so auf, dass nach jedem Block etwas Demo-fähiges existiert
 ## 17. Out of Scope (für spätere Versionen)
 
 Notifications kommen in v2 — geplant zuerst Email (SMTP) und Discord (Webhook), dann weitere Channels analog zu uptime-kuma. **Secret-Scanning** ist ebenfalls v2: Trivy kann unter `--scanners secret` Schlüssel und Token im Filesystem finden (AWS-Keys, SSH-Keys, generische API-Token), der Workflow ist aber so anders (Key-Rotation statt Paket-Update) und das UI-Design braucht eigene Aufmerksamkeit (Redaction der Werte, eigene Bewertungs-Logik), dass wir es bewusst aus dem MVP raushalten. Das Datenmodell ist über das `finding_type`-Enum vorbereitet, sodass die Erweiterung später keine Migration braucht. Misconfig-Findings (`--scanners misconfig`) folgen demselben Schema, sind ebenfalls v2. Multi-User mit RBAC oder OIDC-SSO ist eine v3-Frage, sobald jemand danach fragt. **Mobile-responsive Layout** ist bewusst nicht im MVP — die App ist desktop-first für Triage-Sessions; Tailwind-Defaults skalieren grundsätzlich, aber wir optimieren nichts für kleine Viewports. Container-Image-Scans und Code-Repository-Scans bleiben explizit außerhalb — andere Werkzeuge sind dafür da. Trend-Graphen über mehrere Wochen (CVE-Anzahl pro Server, MTTR pro Severity, KEV-Burndown) wären v2-Polish. PDF-Export von Audit-Logs für Compliance-Reports kommt wenn jemand fragt. Verteiltes Rate-Limit-Backend (Redis) und Multi-Instance-Deploy ist v3. SBOM-Erfassung und License-Findings sind v3. **LLM-basierte Update-Befehl-Empfehlung pro Finding** (z.B. "diese Library ist in k3s eingebettet, Update via k3s-Release X.Y.Z, Service-Restart nötig") ist bewusst out-of-scope für v0.7.0 — die Ursachen-Felder aus ADR-0021 liefern dem Operator die Information **was** das Problem ist (Distro-Paket vs. eingebettete Library, Pfad, Vendor-Advisory), aber **nicht was zu tun ist**. Ein verlässlicher Fix-Vorschlag braucht Server-Kontext (Tags, OS-Pretty-Name, Cluster der Findings) und Caveats (Snap/Flatpak, Container-Hosts, embedded `gobinary`), die ein statisches Mapping nicht liefert; ein LLM-getriebenes Feature mit Caching und Token-Budget braucht eine eigene ADR.
+
+Weitere Punkte mit Block O (ADR-0022) bewusst aus dem Scope ausgeklammert:
+
+- **LLM-Risk-Reasoning** (Setzen der finalen Bands `escalate`/`act`/`mitigate` plus LLM-Demote zu `monitor`/`noise` durch Auswertung des Host-Snapshots gegen `pending`-Findings) ist Inhalt von **Block P** — nicht in Block O. Block O liefert nur die deterministische Vor-Auswertung (`pending`/`unknown`/`monitor`/`noise`) und die Snapshot-Daten als Eingabe.
+- **Host-Snapshot-Historisierung.** Nur der letzte Snapshot pro Server bleibt erhalten (Truncate+Insert pro Ingest). Eine Zeitreihe über Listener/Prozesse/Module ist out-of-scope — separate ADR mit DSGVO-Betrachtung nötig.
+- **Manueller Risk-Override.** Der Operator kann den Risk-Band nicht über eine Eingabe-Maske oder per Tag setzen. **Acknowledgement** ist der einzige Override-Mechanismus und bleibt es.
+- **Patch-Alter-Eskalation.** Kein automatischer Band-Bump auf Basis „seit X Tagen verfügbarer Patch nicht eingespielt". Wenn LLM/Operator das thematisieren will, läuft das über die existierenden `first_seen_at`-/`fixed_version`-Felder, nicht über eine Engine-Regel.
+- **Exposure-Mapping als statisches Asset.** Kein `app/data/package_exposure_map.json`, kein `app/services/exposure_matcher.py`. Die Frage „passt das verwundbare Modul/Paket zu diesem Host?" beantwortet das LLM in Block P, nicht eine Regel-Engine mit Hunderten Mapping-Einträgen (Wartungsaufwand vs. LLM-Generalisierung — siehe ADR-0022 Begründung).
+- **OpenRC-/Alpine-Service-Sammlung.** Der `services`-Block des Host-Snapshots ist auf `systemctl list-units` zugeschnitten. Alpine/OpenRC-Hosts liefern leer mit `gaps=["services"]` — separater Block (eigene Sammelmethode via `rc-status`) als Re-Open-Trigger.
+- **Daily-Re-Eval-Job für EPSS/KEV-DB-Updates zwischen Scans.** Pre-Triage läuft ausschließlich beim Scan-Ingest. EPSS-/KEV-Datenbank-Updates zwischen zwei Scans schlagen sich erst beim nächsten Scan in den Bändern nieder (Stale-Pill aus Block N macht den Update-Bedarf sichtbar).
 
 ## 18. Offene Punkte vor Implementierung
 

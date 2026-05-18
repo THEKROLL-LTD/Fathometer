@@ -298,17 +298,20 @@ def test_status_invalid_falls_back_to_open() -> None:
     assert DashboardFilter.from_request(_args(status="bogus")).status == "open"
 
 
-def test_sort_default_sev() -> None:
-    assert DashboardFilter.from_request(_args()).sort == "sev"
+def test_sort_default_risk() -> None:
+    """Block O (ADR-0022): Default-Sort wechselt von `sev` auf `risk`."""
+    assert DashboardFilter.from_request(_args()).sort == "risk"
 
 
 def test_sort_valid_values() -> None:
-    for val in ("server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"):
+    # Block O (ADR-0022): `risk` ist neuer Default-Primary in der Whitelist.
+    for val in ("risk", "server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"):
         assert DashboardFilter.from_request(_args(sort=val)).sort == val
 
 
-def test_sort_invalid_falls_back_to_sev() -> None:
-    assert DashboardFilter.from_request(_args(sort="DROP TABLE")).sort == "sev"
+def test_sort_invalid_falls_back_to_risk() -> None:
+    """Block O (ADR-0022): Ungueltige Werte fallen auf Default `risk`."""
+    assert DashboardFilter.from_request(_args(sort="DROP TABLE")).sort == "risk"
 
 
 def test_dir_default_desc() -> None:
@@ -324,7 +327,8 @@ def test_dir_invalid_falls_back_to_desc() -> None:
 
 
 def test_to_query_string_omits_default_status_sort_dir() -> None:
-    filt = DashboardFilter(status="open", sort="sev", dir="desc")
+    """Block O (ADR-0022): Default-Sort ist `risk` — wird im QS weggelassen."""
+    filt = DashboardFilter(status="open", sort="risk", dir="desc")
     qs = filt.to_query_string()
     assert "status" not in qs
     assert "sort" not in qs

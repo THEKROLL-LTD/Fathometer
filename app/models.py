@@ -196,6 +196,11 @@ class Server(Base):
     # haengen, wenn der Server selbst stale ist.
     agent_version_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Block O (ADR-0022): Zeitstempel des zuletzt empfangenen Host-Snapshots.
+    # NULL solange noch kein Agent ab v0.3.0 einen `host_state`-Block geliefert
+    # hat — die Pre-Triage-Engine setzt das Finding dann in `risk_band=unknown`.
+    host_state_snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Trivy-DB-Frische.
     trivy_db_version: Mapped[str | None] = mapped_column(String(64))
     trivy_db_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -331,6 +336,27 @@ class Finding(Base):
     severity_source: Mapped[str | None] = mapped_column(String(64))
     vendor_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String(128)))
 
+    # Block O (ADR-0022): Risk-Band-Klassifikation der Pre-Triage-Engine
+    # (`engine`) oder des LLM-Passes in Block P (`llm`/`manual`).
+    # `risk_band` ist nullable bis zur ersten Auswertung; die UI rendert in
+    # diesem Fall einen "pending pre-triage"-Hint.
+    risk_band: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    risk_band_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    risk_band_source: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default="engine"
+    )
+    risk_band_computed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Provider-Map aus Trivys `Vulnerability.VendorSeverity` — Eingabe fuer
+    # `max_severity_across_providers()` (Phase B). JSONB damit wir bei
+    # spaeteren Use-Cases (Disagreement-Pill, Re-Open-Trigger) GIN-indexieren
+    # koennen ohne Schema-Migration.
+    severity_by_provider: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Normalisierter Vendor-Status (ADR-0022 §vendor_status, Whitelist:
+    # affected/fixed/investigating/will_not_fix/eol/not_affected/unknown).
+    vendor_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     # Generierte Spalte — Postgres berechnet bei jedem Insert/Update.
     has_fix: Mapped[bool] = mapped_column(
         Boolean,
@@ -399,6 +425,20 @@ class Finding(Base):
             "package_name",
             "server_id",
             postgresql_where="status = 'open'",
+        ),
+        # Block O (ADR-0022): Risk-Band-Indizes fuer die UI-Filter.
+        # Partial-Index auf offene Findings deckt den haeufigsten Dashboard-
+        # Filter `?risk_band=...&status=open` ab; `server_risk_band` deckt die
+        # Server-Detail-Gruppierung.
+        Index(
+            "ix_findings_risk_band_open",
+            "risk_band",
+            postgresql_where="status = 'open'",
+        ),
+        Index(
+            "ix_findings_server_risk_band",
+            "server_id",
+            "risk_band",
         ),
     )
 
@@ -580,6 +620,78 @@ class Setting(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# Host-Snapshot-Tabellen (Block O, ADR-0022 §Host-Snapshot-Datenmodell).
+#
+# Vier Tabellen, eine pro Snapshot-Block. Persistenz-Strategie ist
+# truncate+insert pro Server (kein UPSERT) — wir wollen den vollstaendigen
+# aktuellen State, kein Merge mit alten Daten. Datensatz-Volumen pro Server:
+# bis zu 4096 + 4096 + 1024 + 1024 = 10K Zeilen.
+# ---------------------------------------------------------------------------
+
+
+class ServerListener(Base):
+    """Listening-Socket aus `ss` / `netstat` zum Snapshot-Zeitpunkt."""
+
+    __tablename__ = "server_listeners"
+
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    # proto in {tcp, udp, tcp6, udp6}
+    proto: Mapped[str] = mapped_column(String(8), primary_key=True)
+    port: Mapped[int] = mapped_column(Integer, primary_key=True)
+    addr: Mapped[str] = mapped_column(String(64), primary_key=True)
+    process: Mapped[str | None] = mapped_column(String(64))
+    pid: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (
+        Index("ix_server_listeners_port", "server_id", "port"),
+        CheckConstraint(
+            "port >= 0 AND port <= 65535",
+            name="ck_server_listeners_port_range",
+        ),
+    )
+
+
+class ServerProcess(Base):
+    """Prozess-Eintrag aus `ps` zum Snapshot-Zeitpunkt."""
+
+    __tablename__ = "server_processes"
+
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    pid: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user: Mapped[str | None] = mapped_column(String(32))
+    comm: Mapped[str | None] = mapped_column(String(64))
+    args: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (Index("ix_server_processes_comm", "server_id", "comm"),)
+
+
+class ServerKernelModule(Base):
+    """Geladenes Kernel-Modul aus `lsmod` zum Snapshot-Zeitpunkt."""
+
+    __tablename__ = "server_kernel_modules"
+
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+
+class ServerService(Base):
+    """systemd-/Init-Service-Eintrag zum Snapshot-Zeitpunkt."""
+
+    __tablename__ = "server_services"
+
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    name: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+
 __all__ = [
     "ATTACK_VECTOR_ENUM_NAME",
     "FINDING_CLASS_ENUM_NAME",
@@ -603,6 +715,10 @@ __all__ = [
     "LlmMessageRole",
     "Scan",
     "Server",
+    "ServerKernelModule",
+    "ServerListener",
+    "ServerProcess",
+    "ServerService",
     "ServerTag",
     "Setting",
     "Severity",

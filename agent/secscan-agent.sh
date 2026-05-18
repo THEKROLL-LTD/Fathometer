@@ -24,6 +24,15 @@
 #     backend). Falls back to the raw output if `jq` cannot apply the
 #     filter — backend handles both shapes identically.
 #
+# Block O (ADR-0022) — v0.3.0 changes:
+#   - Optional `host_state` block is added to the envelope. Collects
+#     `ss`-listeners, `ps`-processes, `lsmod`-kernel-modules and
+#     `systemctl`-services. Each block has its own fallback path
+#     (`netstat` for `ss`, gap-flag for the others). Adds ~10-30 KB
+#     gzipped per scan on a typical Ubuntu host.
+#   - Collectors live in `agent/lib_host_state.sh` (sourcable for tests
+#     and Block-P reuse).
+#
 # Requirements: bash >= 4, curl, jq, gzip, trivy (>= 0.70.0)
 #               (https://aquasecurity.github.io/trivy/)
 #
@@ -47,7 +56,7 @@
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.2.0"
+readonly AGENT_VERSION="0.3.0"
 readonly TRIVY_BIN="${SECSCAN_TRIVY_PATH:-trivy}"
 readonly SCAN_PATH="${SECSCAN_SCAN_PATH:-/}"
 readonly TIMEOUT_SEC="${SECSCAN_TIMEOUT_SEC:-60}"
@@ -67,6 +76,21 @@ require_cmd "$TRIVY_BIN"
 
 : "${SECSCAN_URL:?SECSCAN_URL is not set}"
 : "${SECSCAN_API_KEY:?SECSCAN_API_KEY is not set}"
+
+# ----- Host-state collectors (Block O, v0.3.0) ---------------------------
+# Sourcable companion library next to this script. We resolve the path via
+# `BASH_SOURCE` so the script works when invoked via an absolute path,
+# from a symlink, or from `$PATH`.
+_agent_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib_host_state.sh
+if [[ -r "${_agent_dir}/lib_host_state.sh" ]]; then
+  # shellcheck disable=SC1091
+  . "${_agent_dir}/lib_host_state.sh"
+  _has_host_state_lib=1
+else
+  log "Warning: lib_host_state.sh not found next to agent; host_state will be omitted"
+  _has_host_state_lib=0
+fi
 
 # ----- Host info ---------------------------------------------------------
 if [[ -r /etc/os-release ]]; then
@@ -142,6 +166,25 @@ else
   cp "$trivy_raw" "$trivy_out"
 fi
 
+# ----- Host-state snapshot (Block O, v0.3.0) -----------------------------
+# Sammelt Listener/Prozesse/Module/Services. Im Fehlerfall (Lib fehlt oder
+# Build wirft) lassen wir den Block weg — Backend toleriert via
+# `host_state: HostStateBlock | None = None`.
+host_state_json="null"
+if [[ "$_has_host_state_lib" -eq 1 ]]; then
+  if hs_tmp="$(build_host_state_json 2>/dev/null)" && [[ -n "$hs_tmp" ]]; then
+    # Validate via jq — falls Bash-Quirk doch invalid JSON erzeugt, fallback null.
+    if printf '%s' "$hs_tmp" | jq -e '.' >/dev/null 2>&1; then
+      host_state_json="$hs_tmp"
+      log "Host-state collected (tools_available=$(printf '%s' "$hs_tmp" | jq -rc '.tools_available | join(",")'); gaps=$(printf '%s' "$hs_tmp" | jq -rc '.gaps | join(",")'))"
+    else
+      log "Warning: host_state build produced invalid JSON, omitting"
+    fi
+  else
+    log "Warning: host_state build failed, omitting"
+  fi
+fi
+
 # ----- Build envelope ----------------------------------------------------
 payload="$(jq -n \
   --arg agent_version "$AGENT_VERSION" \
@@ -152,6 +195,7 @@ payload="$(jq -n \
   --arg arch          "$arch" \
   --arg trivy_ver     "$trivy_version" \
   --slurpfile scan    "$trivy_out" \
+  --argjson host_state "$host_state_json" \
   '{
     agent_version: $agent_version,
     host: {
@@ -163,7 +207,8 @@ payload="$(jq -n \
       trivy_version:  $trivy_ver
     },
     scan: $scan[0]
-  }')"
+  }
+  + (if $host_state == null then {} else {host_state: $host_state} end)')"
 
 # ----- Upload (gzipped) --------------------------------------------------
 # Compresses typically 8-10x. Backend accepts Content-Encoding: gzip and

@@ -55,6 +55,16 @@
     <div class="min-w-0 flex-1">
       <div class="flex items-center gap-3 flex-wrap">
         <h1 class="font-mono text-2xl lg:text-3xl font-semibold tracking-tight break-all">{{ server.name }}</h1>
+        {# Block O (ADR-0022): Action-Required-Pill als ERSTE Header-Pill,
+           vor allen Status-/Outdated-Pills. Drei Varianten (needed/safe/
+           update-agent) je nach yes_count + host_state_snapshot_at. #}
+        {% with yes_count=action_required.yes_count,
+                no_count=action_required.no_count,
+                yes_subcounts=action_required.yes_subcounts,
+                no_subcounts=action_required.no_subcounts,
+                snapshot_missing=(server.host_state_snapshot_at is none) %}
+          {% include "_partials/action_required_pill.html" %}
+        {% endwith %}
         {# Status-Pill-Reihe. Reihenfolge: schlimmster Marker zuerst. #}
         {% if server.revoked_at %}
           <span class="badge badge-sm badge-error font-mono"
@@ -193,6 +203,9 @@
       {% endif %}
     </div>
   </header>
+
+  {# =============== 1b. Host-Snapshot (Block O, ADR-0022) =============== #}
+  {% include "_partials/host_snapshot.html" %}
 
   {# =============== 2. Tag-Editor (Akkordeon) =============== #}
   <section class="py-4">

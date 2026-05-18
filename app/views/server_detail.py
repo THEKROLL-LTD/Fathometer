@@ -37,7 +37,18 @@ from app.forms import (
     NoteForm,
     ReopenForm,
 )
-from app.models import Finding, FindingStatus, Server, ServerTag, Severity, Tag
+from app.models import (
+    Finding,
+    FindingStatus,
+    Server,
+    ServerKernelModule,
+    ServerListener,
+    ServerProcess,
+    ServerService,
+    ServerTag,
+    Severity,
+    Tag,
+)
 from app.schemas.findings_view_filter import FindingsViewFilter
 from app.services.diff_view import DiffSection, compute_diff
 from app.services.findings_query import (
@@ -47,6 +58,7 @@ from app.services.findings_query import (
     list_findings,
 )
 from app.services.heartbeat_aggregation import DailyStatus, heartbeats_for_servers
+from app.services.risk_engine import no_band_values, yes_band_values
 from app.services.severity_history import (
     DailySeverityCount,
     count_kev_events_50d,
@@ -178,6 +190,36 @@ def show(server_id: int) -> Any:
         server.id
     ]
     quick_counts = _quick_counts_for_server(sess, server.id)
+    # Block O (ADR-0022): Action-Required-Counts + Host-Snapshot fuer Header.
+    action_required = _load_action_required_counts(sess, server.id)
+    snapshot_ctx = _load_host_snapshot(sess, server.id)
+    # Noise-Findings fuer den Bulk-Ack-Noise-Modal-Inhalt (max 50 inline +
+    # Truncation-Hinweis im Template). Wir laden gezielt nur OPEN-noise-IDs
+    # + identifier_key + package_name (selectinload nicht noetig).
+    noise_findings = list(
+        sess.execute(
+            select(Finding)
+            .where(
+                Finding.server_id == server.id,
+                Finding.status == FindingStatus.OPEN,
+                Finding.risk_band == "noise",
+            )
+            .order_by(Finding.identifier_key.asc())
+            .limit(50)
+        )
+        .scalars()
+        .all()
+    )
+    noise_total = int(
+        sess.execute(
+            select(func.count(Finding.id)).where(
+                Finding.server_id == server.id,
+                Finding.status == FindingStatus.OPEN,
+                Finding.risk_band == "noise",
+            )
+        ).scalar()
+        or 0
+    )
 
     # Block I: `active_server_id` markiert die Sidebar-Zeile, `hx_partial`
     # entscheidet zwischen Vollseite (`base_app.html`) und Fragment-Shell
@@ -196,8 +238,90 @@ def show(server_id: int) -> Any:
         kev_events_50d=kev_events_50d,
         heartbeat_cells=heartbeat_cells,
         quick_counts=quick_counts,
+        action_required=action_required,
+        listeners=snapshot_ctx["listeners"],
+        services=snapshot_ctx["services"],
+        processes=snapshot_ctx["processes"],
+        noise_findings=noise_findings,
+        noise_total=noise_total,
         **section_ctx,
     )
+
+
+def _load_action_required_counts(sess: Any, server_id: int) -> dict[str, Any]:
+    """Liefert Action-Required-Counter fuer den Server-Detail-Header (Block O).
+
+    Rueckgabe:
+      - `yes_count`        : Anzahl OPEN-Findings im Yes-Bucket.
+      - `no_count`         : Anzahl OPEN-Findings im No-Bucket.
+      - `yes_subcounts`    : dict[str,int] pro Yes-Band (escalate..unknown).
+      - `no_subcounts`     : dict[str,int] pro No-Band (monitor/noise).
+    """
+    band_stmt = (
+        select(Finding.risk_band, func.count(Finding.id))
+        .where(Finding.server_id == server_id, Finding.status == FindingStatus.OPEN)
+        .group_by(Finding.risk_band)
+    )
+    band_counts: dict[str, int] = {}
+    for band_value, n in sess.execute(band_stmt).all():
+        if band_value is not None:
+            band_counts[band_value] = int(n)
+
+    yes_bands = yes_band_values()
+    no_bands = no_band_values()
+    yes_subcounts = {band: band_counts.get(band, 0) for band in yes_bands}
+    no_subcounts = {band: band_counts.get(band, 0) for band in no_bands}
+
+    return {
+        "yes_count": sum(yes_subcounts.values()),
+        "no_count": sum(no_subcounts.values()),
+        "yes_subcounts": yes_subcounts,
+        "no_subcounts": no_subcounts,
+        "noise_count": band_counts.get("noise", 0),
+    }
+
+
+def _load_host_snapshot(sess: Any, server_id: int) -> dict[str, Any]:
+    """Liefert die Snapshot-Daten fuer die `host_snapshot`-Sektion (Block O).
+
+    Rueckgabe-Keys:
+      - `listeners` : list[ServerListener], sortiert nach (port, proto, addr).
+      - `services`  : list[str], alphabetisch.
+      - `processes` : list[ServerProcess], fuer Args-Tooltip.
+    """
+    listeners = list(
+        sess.execute(
+            select(ServerListener)
+            .where(ServerListener.server_id == server_id)
+            .order_by(
+                ServerListener.port.asc(), ServerListener.proto.asc(), ServerListener.addr.asc()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    services = list(
+        sess.execute(
+            select(ServerService.name)
+            .where(ServerService.server_id == server_id)
+            .order_by(ServerService.name.asc())
+        )
+        .scalars()
+        .all()
+    )
+    processes = list(
+        sess.execute(select(ServerProcess).where(ServerProcess.server_id == server_id))
+        .scalars()
+        .all()
+    )
+    # ServerKernelModule wird im MVP nicht inline gerendert; in Loader
+    # vorbereiten waere ueberflussig.
+    _ = ServerKernelModule
+    return {
+        "listeners": listeners,
+        "services": services,
+        "processes": processes,
+    }
 
 
 def _quick_counts_for_server(sess: Any, server_id: int) -> dict[str, int]:

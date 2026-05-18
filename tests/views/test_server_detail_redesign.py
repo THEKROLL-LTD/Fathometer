@@ -254,14 +254,15 @@ def test_detail_table_renders_sort_indicator(db_app: Flask) -> None:
     resp = client.get(f"/servers/{sid}?sort=cvss&dir=desc")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    # Sortierbare Spalten: cve/pkg/epss/cvss/sev/status/first_seen — 7 Header.
+    # Block O (ADR-0022): Sortierbare Spalten sind risk/cve/pkg/epss/cvss/
+    # sev/status/first_seen — 8 Header.
     descending_count = body.count('aria-sort="descending"')
     ascending_count = body.count('aria-sort="ascending"')
     none_count = body.count('aria-sort="none"')
     assert descending_count == 1, f"erwartet 1 descending header, habe {descending_count}"
     assert ascending_count == 0
-    # 6 weitere sortierbare Header in none-State.
-    assert none_count == 6, f"erwartet 6 none-Header, habe {none_count}"
+    # 7 weitere sortierbare Header in none-State.
+    assert none_count == 7, f"erwartet 7 none-Header, habe {none_count}"
 
 
 # ---------------------------------------------------------------------------

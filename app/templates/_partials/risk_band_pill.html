@@ -1,0 +1,70 @@
+{# Risk-Band-Pill — Dashboard-Sekundaer-Reihe (Block O, ADR-0022 §UI-Redesign).
+
+   Variablen-Vertrag:
+     - `band_value`  : str — einer aus
+                       escalate/act/mitigate/pending/unknown/monitor/noise.
+     - `count`       : int — Findings-Count fuer diesen Band (auch 0).
+     - `as_link`     : bool — default true. Wenn true wird die Pill als
+                       `<a>` mit `?risk_band=<band>` gerendert, HTMX-fetcht
+                       das `#findings-section`-Partial. False -> reiner Span.
+     - `is_active`   : bool — default false. Markiert die Pill visuell wenn
+                       der aktuelle Filter genau diesen Band traegt.
+     - `compact`     : bool — default false. Wenn true: minimal-Padding,
+                       fuer dichte Header-Layouts (z.B. Server-Detail-Pill).
+
+   Sicherheit: alle Werte sind serverseitig — `band_value` kommt aus dem
+   Enum-Whitelist-Mapping unten, `count` ist int. Kein |safe.
+#}
+{%- set _band = band_value or 'pending' -%}
+{%- set _count = count | default(0) -%}
+{%- set _as_link = as_link if as_link is defined else true -%}
+{%- set _is_active = is_active | default(false) -%}
+{%- set _compact = compact | default(false) -%}
+{%- set _show_count = show_count if show_count is defined else true -%}
+{%- set _label_map = {
+  'escalate': 'Escalate',
+  'act':      'Act',
+  'mitigate': 'Mitigate',
+  'pending':  'Pending',
+  'unknown':  'Unknown',
+  'monitor':  'Monitor',
+  'noise':    'Noise',
+} -%}
+{# Visuelle Klassen pro Band — DaisyUI badge-error/warning/etc., Tailwind-
+   Akzent fuer noise/monitor. `escalate` bekommt eine zusaetzliche
+   `animate-pulse`-Klasse fuer den auffaelligen Hinweis. #}
+{%- set _cls_map = {
+  'escalate': 'badge-error animate-pulse',
+  'act':      'badge-warning',
+  'mitigate': 'badge-warning',
+  'pending':  'badge-info',
+  'unknown':  'badge-ghost',
+  'monitor':  'badge-accent',
+  'noise':    'badge-ghost',
+} -%}
+{%- set _label = _label_map.get(_band, _band) -%}
+{%- set _cls = _cls_map.get(_band, 'badge-ghost') -%}
+{%- set _size = 'badge-sm' if _compact else 'badge-md' -%}
+{%- set _active_ring = 'ring-2 ring-base-content/40' if _is_active else '' -%}
+{%- if _as_link -%}
+  {%- set _href = url_for('dashboard.index') ~ '?risk_band=' ~ _band ~ '#findings-section' -%}
+  <a href="{{ _href }}"
+     hx-get="{{ _href }}"
+     hx-target="#findings-section"
+     hx-select="#findings-section"
+     hx-swap="outerHTML"
+     hx-push-url="true"
+     class="badge {{ _size }} {{ _cls }} {{ _active_ring }} gap-1.5 font-mono cursor-pointer hover:opacity-100 opacity-90"
+     title="Risk-Band {{ _label }} — {{ _count }} Findings"
+     data-test="risk-band-pill-{{ _band }}">
+    <span class="uppercase tracking-wider text-[10px]">{{ _label }}</span>
+    {%- if _show_count %}<span class="font-semibold tabular-nums">{{ _count }}</span>{%- endif -%}
+  </a>
+{%- else -%}
+  <span class="badge {{ _size }} {{ _cls }} {{ _active_ring }} gap-1.5 font-mono"
+        title="Risk-Band {{ _label }}"
+        data-test="risk-band-pill-{{ _band }}">
+    <span class="uppercase tracking-wider text-[10px]">{{ _label }}</span>
+    {%- if _show_count %}<span class="font-semibold tabular-nums">{{ _count }}</span>{%- endif -%}
+  </span>
+{%- endif -%}

@@ -83,7 +83,14 @@ class BulkAckMatchCriterion(BaseModel):
 
 
 class BulkAckRequest(BaseModel):
-    """Request-Body fuer `POST /api/findings/bulk-acknowledge`."""
+    """Request-Body fuer `POST /api/findings/bulk-acknowledge`.
+
+    Block O (ADR-0022) erweitert das Schema um `risk_band_filter`. Wenn
+    gesetzt, filtert der Endpoint **server-side** hart auf den genannten
+    Band — eingeschleuste IDs anderer Baender werden gedropped und in
+    `skipped_non_noise_ids` reportet. Aktuell nur `"noise"` zugelassen
+    (Bulk-Ack-Noise-Workflow, siehe ADR-0022 §UI-Redesign).
+    """
 
     model_config = ConfigDict(extra="ignore")
 
@@ -91,6 +98,7 @@ class BulkAckRequest(BaseModel):
     match: BulkAckMatchCriterion | None = None
     dry_run: bool = True
     comment: str | None = Field(default=None, max_length=_COMMENT_MAX_LEN)
+    risk_band_filter: Literal["noise"] | None = None
 
     @model_validator(mode="after")
     def _xor_finding_ids_and_match(self) -> BulkAckRequest:

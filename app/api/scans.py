@@ -23,12 +23,14 @@ from __future__ import annotations
 
 import hmac
 import json
+from collections import Counter
 from typing import Any, cast
 
 import structlog
 from flask import current_app, request
 from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.wrappers import Response
 
 from app import csrf, limiter
@@ -43,11 +45,13 @@ from app.middleware.gzip import (
     DecompressLimitError,
     read_decompressed_body,
 )
-from app.models import Server
+from app.models import Finding, FindingStatus, Server
 from app.schemas.scan_envelope import Envelope
 from app.services.agent_version import version_lt
 from app.services.findings_ingest import ingest_scan as run_ingest
 from app.services.findings_ingest import server_is_active
+from app.services.host_state_ingest import persist_host_state
+from app.services.risk_engine import pretriage
 
 log = structlog.get_logger(__name__)
 
@@ -271,6 +275,94 @@ def ingest_scan() -> Response | tuple[Response, int]:
     # ---- 5. Findings-Ingest -------------------------------------------
     sess = get_session()
     result = run_ingest(server, envelope, session=sess)
+
+    # ---- 6. Host-Snapshot persistieren (Block O Phase C Task #7) -------
+    # Reihenfolge: erst nach erfolgreichem Findings-UPSERT. Bei Schema-Fehlern
+    # oder DB-Constraint-Verletzungen wird der Snapshot verworfen und der
+    # Pre-Triage-Lauf faellt auf `snapshot_available=False` zurueck — Findings
+    # bleiben aber ingested, der Operator sieht den Versionsstand.
+    snapshot_available = False
+    if envelope.host_state is not None:
+        try:
+            persist_host_state(sess, server, envelope.host_state)
+            snapshot_available = True
+            log_event(
+                "host_state.snapshot_received",
+                target_type="server",
+                target_id=server.id,
+                metadata={
+                    "tools_available": list(envelope.host_state.tools_available),
+                    "gaps": list(envelope.host_state.gaps),
+                    "listener_count": len(envelope.host_state.listeners),
+                    "process_count": len(envelope.host_state.processes),
+                },
+                actor=server.name,
+                session=sess,
+            )
+        except (SQLAlchemyError, ValueError) as exc:
+            log.warning(
+                "api.scans.host_state_persist_failed",
+                server_id=server.id,
+                error=type(exc).__name__,
+            )
+            log_event(
+                "host_state.parse_failed",
+                target_type="server",
+                target_id=server.id,
+                metadata={"error": str(exc)[:256]},
+                actor=server.name,
+                session=sess,
+            )
+            snapshot_available = False
+
+    # ---- 7. Pre-Triage-Schleife (Block O Phase C Task #8) --------------
+    # Iteriert ueber alle aktuell offenen Findings des Servers. LLM-gesetzte
+    # Bands (`risk_band_source == "llm"`) werden nicht ueberschrieben — diese
+    # Logik lebt hier im Caller, nicht in `pretriage()` selbst
+    # (Single-Responsibility, ADR-0022 §Re-Evaluation).
+    band_counters: Counter[str] = Counter()
+    open_findings = (
+        sess.query(Finding)
+        .filter(Finding.server_id == server.id, Finding.status == FindingStatus.OPEN)
+        .all()
+    )
+    for finding in open_findings:
+        if finding.risk_band_source == "llm":
+            band_counters[finding.risk_band or "unset"] += 1
+            continue
+
+        evaluation = pretriage(finding, server, snapshot_available)
+        new_band = evaluation.band.value
+
+        if finding.risk_band != new_band:
+            log_event(
+                "risk.band_changed",
+                target_type="finding",
+                target_id=str(finding.id),
+                metadata={
+                    "from": finding.risk_band,
+                    "to": new_band,
+                    "source": "engine",
+                    "reason": evaluation.reason,
+                },
+                actor=server.name,
+                session=sess,
+            )
+
+        finding.risk_band = new_band
+        finding.risk_band_reason = evaluation.reason
+        finding.risk_band_source = "engine"
+        finding.risk_band_computed_at = evaluation.computed_at
+        band_counters[new_band] += 1
+
+    log_event(
+        "risk.pretriage_evaluated",
+        target_type="server",
+        target_id=server.id,
+        metadata={"counters": dict(band_counters)},
+        actor=server.name,
+        session=sess,
+    )
 
     log_event(
         "scan.ingested",

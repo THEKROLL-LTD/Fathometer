@@ -81,10 +81,12 @@
      Inline-No-Flash-Resolver oben hat das `data-theme` schon gesetzt. #}
   <script defer src="{{ url_for('static', filename='js/theme.js') }}"></script>
 
-  {# Bulk-Acknowledge-Komponenten (Alpine `bulkAckIds` / `bulkAckMatch`).
-     Reine Frontend-Logik — POSTs gehen an /api/findings/bulk-acknowledge
-     mit X-CSRFToken-Header aus dem oben gesetzten <meta>. #}
+  {# Bulk-Acknowledge-Komponenten (Alpine `bulkAckIds` / `bulkAckMatch` /
+     `bulkAckNoise`). Reine Frontend-Logik — POSTs gehen an
+     /api/findings/bulk-acknowledge mit X-CSRFToken-Header aus dem oben
+     gesetzten <meta>. `bulkAckNoise` setzt `risk_band_filter="noise"`. #}
   <script defer src="{{ url_for('static', filename='js/bulk_ack.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/bulk_ack_noise.js') }}"></script>
 
   {# Stale-Re-Render-Komponente (Block H, nach ADR-0019 ohne SSE).
      Stellt `window.staleTick()` als Alpine-Component-Factory bereit.

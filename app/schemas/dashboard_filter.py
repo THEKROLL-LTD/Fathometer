@@ -41,18 +41,30 @@ _BOOL_TRUE_TOKENS: frozenset[str] = frozenset({"1", "true", "on", "yes"})
 
 # Block M (ADR-0020): Whitelists fuer die neuen Felder.
 _VALID_STATUS: frozenset[str] = frozenset({"open", "acknowledged", "resolved", "all"})
+# Block O (ADR-0022): Risk-Sort-Key wird Default-Primary; bleibt in der
+# Whitelist neben den Block-M-Keys.
 _VALID_SORTS: frozenset[str] = frozenset(
-    {"server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"}
+    {"risk", "server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"}
 )
 _VALID_DIRS: frozenset[str] = frozenset({"asc", "desc"})
+
+# Block O (ADR-0022): Risk-Band-Whitelist + Action-Required-Whitelist.
+_VALID_RISK_BANDS: frozenset[str] = frozenset(
+    {"escalate", "act", "mitigate", "pending", "unknown", "monitor", "noise"}
+)
+_VALID_ACTION_REQUIRED: frozenset[str] = frozenset({"yes", "no"})
 
 # Maximale Laenge des Such-Strings — schuetzt URLs und DB-Indices vor
 # ueberlangen `ilike`-Patterns.
 _Q_MAX_LEN: int = 128
 
 DashboardStatusFilter = Literal["open", "acknowledged", "resolved", "all"]
-DashboardSortKey = Literal["server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"]
+DashboardSortKey = Literal[
+    "risk", "server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"
+]
 DashboardSortDir = Literal["asc", "desc"]
+DashboardRiskBand = Literal["escalate", "act", "mitigate", "pending", "unknown", "monitor", "noise"]
+DashboardActionRequired = Literal["yes", "no"]
 
 
 class DashboardFilter(BaseModel):
@@ -84,8 +96,11 @@ class DashboardFilter(BaseModel):
     # Block M (ADR-0020)
     q: str | None = None
     status: DashboardStatusFilter = "open"
-    sort: DashboardSortKey = "sev"
+    sort: DashboardSortKey = "risk"
     dir: DashboardSortDir = "desc"
+    # Block O (ADR-0022)
+    risk_band: DashboardRiskBand | None = None
+    action_required: DashboardActionRequired | None = None
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -172,15 +187,30 @@ class DashboardFilter(BaseModel):
             log.debug("dashboard_filter.status_rejected", value=status_raw)
             status_raw = "open"
 
-        sort_raw = (args.get("sort") or "sev").strip().lower()
+        sort_raw = (args.get("sort") or "risk").strip().lower()
         if sort_raw not in _VALID_SORTS:
             log.debug("dashboard_filter.sort_rejected", value=sort_raw)
-            sort_raw = "sev"
+            sort_raw = "risk"
 
         dir_raw = (args.get("dir") or "desc").strip().lower()
         if dir_raw not in _VALID_DIRS:
             log.debug("dashboard_filter.dir_rejected", value=dir_raw)
             dir_raw = "desc"
+
+        # Block O (ADR-0022): risk_band / action_required Whitelist.
+        risk_band_raw = (args.get("risk_band") or "").strip().lower()
+        risk_band: DashboardRiskBand | None = None
+        if risk_band_raw in _VALID_RISK_BANDS:
+            risk_band = risk_band_raw  # type: ignore[assignment]
+        elif risk_band_raw:
+            log.debug("dashboard_filter.risk_band_rejected", value=risk_band_raw)
+
+        action_required_raw = (args.get("action_required") or "").strip().lower()
+        action_required: DashboardActionRequired | None = None
+        if action_required_raw in _VALID_ACTION_REQUIRED:
+            action_required = action_required_raw  # type: ignore[assignment]
+        elif action_required_raw:
+            log.debug("dashboard_filter.action_required_rejected", value=action_required_raw)
 
         return cls(
             tags=raw_tags,
@@ -192,6 +222,8 @@ class DashboardFilter(BaseModel):
             status=status_raw,  # type: ignore[arg-type]
             sort=sort_raw,  # type: ignore[arg-type]
             dir=dir_raw,  # type: ignore[arg-type]
+            risk_band=risk_band,
+            action_required=action_required,
         )
 
     def to_query_string(self, *, override: dict[str, str] | None = None) -> str:
@@ -224,10 +256,15 @@ class DashboardFilter(BaseModel):
             parts.append(("q", self.q))
         if self.status != "open":
             parts.append(("status", self.status))
-        if self.sort != "sev":
+        if self.sort != "risk":
             parts.append(("sort", self.sort))
         if self.dir != "desc":
             parts.append(("dir", self.dir))
+        # Block O (ADR-0022): Risk-Filter im Query-String.
+        if self.risk_band is not None:
+            parts.append(("risk_band", self.risk_band))
+        if self.action_required is not None:
+            parts.append(("action_required", self.action_required))
 
         if override:
             seen_keys = {k for k, _ in parts}
@@ -259,6 +296,8 @@ class DashboardFilter(BaseModel):
             or self.stale_only
             or self.q
             or self.status != "open"
+            or self.risk_band is not None
+            or self.action_required is not None
         )
 
 
@@ -270,7 +309,9 @@ def _parse_bool(value: str | None) -> bool:
 
 
 __all__ = [
+    "DashboardActionRequired",
     "DashboardFilter",
+    "DashboardRiskBand",
     "DashboardSortDir",
     "DashboardSortKey",
     "DashboardStatusFilter",

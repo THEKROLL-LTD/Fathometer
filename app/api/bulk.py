@@ -178,7 +178,24 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
         }
 
     # Subset: Findings (objekte) + IDs + distinct server_ids.
-    findings: list[Finding] = list(sess.execute(stmt).scalars().all())
+    raw_findings: list[Finding] = list(sess.execute(stmt).scalars().all())
+
+    # Block O (ADR-0022): Server-side risk_band_filter — eingeschleuste IDs
+    # anderer Baender werden hart gedropped. Aktuell nur `noise` zulaessig.
+    # Sicherheits-Default: das gilt SOWOHL fuer dry_run als auch fuer apply,
+    # damit der Operator die Preview ehrlich sieht.
+    skipped_non_noise_ids: list[int] = []
+    if req.risk_band_filter == "noise":
+        kept: list[Finding] = []
+        for f in raw_findings:
+            if f.risk_band == "noise":
+                kept.append(f)
+            else:
+                skipped_non_noise_ids.append(f.id)
+        findings: list[Finding] = kept
+    else:
+        findings = raw_findings
+
     finding_ids: list[int] = [f.id for f in findings]
     server_count = len({f.server_id for f in findings})
 
@@ -188,6 +205,8 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
             "bulk_ack.dry_run",
             count=len(finding_ids),
             server_count=server_count,
+            risk_band_filter=req.risk_band_filter,
+            skipped_non_noise=len(skipped_non_noise_ids),
             actor=getattr(current_user, "username", "unknown"),
         )
         return _ok(
@@ -196,6 +215,8 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
                 "count": len(finding_ids),
                 "server_count": server_count,
                 "finding_ids": finding_ids,
+                "risk_band_filter": req.risk_band_filter,
+                "skipped_non_noise_ids": skipped_non_noise_ids,
             }
         )
 
@@ -215,6 +236,8 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
                 "skipped": 0,
                 "has_comment": req.has_comment,
                 "match": match_meta,
+                "risk_band_filter": req.risk_band_filter,
+                "skipped_non_noise_ids": skipped_non_noise_ids,
             },
             session=sess,
         )
@@ -227,6 +250,8 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
                 "skipped": 0,
                 "server_count": 0,
                 "finding_ids": [],
+                "risk_band_filter": req.risk_band_filter,
+                "skipped_non_noise_ids": skipped_non_noise_ids,
             }
         )
 
@@ -289,6 +314,8 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
             "has_comment": comment_text is not None,
             "match": match_meta,
             "note_ids": note_ids,
+            "risk_band_filter": req.risk_band_filter,
+            "skipped_non_noise_ids": skipped_non_noise_ids,
         },
         session=sess,
     )
@@ -299,6 +326,8 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
         count=len(open_ids),
         skipped=skipped,
         server_count=len({f.server_id for f in findings if f.id in set(open_ids)}),
+        risk_band_filter=req.risk_band_filter,
+        skipped_non_noise=len(skipped_non_noise_ids),
         actor=getattr(current_user, "username", "unknown"),
     )
 
@@ -310,6 +339,8 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
             "skipped": skipped,
             "server_count": len({f.server_id for f in findings if f.id in set(open_ids)}),
             "finding_ids": open_ids,
+            "risk_band_filter": req.risk_band_filter,
+            "skipped_non_noise_ids": skipped_non_noise_ids,
         }
     )
 

@@ -4,7 +4,82 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
-**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer — v0.7.0 (2026-05-18).**
+**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer + ADR-0022-Risk-Engine — v0.8.0 (2026-05-18).**
+
+Block O (ADR-0022) abgeschlossen: Deterministische Pre-Triage-Risk-
+Engine plus Host-Snapshot-Sammlung plus CVSS-Vendor-Resolver plus
+Risk-zentrisches UI-Redesign. Pro Finding ein Band aus
+`{noise, monitor, pending, unknown}` allein aus max-Severity-aller-
+Provider + EPSS + KEV (defensive Cuts: KEV → pending,
+max-sev >= HIGH → pending, EPSS >= 0.1 → pending, MEDIUM → monitor,
+sonst noise; ohne Snapshot → unknown). LLM-Final-Bewertung
+(`escalate`/`act`/`mitigate`) bleibt out-of-scope und kommt in Block P;
+`risk_band_source = "llm"` ueberlebt Re-Ingest. Agent v0.3.0 sammelt
+vier Host-State-Bloecke (Listener via `ss`/Fallback `netstat`,
+Prozesse via `ps`, Kernel-Module via `lsmod`, systemd-Services) in
+sourcabler Lib `agent/lib_host_state.sh`, mit `tools_available`/`gaps`-
+Tracking und ASCII-only-Filterung (`LC_ALL=C` + Non-ASCII-Drop).
+Backend persistiert die vier Bloecke truncate+insert pro Server in
+neuen Tabellen `server_listeners`/`server_processes`/
+`server_kernel_modules`/`server_services`. `host_state.parse_failed`
+ist resilient: Pydantic- oder SQLAlchemy-Fehler verwirft den Snapshot,
+Findings-Ingest laeuft trotzdem, Pre-Triage faellt auf
+`snapshot_available=False`. Sechs neue Finding-Spalten (`risk_band`,
+`risk_band_reason`, `risk_band_source`, `risk_band_computed_at`,
+`severity_by_provider` JSONB, `vendor_status`) plus
+`Server.host_state_snapshot_at` plus zwei Indizes (partial-`open` +
+server_risk_band) in Migration 0004. UI: drei-Tier-Dashboard
+(zwei Action-Required-Cards prominent, sieben Risk-Band-Pills mit
+Escalate-Pulse, Severity-Strip kompakt), Server-Detail-Header mit
+drei-Varianten-Action-Pill (rot Action-needed mit Sub-Counter / gruen
+Safe / grau Update-agent), neue `<section id="host-snapshot">` direkt
+unter dem Header (default-collapsed, max 5 Listener inline mit Tooltip
+auf `process.args` — Jinja-Autoescape verifiziert via XSS-Adversarial),
+Findings-Tabelle gruppiert nach `risk_band` mit Section-Headers
+(default-expanded ab `pending` aufwaerts, default-collapsed fuer
+monitor/noise/unknown), Bulk-Ack-Noise-Button mit Modal und Server-
+Side-`risk_band_filter="noise"`-Filter im bestehenden Block-F-Endpoint
+(eingeschleuste non-noise-IDs werden gedroppt und in
+`skipped_non_noise_ids` der Response gelistet). Default-Sort wechselt
+von `sev` zu `risk` mit `RISK_BAND_SORT_RANK` (70/60/50/40/30/20/10/
+NULL=0); CVSS-Severity rutscht in den Tiebreak-Tail
+(KEV → EPSS → CVSS-Rank → identifier_key). `severity_by_provider`
+persistiert Trivys `VendorSeverity`-Map (max 16 Provider, ASCII-only,
+numerische Severity-Werte 0..4 zu Strings normalisiert).
+`vendor_status` haelt normalisierten Trivy-`Status`
+(`affected`/`fixed`/`investigating`/`will_not_fix`/`eol`/
+`not_affected`/`unknown`) — Block P wird das als LLM-Eingabe-Signal
+nutzen. **Bewusst weggelassen:** LLM-Risk-Reasoning, Host-Snapshot-
+Historisierung, manueller Risk-Override, Patch-Alter-Eskalation,
+Exposure-Mapping als statisches Asset, OpenRC-/Alpine-Services,
+Daily-Re-Eval-Job — alle in §17 nachgetragen. Privacy-Hinweis zu
+Process-Args in ARCHITECTURE §9 mit DSGVO-Empfehlung dokumentiert
+(README-Notice als optionaler Re-Open-Trigger vom Security-Auditor
+benannt). MIN_AGENT_VERSION bleibt 0.1.0 — alte Agents weiter
+akzeptiert, Findings landen in `risk_band="unknown"`.
+
+1226 Tests gruen (vorher 992; +234 Block-O-Tests: 53 Phase A,
+62+1 bench Phase B, 12 Phase C, 21 Phase D, 10 Phase E, 69 Phase G,
+plus 6 angepasste Block-M/K-Tests). Coverage **92.42 %**
+(Threshold 85 %); 326 adversarial PASS (+69 neue Block-O-Cases:
+KEV/HIGH/EPSS-Kombinations-Tabellen, Pre-Triage-No-Snapshot-Safety,
+Pre-Triage-No-LLM-Override, Host-State-XSS, Listener-Addr-Validierung
+mit ipaddress-Modul, Host-State-Max-Lengths 10k-Reject, Bulk-Ack-
+Noise-Strict). `ruff check` / `ruff format --check` / `mypy app/`
+(60 source files) / `shellcheck agent/*.sh` PASS. Alembic-Roundtrip
+(0004 ↔ 0003) PASS im Container. `docker build` + `docker compose up
+--build` + `/healthz` PASS, Image-Size **191 MB** (Delta 0 MB vs.
+v0.7.x — Engine ist reines Python). Reviewer APPROVE nach drei
+mechanischen Fixes (ruff RUF003/S104/I001-Adversarial-Files,
+ruff format, CHANGELOG-v0.8.0-Eintrag); Security-Auditor
+**ACCEPTABLE WITH NOTES → SECURITY APPROVED** (alle 8 Pflicht-Punkte
+PASS: Pre-Triage schluckt keine Eskalationen, unknown-Default
+konservativ, Bulk-Ack-Server-Side-Filter unumgehbar, Pydantic-
+Validatoren strikt fuer IP/Port/ASCII, risk_band hat keinen
+User-Input-Pfad, alle Band-Bewegungen produzieren `risk.band_changed`,
+DSGVO-Aspekt der Process-Args als bewusste MVP-Entscheidung
+dokumentiert + Re-Open-Trigger benannt, LLM-Bands ueberleben
+Re-Ingest). Tag `v0.8.0` zu setzen.
 
 Block N (ADR-0021) abgeschlossen: Backend-gehosteter interaktiver
 Bootstrap-Installer ueber `curl -fsSL .../install.sh | sudo bash`
@@ -102,9 +177,11 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Aktueller Block
 
-(keiner — Block N abgeschlossen 2026-05-18, naechster Block per User-Entscheidung)
+(keiner — Block O abgeschlossen 2026-05-18, naechster Block per User-Entscheidung. Block P bereits als Re-Open-Trigger in ADR-0022 angelegt: LLM-Final-Bewertung der `pending`-Findings.)
 
 ## Completed
+
+- **O — Pre-Triage-Risk-Engine + Host-Snapshot + Vendor-Severity + UI-Redesign (ADR-0022)** · abgeschlossen 2026-05-18 · Branch `feat/block-o` · Reviewer APPROVE nach drei mechanischen Fixes (ruff RUF003/S104/I001 in sechs neuen Adversarial-Test-Files, ruff format auf vier davon, CHANGELOG-v0.8.0-Eintrag mit allen vier Bausteinen). Security-Auditor: **ACCEPTABLE WITH NOTES → SECURITY APPROVED** (alle 8 Pflicht-Punkte PASS: Pre-Triage-Cuts schlucken keine Eskalationen, `unknown`-Default ist `action_required=yes`, Bulk-Ack-Server-Side-Filter `risk_band == "noise"` unumgehbar via Request-Manipulation, Pydantic-Validatoren strikt fuer IP-Literal/Port-Range/ASCII/NUL/Length-Bounds, `risk_band`-Spalte hat genau einen Schreibpfad in `app/api/scans.py` Pre-Triage-Schleife nach Auth, alle Band-Bewegungen produzieren `risk.band_changed`-Audit, DSGVO-Aspekt der Process-Args als bewusste MVP-Entscheidung in ARCHITECTURE §9 dokumentiert mit README-Notice als optionaler Re-Open-Trigger, LLM-gesetzte Bands mit `risk_band_source="llm"` ueberleben Re-Ingest). 1226 Tests gruen (+234 vs. v0.7.0; +90 erwartete + Adversarial-Surplus), Coverage **92.42 %**; 326 adversarial PASS (+69 Block-O-Cases). `ruff check`/`ruff format --check`/`mypy app/` (60 source files)/`shellcheck agent/*.sh` PASS, Alembic-Roundtrip (0004 ↔ 0003) PASS, `docker build` + `docker compose up --build` + `/healthz` PASS, Image **191 MB** (Delta 0 MB vs. v0.7.0). **Neu:** `app/services/risk_engine.py` (`RiskBand`/`ActionRequired`/`ACTION_REQUIRED_MAP`/`RISK_BAND_SORT_RANK`/`EPSS_PENDING_THRESHOLD=0.1`/`pretriage()`/`RiskEvaluation`/`normalize_vendor_status()`/`VENDOR_SEVERITY_INT_MAP`/`yes_band_values()`/`no_band_values()`), `app/services/severity_resolver.py` (`severity_for()` mit 13 Distro-Profilen + GHSA-Prio fuer lang-pkgs, `max_severity_across_providers()`, `_score_to_severity()`), `app/services/host_state_ingest.py` (`persist_host_state()` mit truncate+insert pro Server, Dedup auf `(proto,addr,port)`/`pid`/`name`), `agent/lib_host_state.sh` (~330 LOC sourcable Lib mit `collect_listeners`/`collect_processes`/`collect_kernel_modules`/`collect_services` + `build_host_state_json`, POSIX-awk, `ss`/`netstat`-Fallback, `LC_ALL=C`), `alembic/versions/0004_block_o_risk_and_host_state.py` (4 create_table + 7 add_column + 4 create_index), `app/templates/_partials/{host_snapshot,risk_band_pill,action_required_pill,action_required_card}.html`, `app/templates/servers/_bulk_ack_noise_modal.html`, `app/static/js/bulk_ack_noise.js` (Alpine-Komponente, postet `risk_band_filter="noise"`), 13 neue Test-Dateien (3 Schemas, 1 Migration, 5 Services, 2 API-Integration, 1 Agent-Subprocess, 4 Views, 7 Adversarial). **Geaendert:** `app/models.py` (vier Snapshot-Modelle, `Server.host_state_snapshot_at`, sechs Finding-Spalten plus zwei Indizes), `app/api/scans.py` (Reihenfolge Auth → Body → Findings-UPSERT → Snapshot-Persist → Pre-Triage-Schleife → `scan.ingested`; mit `host_state.snapshot_received`/`host_state.parse_failed`/`risk.band_changed`/`risk.pretriage_evaluated` Audit-Events; LLM-Override-Skip `if finding.risk_band_source == "llm": continue`), `app/api/bulk.py` (`risk_band_filter="noise"`-Form-Field, server-side `Finding.risk_band == "noise"`-Drop, `skipped_non_noise_ids` in Response + Audit), `app/schemas/scan_envelope.py` (`HostStateBlock`/`ListenerEntry`/`ProcessEntry` mit IP-Literal/Port-Range/ASCII/NUL-/Length-Validatoren, `TrivyVulnerability.vendor_severity` mit Numeric-zu-String-Normalisierung), `app/schemas/{dashboard_filter,findings_view_filter,bulk_request}.py` (Literal-Felder `risk_band`/`action_required`/`risk_band_filter`), `app/services/findings_ingest.py` (Mapper schreibt `vendor_status` + `severity_by_provider`), `app/services/findings_query.py` (`risk`-Sort-Key mit `case()`-Expression, Filter fuer `risk_band`/`action_required`), `app/views/dashboard.py` (`RiskKpiCounters` + `_load_risk_kpi_counters()`), `app/views/server_detail.py` (`_load_action_required_counts()` + `_load_host_snapshot()` + noise-Findings fuer Modal), `agent/secscan-agent.sh` (`AGENT_VERSION="0.3.0"`, Lib-Source ueber `BASH_SOURCE`-relativen Pfad, host_state-Build im Envelope), Templates `dashboard/_kpi_cards.html` (Tier-Umbau), `dashboard/_findings_filter_bar.html` (zwei neue Selects), `dashboard/_findings_section.html` (Risk-Spalte), `servers/detail.html` (Action-Required-Pill als erste Header-Pill + Host-Snapshot-Sektion), `servers/_view_list.html` (`risk_band`-Gruppierung mit Alpine-Collapsible), `servers/_findings_section.html` (Bulk-Ack-Noise-Button), `base.html`/`base_app.html` (`bulk_ack_noise.js`-Include), ARCHITECTURE.md §6/§7/§7a/§9/§11/§15/§17, `docs/decisions/0022-risk-based-prioritization.md` Status „Akzeptiert", `docs/decisions/README.md` Index, CHANGELOG.md v0.8.0-Eintrag, sechs angepasste Block-M/K-Tests, `tests/views/test_agent_install.py` AGENT_VERSION-Erwartung 0.2.0→0.3.0, `tests/schemas/test_dashboard_filter.py` Default-Sort `sev`→`risk`. **MIN_AGENT_VERSION** bleibt `0.1.0` — alte Agents 0.2.0 weiter akzeptiert, Findings landen ohne `host_state` in `risk_band="unknown"` mit Reason „host snapshot missing — update agent to >= 0.3.0". **Bewusst weggelassen:** LLM-Risk-Reasoning (Block P), Host-Snapshot-Historisierung, manueller Risk-Override, Patch-Alter-Eskalation, Exposure-Mapping als statisches Asset, OpenRC-/Alpine-Services, Daily-Re-Eval-Job, README-Privacy-Notice (vom Security-Auditor als optionaler Re-Open-Trigger benannt). **Tag `v0.8.0` zu setzen.**
 
 - **N — Agent-Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding (ADR-0021)** · abgeschlossen 2026-05-18 · Branch `feat/block-n-agent-installer` · Reviewer-Freigabe nach `.dockerignore`-Fix (Zeile `agent` entfernt — sonst war das Runtime-Image ohne `agent/`-Verzeichnis und die drei neuen Public-Endpoints 404). Security-Auditor: **ACCEPTABLE WITH NOTES** (alle 8 Pflicht-Punkte PASS — no-secrets in /install.sh, Path-Traversal, PUBLIC_PATHS minimal, Pill-Tooltip-XSS via DaisyUI-CSS-`::before`, outdated-Agent-Reject + Audit, agent.env mode 0600 root:root, Trivy-SHA256-fail-stop, Master-Key niemals in Argv/History/Files; zwei optionale Doku-Notes als Re-Open-Trigger: `@limiter.limit("60/minute")` auf `/install.sh`/`/agent/files/` und README-Hinweis fuer Reverse-Proxy-Allowlist). 992 Tests grün (+108 neue Block-N-Tests), Coverage **92.16 %**; 254 adversarial PASS (+14 neue: Path-Traversal × 9, no-secrets, outdated-Reject, public-no-auth × 3, PURL-XSS, VendorIDs-Injection × 9). `ruff check`/`ruff format --check`/`mypy app/`/`shellcheck agent/*.sh` PASS, Alembic-Roundtrip (0003 ↔ 0002) PASS, `docker compose up --build` + `/healthz` + `/install.sh` + `/agent/version` + `/agent/files/secscan-agent.sh` PASS, Image 191 MB (Delta 0 vs. v0.6.x). Neu: `app/views/agent_install.py` (3 Routes), `app/templates/agent/install.sh.j2` (~720 Bash-Zeilen, sechs-Phasen-Wizard mit TTY/Color/Box-Helpers, `/dev/tty`-Master-Key-Prompt, Trivy-`sha256sum -c`, systemd+Cron-Fallback, Unattended-Modus), `app/services/agent_version.py` (`version_lt`/`is_*_outdated`), `app/services/finding_display.py` (`format_finding_cause()` mit ADR-0011-Fallback-Split), `alembic/versions/0003_block_n_agent_and_finding_cause.py` (7 add_column: 2 Server + 5 Finding — `Server.agent_version` existierte bereits aus 0002), `tests/integration/installer/` (Ubuntu-24.04 + AlmaLinux-9 Dockerfiles + run.sh + Make-Target `test-installer`, alle unter `@pytest.mark.integration`). Geaendert: `agent/secscan-agent.sh` AGENT_VERSION 0.1.0→0.2.0 + `host.trivy_version` + `jq`-Strip mit Raw-Fallback + Englisch, `agent/secscan-register.sh` Englisch, `app/api/scans.py` Agent-Version-Reject (400 + Audit `agent.rejected_outdated`, 401-vor-400-Reihenfolge erhalten), `app/services/findings_ingest.py` `_extract_cause_fields` + UPSERT-Pfad schreibt fuenf Cause-Spalten, `app/schemas/scan_envelope.py` `HostBlock.trivy_version` + `TrivyPkgIdentifier` + `TrivyVulnerability.{pkg_identifier,severity_source,vendor_ids}` + `package_purl`-Property + `MAX_VENDOR_IDS_PER_VULN=32`, `app/__init__.py` Context-Processor + PUBLIC_PATHS-Allowlist um drei Routes + `humanize_delta`-Filter, `app/templates/servers/detail.html` (drei conditional Pills mit Tooltips), `app/templates/sidebar/_server_row.html` (`⚠`-Marker), `app/templates/servers/_view_list.html` + `dashboard/_findings_section.html` (Ursachen-Sub-Zeile). ADR-0011 bleibt waehrend natuerlicher Re-Ingest-Konsolidierung aktiv — `_disambiguated_package_name()` unveraendert, Alt-Daten ohne `target_path` rendert UI per `package_name`-`@`-Split-Fallback. ARCHITECTURE §6 + §11 + §17 aktualisiert. `.dockerignore` `agent` raus. **Tag `v0.7.0` zu setzen.**
 
@@ -144,6 +221,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 | L | [L-dashboard-polling.md](L-dashboard-polling.md) | completed 2026-05-16 — **v0.5.0** (ADR-0019 Dashboard-SSE → HTMX-Polling, LLM-Stream-SSE bleibt) |
 | M | [M-dashboard-findings.md](M-dashboard-findings.md) | completed 2026-05-16 — **v0.6.0** (ADR-0020 Cross-Server-Findings + KPI-Sparklines, /findings/search-Removal) |
 | N | [N-agent-installer.md](N-agent-installer.md) | completed 2026-05-18 — **v0.7.0** (ADR-0021 Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding) |
+| O | [O-risk-engine.md](O-risk-engine.md) | completed 2026-05-18 — **v0.8.0** (ADR-0022 Pre-Triage-Risk-Engine + Host-Snapshot + Vendor-Severity + Risk-zentrisches UI) |
 
 ## Aktive Blocker
 
@@ -151,7 +229,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Offene ADR-Wünsche
 
-(keine — ADR-0020 deckt Block M ab. ADR-0016 wird im Zuge von Block M auf „Superseded by 0020" gesetzt, partiell für die Dashboard-Pane-Layout-Sektionen; Header- und Profile-Dropdown-Teile bleiben gültig. Wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird.)
+(keine — ADR-0022 deckt Block O ab. Block P wird LLM-Final-Bewertung der `pending`-Findings bringen und nutzt den `risk_band_source = "llm"`-Slot der bereits angelegt ist. Wenn Implementer eine neue Architektur-Entscheidung braucht, hier eintragen und Spec ergänzen bevor Code geschrieben wird.)
 
 ## Update-Konvention
 

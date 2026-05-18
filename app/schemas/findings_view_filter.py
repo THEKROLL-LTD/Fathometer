@@ -28,17 +28,24 @@ log = structlog.get_logger(__name__)
 
 
 ViewMode = Literal["list", "group", "diff"]
-SortKey = Literal["cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"]
+SortKey = Literal["risk", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"]
 SortDir = Literal["asc", "desc"]
+RiskBandFilter = Literal["escalate", "act", "mitigate", "pending", "unknown", "monitor", "noise"]
+ActionRequiredFilter = Literal["yes", "no"]
 
 _VALID_MODES: frozenset[str] = frozenset({"list", "group", "diff"})
 _VALID_STATUS: frozenset[str] = frozenset({"open", "acknowledged", "resolved", "all"})
 _VALID_CLASS: frozenset[str] = frozenset({"os-pkgs", "lang-pkgs", "both"})
 _VALID_SEVERITIES: frozenset[str] = frozenset({"critical", "high", "medium", "low", "all"})
+# Block O (ADR-0022): `risk` als Default-Primary-Sort.
 _VALID_SORTS: frozenset[str] = frozenset(
-    {"cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"}
+    {"risk", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"}
 )
 _VALID_DIRS: frozenset[str] = frozenset({"asc", "desc"})
+_VALID_RISK_BANDS: frozenset[str] = frozenset(
+    {"escalate", "act", "mitigate", "pending", "unknown", "monitor", "noise"}
+)
+_VALID_ACTION_REQUIRED: frozenset[str] = frozenset({"yes", "no"})
 _BOOL_TRUE_TOKENS: frozenset[str] = frozenset({"1", "true", "on", "yes"})
 
 
@@ -53,10 +60,16 @@ class FindingsViewFilter(BaseModel):
     severity: Severity | None = None
     kev_only: bool = False
     search: str | None = None
-    # ADR-0018: sortierbare Spalten-Header in der Server-Detail-Tabelle.
-    # Default `sort=sev, dir=desc` entspricht §15 (high-severity oben).
-    sort: SortKey = "sev"
+    # ADR-0018/ADR-0022: sortierbare Spalten-Header in der Server-Detail-
+    # Tabelle. Default `sort=risk, dir=desc` (Block O) — escalate/act/mitigate
+    # oben, dann pending/unknown/monitor/noise. CVSS-Severity rutscht in den
+    # Tiebreak-Tail.
+    sort: SortKey = "risk"
     dir: SortDir = "desc"
+    # Block O (ADR-0022): Risk-Filter (kein Filter-Bar auf Server-Detail laut
+    # ADR-0018, aber Bookmark-URLs sollen funktionieren).
+    risk_band: RiskBandFilter | None = None
+    action_required: ActionRequiredFilter | None = None
 
     @field_validator("search", mode="before")
     @classmethod
@@ -112,15 +125,31 @@ class FindingsViewFilter(BaseModel):
             else:
                 severity = Severity(sev_raw)
 
-        sort_raw = (args.get("sort") or "sev").strip().lower()
+        sort_raw = (args.get("sort") or "risk").strip().lower()
         if sort_raw not in _VALID_SORTS:
             log.debug("findings_filter.sort_rejected", value=sort_raw)
-            sort_raw = "sev"
+            sort_raw = "risk"
 
         dir_raw = (args.get("dir") or "desc").strip().lower()
         if dir_raw not in _VALID_DIRS:
             log.debug("findings_filter.dir_rejected", value=dir_raw)
             dir_raw = "desc"
+
+        # Block O (ADR-0022): Risk-Filter aus dem Query-String. Ungueltige
+        # Werte fallen still auf None zurueck.
+        risk_band_raw = (args.get("risk_band") or "").strip().lower()
+        risk_band: RiskBandFilter | None = None
+        if risk_band_raw in _VALID_RISK_BANDS:
+            risk_band = risk_band_raw  # type: ignore[assignment]
+        elif risk_band_raw:
+            log.debug("findings_filter.risk_band_rejected", value=risk_band_raw)
+
+        action_required_raw = (args.get("action_required") or "").strip().lower()
+        action_required: ActionRequiredFilter | None = None
+        if action_required_raw in _VALID_ACTION_REQUIRED:
+            action_required = action_required_raw  # type: ignore[assignment]
+        elif action_required_raw:
+            log.debug("findings_filter.action_required_rejected", value=action_required_raw)
 
         return cls(
             mode=mode_raw,  # type: ignore[arg-type]
@@ -131,6 +160,8 @@ class FindingsViewFilter(BaseModel):
             search=args.get("q"),
             sort=sort_raw,  # type: ignore[arg-type]
             dir=dir_raw,  # type: ignore[arg-type]
+            risk_band=risk_band,
+            action_required=action_required,
         )
 
     def to_findings_filter(self) -> FindingsFilter:
@@ -141,6 +172,8 @@ class FindingsViewFilter(BaseModel):
             finding_class=self.finding_class,
             kev_only=self.kev_only,
             search=self.search,
+            risk_band=self.risk_band,
+            action_required=self.action_required,
         )
 
     def to_query_string(self, *, override: dict[str, str] | None = None) -> str:
@@ -165,10 +198,15 @@ class FindingsViewFilter(BaseModel):
         # Sort/Dir immer mitgeben — Bookmarks sollen die explizite
         # Sortierung beibehalten, auch wenn sie zufaellig dem Default
         # entspricht. Macht URL kompakter ohne Wirkungsaenderung.
-        if self.sort != "sev":
+        if self.sort != "risk":
             parts.append(("sort", self.sort))
         if self.dir != "desc":
             parts.append(("dir", self.dir))
+        # Block O (ADR-0022).
+        if self.risk_band is not None:
+            parts.append(("risk_band", self.risk_band))
+        if self.action_required is not None:
+            parts.append(("action_required", self.action_required))
 
         if override:
             # Bestehende Keys ersetzen, sonst anhaengen.
@@ -193,4 +231,11 @@ def _parse_bool(value: str | None) -> bool:
     return value.strip().lower() in _BOOL_TRUE_TOKENS
 
 
-__all__ = ["FindingsViewFilter", "SortDir", "SortKey", "ViewMode"]
+__all__ = [
+    "ActionRequiredFilter",
+    "FindingsViewFilter",
+    "RiskBandFilter",
+    "SortDir",
+    "SortKey",
+    "ViewMode",
+]

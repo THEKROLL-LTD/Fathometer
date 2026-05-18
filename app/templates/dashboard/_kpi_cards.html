@@ -1,75 +1,85 @@
-{# Dashboard-KPI-Cards-Grid (Block M, ADR-0020).
+{# Dashboard-KPI-Cards (Block O, ADR-0022 §UI-Redesign).
 
-   Fuenf Karten in einem responsiven Grid. Jede Karte ist ein Include von
-   `servers/_kpi_card.html` — derselbe Partial wie auf dem Server-Detail-View
-   (Block K, ADR-0018), erweitert um den optionalen `link_url`-Parameter aus
-   Task #9a. Klick auf eine Karte setzt den entsprechenden URL-Filter und
-   HTMX-swappt das Dashboard-Pane.
+   Drei Tiers:
 
-   Variablen-Vertrag:
-     - `quick_stats`     : QuickStats  — total_open / kev_open / critical_open
-                           / high_open / stale_servers (filter-unabhaengige
-                           OPEN-Counter, siehe ADR-0020 „Sparkline-Semantik").
-     - `kpi_sparklines`  : dict[str, list[int]] — Keys total/kev/critical/high,
-                           jeweils 50 OPEN-Snapshots aelteste zuerst.
-     - `stale_sparkline` : list[int] — 50 Daily-Stale-Server-Counts.
+     1. Primaere Action-Required-Cards links (gross, klickbar):
+        - "Action needed — N Server" (rot/orange, ?action_required=yes)
+        - "Safe — N Server" (gruen, ?action_required=no)
+        Beide haben Sub-Counter pro Band.
 
-   Implementierungs-Entscheidung (gegenueber Block-M-Brief): wir nutzen
-   `{% with %}…{% endwith %}` statt `{% include … with context only ... %}`.
-   Jinja2 unterstuetzt `with context` als Modifier, aber keine inline-Key-
-   Value-Parameter-Liste auf `{% include %}`. `{% with %}` ist die portable
-   Variante und exakt das Pattern, das `servers/detail.html` (Block K)
-   bereits fuer dieselben KPI-Card-Includes nutzt — kein Refactor des
-   Card-Partials noetig.
+     2. Sekundaere Risk-Band-Pills rechts (kompakt, klickbar, 7 Stueck):
+        Escalate · Act · Mitigate · Pending · Unknown · Monitor · Noise
+        `escalate` mit `animate-pulse`.
+
+     3. Tertiaere Severity-Strip unten (klein, OHNE Klick-Filter):
+        CRITICAL N · HIGH N · MEDIUM N · LOW N.
+
+   Variablen-Vertrag (gesetzt in `_build_pane_context`):
+     - `risk_kpis` : RiskKpiCounters (action_yes_servers/action_no_servers/
+                     risk_band_counts/action_yes_subcounts/severity_strip_counts).
+     - `view_filter`/`filter` : DashboardFilter (fuer `is_active`-Highlight).
+
+   Block-M-Sparklines bzw. der alte 5-Card-Grid sind ersatzlos weg —
+   ADR-0022 §UI-Redesign erklaert das CVSS-zentrische Layout fuer abgeloest.
 #}
-<section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-  {# Total Open — tone=base, link auf Dashboard ohne Filter (Reset). #}
-  {% with label='TOTAL OPEN',
-          value=quick_stats.total_open | default(0),
-          tone='base',
-          sparkline=kpi_sparklines.total | default([]),
-          kev_indicator=false,
-          link_url=url_for('dashboard.index') ~ '#findings-section' %}
-    {% include "servers/_kpi_card.html" %}
-  {% endwith %}
+{%- set _yes_active = filter.action_required == 'yes' -%}
+{%- set _no_active = filter.action_required == 'no' -%}
+{%- set _band_filter = filter.risk_band -%}
+{%- set _risk_counts = risk_kpis.risk_band_counts | default({}) -%}
+{%- set _sev_strip = risk_kpis.severity_strip_counts | default({}) -%}
 
-  {# KEV — pulsierender Dot wenn kev_open > 0. #}
-  {% with label='KEV',
-          value=quick_stats.kev_open | default(0),
-          tone='error',
-          sparkline=kpi_sparklines.kev | default([]),
-          kev_indicator=true,
-          link_url=url_for('dashboard.index') ~ '?kev_only=1#findings-section' %}
-    {% include "servers/_kpi_card.html" %}
-  {% endwith %}
+<section class="space-y-4" data-test="dashboard-kpi-section">
+  {# Tier 1 + Tier 2 nebeneinander. Auf schmalen Layouts stapeln sie. #}
+  <div class="flex items-stretch justify-between gap-4 flex-wrap">
+    {# Tier 1: zwei Action-Required-Cards. #}
+    <div class="flex gap-3 flex-wrap"
+         data-test="dashboard-action-cards">
+      {% with kind='yes',
+              server_count=risk_kpis.action_yes_servers,
+              subcounts=risk_kpis.action_yes_subcounts,
+              is_active=_yes_active %}
+        {% include "_partials/action_required_card.html" %}
+      {% endwith %}
+      {% with kind='no',
+              server_count=risk_kpis.action_no_servers,
+              subcounts={'monitor': _risk_counts.get('monitor', 0),
+                         'noise':   _risk_counts.get('noise', 0)},
+              is_active=_no_active %}
+        {% include "_partials/action_required_card.html" %}
+      {% endwith %}
+    </div>
 
-  {# Critical-Findings. #}
-  {% with label='CRITICAL',
-          value=quick_stats.critical_open | default(0),
-          tone='error',
-          sparkline=kpi_sparklines.critical | default([]),
-          kev_indicator=false,
-          link_url=url_for('dashboard.index') ~ '?severity=critical#findings-section' %}
-    {% include "servers/_kpi_card.html" %}
-  {% endwith %}
+    {# Tier 2: sieben Risk-Band-Pills. #}
+    <div class="flex items-center gap-2 flex-wrap"
+         data-test="dashboard-risk-band-pills">
+      {% for band in ['escalate','act','mitigate','pending','unknown','monitor','noise'] %}
+        {% with band_value=band,
+                count=_risk_counts.get(band, 0),
+                as_link=true,
+                is_active=(band == _band_filter),
+                compact=true %}
+          {% include "_partials/risk_band_pill.html" %}
+        {% endwith %}
+      {% endfor %}
+    </div>
+  </div>
 
-  {# High-Findings. #}
-  {% with label='HIGH',
-          value=quick_stats.high_open | default(0),
-          tone='warning',
-          sparkline=kpi_sparklines.high | default([]),
-          kev_indicator=false,
-          link_url=url_for('dashboard.index') ~ '?severity=high#findings-section' %}
-    {% include "servers/_kpi_card.html" %}
-  {% endwith %}
-
-  {# Stale-Server. tone=base wie im ADR (gedaempfter Indikator). #}
-  {% with label='STALE-SERVER',
-          value=quick_stats.stale_servers | default(0),
-          tone='base',
-          sparkline=stale_sparkline | default([]),
-          kev_indicator=false,
-          link_url=url_for('dashboard.index') ~ '?stale_only=1#findings-section' %}
-    {% include "servers/_kpi_card.html" %}
-  {% endwith %}
+  {# Tier 3: Severity-Strip — KEIN Klick-Filter (Severity-Filter lebt in
+     der Filter-Bar). #}
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-mono opacity-80"
+       data-test="dashboard-severity-strip">
+    <span class="opacity-60 uppercase tracking-[0.12em] text-[10px]">Severity</span>
+    {% for sev_key, sev_label in [
+      ('critical', 'CRITICAL'),
+      ('high',     'HIGH'),
+      ('medium',   'MEDIUM'),
+      ('low',      'LOW'),
+    ] %}
+      <span data-test="severity-strip-{{ sev_key }}">
+        <span class="uppercase opacity-60">{{ sev_label }}</span>
+        <span class="font-semibold tabular-nums ml-1">{{ _sev_strip.get(sev_key, 0) }}</span>
+      </span>
+      {% if not loop.last %}<span class="opacity-30">·</span>{% endif %}
+    {% endfor %}
+  </div>
 </section>

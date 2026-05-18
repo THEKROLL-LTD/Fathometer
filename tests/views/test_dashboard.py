@@ -166,9 +166,10 @@ def test_dashboard_renders_empty_state_when_no_servers(db_app: Flask) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dashboard_renders_kpi_cards_with_sparklines(db_app: Flask) -> None:
-    """Fuenf KPI-Card-Instanzen aus `_kpi_card.html` mit jeweils einer
-    SVG-Sparkline-Markup-Sektion (auch wenn flat/leer)."""
+def test_dashboard_renders_risk_kpi_strip(db_app: Flask) -> None:
+    """Block O (ADR-0022): Drei-Tier-KPI-Strip ersetzt die Block-M-Sparkline-
+    Cards. Zwei Action-Required-Cards links, sieben Risk-Band-Pills rechts,
+    Severity-Strip darunter."""
     create_admin_user(db_app)
     _create_server(db_app, name="kpi-srv-1")
     client = db_app.test_client()
@@ -176,19 +177,21 @@ def test_dashboard_renders_kpi_cards_with_sparklines(db_app: Flask) -> None:
     resp = client.get("/")
     body = resp.get_data(as_text=True)
 
-    # Fuenf Card-Marker — siehe `dashboard/_kpi_cards.html`.
-    expected = ("total_open", "kev", "critical", "high", "stale_server")
-    for label in expected:
-        assert f'data-test="kpi-card-{label}"' in body, (
-            f"KPI-Card-Marker `kpi-card-{label}` fehlt im Markup"
+    # Tier 1: zwei Action-Required-Cards.
+    assert 'data-test="action-required-card-yes"' in body
+    assert 'data-test="action-required-card-no"' in body
+
+    # Tier 2: sieben Risk-Band-Pills.
+    for band in ("escalate", "act", "mitigate", "pending", "unknown", "monitor", "noise"):
+        assert f'data-test="risk-band-pill-{band}"' in body, (
+            f"Risk-Band-Pill `{band}` fehlt im Markup"
         )
 
-    # Jede KPI-Card hat ein eigenes `<svg>` (Sparkline oder leerer Container).
-    # Wir zaehlen die Card-Container per Marker und stellen sicher, dass
-    # mindestens fuenf `<svg ` im Markup auftauchen — Sidebar-Sparklines gibt
-    # es im Pane nicht, Header-Logo-SVGs sind im Pane ebenfalls nicht.
-    svg_count = body.count("<svg")
-    assert svg_count >= 5, f"Erwartet >= 5 SVG-Tags fuer Sparklines, gefunden: {svg_count}"
+    # Tier 3: Severity-Strip.
+    for sev in ("critical", "high", "medium", "low"):
+        assert f'data-test="severity-strip-{sev}"' in body, (
+            f"Severity-Strip-Item `{sev}` fehlt im Markup"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -311,19 +314,15 @@ def test_dashboard_filter_status_acknowledged_only_changes_table(
     assert "CVE-ACK-1" in section
     assert "CVE-OPEN-1" not in section
 
-    # KPI-Counter zeigt weiter den OPEN-Counter (TOTAL OPEN). Es gibt 1 OPEN-
-    # Finding in der Flotte; die Card muss den Wert `1` rendern.
-    # Wir parsen das aus dem `total_open`-Card-Block.
-    total_open_match = re.search(
-        r'data-test="kpi-card-total_open".*?font-mono text-2xl[^>]*>(\d+)<',
-        body,
-        re.DOTALL,
-    )
-    assert total_open_match is not None, "TOTAL OPEN KPI-Card nicht gefunden"
-    assert total_open_match.group(1) == "1", (
-        f"TOTAL OPEN sollte 1 zeigen (filter-unabhaengig OPEN-Counter), "
-        f"got {total_open_match.group(1)}"
-    )
+    # Block O (ADR-0022): die KPI-Strip-Counter sind weiterhin filter-
+    # unabhaengig OPEN — d.h. das 1 OPEN-Finding muss in den Action-Cards/
+    # Severity-Strip reflektiert sein, auch wenn die Tabelle gerade auf
+    # `status=acknowledged` filtert.
+    # Sub-Counter ist im Action-Card-Markup; wir pruefen nur dass die Counter-
+    # Strukturen vorhanden sind. Konkrete Werte werden in
+    # `test_dashboard_risk_kpis.py` getestet.
+    assert 'data-test="action-required-card-yes"' in body
+    assert 'data-test="action-required-card-no"' in body
 
 
 # ---------------------------------------------------------------------------
@@ -362,66 +361,65 @@ def test_dashboard_filter_sort_by_server_asc(db_app: Flask) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dashboard_kpi_card_click_sets_filter(db_app: Flask) -> None:
-    """Card-`hx-get` setzt den richtigen Query-String fuer den entsprechenden
-    Filter (KEV-, Severity-, Stale-Cards)."""
+def test_dashboard_action_required_cards_set_filter(db_app: Flask) -> None:
+    """Block O (ADR-0022): Action-Required-Cards setzen `?action_required=yes|no`.
+
+    Risk-Band-Pills setzen `?risk_band=<band>`. Klick fuehrt HTMX-Swap auf
+    `#findings-section`.
+    """
     create_admin_user(db_app)
     _create_server(db_app, name="kpi-click-srv")
     client = db_app.test_client()
     login(client)
     body = client.get("/").get_data(as_text=True)
 
-    # `data-test` kommt nach `hx-get` im Macro — wir suchen die Card-`<a>`
-    # neutral und extrahieren das gesamte Opening-Tag.
-    kev_card_block = re.search(
-        r'<a[^>]*data-test="kpi-card-kev"[^>]*>',
+    # Action-needed-Card.
+    yes_card = re.search(
+        r'<a[^>]*data-test="action-required-card-yes"[^>]*>',
         body,
         re.DOTALL,
     )
-    assert kev_card_block is not None, "KEV-Card nicht als <a> gerendert"
-    kev_tag = kev_card_block.group(0)
-    assert "kev_only=1" in kev_tag, f"KEV-Card hx-get setzt nicht kev_only=1: {kev_tag!r}"
-    assert "#findings-section" in kev_tag, kev_tag
+    assert yes_card is not None
+    yes_tag = yes_card.group(0)
+    assert "action_required=yes" in yes_tag, yes_tag
+    assert "#findings-section" in yes_tag, yes_tag
 
-    # CRITICAL-Card.
-    crit_block = re.search(
-        r'<a[^>]*data-test="kpi-card-critical"[^>]*>',
+    # Safe-Card.
+    no_card = re.search(
+        r'<a[^>]*data-test="action-required-card-no"[^>]*>',
         body,
         re.DOTALL,
     )
-    assert crit_block is not None
-    assert "severity=critical" in crit_block.group(0)
+    assert no_card is not None
+    assert "action_required=no" in no_card.group(0)
 
-    # STALE-Card.
-    stale_block = re.search(
-        r'<a[^>]*data-test="kpi-card-stale_server"[^>]*>',
+    # Eine Beispiel-Risk-Band-Pill (Pending) setzt risk_band=pending.
+    pending_pill = re.search(
+        r'<a[^>]*data-test="risk-band-pill-pending"[^>]*>',
         body,
         re.DOTALL,
     )
-    assert stale_block is not None
-    assert "stale_only=1" in stale_block.group(0)
+    assert pending_pill is not None
+    assert "risk_band=pending" in pending_pill.group(0)
 
 
-def test_dashboard_kpi_total_open_card_resets_filter(db_app: Flask) -> None:
-    """Total-Card `link_url` = `/#findings-section` (kein Filter-Query)."""
+def test_dashboard_severity_strip_has_no_click_filter(db_app: Flask) -> None:
+    """Block O (ADR-0022): Severity-Strip ist KEIN Filter — nur Display."""
     create_admin_user(db_app)
-    _create_server(db_app, name="kpi-reset-srv")
+    _create_server(db_app, name="sev-strip-srv")
     client = db_app.test_client()
     login(client)
-    body = client.get("/?severity=critical").get_data(as_text=True)
+    body = client.get("/").get_data(as_text=True)
 
-    total_block = re.search(
-        r'<a[^>]*data-test="kpi-card-total_open"[^>]*>',
+    # Severity-Strip-Marker existiert.
+    assert 'data-test="dashboard-severity-strip"' in body
+    # Keine <a>-Wrapper um die Severity-Strip-Items.
+    crit_block = re.search(
+        r'<a[^>]*data-test="severity-strip-critical"[^>]*>',
         body,
         re.DOTALL,
     )
-    assert total_block is not None, "TOTAL-OPEN-Card nicht als <a>"
-    tag = total_block.group(0)
-    # `href`/`hx-get` zeigen auf `/` mit `#findings-section` — kein Query-Param.
-    assert 'href="/#findings-section"' in tag, tag
-    assert 'hx-get="/#findings-section"' in tag, tag
-    # Kein Severity-Filter im Reset-Link.
-    assert "severity=" not in tag
+    assert crit_block is None, "Severity-Strip darf kein Klick-Filter sein"
 
 
 # ---------------------------------------------------------------------------
@@ -672,9 +670,11 @@ def test_dashboard_pane_context_complete(db_app: Flask) -> None:
     assert "CVE-CTX-1" in body or 'data-test="findings-empty"' in body, body[:500]
     # `findings_total` -> Truncation-Logik (kein Notice bei nur 1 Finding).
     assert 'data-test="truncation-notice"' not in body
-    # `kpi_sparklines` + `stale_sparkline` -> KPI-Cards.
-    assert 'data-test="kpi-card-total_open"' in body
-    assert 'data-test="kpi-card-stale_server"' in body
+    # `risk_kpis` -> Action-Required-Cards + Risk-Band-Pills (Block O).
+    assert 'data-test="action-required-card-yes"' in body
+    assert 'data-test="action-required-card-no"' in body
+    assert 'data-test="risk-band-pill-pending"' in body
+    assert 'data-test="dashboard-severity-strip"' in body
     # `bulk_form` + `csrf_form` -> Bulk-Ack-Modal-Marker.
     assert 'data-test="bulk-ack-modal"' in body
     # `attention` darf NICHT mehr da sein.

@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.sql import ColumnElement
 
 from app.models import Finding, FindingClass, FindingStatus, Server, ServerTag, Severity, Tag
+from app.services.risk_engine import RISK_BAND_SORT_RANK, RiskBand, no_band_values, yes_band_values
 
 if TYPE_CHECKING:
     from app.schemas.dashboard_filter import DashboardFilter
@@ -49,18 +50,23 @@ if TYPE_CHECKING:
 
 FindingsStatusFilter = Literal["open", "acknowledged", "resolved", "all"]
 FindingsClassFilter = Literal["os-pkgs", "lang-pkgs", "both"]
+FindingsRiskBandFilter = Literal[
+    "escalate", "act", "mitigate", "pending", "unknown", "monitor", "noise"
+]
+FindingsActionRequiredFilter = Literal["yes", "no"]
 
 # Block-K (ADR-0018): sortierbare Spalten-Header.
 # Whitelist-Literal — `_SORT_COLUMNS` mappt jeden Key auf eine fest
 # referenzierte Column. Damit ist `ORDER BY` immer ein Column-Objekt aus
 # dem Mapping, NIE eine User-Eingabe — kein SQL-Injection-Surface.
-FindingsSortKey = Literal["cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"]
+# Block O (ADR-0022): `"risk"` als neuer Default-Primary-Sort.
+FindingsSortKey = Literal["risk", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"]
 FindingsSortDir = Literal["asc", "desc"]
 
 # Block M (ADR-0020): Cross-Server-Sort enthaelt zusaetzlich `"server"`
 # (Sortierung nach `Server.name`).
 FindingsCrossSortKey = Literal[
-    "server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"
+    "risk", "server", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen"
 ]
 
 
@@ -71,6 +77,10 @@ class FindingsFilter:
     Defaults entsprechen dem Block-Plan: `status="open"`,
     `finding_class="both"`, keine weiteren Einschraenkungen. Severity-Minimum,
     KEV-Only und Such-Term sind optional.
+
+    Block O (ADR-0022): `risk_band` und `action_required` filtern auf den
+    neuen `Finding.risk_band`-Spaltenwert; `action_required="yes"` wird
+    aus `ACTION_REQUIRED_MAP` abgeleitet (kein Hardcode).
     """
 
     status: FindingsStatusFilter = "open"
@@ -78,6 +88,8 @@ class FindingsFilter:
     finding_class: FindingsClassFilter = "both"
     kev_only: bool = False
     search: str | None = None  # case-insensitive substring
+    risk_band: FindingsRiskBandFilter | None = None
+    action_required: FindingsActionRequiredFilter | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +178,28 @@ def _status_rank_expr() -> ColumnElement[int]:
     )
 
 
+def _risk_band_rank_expr() -> ColumnElement[int]:
+    """CASE-Expression: `Finding.risk_band` -> numerischer Rank (Block O).
+
+    Mapping aus `RISK_BAND_SORT_RANK` (ADR-0022). NULL-Band laeuft via
+    `else_=0` ans Ende — frische, noch nicht klassifizierte Findings
+    landen unter `noise` (Rank 10). Konsistent mit ADR-0022 §Sort-Order.
+    """
+    whens = [
+        (Finding.risk_band == band.value, RISK_BAND_SORT_RANK[band])
+        for band in (
+            RiskBand.ESCALATE,
+            RiskBand.ACT,
+            RiskBand.MITIGATE,
+            RiskBand.PENDING,
+            RiskBand.UNKNOWN,
+            RiskBand.MONITOR,
+            RiskBand.NOISE,
+        )
+    ]
+    return case(*whens, else_=0)
+
+
 # Whitelist-Mapping: Sort-Key -> Column/Expression. Jeder Eintrag wird in
 # `list_findings()` direkt via `.asc()`/`.desc()` benutzt — ORM-only, kein
 # `text()`, kein User-String fliesst in das ORDER BY.
@@ -176,6 +210,7 @@ def _status_rank_expr() -> ColumnElement[int]:
 # heterogene Sammlung valide bleibt. Die Sicherheit kommt aus der
 # Literal-Whitelist auf `sort` (siehe `FindingsSortKey`).
 _SORT_COLUMNS: dict[str, Any] = {
+    "risk": _risk_band_rank_expr(),
     "cve": Finding.identifier_key,
     "pkg": Finding.package_name,
     "epss": Finding.epss_score,
@@ -225,6 +260,14 @@ def _apply_filters(stmt: Any, server_id: int, filt: FindingsFilter) -> Any:
     if filt.kev_only:
         stmt = stmt.where(Finding.is_kev.is_(True))
 
+    # Block O (ADR-0022): risk_band / action_required.
+    if filt.risk_band is not None:
+        stmt = stmt.where(Finding.risk_band == filt.risk_band)
+    if filt.action_required == "yes":
+        stmt = stmt.where(Finding.risk_band.in_(yes_band_values()))
+    elif filt.action_required == "no":
+        stmt = stmt.where(Finding.risk_band.in_(no_band_values()))
+
     if filt.search:
         # Case-insensitive substring auf identifier_key, package_name, title.
         # `ilike` bindet den Wert -> kein SQL-Injection-Risiko.
@@ -247,15 +290,18 @@ def _apply_filters(stmt: Any, server_id: int, filt: FindingsFilter) -> Any:
 
 
 def _order_clauses(filt: FindingsFilter) -> list[Any]:
-    """Default-Sortierung gemaess §15 plus optionaler OS-Pakete-zuerst-Logik.
+    """Default-Sortierung gemaess §15 (post-Block-O) plus OS-Pakete-zuerst.
 
-    Reihenfolge bei `finding_class="both"`:
+    Block O (ADR-0022): `risk_band`-Rank rutscht als neuer Primary-Sort vor
+    KEV; CVSS-Severity bleibt im Tiebreak. Konkrete Reihenfolge bei
+    `finding_class="both"`:
       1. `finding_class = 'os-pkgs'` zuerst.
-      2. KEV desc.
-      3. EPSS desc nulls last.
-      4. CVSS-v3-Score desc nulls last.
-      5. Severity-Rank desc.
-      6. first_seen_at asc.
+      2. Risk-Band-Rank desc (escalate -> noise).
+      3. KEV desc.
+      4. EPSS desc nulls last.
+      5. CVSS-v3-Score desc nulls last.
+      6. Severity-Rank desc.
+      7. first_seen_at asc.
 
     Bei expliziter Klassen-Wahl (`os-pkgs`/`lang-pkgs`) entfaellt Schritt 1.
     """
@@ -270,6 +316,7 @@ def _order_clauses(filt: FindingsFilter) -> list[Any]:
         )
         clauses.append(os_pkgs_priority.desc())
 
+    clauses.append(_risk_band_rank_expr().desc())
     clauses.append(Finding.is_kev.desc())
     clauses.append(nulls_last(Finding.epss_score.desc()))
     clauses.append(nulls_last(Finding.cvss_v3_score.desc()))
@@ -485,7 +532,7 @@ def list_findings_cross_server(
     filt: DashboardFilter,
     *,
     limit: int = 200,
-    sort: FindingsCrossSortKey = "sev",
+    sort: FindingsCrossSortKey = "risk",
     dir: FindingsSortDir = "desc",
     now: datetime | None = None,
 ) -> tuple[list[Finding], int]:
@@ -573,20 +620,41 @@ def list_findings_cross_server(
             return [], 0
         base_stmt = base_stmt.where(Finding.server_id.in_(stale_ids))
 
+    # Block O (ADR-0022): Filter risk_band / action_required.
+    if filt.risk_band is not None:
+        base_stmt = base_stmt.where(Finding.risk_band == filt.risk_band)
+    if filt.action_required == "yes":
+        base_stmt = base_stmt.where(Finding.risk_band.in_(yes_band_values()))
+    elif filt.action_required == "no":
+        base_stmt = base_stmt.where(Finding.risk_band.in_(no_band_values()))
+
     # `total_count` — exakter COUNT(*) ueber das gefilterte Subselect. Wir
     # bauen das Subselect aus dem aktuellen Statement ohne ORDER BY/LIMIT
     # (SQL-Standard akzeptiert beides in Subqueries, aber unnoetig).
     count_subq = base_stmt.with_only_columns(Finding.id).order_by(None).subquery()
     total_count = int(session.execute(select(func.count()).select_from(count_subq)).scalar() or 0)
 
-    # Sortier-Klauseln aufbauen — Whitelist-Lookup, sonst Default sev/desc.
+    # Sortier-Klauseln aufbauen — Whitelist-Lookup, sonst Default risk/desc.
     sort_col = _SORT_COLUMNS_CROSS.get(sort)
     if sort_col is None:
-        sort_col = _SORT_COLUMNS_CROSS["sev"]
+        sort_col = _SORT_COLUMNS_CROSS["risk"]
         dir = "desc"
     primary_clause = sort_col.asc() if dir == "asc" else sort_col.desc()
     primary_clause = nulls_last(primary_clause)
-    list_stmt = base_stmt.order_by(primary_clause, Finding.identifier_key.asc()).limit(limit)
+    # Block O: Tiebreak-Kette nach §15 (post-Block-O):
+    # 1. KEV desc
+    # 2. EPSS desc nulls last
+    # 3. CVSS desc nulls last
+    # 4. Severity-Rank desc
+    # 5. identifier_key asc (deterministisch).
+    tiebreaks: list[Any] = [
+        Finding.is_kev.desc(),
+        nulls_last(Finding.epss_score.desc()),
+        nulls_last(Finding.cvss_v3_score.desc()),
+        _severity_rank_expr().desc(),
+        Finding.identifier_key.asc(),
+    ]
+    list_stmt = base_stmt.order_by(primary_clause, *tiebreaks).limit(limit)
     results = list(session.execute(list_stmt).scalars().unique().all())
     return results, total_count
 

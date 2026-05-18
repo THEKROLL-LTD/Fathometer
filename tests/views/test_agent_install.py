@@ -66,7 +66,7 @@ def test_agent_files_serves_secscan_agent_sh(db_app: Flask) -> None:
     assert resp.status_code == 200
     assert resp.mimetype == "text/x-shellscript"
     body = resp.get_data(as_text=True)
-    assert 'AGENT_VERSION="0.2.0"' in body
+    assert 'AGENT_VERSION="0.3.0"' in body
 
 
 def test_agent_files_serves_secscan_register_sh(db_app: Flask) -> None:

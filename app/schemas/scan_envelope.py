@@ -63,9 +63,10 @@ vor dem Upload (`extra="ignore"` toleriert beide Faelle).
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -74,6 +75,12 @@ from pydantic import (
     HttpUrl,
     field_validator,
     model_validator,
+)
+
+# Trivy-internes Severity-Integer-Mapping — Single-Source-of-Truth in
+# `app/services/risk_engine.py` (Block O Phase B Zentralisierung).
+from app.services.risk_engine import (
+    VENDOR_SEVERITY_INT_MAP as _VENDOR_SEVERITY_INT_MAP,
 )
 
 # ---------------------------------------------------------------------------
@@ -128,6 +135,41 @@ MAX_REF_URL_LENGTH = 2_048  # §10 "max 2 KB pro URL".
 MAX_TITLE_LENGTH = 512
 MAX_VERSION_LENGTH = 256
 MAX_PKG_NAME_LENGTH = 256
+
+# ---------------------------------------------------------------------------
+# Host-Snapshot-Bounds (Block O, ADR-0022 §Host-Snapshot-Datenmodell).
+# ---------------------------------------------------------------------------
+MAX_LISTENERS = 4_096
+MAX_PROCESSES = 4_096
+MAX_KERNEL_MODULES = 1_024
+MAX_SERVICES = 1_024
+MAX_TOOLS_GAPS_ITEMS = 32
+MAX_TOOLS_GAPS_ITEM_LENGTH = 32
+
+MAX_LISTENER_ADDR_LENGTH = 64
+MAX_LISTENER_PROCESS_LENGTH = 64
+MAX_PROCESS_USER_LENGTH = 32
+MAX_PROCESS_COMM_LENGTH = 64
+MAX_PROCESS_ARGS_LENGTH = 4_096
+MAX_KERNEL_MODULE_LENGTH = 64
+MAX_SERVICE_NAME_LENGTH = 128
+
+# Trivy `Vulnerability.VendorSeverity`: Map `provider -> severity_label`.
+# Trivy schreibt die Werte in zwei Varianten — als String (`"high"`) oder
+# numerisch (`3`); wir normalisieren auf den lowercase-Label.
+MAX_VENDOR_SEVERITY_PROVIDERS = 16
+
+# Trivy-internes Severity-Integer-Mapping. Quelle: Trivy `dbtypes/Severity`
+# (SeverityUnknown=0 ... SeverityCritical=4). Zentralisiert in
+# `app/services/risk_engine.py` als `VENDOR_SEVERITY_INT_MAP` (Phase B —
+# Single-Source-of-Truth fuer Envelope-Validator und Ingest-Mapper,
+# kein Drift-Risiko. Import unten am Modul-Anfang via top-level Import.
+
+_LISTENER_PROTOS = frozenset({"tcp", "udp", "tcp6", "udp6"})
+
+# ASCII-only Tools-/Gaps-Items. Bewusst die printable-ASCII-Regex aus §10
+# wiederverwenden plus harten Length-Cap.
+_TOOLS_GAPS_ITEM_RE = re.compile(r"^[\x20-\x7e]{1,32}$")
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +385,13 @@ class TrivyVulnerability(BaseModel):
     # Validator trimmt defensiv. Cap-Quelle ist `MAX_VENDOR_IDS_PER_VULN`.
     vendor_ids: list[str] | None = Field(default=None, alias="VendorIDs")
 
+    # Block O (ADR-0022): Provider-Severity-Map. Trivy schreibt sie als Dict
+    # `provider -> severity` mit zwei Varianten — String (`"high"`) oder
+    # Integer (`3`). Der `field_validator(..., mode="before")` normalisiert
+    # beide Varianten auf lowercase-String-Labels. Reject bei
+    # `> MAX_VENDOR_SEVERITY_PROVIDERS` oder bei NUL/non-ASCII in Keys.
+    vendor_severity: dict[str, str] | None = Field(default=None, alias="VendorSeverity")
+
     # ---- Validators ------------------------------------------------------
 
     @field_validator("vulnerability_id")
@@ -449,6 +498,67 @@ class TrivyVulnerability(BaseModel):
                 continue
             cleaned.append(item)
         return cleaned[:MAX_VENDOR_IDS_PER_VULN]
+
+    @field_validator("vendor_severity", mode="before")
+    @classmethod
+    def _normalize_vendor_severity(cls, v: Any) -> dict[str, str] | None:
+        """Block O (ADR-0022): normalisiert `VendorSeverity` auf `dict[str, str]`.
+
+        Trivy schreibt die Map in zwei Formaten:
+
+        - String: `{"nvd": "high", "ubuntu": "medium"}`
+        - Integer: `{"nvd": 3, "ubuntu": 2}` (interner Severity-Code)
+
+        Wir normalisieren beide auf lowercase-Strings. Unbekannte Integer
+        oder unbekannte/non-ASCII Provider-Keys werden vewworfen (per-Item),
+        leerer Dict bleibt leerer Dict, `None` bleibt `None`.
+
+        Reject (ValueError) nur bei strukturellem Murks:
+
+        - mehr als `MAX_VENDOR_SEVERITY_PROVIDERS` (16) Provider,
+        - Top-Level kein Dict (z.B. Liste),
+        - Key kein String, mit NUL oder non-ASCII,
+        - Wert weder String noch Integer.
+        """
+        if v is None:
+            return None
+        if not isinstance(v, dict):
+            raise ValueError("VendorSeverity muss ein Dict sein")
+        if len(v) > MAX_VENDOR_SEVERITY_PROVIDERS:
+            raise ValueError(
+                f"VendorSeverity hat mehr als {MAX_VENDOR_SEVERITY_PROVIDERS} Provider"
+            )
+        cleaned: dict[str, str] = {}
+        for key, raw_value in v.items():
+            if not isinstance(key, str):
+                raise ValueError("VendorSeverity-Key muss String sein")
+            if "\x00" in key:
+                raise ValueError("VendorSeverity-Key enthaelt NUL")
+            if not _PRINTABLE_ASCII_RE.match(key):
+                raise ValueError("VendorSeverity-Key muss druckbares ASCII sein")
+            # Length-Cap pro Key — Provider-Namen sind typisch <= 16 Chars,
+            # 64 als defensive Obergrenze.
+            if len(key) > 64:
+                raise ValueError("VendorSeverity-Key ist zu lang")
+
+            if isinstance(raw_value, bool):
+                # bool ist subclass von int in Python — separater Check, sonst
+                # wuerde `True` als Integer 1 durchgehen.
+                raise ValueError("VendorSeverity-Wert darf nicht bool sein")
+            if isinstance(raw_value, int):
+                cleaned[key.lower()] = _VENDOR_SEVERITY_INT_MAP.get(raw_value, "unknown")
+                continue
+            if isinstance(raw_value, str):
+                stripped = raw_value.strip()
+                if "\x00" in stripped or not _PRINTABLE_ASCII_RE.match(stripped):
+                    # Per-Item-Drop bei NUL/non-ASCII im Wert.
+                    continue
+                if len(stripped) > 32:
+                    continue
+                cleaned[key.lower()] = stripped.lower()
+                continue
+            raise ValueError("VendorSeverity-Wert muss String oder Integer sein")
+        return cleaned
 
     @field_validator("primary_url")
     @classmethod
@@ -638,11 +748,157 @@ class HostBlock(BaseModel):
         return v
 
 
+# ---------------------------------------------------------------------------
+# Host-Snapshot-Block (Block O, ADR-0022 §Host-Snapshot-Datenmodell).
+#
+# Der Agent ab v0.3.0 sendet im Envelope einen optionalen `host_state`-Block
+# mit vier Sub-Listen (`listeners`, `processes`, `kernel_modules`, `services`)
+# plus `tools_available`/`gaps`-Tracking. Schema ist additiv — Agent 0.2.0
+# sendet den Block nicht, das Backend muss damit umgehen (`extra="ignore"`).
+#
+# Validatoren sind defensive Strict-Whitelists analog Trivy-Schema §10:
+# IP-Literal-Validierung via `ipaddress.ip_address()`, Port-Range, ASCII-only,
+# NUL-frei, Length-Bounds. Wenn ein einzelnes `ListenerEntry`/`ProcessEntry`
+# rejected wird, killt das nur diese Entry (Pydantic-Default); die
+# uebergeordnete Liste hat eine Max-Length-Schranke (Pydantic rejected den
+# ganzen `HostStateBlock` bei Ueberlauf, das ist Phase-C-Concern).
+# ---------------------------------------------------------------------------
+
+
+class ListenerEntry(BaseModel):
+    """Listening-Socket-Eintrag aus `ss` / `netstat`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    proto: Literal["tcp", "udp", "tcp6", "udp6"]
+    addr: Annotated[str, Field(max_length=MAX_LISTENER_ADDR_LENGTH)]
+    port: int = Field(ge=0, le=65535)
+    process: Annotated[str, Field(max_length=MAX_LISTENER_PROCESS_LENGTH)] | None = None
+    pid: int | None = Field(default=None, ge=0, le=2**31 - 1)
+
+    @field_validator("addr")
+    @classmethod
+    def _validate_addr(cls, v: str) -> str:
+        """ASCII-only IPv4/IPv6-Literal-Validierung."""
+        v = _no_nul_bytes(v) or v
+        if not _PRINTABLE_ASCII_RE.match(v):
+            raise ValueError("addr muss druckbares ASCII sein")
+        try:
+            ipaddress.ip_address(v)
+        except ValueError as exc:
+            raise ValueError(f"addr ist kein gueltiges IP-Literal: {v}") from exc
+        return v
+
+    @field_validator("process")
+    @classmethod
+    def _validate_process(cls, v: str | None) -> str | None:
+        v = _no_nul_bytes(v)
+        if v is None or v == "":
+            return None
+        if not _PRINTABLE_ASCII_RE.match(v):
+            raise ValueError("process muss druckbares ASCII sein")
+        return v
+
+
+class ProcessEntry(BaseModel):
+    """Prozess-Eintrag aus `ps`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    pid: int = Field(ge=0, le=2**31 - 1)
+    user: Annotated[str, Field(max_length=MAX_PROCESS_USER_LENGTH)] | None = None
+    comm: Annotated[str, Field(max_length=MAX_PROCESS_COMM_LENGTH)] | None = None
+    args: Annotated[str, Field(max_length=MAX_PROCESS_ARGS_LENGTH)] | None = None
+
+    @field_validator("user", "comm")
+    @classmethod
+    def _validate_short_ascii(cls, v: str | None) -> str | None:
+        v = _no_nul_bytes(v)
+        if v is None or v == "":
+            return None
+        if not _PRINTABLE_ASCII_RE.match(v):
+            raise ValueError("Feld muss druckbares ASCII sein")
+        return v
+
+    @field_validator("args")
+    @classmethod
+    def _validate_args(cls, v: str | None) -> str | None:
+        """args darf Whitespace enthalten, aber kein NUL und kein non-ASCII."""
+        v = _no_nul_bytes(v)
+        if v is None or v == "":
+            return None
+        if not _PRINTABLE_ASCII_RE.match(v):
+            raise ValueError("args muss druckbares ASCII sein")
+        return v
+
+
+def _filter_ascii_strings(items: Any, max_items: int, max_item_length: int) -> list[str]:
+    """Filter-Helper fuer `tools_available`/`gaps`/`kernel_modules`/`services`.
+
+    Verwirft Items die nicht-String, NUL-haltig, non-ASCII oder ueberlang
+    sind (per-Item-Drop, nicht Reject). Cap auf `max_items` Eintraege.
+    Reject (ValueError) wenn die Eingabe selbst keine Liste ist.
+    """
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        raise ValueError("Feld muss eine Liste sein")
+    cleaned: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        if "\x00" in item:
+            continue
+        if len(item) > max_item_length:
+            continue
+        if not _PRINTABLE_ASCII_RE.match(item):
+            continue
+        cleaned.append(item)
+    return cleaned[:max_items]
+
+
+class HostStateBlock(BaseModel):
+    """`envelope.host_state` — optional, Forward-Compat-by-design.
+
+    Der Agent ab v0.3.0 sendet diesen Block. Aeltere Agents senden ihn nicht;
+    der Envelope ignoriert das Fehlen (`extra="ignore"` greift hier nicht,
+    weil der Feld-Default `None` ist — Pre-Triage faellt auf
+    `snapshot_available=False`).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    snapshot_at: datetime | None = None
+    tools_available: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    listeners: list[ListenerEntry] = Field(default_factory=list, max_length=MAX_LISTENERS)
+    processes: list[ProcessEntry] = Field(default_factory=list, max_length=MAX_PROCESSES)
+    kernel_modules: list[str] = Field(default_factory=list)
+    services: list[str] = Field(default_factory=list)
+
+    @field_validator("tools_available", "gaps", mode="before")
+    @classmethod
+    def _filter_tools_gaps(cls, v: Any) -> list[str]:
+        """Verwirft non-ASCII-Items per-Item; cap auf 32 Strings x 32 Chars."""
+        return _filter_ascii_strings(v, MAX_TOOLS_GAPS_ITEMS, MAX_TOOLS_GAPS_ITEM_LENGTH)
+
+    @field_validator("kernel_modules", mode="before")
+    @classmethod
+    def _filter_kernel_modules(cls, v: Any) -> list[str]:
+        return _filter_ascii_strings(v, MAX_KERNEL_MODULES, MAX_KERNEL_MODULE_LENGTH)
+
+    @field_validator("services", mode="before")
+    @classmethod
+    def _filter_services(cls, v: Any) -> list[str]:
+        return _filter_ascii_strings(v, MAX_SERVICES, MAX_SERVICE_NAME_LENGTH)
+
+
 class Envelope(BaseModel):
     """Wrapper-Envelope fuer `POST /api/scans`.
 
     `agent_version` und `host` sind Pflichtfelder; `scan` wird durch das
-    Trivy-Sub-Schema gezogen.
+    Trivy-Sub-Schema gezogen. `host_state` ist optional und ab Agent v0.3.0
+    befuellt (ADR-0022).
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -650,6 +906,7 @@ class Envelope(BaseModel):
     agent_version: Annotated[str, Field(max_length=32)]
     host: HostBlock
     scan: TrivyReport
+    host_state: HostStateBlock | None = None
 
     @field_validator("agent_version")
     @classmethod
@@ -702,14 +959,24 @@ class KeyRotateRequest(BaseModel):
 
 __all__: list[str] = [
     "MAX_CWE_IDS_PER_VULN",
+    "MAX_KERNEL_MODULES",
+    "MAX_LISTENERS",
+    "MAX_PROCESSES",
     "MAX_REFERENCES_PER_VULN",
     "MAX_RESULTS_PER_SCAN",
+    "MAX_SERVICES",
+    "MAX_TOOLS_GAPS_ITEMS",
+    "MAX_TOOLS_GAPS_ITEM_LENGTH",
     "MAX_VENDOR_IDS_PER_VULN",
     "MAX_VENDOR_ID_LENGTH",
+    "MAX_VENDOR_SEVERITY_PROVIDERS",
     "MAX_VULNS_PER_SCAN",
     "Envelope",
     "HostBlock",
+    "HostStateBlock",
     "KeyRotateRequest",
+    "ListenerEntry",
+    "ProcessEntry",
     "RegisterRequest",
     "TrivyCVSSEntry",
     "TrivyDataSource",

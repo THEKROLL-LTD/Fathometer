@@ -1,6 +1,6 @@
 ## ADR-0022 — Risk-basierte Priorisierung: Pre-Triage, Host-Snapshot, Vendor-Severity, UI-Redesign
 
-**Status:** Draft · **Datum:** 2026-05-18 · **Bezug:** ARCHITECTURE §6 (Wrapper-Envelope wird um `host_state`-Block erweitert), §7 (Dashboard-Layout wird umgebaut — Risk-zentrisch statt CVSS-zentrisch), §11 (Client-Agent sammelt zusätzliche Host-Daten), §15 (Sortier-Defaults bekommen `risk_band` als primären Sort-Key, CVSS-Severity rutscht zum Tiebreak). ADR-0020 (Dashboard-Cross-Server-Findings) bleibt strukturell unberührt — Tabelle und Filter-Bar bleiben, KPI-Cards werden inhaltlich umgebaut. ADR-0021 (Agent-Bootstrap, Ursachen-Felder) wird durch diesen Block **erweitert**, nicht abgelöst — die fünf Ursachen-Spalten am `Finding` bleiben Eingaben für die spätere LLM-Phase.
+**Status:** Akzeptiert · **Akzeptiert:** 2026-05-18 · **Datum:** 2026-05-18 · **Bezug:** ARCHITECTURE §6 (Wrapper-Envelope wird um `host_state`-Block erweitert), §7 (Dashboard-Layout wird umgebaut — Risk-zentrisch statt CVSS-zentrisch), §11 (Client-Agent sammelt zusätzliche Host-Daten), §15 (Sortier-Defaults bekommen `risk_band` als primären Sort-Key, CVSS-Severity rutscht zum Tiebreak). ADR-0020 (Dashboard-Cross-Server-Findings) bleibt strukturell unberührt — Tabelle und Filter-Bar bleiben, KPI-Cards werden inhaltlich umgebaut. ADR-0021 (Agent-Bootstrap, Ursachen-Felder) wird durch diesen Block **erweitert**, nicht abgelöst — die fünf Ursachen-Spalten am `Finding` bleiben Eingaben für die spätere LLM-Phase.
 
 ## Kontext
 

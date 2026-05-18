@@ -74,6 +74,52 @@
     {% endfor %}
   </select>
 
+  {# Risk-Band-Filter (Block O, ADR-0022). #}
+  <select name="risk_band"
+          class="select select-bordered select-sm"
+          aria-label="Risk-Band-Filter"
+          hx-get="{{ _hx_url }}"
+          hx-trigger="change"
+          hx-target="{{ _hx_target }}"
+          hx-select="{{ _hx_target }}"
+          hx-swap="outerHTML"
+          hx-include="closest form"
+          hx-push-url="true"
+          data-test="filter-risk-band">
+    <option value="">Risk: alle</option>
+    {% for band_key, band_label in [
+      ('escalate', 'Escalate'),
+      ('act',      'Act'),
+      ('mitigate', 'Mitigate'),
+      ('pending',  'Pending'),
+      ('unknown',  'Unknown'),
+      ('monitor',  'Monitor'),
+      ('noise',    'Noise'),
+    ] %}
+      <option value="{{ band_key }}"
+              {% if view_filter.risk_band == band_key %}selected{% endif %}>
+        {{ band_label }}
+      </option>
+    {% endfor %}
+  </select>
+
+  {# Action-Required-Filter (Block O, ADR-0022). #}
+  <select name="action_required"
+          class="select select-bordered select-sm"
+          aria-label="Action-Required-Filter"
+          hx-get="{{ _hx_url }}"
+          hx-trigger="change"
+          hx-target="{{ _hx_target }}"
+          hx-select="{{ _hx_target }}"
+          hx-swap="outerHTML"
+          hx-include="closest form"
+          hx-push-url="true"
+          data-test="filter-action-required">
+    <option value="">Action: alle</option>
+    <option value="yes" {% if view_filter.action_required == 'yes' %}selected{% endif %}>Action: needed</option>
+    <option value="no"  {% if view_filter.action_required == 'no' %}selected{% endif %}>Action: safe</option>
+  </select>
+
   {# Severity-Threshold. #}
   <select name="severity"
           class="select select-bordered select-sm"

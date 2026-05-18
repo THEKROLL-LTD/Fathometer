@@ -43,6 +43,7 @@ from app.schemas.scan_envelope import (
     TrivyResult,
     TrivyVulnerability,
 )
+from app.services.risk_engine import normalize_vendor_status
 
 log = structlog.get_logger(__name__)
 
@@ -137,6 +138,16 @@ def _extract_cause_fields(vuln: TrivyVulnerability, result: TrivyResult) -> dict
         "result_type": result.type_,
         "severity_source": vuln.severity_source,
         "vendor_ids": vuln.vendor_ids,
+        # Block O (ADR-0022): Vendor-Status (`will_not_fix`/`eol`/...) und
+        # Provider-Severity-Map (`VendorSeverity`). Beide werden bei jedem
+        # Re-Ingest geschrieben — fehlende Felder im aktuellen Scan setzen
+        # die Spalten auf NULL (Quelle der Wahrheit ist der aktuelle Scan).
+        # `vendor_severity` ist im Envelope-Pre-Validator bereits zu
+        # lowercase-Strings normalisiert (numerische Trivy-Severities werden
+        # ueber `VENDOR_SEVERITY_INT_MAP` aufgeloest), wir schreiben das
+        # Dict direkt durch.
+        "vendor_status": normalize_vendor_status(vuln.status),
+        "severity_by_provider": dict(vuln.vendor_severity) if vuln.vendor_severity else None,
     }
 
 
@@ -203,6 +214,9 @@ def _build_finding_row(
         "result_type": cause["result_type"],
         "severity_source": cause["severity_source"],
         "vendor_ids": cause["vendor_ids"],
+        # Block O (ADR-0022) — Vendor-Status + Provider-Severity-Map.
+        "vendor_status": cause["vendor_status"],
+        "severity_by_provider": cause["severity_by_provider"],
         "status": FindingStatus.OPEN.value,
         "first_seen_at": now,
         "last_seen_at": now,
@@ -313,6 +327,11 @@ def ingest_scan(
                 "result_type": stmt.excluded.result_type,
                 "severity_source": stmt.excluded.severity_source,
                 "vendor_ids": stmt.excluded.vendor_ids,
+                # Block O (ADR-0022) — Vendor-Status + Provider-Severity-Map.
+                # Quelle der Wahrheit ist der aktuelle Scan, fehlende Felder
+                # ueberschreiben mit NULL.
+                "vendor_status": stmt.excluded.vendor_status,
+                "severity_by_provider": stmt.excluded.severity_by_provider,
             }
             upsert = stmt.on_conflict_do_update(
                 constraint="uq_findings_natural_key",

@@ -1,0 +1,126 @@
+{# Host-Snapshot-Sektion auf Server-Detail (Block O, ADR-0022 §UI-Redesign).
+
+   Zeigt eine kompakte Uebersicht der Listener (+ Services) aus dem letzten
+   Agent-Snapshot. Default-collapsed Alpine-Toggle. Inline-Default zeigt
+   max 5 Listener als Mono-Font-Liste; ein "+N more"-Toggle expandiert
+   auf die volle Liste.
+
+   Variablen-Vertrag:
+     - `server`       : Server — mit `host_state_snapshot_at` (datetime|None).
+     - `listeners`    : list[ServerListener] — sortiert nach (port, proto, addr).
+     - `services`     : list[str] — Service-Namen, alphabetisch.
+     - `processes`    : list[ServerProcess] — optional, fuer Tooltip-args.
+
+   Empty-State: wenn `host_state_snapshot_at IS NULL` -> "Update agent"-Hint.
+
+   Sicherheit:
+     - `addr`, `process`, `args`, `name` sind Pydantic-validiert (ASCII-only,
+       NUL-frei, Length-Cap). Trotzdem KEIN |safe — Jinja-Autoescape rendert
+       das natuerlich (`|e` ist Default).
+#}
+{%- set _snapshot_at = server.host_state_snapshot_at -%}
+{%- set _listeners = listeners | default([]) -%}
+{%- set _services = services | default([]) -%}
+{%- set _processes = processes | default([]) -%}
+{%- set _proc_args_by_pid = {} -%}
+{%- for p in _processes -%}
+  {%- set _ = _proc_args_by_pid.update({p.pid: p.args or ''}) -%}
+{%- endfor -%}
+
+<section id="host-snapshot" class="py-6 space-y-3"
+         x-data="{ openListeners: false, openServices: false }"
+         data-test="host-snapshot-section">
+  <div class="flex items-end justify-between gap-3 flex-wrap">
+    <div>
+      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">
+        Host Snapshot
+        {% if _snapshot_at %}
+          · <time datetime="{{ _snapshot_at.isoformat() }}"
+                  title="{{ _snapshot_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ _snapshot_at | relative_time }}</time>
+        {% endif %}
+      </div>
+      <h3 class="font-mono text-base font-medium mt-1">Listeners &amp; services</h3>
+    </div>
+  </div>
+
+  {% if _snapshot_at is none %}
+    <div class="rounded-box bg-base-200/40 border border-base-300 px-5 py-4 text-sm"
+         data-test="host-snapshot-missing">
+      <p class="opacity-70">
+        Host snapshot missing — update agent to <span class="font-mono">&gt;= 0.3.0</span>
+        for context-aware risk classification.
+      </p>
+    </div>
+  {% else %}
+    {# Listeners #}
+    <div class="rounded-box bg-base-200/40 border border-base-300 px-5 py-3 text-sm space-y-2">
+      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Listeners</div>
+      {% if not _listeners %}
+        <p class="opacity-60 text-xs" data-test="host-snapshot-listeners-empty">Keine offenen Listener im letzten Snapshot.</p>
+      {% else %}
+        {% set _first = _listeners[:5] %}
+        {% set _rest = _listeners[5:] %}
+        <ul class="font-mono text-xs space-y-1" data-test="host-snapshot-listeners-inline">
+          {% for li in _first %}
+            <li class="flex items-center gap-3"
+                title="{{ _proc_args_by_pid.get(li.pid, '') }}"
+                data-test="host-snapshot-listener-row">
+              <span class="opacity-80 w-20 truncate">{{ li.process or '?' }}</span>
+              <span class="opacity-90 truncate">{{ li.addr }}:{{ li.port }}</span>
+              <span class="opacity-50 text-[10px] uppercase">{{ li.proto }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+        {% if _rest %}
+          <button type="button"
+                  class="text-xs link link-hover opacity-70 hover:opacity-100"
+                  @click="openListeners = !openListeners"
+                  :aria-expanded="openListeners ? 'true' : 'false'"
+                  data-test="host-snapshot-listeners-toggle">
+            <span x-show="!openListeners" x-cloak>{{ _rest | length }} more — show all</span>
+            <span x-show="openListeners" x-cloak>weniger zeigen</span>
+          </button>
+          <ul class="font-mono text-xs space-y-1"
+              x-show="openListeners"
+              x-cloak
+              data-test="host-snapshot-listeners-rest">
+            {% for li in _rest %}
+              <li class="flex items-center gap-3"
+                  title="{{ _proc_args_by_pid.get(li.pid, '') }}">
+                <span class="opacity-80 w-20 truncate">{{ li.process or '?' }}</span>
+                <span class="opacity-90 truncate">{{ li.addr }}:{{ li.port }}</span>
+                <span class="opacity-50 text-[10px] uppercase">{{ li.proto }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endif %}
+    </div>
+
+    {# Services #}
+    {% if _services %}
+      {% set _svc_first = _services[:5] %}
+      {% set _svc_rest = _services[5:] %}
+      <div class="rounded-box bg-base-200/40 border border-base-300 px-5 py-3 text-sm"
+           data-test="host-snapshot-services">
+        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65 mb-1">Active services</div>
+        <div class="font-mono text-xs">
+          {% for svc in _svc_first %}{{ svc }}{% if not loop.last %} · {% endif %}{% endfor %}
+          {% if _svc_rest %}
+            <button type="button"
+                    class="link link-hover opacity-70 hover:opacity-100 ml-2"
+                    @click="openServices = !openServices"
+                    :aria-expanded="openServices ? 'true' : 'false'"
+                    data-test="host-snapshot-services-toggle">
+              <span x-show="!openServices" x-cloak>(+{{ _svc_rest | length }})</span>
+              <span x-show="openServices" x-cloak>weniger zeigen</span>
+            </button>
+            <span x-show="openServices" x-cloak>
+              · {% for svc in _svc_rest %}{{ svc }}{% if not loop.last %} · {% endif %}{% endfor %}
+            </span>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  {% endif %}
+</section>

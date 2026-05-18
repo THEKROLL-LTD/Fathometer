@@ -1,0 +1,90 @@
+{# Action-Required-Pill — Server-Detail-Header (Block O, ADR-0022).
+
+   Drei Varianten:
+     - rot "Action needed" wenn `yes_count > 0`.
+     - grau "Update agent" wenn `snapshot_missing` (kein host_state je
+       empfangen, server.host_state_snapshot_at IS NULL).
+     - gruen "Safe" sonst.
+
+   Snapshot-Missing-Variante hat Vorrang vor "Safe" — der Operator soll
+   sehen, dass der Agent veraltet ist, statt eine falsche Sicherheit
+   suggeriert zu bekommen. Wenn yes_count > 0 UND snapshot_missing:
+   wir zeigen "Action needed" (Action hat Vorrang ueber Snapshot-Hint,
+   die yes-Findings haben dann typischerweise `risk_band='unknown'`,
+   was die Yes-Sub-Counter ohnehin reflektieren).
+
+   Variablen-Vertrag:
+     - `yes_count`         : int — Anzahl Findings im action_required=yes.
+     - `no_count`          : int — Anzahl Findings im action_required=no.
+     - `yes_subcounts`     : dict[str, int] — Bands escalate/act/.../unknown.
+     - `no_subcounts`      : dict[str, int] — Bands monitor/noise.
+     - `snapshot_missing`  : bool — true wenn host_state_snapshot_at IS NULL.
+
+   Sub-Counter werden im Tooltip-Stil ans Pill-Label angehaengt (max 5).
+#}
+{%- set _yes = yes_count | default(0) -%}
+{%- set _no = no_count | default(0) -%}
+{%- set _yes_subs = yes_subcounts | default({}) -%}
+{%- set _no_subs = no_subcounts | default({}) -%}
+{%- set _missing = snapshot_missing | default(false) -%}
+
+{%- if _yes > 0 -%}
+  {%- set _kind = 'needed' -%}
+  {%- set _classes = 'badge-error font-semibold ring-1 ring-error/40' -%}
+  {%- set _title = 'Action needed' -%}
+  {%- set _band_order = ['escalate','act','mitigate','pending','unknown'] -%}
+  {%- set _subs = _yes_subs -%}
+{%- elif _missing -%}
+  {%- set _kind = 'update-agent' -%}
+  {%- set _classes = 'badge-ghost' -%}
+  {%- set _title = 'Update agent' -%}
+  {%- set _band_order = [] -%}
+  {%- set _subs = {} -%}
+{%- else -%}
+  {%- set _kind = 'safe' -%}
+  {%- set _classes = 'badge-success' -%}
+  {%- set _title = 'Safe' -%}
+  {%- set _band_order = ['monitor','noise'] -%}
+  {%- set _subs = _no_subs -%}
+{%- endif -%}
+
+{%- set _ns = namespace(items=[]) -%}
+{%- for band in _band_order -%}
+  {%- set n = _subs.get(band, 0) -%}
+  {%- if n > 0 -%}
+    {%- set _ns.items = _ns.items + [(band, n)] -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- set _items = _ns.items -%}
+
+{%- set _tooltip -%}
+  {%- if _kind == 'update-agent' -%}
+    Host snapshot missing — update agent to >= 0.3.0 for context-aware risk classification.
+  {%- elif _items -%}
+    {%- for band, n in _items -%}{{ n }} {{ band }}{% if not loop.last %} · {% endif %}{%- endfor -%}
+  {%- else -%}
+    Keine offenen Findings auf diesem Server.
+  {%- endif -%}
+{%- endset -%}
+
+<span class="badge badge-sm {{ _classes }} font-mono tooltip tooltip-bottom"
+      data-tip="{{ _tooltip | trim }}"
+      data-test="action-required-pill-{{ _kind }}">
+  {%- if _kind == 'needed' -%}
+    Action needed
+    {%- if _items -%}
+      <span class="ml-1 opacity-80">
+        — {% for band, n in _items %}{{ n }} {{ band }}{% if not loop.last %} · {% endif %}{% endfor %}
+      </span>
+    {%- endif -%}
+  {%- elif _kind == 'update-agent' -%}
+    Update agent — host snapshot missing
+  {%- else -%}
+    Safe
+    {%- if _items -%}
+      <span class="ml-1 opacity-80">
+        — {% for band, n in _items %}{{ n }} {{ band }}{% if not loop.last %} · {% endif %}{% endfor %}
+      </span>
+    {%- endif -%}
+  {%- endif -%}
+</span>

@@ -4,6 +4,144 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.8.0] — 2026-05-18
+
+Block O (ADR-0022) — Pre-Triage-Risk-Engine + Host-Snapshot-Sammlung +
+Vendor-Severity + Risk-zentrisches UI-Redesign.
+
+### Added
+
+- **Deterministische Pre-Triage-Engine** in `app/services/risk_engine.py`.
+  Klassifiziert jedes offene Finding pro Scan-Ingest in einen der vier
+  Block-O-Bands `noise`, `monitor`, `pending`, `unknown` allein basierend
+  auf max-Severity-aller-Provider + EPSS + KEV-Flag — **kein**
+  Host-Kontext-Abgleich. Defensive Cuts: KEV-Listing → PENDING,
+  max-Severity >= HIGH → PENDING, EPSS >= 0.1 → PENDING, MEDIUM →
+  MONITOR, sonst NOISE. Ohne Host-Snapshot landet jedes Finding in
+  UNKNOWN (Operator-Hint: „Update agent to >= 0.3.0"). Ergebnis pro
+  Finding plus Reason-String wird auf `Finding.risk_band` +
+  `.risk_band_reason` + `.risk_band_source="engine"` +
+  `.risk_band_computed_at` persistiert.
+- **`RiskBand`-Modell mit binaerem `action_required`-Mapping.** Sieben
+  Bands `escalate`/`act`/`mitigate` (LLM-Output, Block P) +
+  `pending`/`unknown`/`monitor`/`noise` (Engine-Output). `escalate`/
+  `act`/`mitigate`/`pending`/`unknown` → `action_required=yes`,
+  `monitor`/`noise` → `no`. Mapping deterministisch in
+  `ACTION_REQUIRED_MAP`, nicht in der DB.
+- **Host-Snapshot-Sammlung im Agent (v0.3.0).** Vier neue
+  Collector-Funktionen in `agent/lib_host_state.sh`
+  (`collect_listeners`/`processes`/`kernel_modules`/`services`).
+  Tool-Verfuegbarkeits-Check via `tools_available`/`gaps`. Fallback-
+  Pfade: `ss` → `netstat`; fehlendes `lsmod`/`systemctl` → leerer
+  Block + Gap-Eintrag. ASCII-only via `LC_ALL=C` plus Non-ASCII-Drop.
+  Typische Envelope-Groesse: +10-30 KB gzipped.
+- **CVSS-Vendor-Resolver** `app/services/severity_resolver.py` mit
+  `severity_for()` (Anzeige-Severity pro Host-Distro) und
+  `max_severity_across_providers()` (Eingabe fuer Pre-Triage). 13
+  Distro-Profile + GHSA-Bevorzugung fuer `lang-pkgs`. Trivys
+  `VendorSeverity`-Map persistiert in neuer Spalte
+  `Finding.severity_by_provider` (JSONB).
+- **Vendor-Status-Persistenz.** Trivys `Vulnerability.Status` wird via
+  Whitelist auf `{affected, fixed, investigating, will_not_fix, eol,
+  not_affected, unknown}` normalisiert und in
+  `Finding.vendor_status` (max 32 Chars) persistiert. Block P (LLM)
+  liest das als Eingabe-Signal — Block O zeigt es noch nicht im UI.
+- **Dashboard-UI-Redesign (Risk-zentrisch).** Drei Tiers:
+  (1) zwei prominente Action-Required-Cards `Action needed` + `Safe`
+  mit Server-Counts und klickbarem Filter; (2) sieben kompakte Risk-
+  Band-Pills `Escalate`/`Act`/`Mitigate`/`Pending`/`Unknown`/`Monitor`/
+  `Noise` mit Findings-Counts (Escalate pulsiert); (3) tertiaere
+  Severity-Strip CRITICAL/HIGH/MEDIUM/LOW kompakt ohne Klick-Filter.
+  Findings-Tabelle bekommt `Risk`-Spalte als erste Sort-Spalte (Default
+  DESC), CVSS-Severity rutscht zwischen Status und Erstmals.
+- **Server-Detail Action-Required-Pill + Host-Snapshot-Sektion.**
+  Header-Pill-Reihe bekommt drei Varianten als ERSTE Pill:
+  rot „Action needed — N escalate · M act · K pending",
+  gruen „Safe — N monitor · M noise",
+  grau „Update agent — host snapshot missing".
+  Direkt unter dem Header `<section id="host-snapshot">` mit
+  collapsible Listener-/Service-Anzeige (default 5 inline + „N more"-
+  Toggle, Process-Args als Tooltip mit HTML-Escape). Findings-Tabelle
+  gruppiert nach `risk_band` mit Section-Headers, default-expanded ab
+  `pending` aufwaerts, default-collapsed fuer `monitor`/`noise`/
+  `unknown`. Per-Finding-Detail-Box zeigt `risk_band_reason` in Mono-
+  Font.
+- **Bulk-Ack-`noise`-Workflow.** Neuer Button „Acknowledge all noise on
+  this server (N)" auf Server-Detail. Modal mit Liste der noise-
+  Findings (max 50 inline + „... and N more"). Endpoint
+  `POST /api/findings/bulk-acknowledge` um optionalen Form-Parameter
+  `risk_band_filter="noise"` erweitert: server-side hartes Filtern
+  auf `Finding.risk_band == "noise"`, eingeschleuste non-noise-IDs
+  werden gedroppt und in `skipped_non_noise_ids` der Response-Body
+  aufgelistet.
+- **Filter-Bar-Erweiterung.** Neue `<select>`-Felder `risk_band` und
+  `action_required` in der Dashboard-Findings-Filter-Bar.
+  `DashboardFilter` und `FindingsViewFilter` um die Literal-Whitelist-
+  Felder erweitert. `findings_query.list_findings()` und
+  `.list_findings_cross_server()` applizieren beide Filter; Default-
+  Sort-Key wechselt von `sev` zu `risk` (DESC).
+- **DB-Migration `0004_block_o_risk_and_host_state.py`.** Vier neue
+  Tabellen `server_listeners`, `server_processes`,
+  `server_kernel_modules`, `server_services` (jeweils mit
+  `(server_id, ...)` als PK und FK-CASCADE). Sechs neue
+  Finding-Spalten (`risk_band`, `risk_band_reason`,
+  `risk_band_source`, `risk_band_computed_at`, `severity_by_provider`
+  als JSONB, `vendor_status`). Eine neue Server-Spalte
+  `host_state_snapshot_at`. Zwei neue Findings-Indizes:
+  `ix_findings_risk_band_open` partial-index
+  `WHERE status = 'open'` + `ix_findings_server_risk_band`. Kein
+  Backfill — Werte werden beim naechsten Scan gesetzt.
+- **Audit-Events.** `host_state.snapshot_received` (pro Scan mit
+  Snapshot, Body mit `tools_available`/`gaps`/`listener_count`/
+  `process_count`), `host_state.parse_failed` (bei SQLAlchemy- oder
+  Pydantic-Fehler im Snapshot-Pfad, Findings-Ingest laeuft trotzdem),
+  `risk.pretriage_evaluated` (pro Scan mit `counters`-Map),
+  `risk.band_changed` (pro Finding bei Band-Wechsel, mit
+  `from`/`to`/`source`/`reason`).
+
+### Changed
+
+- **Sortier-Defaults (ARCHITECTURE.md §15).** `risk_band` ist neuer
+  Primary-Sort-Key (`RISK_BAND_SORT_RANK` 70/60/50/40/30/20/10/NULL=0).
+  Tiebreak-Kette: KEV DESC → EPSS DESC → CVSS-Severity-Rank DESC →
+  `identifier_key` ASC.
+- **`ARCHITECTURE.md`** §6 (Envelope mit `host_state`), §7
+  (Risk-zentrisches Dashboard), §7a (Server-Detail Risk-Layout), §9
+  (Bandbreiten-Hinweis + Privacy-Notice fuer Process-Args), §11
+  (Agent v0.3.0), §15 (Pre-Triage-Engine + neue Sort-Order), §17
+  (sieben neue Out-of-Scope-Punkte: LLM-Reasoning, Snapshot-
+  Historisierung, manueller Risk-Override, Patch-Alter-Eskalation,
+  Exposure-Mapping, OpenRC-Services, Daily-Re-Eval).
+
+### Compat-Hinweise
+
+- **Alte Agents (v0.2.0) werden weiterhin akzeptiert.** Ohne
+  `host_state` im Envelope landet jedes Finding in
+  `risk_band="unknown"` mit Reason „host snapshot missing — update
+  agent to >= 0.3.0". `MIN_AGENT_VERSION` bleibt `0.1.0` — Block O
+  bumpt NICHT.
+- **LLM-Final-Bewertung kommt in v0.9.0 (Block P).** Pre-Triage
+  ueberschreibt LLM-gesetzte Bands nicht: Findings mit
+  `risk_band_source == "llm"` werden im Ingest skipt. Schema-Slot
+  `escalate`/`act`/`mitigate` ist im `RiskBand`-Enum schon da.
+
+### Tests
+
+- 1226 Tests gruen (Vorher v0.7.2: 999; Delta +227 — Block-O-Brief
+  hatte ~90 erwartet, Adversarial- und View-Tests sind reicher
+  ausgefallen). Coverage **92.42 %** (Threshold 85 %).
+- 326 adversarial Tests gruen (Vorher: 257; +69 neue Block-O-Cases:
+  Host-Snapshot-XSS, Listener-Addr-Validierung, Pre-Triage-No-
+  Snapshot-Safety, Pre-Triage-No-LLM-Override, Host-State-Max-
+  Lengths, KEV/HIGH/EPSS-Tabellen-Kombinationen, Bulk-Ack-Noise-
+  Strict). 34 Pre-Triage-Tests in
+  `tests/services/test_risk_engine_pretriage.py` (DoD verlangt
+  >= 25).
+- `ruff check` + `ruff format --check` + `mypy app/` +
+  `shellcheck agent/*.sh` PASS. Alembic-Roundtrip (0004 ↔ 0003) PASS
+  gegen Postgres-17-Container. `docker compose up --build` +
+  `/healthz` PASS. Image-Size **191 MB** (= v0.7.x, Delta 0 MB).
+
 ## [v0.7.2] — 2026-05-18
 
 Punkt-Fix fuer Phase 6 (Probe-Scan) im Bootstrap-Installer.

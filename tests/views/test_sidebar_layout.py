@@ -84,17 +84,21 @@ def test_dashboard_full_page_renders_sidebar(db_app: Flask) -> None:
 
 
 def test_dashboard_full_page_renders_kpi_cards_in_pane(db_app: Flask) -> None:
-    """Block M (ADR-0020): Der Dashboard-Pane rendert fuenf KPI-Cards
-    statt der frueheren Quick-Stats-Counter-Reihe."""
+    """Block O (ADR-0022): Der Dashboard-Pane rendert das Risk-zentrische
+    KPI-Layout (Action-Required-Cards + Risk-Band-Pills + Severity-Strip).
+    Loest den Block-M-Sparkline-Strip ab."""
     create_admin_user(db_app)
     _create_server(db_app, name="qs-srv-1")
     client = db_app.test_client()
     login(client)
     resp = client.get("/")
     body = resp.get_data(as_text=True)
-    # 5 KPI-Card-Marker aus `dashboard/_kpi_cards.html` (Block M).
-    for label in ("total_open", "kev", "critical", "high", "stale_server"):
-        assert f'data-test="kpi-card-{label}"' in body, label
+    # Action-Required-Cards.
+    assert 'data-test="action-required-card-yes"' in body
+    assert 'data-test="action-required-card-no"' in body
+    # Sieben Risk-Band-Pills.
+    for band in ("escalate", "act", "mitigate", "pending", "unknown", "monitor", "noise"):
+        assert f'data-test="risk-band-pill-{band}"' in body, band
 
 
 def test_dashboard_full_page_dashboard_template_renders(db_app: Flask) -> None:
@@ -129,8 +133,8 @@ def test_dashboard_hx_request_renders_pane_fragment(db_app: Flask) -> None:
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert "Alle Findings</h1>" in body, body[:400]
-    # KPI-Card-Marker statt Quick-Stats-Container.
-    assert 'data-test="kpi-card-total_open"' in body, body[:600]
+    # Block O (ADR-0022): Risk-KPI-Strip-Marker statt Block-M-Sparkline-Cards.
+    assert 'data-test="action-required-card-yes"' in body, body[:600]
 
 
 def test_dashboard_hx_request_returns_fragment_only(db_app: Flask) -> None:

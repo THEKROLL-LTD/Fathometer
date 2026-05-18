@@ -34,6 +34,7 @@ from app.forms import BulkActionForm, CSRFOnlyForm
 from app.models import Finding, FindingStatus, Server, ServerTag, Severity, Tag
 from app.schemas.dashboard_filter import DashboardFilter
 from app.services.findings_query import list_findings_cross_server
+from app.services.risk_engine import RiskBand, yes_band_values
 from app.services.severity_history import daily_severity_counts_fleet
 from app.services.stale_detection import (
     get_db_stale_threshold_h,
@@ -74,6 +75,25 @@ class SeverityCounts:
         return self.total
 
 
+@dataclass(frozen=True, slots=True)
+class RiskKpiCounters:
+    """Aggregierte Risk-/Action-Required-Counter fuer den Dashboard-Header.
+
+    Block O (ADR-0022) §UI-Redesign. Werte sind alle OPEN-Findings-basiert
+    (status=OPEN), gefiltert auf aktive Server (nicht retired, nicht
+    revoked). Filter-unabhaengig, analog zur Sparkline-Semantik aus ADR-0020.
+    """
+
+    action_yes_servers: int
+    action_no_servers: int
+    # Sieben Bands -> Findings-Counts. Fehlende Bands -> 0.
+    risk_band_counts: dict[str, int]
+    # Yes-Sub-Counters: Findings-Counts pro Yes-Band.
+    action_yes_subcounts: dict[str, int]
+    # Severity-Strip: CRITICAL/HIGH/MEDIUM/LOW Findings-Counts ohne UNKNOWN.
+    severity_strip_counts: dict[str, int]
+
+
 @dataclass
 class ServerCardData:
     """Render-Daten fuer eine Server-Karte.
@@ -107,6 +127,90 @@ class ServerCardData:
     @property
     def needs_attention(self) -> bool:
         return self.is_stale or self.is_db_stale or self.kev_open_count > 0
+
+
+# ---------------------------------------------------------------------------
+# Risk-KPI-Loader (Block O, ADR-0022 §UI-Redesign)
+# ---------------------------------------------------------------------------
+
+
+_ALL_BANDS: tuple[str, ...] = tuple(b.value for b in RiskBand)
+
+
+def _load_risk_kpi_counters(sess: Session) -> RiskKpiCounters:
+    """Baut die KPI-Counter fuer Action-Required-Cards, Band-Pills und
+    Severity-Strip.
+
+    Vier separate Queries, alle ueber `Finding.status == OPEN`:
+
+    1. Risk-Band-Counts (Findings, GROUP BY `risk_band`).
+    2. Distinct-Server-Count fuer `risk_band IN yes_bands`.
+    3. Total aktive Server (nicht retired, nicht revoked) -> daraus
+       `action_no_servers = total - action_yes_servers`.
+    4. Severity-Strip (Findings, GROUP BY `severity`, ohne UNKNOWN).
+    """
+    yes_bands = yes_band_values()
+
+    # 1. Risk-Band-Counts (Findings).
+    band_stmt = (
+        select(Finding.risk_band, func.count(Finding.id))
+        .where(Finding.status == FindingStatus.OPEN)
+        .group_by(Finding.risk_band)
+    )
+    band_counts: dict[str, int] = dict.fromkeys(_ALL_BANDS, 0)
+    for band_value, n in sess.execute(band_stmt).all():
+        if band_value in band_counts:
+            band_counts[band_value] = int(n)
+
+    # 2. Distinct-Server-Count fuer Yes-Bands (aktive Server).
+    yes_servers_stmt = (
+        select(func.count(func.distinct(Finding.server_id)))
+        .join(Server, Server.id == Finding.server_id)
+        .where(
+            Finding.status == FindingStatus.OPEN,
+            Finding.risk_band.in_(yes_bands),
+            Server.retired_at.is_(None),
+            Server.revoked_at.is_(None),
+        )
+    )
+    action_yes_servers = int(sess.execute(yes_servers_stmt).scalar() or 0)
+
+    # 3. Total aktive Server.
+    active_servers_stmt = select(func.count(Server.id)).where(
+        Server.retired_at.is_(None),
+        Server.revoked_at.is_(None),
+    )
+    total_active = int(sess.execute(active_servers_stmt).scalar() or 0)
+    action_no_servers = max(0, total_active - action_yes_servers)
+
+    # 4. Yes-Sub-Counters: Findings-Counts pro Yes-Band, in der Reihenfolge
+    #    von yes_band_values() (escalate -> unknown).
+    action_yes_subcounts: dict[str, int] = {band: band_counts.get(band, 0) for band in yes_bands}
+
+    # 5. Severity-Strip — Findings-Counts pro Severity, ohne UNKNOWN.
+    sev_stmt = (
+        select(Finding.severity, func.count(Finding.id))
+        .where(Finding.status == FindingStatus.OPEN)
+        .group_by(Finding.severity)
+    )
+    severity_strip: dict[str, int] = {
+        Severity.CRITICAL.value: 0,
+        Severity.HIGH.value: 0,
+        Severity.MEDIUM.value: 0,
+        Severity.LOW.value: 0,
+    }
+    for sev_value, n in sess.execute(sev_stmt).all():
+        sev_key = sev_value.value if hasattr(sev_value, "value") else str(sev_value)
+        if sev_key in severity_strip:
+            severity_strip[sev_key] = int(n)
+
+    return RiskKpiCounters(
+        action_yes_servers=action_yes_servers,
+        action_no_servers=action_no_servers,
+        risk_band_counts=band_counts,
+        action_yes_subcounts=action_yes_subcounts,
+        severity_strip_counts=severity_strip,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +278,10 @@ def _build_pane_context(
     kpi_sparklines = daily_severity_counts_fleet(sess, days=50, now=now)
     stale_sparkline = daily_stale_server_counts(sess, days=50, now=now)
 
+    # Block O (ADR-0022): Risk-KPI-Counter fuer Action-Required-Cards,
+    # Risk-Band-Pills und Severity-Strip.
+    risk_kpis = _load_risk_kpi_counters(sess)
+
     return {
         "servers": visible,
         "filter": filt,
@@ -190,6 +298,8 @@ def _build_pane_context(
         "stale_sparkline": stale_sparkline,
         "bulk_form": BulkActionForm(),
         "csrf_form": CSRFOnlyForm(),
+        # Block O (ADR-0022).
+        "risk_kpis": risk_kpis,
     }
 
 
@@ -306,6 +416,7 @@ def _card_tag_names(card: ServerCardData) -> set[str]:
 
 
 __all__ = [
+    "RiskKpiCounters",
     "ServerCardData",
     "SeverityCounts",
     "dashboard_bp",

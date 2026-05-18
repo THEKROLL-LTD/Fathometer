@@ -143,6 +143,11 @@
                      @change="toggleAll($event.target.checked)"
                      data-test="dashboard-bulk-select-all">
             </th>
+            {# Block O (ADR-0022): Risk-Spalte als erste Sort-Spalte
+               nach der Checkbox; CVSS-Severity rutscht zwischen Status
+               und Erstmals nach hinten. #}
+            {{ sort_header('risk', 'Risk', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
             {{ sort_header('server', 'Server', view_filter.sort, view_filter.dir,
                            view_filter=view_filter, route='dashboard.index') }}
             {{ sort_header('cve', 'CVE / Titel', view_filter.sort, view_filter.dir,
@@ -153,9 +158,9 @@
                            view_filter=view_filter, route='dashboard.index') }}
             {{ sort_header('cvss', 'CVSS', view_filter.sort, view_filter.dir,
                            view_filter=view_filter, route='dashboard.index') }}
-            {{ sort_header('sev', 'Severity', view_filter.sort, view_filter.dir,
-                           view_filter=view_filter, route='dashboard.index') }}
             {{ sort_header('status', 'Status', view_filter.sort, view_filter.dir,
+                           view_filter=view_filter, route='dashboard.index') }}
+            {{ sort_header('sev', 'Severity', view_filter.sort, view_filter.dir,
                            view_filter=view_filter, route='dashboard.index') }}
             {{ sort_header('first_seen', 'Erstmals', view_filter.sort, view_filter.dir,
                            view_filter=view_filter, route='dashboard.index') }}
@@ -177,6 +182,17 @@
                      @change="selected = $event.target.checked
                                          ? [...selected, {{ f.id }}]
                                          : selected.filter(id => id !== {{ f.id }})">
+            </td>
+
+            {# Risk-Band-Spalte (Block O, ADR-0022): Pill ohne Klick-Filter
+               und ohne Count (eine Pill pro Finding, kein Aggregat). #}
+            <td class="whitespace-nowrap">
+              {% with band_value=(f.risk_band or 'pending'),
+                      as_link=false,
+                      compact=true,
+                      show_count=false %}
+                {% include "_partials/risk_band_pill.html" %}
+              {% endwith %}
             </td>
 
             {# Server-Spalte: Name als Link auf Server-Detail, darunter Tag-
@@ -259,8 +275,8 @@
 
             <td>{{ epss_pill(f.epss_score) }}</td>
             <td>{{ cvss_pill(f.cvss_v3_score) }}</td>
-            <td>{{ severity_badge(f.severity) }}</td>
             <td>{{ status_badge(f.status) }}</td>
+            <td>{{ severity_badge(f.severity) }}</td>
 
             <td class="text-xs whitespace-nowrap">
               <time datetime="{{ f.first_seen_at.isoformat() }}"

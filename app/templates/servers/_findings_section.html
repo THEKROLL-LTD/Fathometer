@@ -87,6 +87,24 @@
                           title='Ausgewaehlte Findings abhaken') }}
       </div>
 
+      {# Block O (ADR-0022): Bulk-Ack-Noise — Server-spezifisch.
+         Aktiviert nur wenn `noise_total > 0`. Modal ist `_bulk_ack_noise_modal.html`. #}
+      {% if (noise_total | default(0)) > 0 %}
+        {%- set _noise_ids = noise_findings | map(attribute='id') | list -%}
+        <div x-data="bulkAckNoise(() => {{ _noise_ids | tojson }})" class="inline-flex"
+             data-test="bulk-ack-noise-scope">
+          <button type="button"
+                  class="btn btn-xs btn-warning gap-1"
+                  @click="openModal()"
+                  title="Alle noise-Findings auf diesem Server abhaken"
+                  data-test="bulk-ack-noise-button">
+            Acknowledge all noise on this server
+            <span class="font-mono opacity-80">({{ noise_total }})</span>
+          </button>
+          {% include "servers/_bulk_ack_noise_modal.html" %}
+        </div>
+      {% endif %}
+
       {# CSV-Export-Dropdown: Mode-abhaengig (flach/gruppiert/diff).
          `view_filter.to_query_string()` traegt alle aktiven Sort/Filter mit. #}
       <details class="dropdown dropdown-end">
