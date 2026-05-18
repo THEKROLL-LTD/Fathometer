@@ -244,10 +244,72 @@ Reihenfolge fuer ein frisches Production-Deployment:
 4. Reverse-Proxy konfigurieren (nginx- oder Caddy-Snippet oben), TLS-Zertifikat einrichten, IP-Allowlist auf `/api/scans` setzen.
 5. Setup-Wizard im Browser durchklicken (`https://secscan.example.com/setup/step1`): Admin-Account anlegen, Master-Key generieren, Defaults setzen.
 6. **Master-Key in einen Password-Manager kopieren.** Er wird nie wieder angezeigt — Verlust bedeutet Rotation aller Server-Keys.
-7. Pro Server `agent/secscan-register.sh <url> <name> <interval>` aufrufen, den ausgegebenen Server-Key in `/etc/secscan/api-key` mit `chmod 600` ablegen.
-8. Cron oder systemd-Timer fuer `agent/secscan-agent.sh` einrichten (typisch `0 3 * * *` taeglich); `SECSCAN_URL` und `SECSCAN_API_KEY` aus der Key-Datei laden.
-9. **Optional**: LLM-Provider unter `Settings -> LLM` konfigurieren (Provider-Preset, API-Key, Tages-Token-Cap). Ohne LLM laeuft die App normal, der Chat-Button ist dann ausgegraut.
-10. Postgres-Backup-Cron einrichten (siehe oben).
+7. Pro Server den Bootstrap-Installer als root ausfuehren (siehe naechster Abschnitt). Ein Einzeiler installiert Trivy + Agent-Skripte, registriert den Host mit dem Master-Key und scharft systemd-Timer (oder Cron-Fallback).
+8. **Optional**: LLM-Provider unter `Settings -> LLM` konfigurieren (Provider-Preset, API-Key, Tages-Token-Cap). Ohne LLM laeuft die App normal, der Chat-Button ist dann ausgegraut.
+9. Postgres-Backup-Cron einrichten (siehe oben).
+
+## Agent-Installation auf einem Server
+
+Standardpfad (ADR-0021, ab v0.7.0):
+
+```bash
+curl -fsSL https://secscan.example.com/install.sh | sudo bash
+```
+
+Wenn `curl | bash` das Terminal als stdin verliert, gleichwertig mit erhaltenem TTY:
+
+```bash
+sudo bash <(curl -fsSL https://secscan.example.com/install.sh)
+```
+
+Der Installer ist ein sechs-Phasen-Wizard (System-Detection, Dependencies, Trivy, Server-Registrierung, Scheduler, Probe-Scan). Master-Key und Server-Name werden interaktiv abgefragt (Master-Key silent ueber `/dev/tty`, kein Argv/keine History). Trivy wird per `sha256sum -c` gegen das offizielle GitHub-Release verifiziert. Die `agent.env`-Datei landet als `/etc/secscan/agent.env` mit `chmod 0600 root:root`. systemd-Timer (`daily`, `RandomizedDelaySec=2h`) ist Default; Cron-Fallback mit Jitter wenn `systemctl` fehlt.
+
+**Re-Run** desselben Befehls auf demselben Host erkennt eine vorhandene Registrierung und ueberspringt Phase 4 (kein erneuter Master-Key-Prompt) — geeignet fuer Agent-Updates.
+
+**Unattended-Modus** (Ansible, Cloud-Init, Terraform):
+
+```bash
+SECSCAN_UNATTENDED=1 \
+SECSCAN_MASTER_KEY=... \
+SECSCAN_SERVER_NAME=host01 \
+SECSCAN_INTERVAL_HOURS=24 \
+SECSCAN_INSTALL_TRIVY=yes \
+  sudo -E bash <(curl -fsSL https://secscan.example.com/install.sh)
+```
+
+### Unterstuetzte Plattformen
+
+| Familie | Distros | Paketmanager |
+|---|---|---|
+| Debian | `ubuntu`, `debian` | `apt-get` |
+| RHEL | `almalinux`, `rocky`, `rhel`, `centos`, `fedora`, `amazon`, `oracle` | `dnf` (Fallback `yum`) |
+| SUSE | `opensuse-leap`, `opensuse-tumbleweed`, `sles` | `zypper` |
+
+Architekturen: `x86_64` und `aarch64`. Andere Architekturen werden mit klarer Fehlermeldung abgelehnt.
+
+**Bewusst nicht unterstuetzt** (ADR-0021): Alpine/OpenRC, `armv7l`, Container-Hosts (`trivy rootfs /` will Host-FS sehen — anti-pattern fuer einen privilegierten Container).
+
+### Power-User-Pfad (Ansible/Salt ohne Wizard)
+
+Wer den Wizard nicht will, kann weiterhin die zwei Skripte direkt aus dem Repo oder vom Backend ziehen und sein eigenes systemd-Template schreiben:
+
+```bash
+curl -fsSL https://secscan.example.com/agent/files/secscan-register.sh -o /opt/secscan/bin/secscan-register.sh
+curl -fsSL https://secscan.example.com/agent/files/secscan-agent.sh -o /opt/secscan/bin/secscan-agent.sh
+chmod 0755 /opt/secscan/bin/secscan-{register,agent}.sh
+
+/opt/secscan/bin/secscan-register.sh https://secscan.example.com <name> <interval-hours>
+# -> druckt Server-Key; in /etc/secscan/agent.env als SECSCAN_API_KEY=... eintragen,
+#    chmod 0600 root:root.
+
+# Cron oder systemd-Timer fuer secscan-agent.sh einrichten (typisch 0 3 * * *
+# taeglich); SECSCAN_URL und SECSCAN_API_KEY werden aus /etc/secscan/agent.env
+# via EnvironmentFile (systemd) oder . agent.env (cron) gelesen.
+```
+
+### Veraltete Agents erkennen
+
+Backend kennt aus dem Envelope `agent_version` und `trivy_version`. Im Server-Detail-View sowie in der Sidebar-Server-Liste erscheinen Pills `agent veraltet` / `trivy veraltet` / `trivy-db stale` (Schwelle `TRIVY_DB_STALE_THRESHOLD_DAYS=7`). Update = derselbe Einzeiler nochmal ausfuehren. Kein Auto-Update — bewusst (siehe ADR-0021).
 
 ## E2E-Smoke ausfuehren
 
