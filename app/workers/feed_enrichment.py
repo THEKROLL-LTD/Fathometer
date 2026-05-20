@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 from app.config import load_settings
 from app.models import CisaKevCatalog, EpssScore, FeedPullLog
 from app.schemas.feed_enrichment import EpssRow, KevEntry, KevFeed
+from app.services.feed_backfill import backfill_epss, backfill_kev
 
 log = structlog.get_logger(__name__)
 
@@ -315,6 +316,15 @@ def pull_epss(
             row_count=row_count,
             bytes_downloaded=bytes_downloaded,
         )
+
+        # Phase 3 (ADR-0024) — Backfill ueber bestehende Findings, idempotent.
+        # Failure hier killt den als-erfolgreich-geloggten Pull NICHT (Audit
+        # bleibt success); Backfill kann beim naechsten Tick wiederholt werden.
+        try:
+            backfill_epss(session)
+        except Exception:  # pragma: no cover — defensiv gegen DB-Hickups
+            log.exception("feed.epss_backfill_failed")
+
         _evict_old_audit_rows(session, "epss")
         log.info(
             "feed.epss_pulled",
@@ -410,6 +420,13 @@ def pull_kev(
             row_count=row_count,
             bytes_downloaded=bytes_downloaded,
         )
+
+        # Phase 3 (ADR-0024) — Backfill ueber bestehende Findings, idempotent.
+        try:
+            backfill_kev(session)
+        except Exception:  # pragma: no cover — defensiv gegen DB-Hickups
+            log.exception("feed.kev_backfill_failed")
+
         _evict_old_audit_rows(session, "cisa_kev")
         log.info(
             "feed.kev_pulled",
