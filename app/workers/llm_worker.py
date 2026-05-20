@@ -444,6 +444,15 @@ def _pick_next_job_id() -> int | None:
     in einer frischen Session, damit der Pickup-Transaktion-Scope klein
     bleibt und die SKIP-LOCKED-Garantie nicht durch nachgelagerte Reads
     verwaessert wird.
+
+    v0.9.x: Pass-2-Jobs haben zusaetzlich zur ``depends_on``-Schicht eine
+    Sibling-Wait-Bedingung — Pass-2 darf nur picken wenn KEIN Pass-1-Job
+    fuer denselben ``server_id`` noch in ``queued`` oder ``in_progress``
+    haengt. Damit kann Pass-2 nicht starten waehrend Pass-1-Geschwister
+    noch laufen (Multi-Worker-zukunftssicher). ``failed`` Pass-1-Siblings
+    blockieren NICHT — Pass-2 startet mit dem was an Groups da ist
+    (Variante 3: Audit-Event signalisiert dem Operator dass nicht alles
+    durch ging — siehe ``_audit_pass2_with_failed_siblings``).
     """
     sql = text(
         """
@@ -454,6 +463,21 @@ def _pick_next_job_id() -> int | None:
             AND (
               depends_on IS NULL
               OR depends_on IN (SELECT id FROM llm_jobs WHERE status = 'done')
+            )
+            AND (
+              -- Pass-1: kein extra Wait
+              job_type = 'group_detection'
+              OR (
+                -- Pass-2: wartet bis alle Pass-1-Siblings fuer den
+                -- selben server_id entweder done oder failed sind.
+                job_type = 'risk_evaluation'
+                AND NOT EXISTS (
+                  SELECT 1 FROM llm_jobs sibling
+                  WHERE sibling.job_type = 'group_detection'
+                    AND sibling.server_id = llm_jobs.server_id
+                    AND sibling.status IN ('queued', 'in_progress')
+                )
+              )
             )
           ORDER BY created_at
           LIMIT 1
@@ -857,6 +881,57 @@ def _union(existing: list[str] | None, incoming: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _audit_pass2_with_failed_siblings(
+    session: Session, *, job_id: int, server_id: int
+) -> None:
+    """Audit-Event wenn ein Pass-2-Job startet waehrend Pass-1-Siblings
+    fuer denselben Server ``failed`` sind.
+
+    v0.9.x: Pass-2 wartet via Pickup-Filter bis alle Pass-1-Siblings
+    terminiert sind — failed Siblings blockieren NICHT (sonst wuerde
+    Pass-2 nie laufen wenn ein einziger Batch konsequent timeout't).
+    Damit Operator trotzdem sieht dass nicht alle Findings groupped
+    werden konnten, loggen wir bei Pass-2-Start den failed-Count.
+    Die failed Pass-1-Findings werden beim naechsten Re-Ingest erneut
+    versucht (sind weiterhin ungrouppt → Block-P-Hook enqueued neue
+    Pass-1-Jobs fuer sie).
+    """
+    failed_ids = [
+        int(row[0])
+        for row in session.execute(
+            text(
+                """
+                SELECT id FROM llm_jobs
+                WHERE job_type = 'group_detection'
+                  AND server_id = :sid
+                  AND status = 'failed'
+                """
+            ),
+            {"sid": server_id},
+        ).fetchall()
+    ]
+    if not failed_ids:
+        return
+    log.warning(
+        "llm_worker.pass2_started_with_failed_pass1 job_id=%s server_id=%s "
+        "failed_pass1_count=%s failed_pass1_ids=%s",
+        job_id,
+        server_id,
+        len(failed_ids),
+        failed_ids[:10],
+    )
+    _audit(
+        session,
+        "llm.pass2_started_with_failed_pass1",
+        target_id=str(job_id),
+        metadata={
+            "server_id": server_id,
+            "failed_pass1_count": len(failed_ids),
+            "failed_pass1_ids": failed_ids[:50],
+        },
+    )
+
+
 async def _do_pass2(job_id: int) -> None:
     """Pass 2: Risk-Bewertung pro Group, mit Cache-Lookup vor LLM-Call."""
     # Phase 1: Daten + Cache-Key vorbereiten.
@@ -869,6 +944,13 @@ async def _do_pass2(job_id: int) -> None:
         server_id = int(payload.get("server_id") or 0)
         if group_id <= 0 or server_id <= 0:
             raise ValueError(f"pass2 payload invalid: {payload!r}")
+
+        # v0.9.x: bei Pass-2-Start audit-loggen ob Pass-1-Siblings fuer
+        # den selben Server gescheitert sind. Pass-2 laeuft trotzdem
+        # (Variante 3), aber Operator sieht im Audit-Log dass nicht alle
+        # Findings groupped werden konnten und vom naechsten Ingest
+        # erneut versucht werden muessen.
+        _audit_pass2_with_failed_siblings(session, job_id=job_id, server_id=server_id)
 
         group = session.get(ApplicationGroup, group_id)
         server = session.get(Server, server_id)

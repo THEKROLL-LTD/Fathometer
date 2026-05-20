@@ -1169,3 +1169,223 @@ async def test_aclose_reviewer_client_swallows_aclose_error() -> None:
 
     # Soll NICHT werfen
     await llm_worker._aclose_reviewer_client(_ReviewerWithFailingClient())
+
+
+# ---------------------------------------------------------------------------
+# v0.9.x: Pass-2 wartet auf ALLE Pass-1-Siblings (queued / in_progress)
+# ---------------------------------------------------------------------------
+
+
+def test_pass2_waits_when_pass1_sibling_queued(db_app: Flask) -> None:
+    """Pass-2 darf NICHT gepickt werden solange ein Pass-1-Sibling fuer den
+    selben server_id noch ``queued`` ist — selbst wenn der ``depends_on``-
+    Parent schon ``done`` ist."""
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            srv = _make_server(sess)
+            # Pass-1 #1: done (Parent von Pass-2)
+            p1_done = _make_job(
+                sess,
+                job_type="group_detection",
+                server_id=srv.id,
+                payload={"finding_ids": [1]},
+                status="done",
+            )
+            # Pass-1 #2: noch queued (Sibling)
+            _make_job(
+                sess,
+                job_type="group_detection",
+                server_id=srv.id,
+                payload={"finding_ids": [2]},
+                status="queued",
+            )
+            # Pass-2: depends_on auf p1_done → klassische Dependency erfuellt
+            _make_job(
+                sess,
+                job_type="risk_evaluation",
+                server_id=srv.id,
+                payload={"group_id": 1, "server_id": srv.id},
+                status="queued",
+                depends_on=p1_done.id,
+            )
+            sess.commit()
+
+            # Pickup soll Pass-1 #2 (queued) zuerst nehmen, NICHT Pass-2.
+            picked = llm_worker._pick_next_job_id()
+            assert picked is not None
+            sess.expire_all()
+            picked_job = sess.get(LLMJob, picked)
+            assert picked_job is not None
+            assert picked_job.job_type == "group_detection"
+    finally:
+        sess.close()
+
+
+def test_pass2_waits_when_pass1_sibling_in_progress(db_app: Flask) -> None:
+    """Pass-2 darf NICHT gepickt werden waehrend ein Pass-1-Sibling in
+    ``in_progress`` ist (Multi-Worker-Szenario)."""
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            srv = _make_server(sess)
+            p1_done = _make_job(
+                sess,
+                job_type="group_detection",
+                server_id=srv.id,
+                payload={"finding_ids": [1]},
+                status="done",
+            )
+            _make_job(
+                sess,
+                job_type="group_detection",
+                server_id=srv.id,
+                payload={"finding_ids": [2]},
+                status="in_progress",
+                picked_up_at=datetime.now(UTC),
+                picked_up_by="other-worker:1",
+            )
+            _make_job(
+                sess,
+                job_type="risk_evaluation",
+                server_id=srv.id,
+                payload={"group_id": 1, "server_id": srv.id},
+                status="queued",
+                depends_on=p1_done.id,
+            )
+            sess.commit()
+
+            # Pickup soll Pass-2 NICHT picken (Pass-1-Sibling in_progress).
+            # Es gibt KEINE anderen Pass-1-Jobs queued → Pickup gibt None.
+            picked = llm_worker._pick_next_job_id()
+            assert picked is None
+    finally:
+        sess.close()
+
+
+def test_pass2_picks_when_pass1_sibling_failed(db_app: Flask) -> None:
+    """Pass-2 DARF starten wenn ein Pass-1-Sibling ``failed`` ist (Variante 3:
+    Pass-2 laeuft mit dem was an Groups da ist, Audit-Event signalisiert
+    den teilweisen Erfolg)."""
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            srv = _make_server(sess)
+            p1_done = _make_job(
+                sess,
+                job_type="group_detection",
+                server_id=srv.id,
+                payload={"finding_ids": [1]},
+                status="done",
+            )
+            _make_job(
+                sess,
+                job_type="group_detection",
+                server_id=srv.id,
+                payload={"finding_ids": [2]},
+                status="failed",
+                attempts=3,
+            )
+            pass2 = _make_job(
+                sess,
+                job_type="risk_evaluation",
+                server_id=srv.id,
+                payload={"group_id": 1, "server_id": srv.id},
+                status="queued",
+                depends_on=p1_done.id,
+            )
+            sess.commit()
+
+            # Pickup soll Pass-2 jetzt picken.
+            picked = llm_worker._pick_next_job_id()
+            assert picked == pass2.id
+    finally:
+        sess.close()
+
+
+def test_pass2_with_failed_pass1_emits_audit(db_app: Flask) -> None:
+    """Wenn Pass-2 startet und failed Pass-1-Siblings existieren, wird
+    ``llm.pass2_started_with_failed_pass1`` als Audit-Event geschrieben."""
+    from app.models import AuditEvent
+
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            srv = _make_server(sess)
+            _make_job(
+                sess,
+                job_type="group_detection",
+                server_id=srv.id,
+                payload={"finding_ids": [1]},
+                status="done",
+            )
+            _make_job(
+                sess,
+                job_type="group_detection",
+                server_id=srv.id,
+                payload={"finding_ids": [2]},
+                status="failed",
+                attempts=3,
+            )
+            sess.commit()
+
+            llm_worker._audit_pass2_with_failed_siblings(sess, job_id=999, server_id=srv.id)
+            sess.commit()
+
+            events = (
+                sess.execute(
+                    select(AuditEvent)
+                    .where(AuditEvent.action == "llm.pass2_started_with_failed_pass1")
+                    .order_by(AuditEvent.id.desc())
+                )
+                .scalars()
+                .all()
+            )
+            assert len(events) == 1
+            assert events[0].event_metadata is not None
+            assert events[0].event_metadata.get("failed_pass1_count") == 1
+            assert events[0].event_metadata.get("server_id") == srv.id
+    finally:
+        sess.close()
+
+
+def test_pass2_without_failed_pass1_no_audit(db_app: Flask) -> None:
+    """Wenn KEIN Pass-1-Sibling failed ist, wird KEIN Audit-Event geschrieben."""
+    from app.models import AuditEvent
+
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            srv = _make_server(sess)
+            _make_job(
+                sess,
+                job_type="group_detection",
+                server_id=srv.id,
+                payload={"finding_ids": [1]},
+                status="done",
+            )
+            sess.commit()
+
+            before = (
+                sess.execute(
+                    select(AuditEvent).where(
+                        AuditEvent.action == "llm.pass2_started_with_failed_pass1"
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            llm_worker._audit_pass2_with_failed_siblings(sess, job_id=999, server_id=srv.id)
+            sess.commit()
+            after = (
+                sess.execute(
+                    select(AuditEvent).where(
+                        AuditEvent.action == "llm.pass2_started_with_failed_pass1"
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(after) == len(before)
+    finally:
+        sess.close()
