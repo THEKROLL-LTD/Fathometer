@@ -206,3 +206,32 @@
     </div>
   </div>
 </div>
+
+{# Block Q (ADR-0024) — Feed-Freshness-Anzeige.
+   Zwei Zeilen, rot bei stale (>7 Tage) oder letztem Pull-Failure. #}
+{% if feed_statuses %}
+<div class="mt-6 card bg-base-100 border border-base-300">
+  <div class="card-body p-4 text-xs font-mono">
+    <p class="mb-2 text-base-content/60 uppercase tracking-wide">External Feeds</p>
+    {% for status in feed_statuses %}
+      {% set is_failed = status.last_attempt_status == "failed" %}
+      {% set row_color = "text-error" if (status.is_stale or is_failed) else "text-base-content" %}
+      <div class="{{ row_color }}">
+        <span class="font-semibold">
+          {% if status.feed_name == "epss" %}EPSS:{% else %}CISA-KEV:{% endif %}
+        </span>
+        {% if status.last_success_at %}
+          letzter Pull {{ status.last_success_at.strftime("%Y-%m-%d %H:%M UTC") }}
+          &middot; {{ "{:,}".format(status.last_success_row_count or 0).replace(",", ".") }} Eintraege
+          {% if status.is_stale %}&middot; stale (&gt;7 Tage){% endif %}
+        {% else %}
+          noch kein erfolgreicher Pull
+        {% endif %}
+        {% if is_failed and status.last_attempt_at %}
+          &middot; letzter Versuch fehlgeschlagen ({{ status.last_attempt_at.strftime("%Y-%m-%d %H:%M UTC") }})
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

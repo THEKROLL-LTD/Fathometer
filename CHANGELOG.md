@@ -4,6 +4,68 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block Q: External EPSS/KEV Enrichment
+
+ADR-0024. Loest die Pass-2-Risk-Bewertungsluecke: Trivy 0.70 liefert
+weder EPSS noch KEV im JSON-Output, deshalb waren die Pass-2-LLM-
+Eskalations-Pfade "KEV-listed" und "EPSS very-high" faktisch tot.
+
+Wir reichern EPSS und KEV jetzt **serverseitig** aus zwei oeffentlichen
+Daily-Feeds an, persistiert in zwei eigenen Tabellen, und im Ingest-
+Pfad pro Finding gelookupt. Trivy bleibt unveraendert als Scanner.
+
+### Added
+
+- **Drei neue DB-Tabellen** (Migration 0008):
+  - ``epss_scores`` (~250k Zeilen, ~10 MB): ``cve_id`` PK,
+    ``epss_score``, ``epss_percentile``, ``updated_at``.
+  - ``cisa_kev_catalog`` (~1500 Eintraege, <1 MB): CISA-Felder inkl.
+    ``known_ransomware`` Flag.
+  - ``feed_pull_log``: Audit-Trail pro Pull-Versuch, hard-cap 100
+    Eintraege pro Feed via Eviction beim naechsten erfolgreichen Pull.
+- **Pull-Worker** (``app/workers/feed_enrichment.py``): alle 24h ±30min
+  Jitter, Sub-Tick im LLM-Worker analog Stale-Reaper. EPSS via gzip-
+  stream-decompress mit 50 MB-Cap, KEV als single-shot Pydantic-
+  Validation mit 10 MB-Cap. Defensiv: EPSS-Failure killt nicht den
+  KEV-Pull. ``SECSCAN_FEED_PULL_DISABLED=true`` schaltet beide Pulls
+  komplett ab (Air-Gap-Setup).
+- **Ingest-Anreicherung** (``app/services/findings_ingest.py``): pro
+  Scan ein Bulk-IN-Lookup gegen beide Feed-Tabellen, Felder werden
+  in-place ueberschrieben. Nicht-CVE-Identifier (GHSA, RHSA, ...)
+  ueberspringen den Lookup.
+- **Backfill** (``app/services/feed_backfill.py``): nach jedem
+  erfolgreichen Pull ein idempotentes ``UPDATE ... FROM`` ueber alle
+  bestehenden Findings. Initial-Bootstrap reichert tausende von
+  Findings auf einen Schlag an; laufende KEV-Nachpflege (CISA traegt
+  CVEs auch im Nachhinein nach) wirkt ohne Re-Scan.
+- **UI-Feed-Status**: zweizeiliger Block am Ende der LLM-Settings-Seite
+  (``/settings/llm``). Zeigt pro Feed letzten erfolgreichen Pull-
+  Zeitpunkt und Row-Count. Rot bei stale (>7 Tage) oder failed
+  letztem Pull-Versuch.
+- **Audit-Events**: ``feed.epss_pulled``, ``feed.kev_pulled``,
+  ``feed.epss_pull_failed``, ``feed.kev_pull_failed`` mit
+  ``event_metadata`` (row_count, bytes, duration_ms, error).
+
+### Changed
+
+- ``Settings``-Modell um sieben neue Felder erweitert:
+  ``feed_pull_disabled``, ``feed_epss_url``, ``feed_kev_url``,
+  ``feed_pull_interval_hours``, ``feed_jitter_max_min``,
+  ``feed_max_decompressed_mb_epss``, ``feed_max_bytes_kev_mb``.
+  Alle ueber ``SECSCAN_FEED_*``-Env-Vars konfigurierbar.
+- ``LLM-Risk-Reviewer`` (Pass 2) Renderer und System-Prompt nutzen
+  jetzt die persistierten EPSS/KEV-Werte (war vorher Block P).
+
+### Operative Auswirkungen
+
+- **Outbound-Network neu**: Server braucht HTTPS-Zugriff auf
+  ``epss.empiricalsecurity.com`` und ``cisa.gov``. Air-Gap-Setup:
+  ``SECSCAN_FEED_PULL_DISABLED=true``, Findings bleiben unangereichert,
+  UI/LLM funktionieren weiter (Prompt sagt explizit ``epss=n/a``
+  nicht als Eskalations-Signal werten).
+- **Erster Pull dauert ~10-30s** je nach Netzwerk; danach passiert
+  nichts mehr fuer 24h ±30min Jitter.
+
 ## [v0.9.6] — 2026-05-20
 
 Worker-Idle-CPU-Optimierung und CI-Build-Speedup. Folge-Patch zu

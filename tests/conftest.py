@@ -75,6 +75,7 @@ _MOCKED_UNIT_FILES: frozenset[str] = frozenset(
         "tests/audit/test_log_event.py",
         "tests/services/test_diff_view.py",
         "tests/services/test_feed_backfill.py",
+        "tests/services/test_feed_status.py",
         "tests/services/test_findings_ingest.py",
         "tests/services/test_findings_ingest_cause_mapping.py",
         "tests/services/test_findings_ingest_feed_enrichment.py",

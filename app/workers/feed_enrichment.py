@@ -41,6 +41,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from app.audit import log_event
 from app.config import load_settings
 from app.models import CisaKevCatalog, EpssScore, FeedPullLog
 from app.schemas.feed_enrichment import EpssRow, KevEntry, KevFeed
@@ -320,8 +321,9 @@ def pull_epss(
         # Phase 3 (ADR-0024) — Backfill ueber bestehende Findings, idempotent.
         # Failure hier killt den als-erfolgreich-geloggten Pull NICHT (Audit
         # bleibt success); Backfill kann beim naechsten Tick wiederholt werden.
+        backfilled = 0
         try:
-            backfill_epss(session)
+            backfilled = backfill_epss(session)
         except Exception:  # pragma: no cover — defensiv gegen DB-Hickups
             log.exception("feed.epss_backfill_failed")
 
@@ -333,11 +335,40 @@ def pull_epss(
             bytes_downloaded=bytes_downloaded,
             duration_ms=duration_ms,
         )
+
+        # Phase 4 (ADR-0024) — Audit-Event fuer Operator-Sichtbarkeit.
+        with contextlib.suppress(Exception):
+            log_event(
+                "feed.epss_pulled",
+                target_type="feed",
+                target_id="epss",
+                metadata={
+                    "row_count": row_count,
+                    "invalid_rows": invalid_count,
+                    "bytes_downloaded": bytes_downloaded,
+                    "duration_ms": duration_ms,
+                    "findings_backfilled": backfilled,
+                },
+                session=session,
+            )
+            session.commit()
         return row_count, bytes_downloaded
     except Exception as exc:
         duration_ms = int((time.monotonic() - started_mono) * 1000)
         log.exception("feed.epss_pull_failed", duration_ms=duration_ms)
         _log_failure(session, log_id, f"{type(exc).__name__}: {exc}")
+        with contextlib.suppress(Exception):
+            log_event(
+                "feed.epss_pull_failed",
+                target_type="feed",
+                target_id="epss",
+                metadata={
+                    "error": f"{type(exc).__name__}: {exc}"[:512],
+                    "duration_ms": duration_ms,
+                },
+                session=session,
+            )
+            session.commit()
         raise
 
 
@@ -422,8 +453,9 @@ def pull_kev(
         )
 
         # Phase 3 (ADR-0024) — Backfill ueber bestehende Findings, idempotent.
+        backfilled = 0
         try:
-            backfill_kev(session)
+            backfilled = backfill_kev(session)
         except Exception:  # pragma: no cover — defensiv gegen DB-Hickups
             log.exception("feed.kev_backfill_failed")
 
@@ -434,11 +466,39 @@ def pull_kev(
             bytes_downloaded=bytes_downloaded,
             duration_ms=duration_ms,
         )
+
+        # Phase 4 (ADR-0024) — Audit-Event fuer Operator-Sichtbarkeit.
+        with contextlib.suppress(Exception):
+            log_event(
+                "feed.kev_pulled",
+                target_type="feed",
+                target_id="cisa_kev",
+                metadata={
+                    "row_count": row_count,
+                    "bytes_downloaded": bytes_downloaded,
+                    "duration_ms": duration_ms,
+                    "findings_backfilled": backfilled,
+                },
+                session=session,
+            )
+            session.commit()
         return row_count, bytes_downloaded
     except Exception as exc:
         duration_ms = int((time.monotonic() - started_mono) * 1000)
         log.exception("feed.kev_pull_failed", duration_ms=duration_ms)
         _log_failure(session, log_id, f"{type(exc).__name__}: {exc}")
+        with contextlib.suppress(Exception):
+            log_event(
+                "feed.kev_pull_failed",
+                target_type="feed",
+                target_id="cisa_kev",
+                metadata={
+                    "error": f"{type(exc).__name__}: {exc}"[:512],
+                    "duration_ms": duration_ms,
+                },
+                session=session,
+            )
+            session.commit()
         raise
 
 
