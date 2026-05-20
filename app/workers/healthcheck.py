@@ -1,30 +1,22 @@
 """Healthcheck-Skript fuer den ``secscan-llm-worker``-Container.
 
-Wird vom ``docker-compose``-``healthcheck.test``-Eintrag aufgerufen
-(``python -m app.workers.healthcheck``). Liest die Singleton-``settings``-
-Zeile aus der DB, prueft das Alter von ``llm_worker_heartbeat_at`` gegen
-einen festen Schwellwert (``HEARTBEAT_MAX_AGE_SEC``) und beendet sich mit
-``exit(0)`` (healthy) oder ``exit(1)`` (unhealthy).
+Wird vom Compose-Healthcheck-Eintrag und von den k8s-Liveness/Readiness-
+Probes aufgerufen (``python -m app.workers.healthcheck``). Liest die
+Singleton-``settings``-Zeile per Raw-SQL, prueft das Alter von
+``llm_worker_heartbeat_at`` und exit'et 0 (healthy) oder 1 (unhealthy).
 
-**Wichtige Eigenschaften:**
-
-* Kein Flask-App-Context — der Worker-Container hat keine eingehenden
-  HTTP-Ports (ARCHITECTURE.md §9). Der Check ist ein reiner DB-Read.
-* Wiederverwendung der Worker-Session-Factory aus
-  ``app.workers.llm_worker`` — damit nutzen Healthcheck und Worker
-  exakt dieselbe Engine-Konfiguration (``SECSCAN_DATABASE_URL``).
-* Defensiv: jede unerwartete Exception wird als unhealthy
-  (``exit(1)``) gewertet und kurz nach STDERR geloggt — der Worker
-  selbst hat sein eigenes Logging, hier reicht ein knapper One-Liner.
+**Bewusst minimaler Import-Footprint** (v0.9.1): das Skript laeuft als
+eigenes kurzlebiges Python-Process bei jeder Probe — die kombinierte
+Import-Last von ``openai``-SDK, Pydantic-v2-Schemas und ORM-Tabellen
+sprengt unter ARM64-RKE2-Realbedingungen das Default-``timeoutSeconds: 5``
+einer k8s-Exec-Probe (gemessen 4-6s Cold-Start). Wir importieren deshalb
+ausschliesslich ``app.config`` (pydantic-settings) plus eine schlanke
+``sqlalchemy``-Connection und lesen die Spalte per Raw-SQL.
 
 Heartbeat-Cadence im Worker ist ``HEARTBEAT_INTERVAL_SEC = 10`` (siehe
 ``app.workers.llm_worker``). Der Schwellwert hier ist mit 30s deutlich
 groesser — zwei verpasste Schreibvorgaenge gelten noch als gesund,
-erst der dritte loest unhealthy aus. Compose-Retries (3 x 30s)
-multiplizieren sich darauf; ein toter Worker wird also erst nach
-ca. 120-150s als unhealthy markiert. Das ist akzeptabel — der
-Stale-Reaper im Worker selbst arbeitet ohnehin auf einer feineren
-Zeitachse.
+erst der dritte loest unhealthy aus.
 """
 
 from __future__ import annotations
@@ -32,12 +24,23 @@ from __future__ import annotations
 import sys
 from datetime import UTC, datetime, timedelta
 
-from app.settings_service import ensure_settings_row
-from app.workers.llm_worker import get_session
+from sqlalchemy import Connection, create_engine, text
 
-# Worker schreibt alle 10s einen Heartbeat (HEARTBEAT_INTERVAL_SEC im Worker).
-# 30s erlaubt zwei verpasste Schreibvorgaenge — der dritte gilt als unhealthy.
+from app.config import load_settings
+
 HEARTBEAT_MAX_AGE_SEC: int = 30
+
+
+def _open_connection() -> Connection:
+    """Baut eine kurzlebige DB-Connection.
+
+    Eigene Funktion damit Tests sie patchen koennen (`patch.object`).
+    `pool_pre_ping=False` weil die Connection sofort genutzt wird —
+    ein Ping waere zusaetzlicher Roundtrip ohne Nutzen.
+    """
+    cfg = load_settings()
+    engine = create_engine(cfg.database_url, future=True, pool_pre_ping=False)
+    return engine.connect()
 
 
 def main() -> int:
@@ -48,13 +51,18 @@ def main() -> int:
         Sekunden ist, sonst ``1``.
     """
     try:
-        with get_session() as session:
-            row = ensure_settings_row(session)
-            hb = row.llm_worker_heartbeat_at
+        conn = _open_connection()
+        try:
+            row = conn.execute(
+                text("SELECT llm_worker_heartbeat_at FROM settings WHERE id = 1")
+            ).first()
+        finally:
+            conn.close()
     except Exception as exc:  # defensiv — DB nicht erreichbar etc.
         print(f"healthcheck: db_error {type(exc).__name__}", file=sys.stderr)
         return 1
 
+    hb = row[0] if row is not None else None
     if hb is None:
         print("healthcheck: no_heartbeat_yet", file=sys.stderr)
         return 1

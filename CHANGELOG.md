@@ -4,6 +4,42 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.9.1] — 2026-05-20
+
+Bugfix-Release. Behebt einen Liveness/Readiness-Probe-Restart-Loop des
+``secscan-llm-worker``-Containers unter k3s/RKE2-Realbedingungen.
+
+### Fixed
+
+- **Healthcheck-Skript ``app/workers/healthcheck.py`` schlankgeschnitten.**
+  Das Skript importierte bisher ``app.workers.llm_worker`` und zog damit
+  die komplette LLM-Service-Lage mit (``openai``-SDK, ``llm_risk_reviewer``,
+  ``group_matcher``, ``llm_cache`` plus alle SQLAlchemy-Tabellen). Auf
+  einem ARM64-RKE2-Node mit geteilter CPU lag der Cold-Start-Import-Plus-
+  DB-Connect zwischen 4-6 Sekunden — k8s-Default ``timeoutSeconds: 5``
+  einer Exec-Probe wurde gerissen, drei Failures = SIGTERM, Pod-Restart
+  alle ~90 Sekunden. Das Skript liest jetzt nur ``app.config`` plus eine
+  schlanke ``sqlalchemy``-Connection und greift per Raw-SQL auf die
+  Heartbeat-Spalte zu. Gemessener Cold-Start fällt auf ~0.6-1.0s, passt
+  in jedes Probe-Timeout. **Keine Schema-/Verhaltens-Änderung** —
+  exit-Codes, Schwellwerte, Edge-Cases bleiben gleich.
+
+### Tests
+
+- ``tests/workers/test_healthcheck.py`` auf neue Injection-API umgestellt
+  (``healthcheck._open_connection`` per ``patch.object`` statt der alten
+  ``llm_worker.set_session_factory_for_tests``-Kette).
+- Neuer Regressions-Test ``test_healthcheck_does_not_import_llm_worker_module``
+  spawnt einen Sub-Process, importiert nur ``app.workers.healthcheck``
+  und verifiziert, dass weder ``app.workers.llm_worker`` noch eines der
+  ``app.services.llm_*``-Module noch ``openai`` in ``sys.modules``
+  landen. Verhindert künftige versehentliche Re-Introduktion des Probleme.
+
+### Compat
+
+- Operator-Hinweis: bestehende k8s-Manifeste muessen **nicht** angepasst
+  werden. ``timeoutSeconds: 5`` reicht ab v0.9.1 wieder aus.
+
 ## [v0.9.0] — 2026-05-19
 
 Block P (ADR-0023) — LLM-Risk-Reviewer mit Application-Grouping
