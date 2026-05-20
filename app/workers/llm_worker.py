@@ -66,6 +66,7 @@ from app.services.llm_risk_reviewer import (
     Pass2Result,
 )
 from app.settings_service import ensure_settings_row
+from app.workers import feed_enrichment
 
 log = logging.getLogger("secscan.llm_worker")
 
@@ -85,6 +86,10 @@ STALE_REAPER_INTERVAL_SEC: float = 60.0
 # v0.9.3 (ADR-0023 §"(e) LLM-Debug-Log-Tabelle"): Eviction-Sub-Tick fuer
 # `llm_debug_log`. Wir laufen alle 10 Minuten (analog Stale-Reaper-Cadence).
 DEBUG_LOG_EVICTION_INTERVAL_SEC: float = 600.0
+# Block Q (ADR-0024): External-EPSS/KEV-Feed-Pull-Sub-Tick. Alle 10 Minuten
+# nachschauen ob ein Pull faellig ist — der Pull selbst laeuft nur 1x pro
+# Tag pro Feed (entscheidet ``feed_enrichment_tick`` per Audit-Log).
+FEED_PULL_CHECK_INTERVAL_SEC: float = 600.0
 # v0.9.6: Idle-CPU-Reduktion. Mode-Wechsel ist Operator-Action; alle 2s die
 # Settings-Row zu pollen ist Verschwendung. Cache 30s — Mode-Switch wird also
 # binnen <30s wirksam, was operativ vollkommen ausreicht.
@@ -134,6 +139,7 @@ _shutdown: bool = False
 _last_heartbeat_at: float = 0.0
 _last_reaper_at: float = 0.0
 _last_debug_log_eviction_at: float = 0.0
+_last_feed_pull_check_at: float = 0.0
 
 # v0.9.6: Mode-/Budget-Caching + Idle-Backoff. Reduziert die Idle-SQL-Last
 # (vorher ~120 Queries/Minute bei leerer Queue) drastisch.
@@ -222,10 +228,12 @@ def request_shutdown_for_tests() -> None:
 def reset_shutdown_for_tests() -> None:
     """Test-Hook — setzt das Shutdown-Flag zurueck (zwischen Tests)."""
     global _shutdown, _last_heartbeat_at, _last_reaper_at, _last_debug_log_eviction_at
+    global _last_feed_pull_check_at
     _shutdown = False
     _last_heartbeat_at = 0.0
     _last_reaper_at = 0.0
     _last_debug_log_eviction_at = 0.0
+    _last_feed_pull_check_at = 0.0
     # v0.9.5: Stop-Event clearen damit Test-Re-Runs den Heartbeat-Thread
     # nicht im Stop-State festhalten.
     _heartbeat_thread_stop.clear()
@@ -394,7 +402,7 @@ def _tick() -> None:
     Bei leerer Queue klettert die Sleep-Dauer exponentiell bis 30s
     (``_idle_sleep_and_backoff``). Reduziert die Idle-SQL-Last drastisch.
     """
-    global _last_reaper_at, _last_debug_log_eviction_at
+    global _last_reaper_at, _last_debug_log_eviction_at, _last_feed_pull_check_at
     now_mono = time.monotonic()
 
     # Stale-Reaper alle 60s.
@@ -406,6 +414,13 @@ def _tick() -> None:
     if now_mono - _last_debug_log_eviction_at > DEBUG_LOG_EVICTION_INTERVAL_SEC:
         _run_debug_log_eviction()
         _last_debug_log_eviction_at = now_mono
+
+    # Block Q (ADR-0024): External-EPSS/KEV-Feed-Pull-Check alle 10 Minuten.
+    # Der Tick selbst entscheidet (anhand des Audit-Logs) ob ein Pull
+    # tatsaechlich faellig ist — pro Feed max 1 Pull / 24h.
+    if now_mono - _last_feed_pull_check_at > FEED_PULL_CHECK_INTERVAL_SEC:
+        _run_feed_enrichment_check()
+        _last_feed_pull_check_at = now_mono
 
     # Mode-Check (cached 30s).
     mode = _get_mode_throttled()
@@ -881,9 +896,7 @@ def _union(existing: list[str] | None, incoming: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _audit_pass2_with_failed_siblings(
-    session: Session, *, job_id: int, server_id: int
-) -> None:
+def _audit_pass2_with_failed_siblings(session: Session, *, job_id: int, server_id: int) -> None:
     """Audit-Event wenn ein Pass-2-Job startet waehrend Pass-1-Siblings
     fuer denselben Server ``failed`` sind.
 
@@ -1422,6 +1435,24 @@ def _run_debug_log_eviction() -> None:
                 )
     except Exception:  # pragma: no cover — DB-Hickup
         log.exception("llm_worker.debug_log_eviction_failed")
+
+
+def _run_feed_enrichment_check() -> None:
+    """Sub-Tick fuer External-EPSS/KEV-Feed-Pull (Block Q, ADR-0024).
+
+    Delegiert an :func:`feed_enrichment.feed_enrichment_tick`. Der Tick
+    entscheidet selbst (per ``feed_pull_log``-Lookup) ob ein Pull faellig
+    ist — wir rufen ihn alle 10 Minuten auf, der echte HTTP-Pull
+    passiert max 1x / 24h pro Feed.
+
+    Defensiv try/except: ein DB-Hickup oder ein Bug im Tick darf den
+    Worker-Loop nicht killen.
+    """
+    try:
+        with get_session() as session:
+            feed_enrichment.feed_enrichment_tick(session)
+    except Exception:  # pragma: no cover — DB-/Tick-Failure
+        log.exception("llm_worker.feed_enrichment_check_failed")
 
 
 def _run_stale_reaper() -> None:

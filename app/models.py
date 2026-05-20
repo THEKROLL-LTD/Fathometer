@@ -16,7 +16,7 @@ mitgehen — Audit muss erhalten bleiben.
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -25,6 +25,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Computed,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -1007,6 +1008,105 @@ class LLMDebugLog(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# Block Q (ADR-0024) — External EPSS/KEV Enrichment.
+#
+# Drei Server-Side-Feed-Tabellen die der ``feed_enrichment``-Worker-Sub-Tick
+# einmal taeglich aus den offiziellen Feeds (FIRST.org / CISA) befuellt. Die
+# Anreicherung selbst (Ingest-Lookup + Backfill) ist Phase 2/3, hier nur das
+# Datenmodell und die UPSERT-Targets.
+# ---------------------------------------------------------------------------
+
+
+class EpssScore(Base):
+    """EPSS-Score pro CVE — Daily-Snapshot von FIRST.org.
+
+    ``epss_score`` und ``epss_percentile`` sind beide in [0.0, 1.0] und werden
+    per Check-Constraint validiert (Defense-in-Depth gegen einen kaputten
+    Feed-Pull). PK ist ``cve_id`` — pro CVE genau ein Score, UPSERT auf
+    Konflikt.
+    """
+
+    __tablename__ = "epss_scores"
+
+    cve_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    epss_score: Mapped[float] = mapped_column(Float, nullable=False)
+    epss_percentile: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "epss_score >= 0.0 AND epss_score <= 1.0 "
+            "AND epss_percentile >= 0.0 AND epss_percentile <= 1.0",
+            name="ck_epss_scores_range",
+        ),
+    )
+
+
+class CisaKevCatalog(Base):
+    """CISA-KEV-Eintrag pro CVE.
+
+    Spalten 1:1 nach ADR-0024 §"Neue DB-Tabellen". ``date_added`` ist NOT
+    NULL (CISA fuellt das immer), ``due_date`` und alle Vendor-/Text-Felder
+    sind nullable damit kuenftige CISA-Schema-Aenderungen (z.B. eine Pflicht-
+    Spalte verschwindet) den Pull nicht killen.
+    """
+
+    __tablename__ = "cisa_kev_catalog"
+
+    cve_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    vendor_project: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    product: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    vulnerability_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    date_added: Mapped[date] = mapped_column(Date, nullable=False)
+    short_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    required_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    known_ransomware: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class FeedPullLog(Base):
+    """Audit-Eintrag pro Feed-Pull-Attempt (success/failure).
+
+    Wird vom ``feed_enrichment``-Worker pro Pull-Lauf geschrieben. Eviction
+    laeuft im selben Sub-Tick (hard-cap 100 Zeilen pro ``feed_name``).
+    Status-Whitelist deckt running/success/failed; ``feed_name`` ist
+    Whitelist-checked auf die zwei bekannten Feeds.
+    """
+
+    __tablename__ = "feed_pull_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    feed_name: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bytes_downloaded: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "feed_name IN ('epss', 'cisa_kev')",
+            name="ck_feed_pull_log_name",
+        ),
+        Index(
+            "ix_feed_pull_log_feed_started",
+            "feed_name",
+            text("started_at DESC"),
+        ),
+    )
+
+
 __all__ = [
     "ATTACK_VECTOR_ENUM_NAME",
     "FINDING_CLASS_ENUM_NAME",
@@ -1019,6 +1119,9 @@ __all__ = [
     "AttackVector",
     "AuditEvent",
     "Base",
+    "CisaKevCatalog",
+    "EpssScore",
+    "FeedPullLog",
     "Finding",
     "FindingClass",
     "FindingNote",

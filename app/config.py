@@ -158,6 +158,55 @@ class Settings(BaseSettings):
     )
     TRIVY_DB_STALE_THRESHOLD_DAYS: ClassVar[int] = 7
 
+    # ----- Block Q (ADR-0024) — External EPSS/KEV Enrichment -----
+    # Master-Switch fuer den ``feed_enrichment``-Worker-Sub-Tick. Wenn
+    # ``True``, springt der Tick sofort zurueck — kein HTTP, kein Log-Spam.
+    # Gedacht fuer Air-Gap-Deploys ohne Outbound-HTTPS.
+    feed_pull_disabled: bool = Field(
+        default=False,
+        description=(
+            "Master-Switch fuer den External-Feed-Pull (EPSS/KEV). "
+            "True => Worker-Sub-Tick ist no-op (Air-Gap-Setup)."
+        ),
+    )
+    feed_epss_url: str = Field(
+        default="https://epss.empiricalsecurity.com/epss_scores-current.csv.gz",
+        description="HTTPS-URL des EPSS-Daily-CSV-Snapshots (gzipped).",
+    )
+    feed_kev_url: str = Field(
+        default="https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+        description="HTTPS-URL des CISA-KEV-JSON-Feeds.",
+    )
+    feed_pull_interval_hours: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        description="Mindestabstand zwischen zwei erfolgreichen Pulls pro Feed (Stunden).",
+    )
+    feed_jitter_max_min: int = Field(
+        default=30,
+        ge=0,
+        le=120,
+        description="Max. Jitter (Minuten) auf das Pull-Intervall, ±-symmetrisch.",
+    )
+    feed_max_decompressed_mb_epss: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description=(
+            "Cap fuer dekomprimierte EPSS-CSV-Groesse in MB "
+            "(Gzip-Bomb-Schutz). Realistisch ~25 MB, Default 50 MB."
+        ),
+    )
+    feed_max_bytes_kev_mb: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description=(
+            "Cap fuer das CISA-KEV-JSON-Response in MB. Realistisch ~1 MB, Default 10 MB."
+        ),
+    )
+
     @property
     def max_body_bytes(self) -> int:
         """Body-Limit in Bytes fuer Flask `MAX_CONTENT_LENGTH`."""

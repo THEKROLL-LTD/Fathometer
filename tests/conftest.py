@@ -219,6 +219,7 @@ def _truncate_all(engine: Any) -> None:
         conn.execute(
             text(
                 "TRUNCATE TABLE "
+                "feed_pull_log, epss_scores, cisa_kev_catalog, "
                 "llm_risk_cache, llm_jobs, application_groups, "
                 "llm_conversation_findings, llm_messages, llm_conversations, "
                 "finding_notes, findings, server_tags, tags, scans, servers, "
