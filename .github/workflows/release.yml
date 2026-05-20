@@ -48,7 +48,12 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
-          platforms: linux/amd64,linux/arm64
+          # arm64 temporaer aus: QEMU-Emulation auf amd64-Runner ist
+          # 5-10x langsamer als nativ. Aktueller Deploy-Pfad (k8s-Cluster)
+          # ist amd64-only. Reaktivieren wenn arm64-Deploy gebraucht wird —
+          # dann besser `runs-on: ubuntu-24.04-arm` als zweiter Matrix-Job
+          # statt QEMU-Emulation.
+          platforms: linux/amd64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -86,14 +91,21 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # GitHub-Actions-Cache: spart Buildtime bei wiederholten Builds um
-          # Größenordnungen, weil pip-Layer + apt-Layer wiederverwendet werden.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # GitHub-Actions-Cache mit expliziter Scope: ohne `scope` wird
+          # default per GITHUB_REF separiert — jeder Tag-Build (refs/tags/
+          # vX.Y.Z) bekommt eigenen Cache und startet bei null. Mit fixem
+          # `scope=release` teilen alle Release-Builds denselben Cache, sodass
+          # pyproject.toml-Layer + apt-Layer ueber Tag-Grenzen hinweg gehittet
+          # werden. Cache wird automatisch nach 7 Tagen ohne Hit evictet
+          # (GHA-LRU). System-Lib-Security-Updates kommen via Base-Image-Push
+          # (`python:3.13-slim-bookworm`-Digest aendert sich) → Layer-Hash
+          # invalidiert automatisch.
+          cache-from: type=gha,scope=release
+          cache-to: type=gha,scope=release,mode=max
           # Provenance-Attestations für Software-Supply-Chain. Sind ohnehin
           # ghcr-Default ab buildx-0.10, hier explizit.
           provenance: true
