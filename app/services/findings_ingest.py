@@ -30,6 +30,8 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     AttackVector,
+    CisaKevCatalog,
+    EpssScore,
     Finding,
     FindingClass,
     FindingStatus,
@@ -224,6 +226,57 @@ def _build_finding_row(
 
 
 # ---------------------------------------------------------------------------
+# EPSS/KEV-Anreicherung (Block Q, ADR-0024)
+# ---------------------------------------------------------------------------
+
+
+def _enrich_with_feeds(session: Session, rows: list[dict[str, Any]]) -> None:
+    """Reichert Findings-Rows in-place mit EPSS- und KEV-Daten an.
+
+    Liest aus den Server-seitigen Feed-Tabellen (``epss_scores``,
+    ``cisa_kev_catalog``) per Bulk-IN-Lookup. Felder die im Lookup
+    getroffen werden ueberschreiben die vom Scanner gelieferten Werte —
+    unsere Feed-Pulls sind die autoritative Quelle (siehe ADR-0024
+    §"Geklaerte Design-Entscheidungen" Punkt 2).
+
+    Nicht-CVE-Identifiers (GHSA-, RHSA-, ...) bleiben unberuehrt; fuer
+    sie gibt es keine EPSS/KEV-Quellen.
+    """
+    cve_ids = {
+        row["identifier_key"]
+        for row in rows
+        if isinstance(row.get("identifier_key"), str) and row["identifier_key"].startswith("CVE-")
+    }
+    if not cve_ids:
+        return
+
+    epss_map: dict[str, EpssScore] = {
+        r.cve_id: r for r in session.scalars(select(EpssScore).where(EpssScore.cve_id.in_(cve_ids)))
+    }
+    kev_map: dict[str, CisaKevCatalog] = {
+        r.cve_id: r
+        for r in session.scalars(select(CisaKevCatalog).where(CisaKevCatalog.cve_id.in_(cve_ids)))
+    }
+
+    if not epss_map and not kev_map:
+        return
+
+    for row in rows:
+        cve = row.get("identifier_key")
+        if not isinstance(cve, str) or not cve.startswith("CVE-"):
+            continue
+        if (e := epss_map.get(cve)) is not None:
+            row["epss_score"] = e.epss_score
+            row["epss_percentile"] = e.epss_percentile
+        if (k := kev_map.get(cve)) is not None:
+            row["is_kev"] = True
+            # ``kev_added_at`` ist Timestamp tz; CISA liefert nur Date.
+            # Auf 00:00 UTC normieren — konsistent mit dem bestehenden
+            # ``Finding.kev_added_at``-Spalten-Semantik.
+            row["kev_added_at"] = datetime.combine(k.date_added, datetime.min.time(), tzinfo=UTC)
+
+
+# ---------------------------------------------------------------------------
 # Haupt-Entry-Point
 # ---------------------------------------------------------------------------
 
@@ -286,6 +339,12 @@ def ingest_scan(
             class_counter[finding_class] += 1
 
     findings_total = len(rows)
+
+    # ---- 1b. EPSS/KEV-Anreicherung (Block Q, ADR-0024) ----------------
+    # Vor dem Bulk-Upsert die Server-seitigen Feed-Tabellen konsultieren.
+    # Trifft pro Scan einen einzelnen IN-Lookup je Feed; bei ~5000 Findings
+    # sind das ~5000 CVE-IDs in einer Query, voellig unkritisch.
+    _enrich_with_feeds(session, rows)
 
     # ---- 2. Bulk-Upsert via INSERT ... ON CONFLICT --------------------
     # `ON CONFLICT` auf dem Unique-Constraint `uq_findings_natural_key`.
