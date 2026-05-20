@@ -100,7 +100,14 @@ class Settings(BaseSettings):
     llm_cache_max_rows: int = Field(default=100_000, ge=100, le=10_000_000)
     # Max-Token-Budget pro Pass-1- und Pass-2-Call (Out-Token, Defense-in-
     # Depth gegen runaway-Outputs).
-    llm_pass1_max_tokens: int = Field(default=4096, ge=256, le=32768)
+    # v0.9.7: Pass-1-Cap von 4096 → 8192. Bei GPT-OSS-120B mit 100-Findings-
+    # Batches sind ~2000-3000 Reasoning-Tokens normal (vgl. Job-32-Probe
+    # 2026-05-20: 4043 chars reasoning + 1977 chars JSON = ~2400 completion-
+    # tokens). 4096 war zu knapp — bei kniffligen Batches sprang das Modell
+    # ins Cap und produzierte HTTP 200 mit message.content="" (finish_reason
+    # "length"). 8192 gibt Reserve fuer Reasoning + JSON-Output ohne dass
+    # die Cost wesentlich steigt (Tokens werden nur bei Output bezahlt).
+    llm_pass1_max_tokens: int = Field(default=8192, ge=256, le=32768)
     llm_pass2_max_tokens: int = Field(default=2048, ge=256, le=32768)
     # Pass-1-Batch-Cap. Default 100 = ~25k Input-Tokens (sicher unter
     # 131k Context-Window von gpt-oss-120b). Operator kann via

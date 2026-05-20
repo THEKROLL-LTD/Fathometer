@@ -934,3 +934,103 @@ async def test_pass2_evaluate_groups_attaches_meta_to_validation_error() -> None
     assert exc.meta.get("system_prompt")
     assert exc.meta.get("user_prompt")
     assert "duration_ms" in exc.meta
+
+
+# ---------------------------------------------------------------------------
+# v0.9.7 — finish_reason capturen + spezifischer Error bei leerem content
+# ---------------------------------------------------------------------------
+
+
+class _FinishReasonSDK:
+    """Mock-SDK das einen konfigurierbaren content + finish_reason zurueckgibt."""
+
+    def __init__(self, content: str | None, finish_reason: str) -> None:
+        self._content = content
+        self._finish_reason = finish_reason
+        self.calls: list[dict[str, Any]] = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs: Any) -> Any:
+        self.calls.append(dict(kwargs))
+        message = SimpleNamespace(content=self._content)
+        choice = SimpleNamespace(message=message, finish_reason=self._finish_reason)
+        return SimpleNamespace(choices=[choice], usage=None)
+
+
+class _FinishReasonClient:
+    def __init__(self, content: str | None, finish_reason: str) -> None:
+        self._sdk = _FinishReasonSDK(content, finish_reason)
+        self.model = "mock-model"
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_captured_in_meta_on_success() -> None:
+    """v0.9.7: ``finish_reason`` MUSS im meta-Dict landen damit der Worker
+    es in den Debug-Log schreiben kann."""
+    client = _FinishReasonClient(json.dumps({"ok": True}), finish_reason="stop")
+    _parsed, meta = await chat_completion_json_with_meta(
+        client,  # type: ignore[arg-type]
+        system_prompt="sys",
+        user_prompt="usr",
+        schema={},
+        max_tokens=100,
+    )
+    assert meta["finish_reason"] == "stop"
+
+
+@pytest.mark.asyncio
+async def test_empty_content_with_finish_reason_length_gives_specific_error() -> None:
+    """v0.9.7: bei ``finish_reason='length'`` + leerem content soll der
+    Fehlertext explizit ``max_tokens-Cap waehrend Reasoning`` erwaehnen
+    und meta mitliefern damit der Debug-Log nicht blind bleibt."""
+    client = _FinishReasonClient(content=None, finish_reason="length")
+    with pytest.raises(LLMInvalidResponseError) as ei:
+        await chat_completion_json_with_meta(
+            client,  # type: ignore[arg-type]
+            system_prompt="sys",
+            user_prompt="usr",
+            schema={},
+            max_tokens=100,
+        )
+    exc = ei.value
+    assert "finish_reason=length" in str(exc)
+    assert "max_tokens-Cap" in str(exc)
+    assert exc.meta is not None
+    assert exc.meta["finish_reason"] == "length"
+    assert "duration_ms" in exc.meta
+
+
+@pytest.mark.asyncio
+async def test_empty_content_with_finish_reason_stop_gives_generic_error() -> None:
+    """v0.9.7: bei leerem content mit ``finish_reason='stop'`` (also
+    "Modell hat sauber beendet, ohne content auszugeben") wird der Provider-
+    Quirk-Generic-Error geworfen, ABER trotzdem mit meta."""
+    client = _FinishReasonClient(content="", finish_reason="stop")
+    with pytest.raises(LLMInvalidResponseError) as ei:
+        await chat_completion_json_with_meta(
+            client,  # type: ignore[arg-type]
+            system_prompt="sys",
+            user_prompt="usr",
+            schema={},
+            max_tokens=100,
+        )
+    exc = ei.value
+    assert "finish_reason='stop'" in str(exc) or "finish_reason=stop" in str(exc)
+    assert exc.meta is not None
+    assert exc.meta["finish_reason"] == "stop"
+
+
+@pytest.mark.asyncio
+async def test_pass1_attaches_meta_on_empty_content_length_error() -> None:
+    """v0.9.7: der ``leeren content``-Pfad muss meta auch durch den Reviewer-
+    Wrapper (pass1_detect_groups) sauber weitergeben — exc.meta darf nicht
+    durch den try/except in pass1_detect_groups verschluckt werden."""
+    f1 = _make_finding(1)
+    reviewer = LLMRiskReviewer(
+        client=_FinishReasonClient(content=None, finish_reason="length"),  # type: ignore[arg-type]
+    )
+    with pytest.raises(LLMInvalidResponseError) as ei:
+        await reviewer.pass1_detect_groups([f1])
+    exc = ei.value
+    assert exc.meta is not None
+    assert exc.meta["finish_reason"] == "length"

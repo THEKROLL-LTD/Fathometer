@@ -692,12 +692,13 @@ async def _do_pass1(job_id: int) -> None:
     pt, ct = _usage_tokens(meta)
     log.info(
         "llm_worker.llm_call_completed job_id=%s job_type=pass1 duration_ms=%s "
-        "prompt_tokens=%s completion_tokens=%s reasoning_chars=%s",
+        "prompt_tokens=%s completion_tokens=%s reasoning_chars=%s finish_reason=%s",
         job_id,
         meta.get("duration_ms"),
         pt,
         ct,
         len(meta.get("reasoning_field") or ""),
+        meta.get("finish_reason"),
     )
 
     _record_pass_debug_log(
@@ -1017,12 +1018,13 @@ async def _do_pass2(job_id: int) -> None:
     pt2, ct2 = _usage_tokens(pass2_meta)
     log.info(
         "llm_worker.llm_call_completed job_id=%s job_type=pass2 duration_ms=%s "
-        "prompt_tokens=%s completion_tokens=%s reasoning_chars=%s",
+        "prompt_tokens=%s completion_tokens=%s reasoning_chars=%s finish_reason=%s",
         job_id,
         pass2_meta.get("duration_ms"),
         pt2,
         ct2,
         len(pass2_meta.get("reasoning_field") or ""),
+        pass2_meta.get("finish_reason"),
     )
 
     _record_pass_debug_log(
@@ -1149,6 +1151,10 @@ def _record_pass_debug_log(
                 "extracted_json": ext_j,
                 "reasoning_field": reason_f,
                 "usage": meta.get("usage"),
+                # v0.9.7: finish_reason aus meta persistieren ("stop" / "length"
+                # / "content_filter") — hilft die Diagnose ob max_tokens
+                # waehrend Reasoning aufgebraucht wurde.
+                "finish_reason": meta.get("finish_reason"),
             }
             duration_ms = int(meta.get("duration_ms") or 0)
         else:

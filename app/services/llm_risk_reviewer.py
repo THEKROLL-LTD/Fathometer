@@ -461,18 +461,13 @@ async def chat_completion_json_with_meta(
     choices = getattr(response, "choices", None) or []
     if not choices:
         raise LLMInvalidResponseError("LLM response hat keine choices")
+    # v0.9.7: finish_reason capturen — bei GPT-OSS-120B kann
+    # finish_reason="length" mit content="" auftreten wenn das Modell
+    # alle max_tokens fuers Reasoning verbraucht hat.
+    finish_reason = getattr(choices[0], "finish_reason", None)
     message = choices[0].message
     raw_content = getattr(message, "content", None)
-    if not raw_content or not isinstance(raw_content, str):
-        raise LLMInvalidResponseError("LLM response hat leeren content")
     reasoning_field = _extract_reasoning(message)
-    extracted = _extract_json_from_response(raw_content)
-    try:
-        parsed = json.loads(extracted)
-    except json.JSONDecodeError as exc:
-        raise LLMInvalidResponseError(f"LLM response ist kein valides JSON: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise LLMInvalidResponseError("LLM response ist kein JSON-Object")
 
     usage_obj = getattr(response, "usage", None)
     usage: dict[str, Any] | None = None
@@ -488,14 +483,44 @@ async def chat_completion_json_with_meta(
                 for k in ("prompt_tokens", "completion_tokens", "total_tokens")
             }
 
+    # Meta-Dict moeglichst frueh bauen damit Exception-Pfade es mit-werfen
+    # koennen (siehe v0.9.5: LLMInvalidResponseError.meta).
     meta: dict[str, Any] = {
         "raw_content": raw_content,
-        "extracted_json": extracted,
+        "extracted_json": None,
         "reasoning_field": reasoning_field,
         "model": client.model,
         "duration_ms": duration_ms,
         "usage": usage,
+        "finish_reason": finish_reason,
     }
+
+    if not raw_content or not isinstance(raw_content, str):
+        # v0.9.7: bei finish_reason="length" + leerem content ist das fast
+        # immer ein max_tokens-Cap-Hit waehrend des Reasonings. Praeziser
+        # Error-Text damit Operator die Ursache sofort sieht.
+        if finish_reason == "length":
+            raise LLMInvalidResponseError(
+                "LLM response hat leeren content (finish_reason=length — "
+                "max_tokens-Cap waehrend Reasoning erreicht, kein JSON-Output)",
+                meta=meta,
+            )
+        raise LLMInvalidResponseError(
+            f"LLM response hat leeren content (finish_reason={finish_reason!r})",
+            meta=meta,
+        )
+
+    extracted = _extract_json_from_response(raw_content)
+    meta["extracted_json"] = extracted
+    try:
+        parsed = json.loads(extracted)
+    except json.JSONDecodeError as exc:
+        raise LLMInvalidResponseError(
+            f"LLM response ist kein valides JSON: {exc}", meta=meta
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise LLMInvalidResponseError("LLM response ist kein JSON-Object", meta=meta)
+
     return parsed, meta
 
 
