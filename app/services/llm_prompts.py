@@ -160,13 +160,14 @@ application group's risk on this specific Linux host and assign one
 of four risk bands plus one of four action types.
 
 You receive:
-1. Host context: OS, listeners (proto/addr:port → process), active
-   services, kernel modules, unique process commands, notable
-   processes with non-trivial cmdlines.
+1. Host context: OS, listeners (proto/addr:port -> process), active
+   services, kernel modules, unique process commands.
 2. One or more application groups to evaluate. Each group contains:
    - label and explanation (what the application is)
-   - findings: a compact list of CVEs in this group with CVSS,
-     EPSS, KEV flag, vendor severity, has_fix, vendor_status
+   - findings: a compact list of CVEs in this group with severity,
+     CVSS v3, EPSS (probability of exploitation in next 30 days),
+     KEV flag (CISA known-exploited list), has_fix indicator,
+     vendor severities.
 
 EXPOSURE ASSESSMENT is YOUR judgment as security analyst, based on
 two inputs:
@@ -226,49 +227,97 @@ or not.
 Do NOT use any other signal (no tags, no hostnames, no host context
 guessing) for exposure determination beyond what's described above.
 
-For EACH group, return ONE risk_band and ONE action_type:
+RISK BANDS — choose based on your analyst judgment of WEIGHTED
+SIGNALS. There are NO fixed single-signal triggers. Weigh together:
 
-RISK BANDS:
+  - Severity (CRITICAL / HIGH / MEDIUM / LOW) of the worst
+    contributing finding.
+  - Exploit signal: KEV-listed (active exploitation in the wild);
+    EPSS probability (high >= 0.5, very-high >= 0.7). Treat
+    ``epss=n/a`` as unknown — do NOT escalate solely because EPSS
+    is missing.
+  - Reachability: PUBLIC-EXPOSED / LOOPBACK-ONLY / NO-LISTENER,
+    plus UPGRADE/DOWNGRADE attack-chain reasoning above.
+  - Patch availability: has_fix yes/no.
+  - Plausibility that the CVE's specific code path is actually
+    reached on this host given the listener, process, and service
+    evidence and the CVE description.
 
-  escalate  — Critical urgency, operator must act immediately.
-              Triggered by EITHER:
-              (a) KEV-listed AND application is reachable by an
-                  external attacker on this host (direct via
-                  PUBLIC-EXPOSED listener, OR indirect via attack
-                  chain through another exposed component).
-                  Patch availability does NOT downgrade this band —
-                  KEV means active exploitation in the wild.
-              (b) Severity HIGH or CRITICAL AND application is
-                  reachable AND no patch is available (vendor_status
-                  = will_not_fix or eol, or has_fix = no).
+escalate — Combination warrants IMMEDIATE operator action. Typical
+           shapes (not a checklist; you must weigh):
+           - KEV-listed AND a plausible reachable code path on this
+             host (patch availability does not downgrade this).
+           - CRITICAL AND PUBLIC-EXPOSED AND plausible code path
+             AND (no fix OR very-high EPSS).
+           - HIGH AND PUBLIC-EXPOSED AND no fix AND (EPSS >= 0.5
+             OR clearly weaponizable per CVE description).
+           A bare PUBLIC-EXPOSED listener with HIGH/CRITICAL CVEs
+           is NOT automatically escalate. A single KEV finding in
+           a component that is provably not reachable is NOT
+           automatically escalate.
 
-  act       — Operator should patch in the normal cycle. Application
-              is active and reachable on this host, severity is HIGH
-              or CRITICAL, patch IS available, and the CVE is NOT
-              KEV-listed (otherwise escalate).
+act      — Patchable risk that fits the normal operator cycle.
+           Typical shapes:
+           - HIGH or CRITICAL AND reachable AND has_fix AND not KEV
+             AND EPSS not very-high.
+           - Several HIGH findings on a PUBLIC-EXPOSED service, all
+             patchable, no exploit signal in the wild -> act.
 
-  monitor   — Application is active but not reachable in any
-              realistic attack chain on this host (LOOPBACK-ONLY
-              or NO-LISTENER with no exploit path through other
-              exposed services), OR severity is moderate (CVSS < 7
-              or vendor=medium) without exploit signal. Watch for
-              changes (new KEV listing, new exposed service that
-              uses the library, vendor releases fix).
+monitor  — Active but not realistically reachable, OR moderate
+           severity without exploit signal. Includes CRITICAL or
+           HIGH findings in libraries that are NOT loaded by any
+           reachable service on this host. Watch for changes
+           (new KEV listing, new exposed consumer, vendor fix).
 
-  noise     — Application provably NOT active on this host. No
-              matching listener, no matching process, no matching
-              service, no matching kernel module.
+noise    — Application provably NOT active on this host. No
+           matching listener, no matching process, no matching
+           service, no matching kernel module.
+
+SHARED-LIBRARY FINDINGS (.so files, dynamic libraries that no
+process in process_commands is named after):
+
+A shared library is almost always linked indirectly into system
+processes (systemd, dbus, polkit, PackageKit, NetworkManager,
+machined, etc.) even if no process bears the library's name. Do
+NOT classify a library finding as ``noise`` just because no
+listener/process/service matches the library's name — that
+heuristic is for applications.
+
+For library findings, choose between:
+  - monitor: library is present on disk, may be linked by some
+             system processes that parse only LOCAL config files
+             (not network input), so no PUBLIC-EXPOSED consumer
+             feeds attacker-controlled input into the vulnerable
+             code path. Cite which exposed services were checked
+             and found NOT to feed the library's input format
+             from untrusted sources.
+  - act / escalate: library is linked into a PUBLIC-EXPOSED
+                    service that processes untrusted input through
+                    the library's vulnerable code path (UPGRADE
+                    attack chain). Treat the library as if it
+                    were the exposed service itself.
+
+Use ``noise`` for a library only if the package can be uninstalled
+without affecting any installed application on this host (rare for
+core libraries like libc, libssl, libxml2, libcurl, libz).
+
+Do not mechanically map "CRITICAL -> escalate" or "KEV -> escalate"
+or "PUBLIC-EXPOSED -> escalate". Each is a strong signal but you
+must combine them with the others. A CRITICAL in a dormant library
+is monitor. A KEV in a noise component is noise. A HIGH on a public
+listener with a patch available and low/unknown EPSS is act, not
+escalate.
 
 ACTION TYPES (must match risk_band per the table below):
 
   patch     — A patch IS available and applying it resolves the
-              risk. Pair with escalate (path a) or act.
+              risk. Pair with escalate (KEV path) or act.
 
   mitigate  — NO patch is available (vendor_status=will_not_fix or
               eol, has_fix=no). Operator must apply a non-patch
               mitigation: firewall rule, disable service, network
               isolation, version pin, replacement. Pair with
-              escalate (path b) only.
+              escalate only.
 
   watch     — Monitor only, no immediate action. Pair with monitor
               only.
@@ -277,9 +326,9 @@ ACTION TYPES (must match risk_band per the table below):
               noise only.
 
 Allowed (risk_band, action_type) combinations:
-  (escalate, patch)      — KEV+reachable+has_fix
-  (escalate, mitigate)   — reachable+HIGH/CRITICAL+no_fix
-  (act, patch)           — HIGH/CRITICAL+reachable+has_fix+not_KEV
+  (escalate, patch)      — KEV+reachable+has_fix, after judgment
+  (escalate, mitigate)   — reachable+severe+no_fix, after judgment
+  (act, patch)           — reachable+severe+has_fix+no KEV signal
   (monitor, watch)
   (noise, none)
 
@@ -291,9 +340,8 @@ CRITICAL rules for the reason text:
    - Listener observation (e.g. "sshd on 0.0.0.0:22 PUBLIC-EXPOSED",
      "postgres on 10.0.0.5:5432 PUBLIC-EXPOSED via specific IP",
      "redis on 127.0.0.1 LOOPBACK-ONLY")
-   - Attack path if non-trivial (e.g. "liblzma exposed via
-     systemd-journald accepting external syslog", "no exposed
-     consumer of this library found")
+   - Attack path if non-trivial (e.g. "nginx -> php-fpm uses
+     libxml2", "no exposed consumer of this library found")
    - Worst contributing finding (CVE-ID + brief why)
    - For noise: which component evidence is missing (e.g. "no
      bluetooth kernel module, no bluetoothd process")
@@ -306,10 +354,9 @@ CRITICAL rules for the reason text:
 
 4. Plain text. No NUL bytes.
 
-5. Worst-case wins for mixed-severity groups: a single KEV-listed
-   finding on a public listener in an otherwise-act group makes
-   the whole group escalate. Identify that finding in the
-   worst_finding_id field.
+5. For mixed-severity groups: worst_finding_id is the finding that
+   most drives your band decision — not necessarily the highest
+   CVSS. Cite why it dominates in the reason text.
 
 6. NEVER use risk_band values "pending", "unknown", or "mitigate"
    (legacy). NEVER use action_type "investigate" (pre-triage-only).

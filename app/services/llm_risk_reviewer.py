@@ -881,14 +881,25 @@ class LLMRiskReviewer:
                 lines.append(f"    explanation: {grp.explanation[:256]}")
             lines.append(f"    findings_in_group ({len(fs)} total):")
             # Kompakte Zusammenfassung — max 32 Findings, Rest summiert.
+            # Per-Finding-Felder: cvss, epss, kev, fix sind explizit gelistet
+            # damit das LLM bewerten kann (siehe PASS2_SYSTEM_PROMPT
+            # "Severity / Exploit signal / Patch availability"-Sektion).
+            # NULL-Werte werden als ``n/a`` bzw. ``none`` gerendert; der
+            # System-Prompt sagt das Modell, "n/a" nicht als Eskalations-
+            # Signal zu werten.
             for f in fs[:32]:
                 vendor_map = f.severity_by_provider or {}
                 vendor_str = ",".join(f"{k}={v}" for k, v in sorted(vendor_map.items()))[:80]
-                kev_str = " kev=yes" if f.is_kev else ""
+                cvss_str = (
+                    f" cvss={f.cvss_v3_score:.1f}" if f.cvss_v3_score is not None else " cvss=n/a"
+                )
+                epss_str = f" epss={f.epss_score:.2f}" if f.epss_score is not None else " epss=n/a"
+                fix_str = f" fix={f.fixed_version}" if f.fixed_version else " fix=none"
+                kev_str = " kev=yes" if f.is_kev else " kev=no"
                 lines.append(
                     f"      {f.id} {f.identifier_key} {f.package_name} "
-                    f"sev={f.severity.value} {vendor_str}"
-                    f"{kev_str}"
+                    f"sev={f.severity.value}{cvss_str}{epss_str}{fix_str}{kev_str} "
+                    f"{vendor_str}"
                 )
             if len(fs) > 32:
                 lines.append(f"      ... ({len(fs) - 32} weitere)")
