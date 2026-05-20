@@ -45,8 +45,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import load_settings
 from app.models import ApplicationGroup, Finding, LLMJob, Server
-from app.services import llm_budget
-from app.services.group_matcher import GroupMatcher
+from app.services import llm_budget, llm_debug_log
+from app.services.group_matcher import GroupMatcher, derive_group_kind
 from app.services.llm_cache import lookup, lru_evict_if_needed, record_hit, store
 from app.services.llm_client import LlmClient, build_client_from_settings
 from app.services.llm_fingerprints import (
@@ -81,6 +81,9 @@ WORKER_ID: str = f"{socket.gethostname()}:{os.getpid()}"
 MAX_ATTEMPTS: int = 3
 HEARTBEAT_INTERVAL_SEC: float = 10.0
 STALE_REAPER_INTERVAL_SEC: float = 60.0
+# v0.9.3 (ADR-0023 §"(e) LLM-Debug-Log-Tabelle"): Eviction-Sub-Tick fuer
+# `llm_debug_log`. Wir laufen alle 10 Minuten (analog Stale-Reaper-Cadence).
+DEBUG_LOG_EVICTION_INTERVAL_SEC: float = 600.0
 
 
 def _poll_interval() -> float:
@@ -108,6 +111,7 @@ def __getattr__(name: str) -> Any:
 _shutdown: bool = False
 _last_heartbeat_at: float = 0.0
 _last_reaper_at: float = 0.0
+_last_debug_log_eviction_at: float = 0.0
 
 # Lazy-erzeugte Session-Factory (kein Flask-App-Context).
 _session_factory: sessionmaker[Session] | None = None
@@ -177,10 +181,11 @@ def request_shutdown_for_tests() -> None:
 
 def reset_shutdown_for_tests() -> None:
     """Test-Hook — setzt das Shutdown-Flag zurueck (zwischen Tests)."""
-    global _shutdown, _last_heartbeat_at, _last_reaper_at
+    global _shutdown, _last_heartbeat_at, _last_reaper_at, _last_debug_log_eviction_at
     _shutdown = False
     _last_heartbeat_at = 0.0
     _last_reaper_at = 0.0
+    _last_debug_log_eviction_at = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +232,7 @@ def _read_mode_safe() -> str:
 
 def _tick() -> None:
     """Einzelne Iteration der Worker-Schleife."""
-    global _last_heartbeat_at, _last_reaper_at
+    global _last_heartbeat_at, _last_reaper_at, _last_debug_log_eviction_at
     now_mono = time.monotonic()
 
     # Heartbeat alle 10s.
@@ -239,6 +244,11 @@ def _tick() -> None:
     if now_mono - _last_reaper_at > STALE_REAPER_INTERVAL_SEC:
         _run_stale_reaper()
         _last_reaper_at = now_mono
+
+    # v0.9.3: Debug-Log-Eviction alle 10 Minuten.
+    if now_mono - _last_debug_log_eviction_at > DEBUG_LOG_EVICTION_INTERVAL_SEC:
+        _run_debug_log_eviction()
+        _last_debug_log_eviction_at = now_mono
 
     # Budget-Reset pruefen (passiert um 00:00 UTC).
     with get_session() as session:
@@ -444,11 +454,50 @@ async def _do_pass1(job_id: int) -> None:
             session.commit()
             return
         # Reviewer-Setup
-        reviewer, _model = _build_reviewer(session)
+        reviewer, model_name = _build_reviewer(session)
+        job_server_id: int | None = job.server_id
 
     # LLM-Call ausserhalb der DB-Session — sonst halten wir die Connection
     # waehrend der 30-90s LLM-Latenz auf.
-    result: Pass1Result = await reviewer.pass1_detect_groups(findings)
+    result: Pass1Result
+    meta: dict[str, Any]
+    try:
+        result, meta = await reviewer.pass1_detect_groups(findings)
+    except LLMInvalidResponseError as exc:
+        _record_pass_debug_log(
+            job_id=job_id,
+            job_type="pass1_group_detection",
+            status="validation_error",
+            model=model_name or "-",
+            server_id=job_server_id,
+            group_id=None,
+            meta=None,
+            error=str(exc),
+        )
+        raise
+    except LLMTimeoutError as exc:
+        _record_pass_debug_log(
+            job_id=job_id,
+            job_type="pass1_group_detection",
+            status="timeout",
+            model=model_name or "-",
+            server_id=job_server_id,
+            group_id=None,
+            meta=None,
+            error=str(exc),
+        )
+        raise
+
+    _record_pass_debug_log(
+        job_id=job_id,
+        job_type="pass1_group_detection",
+        status="success",
+        model=model_name or "-",
+        server_id=job_server_id,
+        group_id=None,
+        meta=meta,
+        error=None,
+    )
 
     with get_session() as session:
         await _persist_pass1_groups(session, finding_ids, result)
@@ -499,6 +548,12 @@ async def _persist_pass1_groups(
                 pkg_purl_pattern=list(grp.pkg_purl_pattern),
                 source="llm",
             )
+            db_grp.group_kind = derive_group_kind(
+                path_prefixes=list(grp.path_prefixes),
+                pkg_name_exact=list(grp.pkg_name_exact),
+                pkg_purl_pattern=list(grp.pkg_purl_pattern),
+                pkg_name_glob=list(grp.pkg_name_glob),
+            )
             session.add(db_grp)
             session.flush()
         else:
@@ -509,6 +564,15 @@ async def _persist_pass1_groups(
             db_grp.pkg_purl_pattern = _union(db_grp.pkg_purl_pattern, grp.pkg_purl_pattern)
             if grp.explanation and not db_grp.explanation:
                 db_grp.explanation = grp.explanation
+            # v0.9.3: ``group_kind`` defensiv ableiten — nur wenn noch NULL
+            # damit existierende deterministische Werte erhalten bleiben.
+            if db_grp.group_kind is None:
+                db_grp.group_kind = derive_group_kind(
+                    path_prefixes=list(db_grp.path_prefixes or []),
+                    pkg_name_exact=list(db_grp.pkg_name_exact or []),
+                    pkg_purl_pattern=list(db_grp.pkg_purl_pattern or []),
+                    pkg_name_glob=list(db_grp.pkg_name_glob or []),
+                )
 
         # Findings zuordnen.
         if grp.finding_ids:
@@ -595,12 +659,14 @@ async def _do_pass2(job_id: int) -> None:
                 reason=cached.reason,
                 worst_finding_id=cached.worst_finding_id,
                 gf_fp=gf_fp,
+                action_type=cached.action_type,
             )
             job.status = "done"
             job.completed_at = datetime.now(UTC)
             job.result = {
                 "cache_hit": True,
                 "risk_band": cached.risk_band,
+                "action_type": cached.action_type,
             }
             _audit(
                 session,
@@ -621,24 +687,63 @@ async def _do_pass2(job_id: int) -> None:
     # Wir nutzen den Reviewer mit detached-Objekten — eine zweite Session
     # haengen wir nicht an, der `pass2_evaluate_groups`-Helper akzeptiert
     # Session-loese Objekte.
-    with get_session() as detached_session:
-        group_re = detached_session.get(ApplicationGroup, group_id)
-        server_re = detached_session.get(Server, server_id)
-        findings_re = list(
-            detached_session.execute(select(Finding).where(Finding.id.in_(group_findings_ids)))
-            .scalars()
-            .all()
-        )
-        if group_re is None or server_re is None:
-            raise ValueError(
-                f"pass2 group/server vanished mid-job: group_id={group_id} server_id={server_id}"
+    pass2_result: Pass2Result
+    pass2_meta: dict[str, Any]
+    try:
+        with get_session() as detached_session:
+            group_re = detached_session.get(ApplicationGroup, group_id)
+            server_re = detached_session.get(Server, server_id)
+            findings_re = list(
+                detached_session.execute(select(Finding).where(Finding.id.in_(group_findings_ids)))
+                .scalars()
+                .all()
             )
-        # Hydrate die Server-Snapshot-Listen damit `_render_pass2_prompt`
-        # alle Felder hat (Server hat keine ORM-Relations dafuer).
-        _hydrate_server_snapshot(detached_session, server_re)
-        pass2_result: Pass2Result = await reviewer.pass2_evaluate_groups(
-            server_re, [(group_re, findings_re)]
+            if group_re is None or server_re is None:
+                raise ValueError(
+                    f"pass2 group/server vanished mid-job: "
+                    f"group_id={group_id} server_id={server_id}"
+                )
+            # Hydrate die Server-Snapshot-Listen damit `_render_pass2_prompt`
+            # alle Felder hat (Server hat keine ORM-Relations dafuer).
+            _hydrate_server_snapshot(detached_session, server_re)
+            pass2_result, pass2_meta = await reviewer.pass2_evaluate_groups(
+                server_re, [(group_re, findings_re)]
+            )
+    except LLMInvalidResponseError as exc:
+        _record_pass_debug_log(
+            job_id=job_id,
+            job_type="pass2_risk_evaluation",
+            status="validation_error",
+            model=model_name or "-",
+            server_id=server_id,
+            group_id=group_id,
+            meta=None,
+            error=str(exc),
         )
+        raise
+    except LLMTimeoutError as exc:
+        _record_pass_debug_log(
+            job_id=job_id,
+            job_type="pass2_risk_evaluation",
+            status="timeout",
+            model=model_name or "-",
+            server_id=server_id,
+            group_id=group_id,
+            meta=None,
+            error=str(exc),
+        )
+        raise
+
+    _record_pass_debug_log(
+        job_id=job_id,
+        job_type="pass2_risk_evaluation",
+        status="success",
+        model=model_name or "-",
+        server_id=server_id,
+        group_id=group_id,
+        meta=pass2_meta,
+        error=None,
+    )
 
     # Phase 3: Result + Cache schreiben.
     evaluation = _pick_evaluation(pass2_result, group_label)
@@ -656,6 +761,7 @@ async def _do_pass2(job_id: int) -> None:
                 reason=evaluation.reason,
                 worst_finding_id=evaluation.worst_finding_id,
                 gf_fp=gf_fp,
+                action_type=evaluation.action_type,
             )
         store(
             session,
@@ -668,6 +774,7 @@ async def _do_pass2(job_id: int) -> None:
             worst_finding_id=evaluation.worst_finding_id,
             reason=evaluation.reason,
             llm_model=model_name,
+            action_type=evaluation.action_type,
         )
         job = session.get(LLMJob, job_id)
         if job is not None:
@@ -676,6 +783,7 @@ async def _do_pass2(job_id: int) -> None:
             job.result = {
                 "cache_hit": False,
                 "risk_band": evaluation.risk_band,
+                "action_type": evaluation.action_type,
             }
         session.commit()
         lru_evict_if_needed(session)
@@ -688,6 +796,81 @@ async def _do_pass2(job_id: int) -> None:
         # evaluation` ist die Schaetzung konstant 2000.
         llm_budget.budget_consume(session, 2000)
     _ = server_id_snapshot  # keep linter happy
+
+
+def _record_pass_debug_log(
+    *,
+    job_id: int,
+    job_type: str,
+    status: str,
+    model: str,
+    server_id: int | None,
+    group_id: int | None,
+    meta: dict[str, Any] | None,
+    error: str | None,
+) -> None:
+    """Schreibt eine ``llm_debug_log``-Row mit (gecappten) Bodies.
+
+    ``meta`` ist das Tuple-Return-Meta-Dict von
+    :meth:`LLMRiskReviewer.pass1_detect_groups` /
+    :meth:`pass2_evaluate_groups`. ``None`` ist erlaubt — z.B. wenn der
+    LLM-Call vor dem Response stirbt (Timeout/Exception in SDK).
+
+    Defensiv geloggt — Debug-Log-Failures duerfen die Job-Pipeline nicht
+    killen.
+    """
+    try:
+        # Request-Body: erste 1KB System-Prompt + erste 8KB User-Prompt, plus
+        # Model+max_tokens. Body-Size-Cap im Service wendet zusaetzlich an.
+        if meta is not None:
+            sys_p = str(meta.get("system_prompt") or "")[:1024]
+            usr_p = str(meta.get("user_prompt") or "")[:8192]
+            max_t = meta.get("max_tokens")
+        else:
+            sys_p = ""
+            usr_p = ""
+            max_t = None
+        request_body: dict[str, Any] = {
+            "system_prompt": sys_p,
+            "user_prompt": usr_p,
+            "model": model,
+            "max_tokens": max_t,
+        }
+        response_body: dict[str, Any] | None
+        duration_ms = 0
+        if meta is not None:
+            raw_c = str(meta.get("raw_content") or "")[:32768]
+            ext_j = str(meta.get("extracted_json") or "")[:32768]
+            reason_f_raw = meta.get("reasoning_field")
+            reason_f = str(reason_f_raw)[:16384] if reason_f_raw else None
+            response_body = {
+                "raw_content": raw_c,
+                "extracted_json": ext_j,
+                "reasoning_field": reason_f,
+                "usage": meta.get("usage"),
+            }
+            duration_ms = int(meta.get("duration_ms") or 0)
+        else:
+            response_body = None
+
+        with get_session() as session:
+            job = session.get(LLMJob, job_id)
+            llm_debug_log.record(
+                session,
+                job=job,
+                job_type=job_type,
+                status=status,
+                model=model,
+                request_body=request_body,
+                response_body=response_body,
+                duration_ms=duration_ms,
+                server_id=server_id,
+                group_id=group_id,
+                error=error,
+            )
+            session.commit()
+    except Exception:  # pragma: no cover — DB-Hickup darf den Worker nicht killen
+        log.exception("llm_worker.debug_log_insert_failed job_id=%s", job_id)
 
 
 def _pick_evaluation(result: Pass2Result, group_label: str) -> Pass2Evaluation | None:
@@ -704,14 +887,23 @@ def _apply_pass2_to_group(
     reason: str,
     worst_finding_id: int | None,
     gf_fp: str,
+    action_type: str | None = None,
 ) -> None:
-    """Setzt die Bewertungs-Felder auf der ApplicationGroup-Row."""
+    """Setzt die Bewertungs-Felder auf der ApplicationGroup-Row.
+
+    ``action_type`` ist v0.9.3-Output von Pass 2. Bei Cache-Hits aus Pre-
+    v0.9.3-Eintraegen (ohne ``action_type``) bleibt das Feld auf seinem
+    Voherwert — wir ueberschreiben es nur wenn ein non-None Wert kommt,
+    damit ein alter Cache eine neue LLM-Bewertung nicht zurueck-`None`'d.
+    """
     group.risk_band = risk_band
     group.risk_band_reason = reason
     group.risk_band_source = "llm"
     group.risk_band_computed_at = datetime.now(UTC)
     group.worst_finding_id = worst_finding_id
     group.group_findings_fingerprint = gf_fp
+    if action_type is not None:
+        group.action_type = action_type
 
 
 def _hydrate_server_snapshot(session: Session, server: Server) -> None:
@@ -784,6 +976,26 @@ def set_reviewer_factory_for_tests(
 # ---------------------------------------------------------------------------
 # Stale-Reaper
 # ---------------------------------------------------------------------------
+
+
+def _run_debug_log_eviction() -> None:
+    """Sub-Tick fuer ``llm_debug_log``-Eviction (v0.9.3).
+
+    Wendet Time-Cap (``llm_debug_log_max_age_days``) und Count-Cap
+    (``llm_debug_log_max_rows``) an. Defensiv geloggt — DB-Hickup hier
+    darf den Worker nicht killen.
+    """
+    try:
+        with get_session() as session:
+            time_evicted, count_evicted = llm_debug_log.evict_old(session)
+            if time_evicted or count_evicted:
+                log.info(
+                    "llm_worker.debug_log_evicted time=%s count=%s",
+                    time_evicted,
+                    count_evicted,
+                )
+    except Exception:  # pragma: no cover — DB-Hickup
+        log.exception("llm_worker.debug_log_eviction_failed")
 
 
 def _run_stale_reaper() -> None:

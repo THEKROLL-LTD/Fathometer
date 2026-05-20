@@ -1,0 +1,114 @@
+{# "Was zu tun ist"-Sektion auf Server-Detail (Block P / v0.9.3, ADR-0023 §c).
+
+   Strukturierte Operator-Workflows zwischen Header-Sub-Line und
+   Host-Snapshot. Bis zu fuenf Cards in Dringlichkeits-Reihenfolge — der
+   View-Helper `_build_action_sections()` skippt leere; wenn das Ergebnis
+   komplett leer ist, blendet sich die Sektion automatisch aus.
+
+   Variablen-Vertrag (aus `app/views/server_detail.py::_build_action_sections`):
+     - `action_sections` : list[dict] mit Keys:
+         `id`           : str  — eindeutiger Slug fuer data-test-Attribute.
+         `label`        : str  — vollstaendiges Label "PHASE · Aktion".
+         `variant`      : str  — CSS-Variant-Slug ("escalate-distro" etc.).
+         `filter`       : tuple — (risk_band, action_type, group_kind|None).
+         `count`        : int  — Anzahl Groups in der Card.
+         `show_labels`  : bool — ob die Group-Label-Sub-Liste rendern soll
+                                  (ESCALATE: ja, ACT: nein — Visual-Noise).
+         `groups`       : list[dict] — Entries aus `_load_application_groups
+                                       _for_server` mit `group`/`findings`/
+                                       `worst_finding`.
+
+   Sicherheit:
+     - Group-Labels, Reason und Finding-Identifier sind Pydantic-validiert
+       beim Ingest (ASCII-safe / Length-Cap). Jinja-Autoescape laeuft
+       trotzdem ueberall — kein `|safe`.
+     - Default-collapsed: `<details>` ohne `open`-Attribut, damit kein
+       Mid-Page-Layout-Jitter beim Detail-Laden entsteht.
+#}
+{% if action_sections %}
+<section id="action-needed" class="py-6 space-y-3"
+         data-test="action-needed-section">
+  <div>
+    <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">
+      Was zu tun ist
+    </div>
+    <h3 class="font-mono text-base font-medium mt-1">Operator-Workflows</h3>
+  </div>
+
+  <div class="grid gap-3 grid-cols-1 lg:grid-cols-2">
+    {% for card in action_sections %}
+      {%- set is_escalate = card.variant.startswith('escalate') -%}
+      {%- set phase_label = 'ESCALATE' if is_escalate else 'ACT' -%}
+      {%- set badge_class = 'badge-error' if is_escalate else 'badge-warning' -%}
+      {%- set action_label = card.label.split('·', 1)[1].strip() if '·' in card.label else card.label -%}
+      <details class="rounded-box bg-base-200/40 border border-base-300 group"
+               data-test="action-card-{{ card.id }}">
+        <summary class="px-5 py-3 cursor-pointer flex items-center justify-between gap-3 list-none">
+          <div class="flex items-center gap-3 min-w-0 flex-1">
+            <span class="badge {{ badge_class }} badge-sm font-mono"
+                  data-test="action-card-{{ card.id }}-phase">{{ phase_label }}</span>
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-medium truncate"
+                   data-test="action-card-{{ card.id }}-action">{{ action_label }}</div>
+              {% if card.show_labels %}
+                {%- set labels = card.groups | map(attribute='group') | map(attribute='label') | list -%}
+                <div class="text-xs opacity-70 font-mono truncate mt-0.5"
+                     data-test="action-card-{{ card.id }}-sublist">
+                  {%- if labels | length > 5 -%}
+                    {{ labels[:5] | join(', ') }} +{{ labels | length - 5 }} more
+                  {%- else -%}
+                    {{ labels | join(', ') }}
+                  {%- endif -%}
+                </div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="badge badge-neutral badge-sm font-mono"
+                  data-test="action-card-{{ card.id }}-count">{{ card.count }}</span>
+            <span class="text-xs opacity-50 group-open:rotate-180 transition-transform"
+                  aria-hidden="true">▾</span>
+          </div>
+        </summary>
+
+        <div class="border-t border-base-300 px-5 py-3 overflow-x-auto">
+          <table class="table table-xs w-full"
+                 data-test="action-card-{{ card.id }}-table">
+            <thead>
+              <tr>
+                <th class="text-[10px] uppercase tracking-wider opacity-65">Group</th>
+                <th class="text-[10px] uppercase tracking-wider opacity-65">Worst Finding</th>
+                <th class="text-[10px] uppercase tracking-wider opacity-65">Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for entry in card.groups %}
+                <tr data-test="action-card-{{ card.id }}-row">
+                  <td class="font-mono whitespace-nowrap">
+                    <a href="#group-{{ entry.group.id }}"
+                       class="link link-hover">{{ entry.group.label }}</a>
+                  </td>
+                  <td class="font-mono text-xs">
+                    {% if entry.worst_finding %}
+                      {{ entry.worst_finding.identifier_key }}
+                    {% else %}
+                      <span class="opacity-50">—</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-xs opacity-70">
+                    {% if entry.group.risk_band_reason %}
+                      {{ entry.group.risk_band_reason }}
+                    {% else %}
+                      <span class="opacity-50">—</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

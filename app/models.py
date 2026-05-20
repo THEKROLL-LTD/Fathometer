@@ -34,6 +34,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -791,6 +792,13 @@ class ApplicationGroup(Base):
     worst_finding_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     group_findings_fingerprint: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
+    # v0.9.3 (ADR-0023 §Update v0.9.3): strukturiertes ``action_type`` und
+    # deterministisches ``group_kind``. ``action_type`` setzt das LLM in
+    # Pass 2, ``group_kind`` wird beim Group-Insert aus den ``match_rules``
+    # abgeleitet (siehe :func:`app.services.group_matcher.derive_group_kind`).
+    action_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    group_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     # Lifecycle / Audit.
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="llm")
     detected_at: Mapped[datetime] = mapped_column(
@@ -810,6 +818,21 @@ class ApplicationGroup(Base):
         CheckConstraint(
             "source IN ('llm','manual')",
             name="ck_application_groups_source",
+        ),
+        # v0.9.3: action_type (LLM-Output, Pflicht ab Pass 2). ``investigate``
+        # ist Pre-Triage-only (Group hat dann ``action_type IS NULL`` bis das
+        # LLM das Feld setzt; UI bildet NULL → ``investigate`` ab).
+        CheckConstraint(
+            "action_type IS NULL OR action_type IN "
+            "('patch','mitigate','watch','none','investigate')",
+            name="ck_application_groups_action_type",
+        ),
+        # v0.9.3: group_kind (deterministisch im Backend aus ``match_rules``
+        # abgeleitet). Trennt OS-Pakete (``apt``/``dnf upgrade`` reicht) von
+        # Application-Bundles (Vendor-Update noetig).
+        CheckConstraint(
+            "group_kind IS NULL OR group_kind IN ('application_bundle','os_package')",
+            name="ck_application_groups_group_kind",
         ),
     )
 
@@ -901,6 +924,10 @@ class LLMRiskCache(Base):
     server_context_fp: Mapped[str] = mapped_column(String(16), nullable=False)
 
     risk_band: Mapped[str] = mapped_column(String(16), nullable=False)
+    # v0.9.3: spiegelt :attr:`ApplicationGroup.action_type` damit der Cache
+    # selbsterklaerend ist und ein Restore aus dem Cache das Feld korrekt
+    # zurueck-applied. Nullable fuer Forward-Compat mit Pre-v0.9.3-Eintraegen.
+    action_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # `worst_finding_id` bewusst kein FK (Finding-Lifecycle entkoppelt).
     worst_finding_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
@@ -920,8 +947,63 @@ class LLMRiskCache(Base):
             "risk_band IN ('escalate','act','mitigate','monitor','noise')",
             name="ck_llm_risk_cache_band",
         ),
+        CheckConstraint(
+            "action_type IS NULL OR action_type IN ('patch','mitigate','watch','none')",
+            name="ck_llm_risk_cache_action_type",
+        ),
         Index("ix_llm_risk_cache_lru", "last_used_at"),
         Index("ix_llm_risk_cache_group", "group_id"),
+    )
+
+
+class LLMDebugLog(Base):
+    """Operator-Debugging-Log fuer LLM-Job-Request/Response-Bodies (v0.9.3).
+
+    Pro LLM-Call eine Row mit dem (gecappten) Request- und Response-Body
+    plus Reasoning-Feld und Status. Eviction laeuft im Worker als Sub-Tick
+    (Count-Cap + Time-Cap, siehe ADR-0023 §"(e) LLM-Debug-Log-Tabelle").
+
+    Alle drei FKs sind ``ON DELETE SET NULL`` — der Debug-Log soll den
+    Lifecycle der referenzierten Entitaeten ueberleben (Job-Cleanup,
+    Group-Loeschung, Server-Loeschung). FK-NULL ist akzeptabler Datenfall:
+    Operator sieht den Debug-Eintrag mit ``-`` als Referenz-Spalte.
+    """
+
+    __tablename__ = "llm_debug_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    job_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    job_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("llm_jobs.id", ondelete="SET NULL"), nullable=True
+    )
+    server_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    group_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("application_groups.id", ondelete="SET NULL"), nullable=True
+    )
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_body: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    response_body: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('success','failed','timeout','validation_error')",
+            name="ck_llm_debug_log_status",
+        ),
+        Index("ix_llm_debug_log_created", "created_at"),
+        Index("ix_llm_debug_log_job_type", "job_type", "created_at"),
+        Index(
+            "ix_llm_debug_log_group",
+            "group_id",
+            postgresql_where=text("group_id IS NOT NULL"),
+        ),
     )
 
 
@@ -942,6 +1024,7 @@ __all__ = [
     "FindingNote",
     "FindingStatus",
     "FindingType",
+    "LLMDebugLog",
     "LLMJob",
     "LLMRiskCache",
     "LlmConversation",

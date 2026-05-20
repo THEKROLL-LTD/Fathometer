@@ -90,6 +90,7 @@ def test_validate_pass2_rejects_nul_byte_in_reason(bad_reason: str) -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "act",
+                "action_type": "patch",
                 "worst_finding_id": None,
                 "reason": bad_reason,
             }
@@ -118,6 +119,7 @@ def test_validate_pass2_reason_length_boundary(reason_len: int, expect_reject: b
             {
                 "group_label": "openssl",
                 "risk_band": "monitor",
+                "action_type": "watch",
                 "worst_finding_id": None,
                 "reason": "x" * reason_len,
             }
@@ -139,6 +141,7 @@ def test_validate_pass2_rejects_non_string_reason() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "monitor",
+                "action_type": "watch",
                 "worst_finding_id": None,
                 "reason": 42,
             }

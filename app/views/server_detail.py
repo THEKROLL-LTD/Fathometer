@@ -207,6 +207,102 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     return result
 
 
+def _build_action_sections(
+    application_groups: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Baut die "Was zu tun ist"-Card-Sektionen fuer den Server-Detail-Header.
+
+    Block P / v0.9.3 (ADR-0023 §"Update v0.9.3 (c)"): die 4-Band-Reduktion
+    deckt die operative Frage "patchen vs. mitigieren vs. App-Vendor-Update"
+    nicht ab. Diese strukturierte Aktions-Sektion teilt die
+    Operator-Workflows visuell in bis zu fuenf Cards auf — in der Reihenfolge
+    operativer Dringlichkeit. Leere Cards werden geskippt; die ganze Sektion
+    blendet sich im Template aus wenn das Ergebnis leer ist.
+
+    Die Card-Filter spiegeln das ``(risk_band, action_type, group_kind)``-
+    Tripel aus der ADR-Tabelle. NULL-``action_type``-Groups (vor dem ersten
+    Pass-2-Re-Eval) matchen **keine** Card und sind absichtlich unsichtbar;
+    sie tauchen wieder auf sobald der Worker das Feld setzt.
+    """
+    card_specs: list[dict[str, Any]] = [
+        {
+            "id": "escalate-distro-patch",
+            "label": "ESCALATE · Distro patchen",
+            "variant": "escalate-distro",
+            "risk_band": "escalate",
+            "action_type": "patch",
+            "group_kind": "os_package",
+            "show_labels": True,
+        },
+        {
+            "id": "escalate-app-update",
+            "label": "ESCALATE · App-Update einspielen",
+            "variant": "escalate-app",
+            "risk_band": "escalate",
+            "action_type": "patch",
+            "group_kind": "application_bundle",
+            "show_labels": True,
+        },
+        {
+            "id": "escalate-mitigate",
+            "label": "ESCALATE · Kein Patch — mitigieren",
+            "variant": "escalate-mitigate",
+            "risk_band": "escalate",
+            "action_type": "mitigate",
+            "group_kind": None,
+            "show_labels": True,
+        },
+        {
+            "id": "act-distro-patch",
+            "label": "ACT · Distro patchen (normal cycle)",
+            "variant": "act-distro",
+            "risk_band": "act",
+            "action_type": "patch",
+            "group_kind": "os_package",
+            "show_labels": False,
+        },
+        {
+            "id": "act-app-update",
+            "label": "ACT · App-Update einspielen (normal cycle)",
+            "variant": "act-app",
+            "risk_band": "act",
+            "action_type": "patch",
+            "group_kind": "application_bundle",
+            "show_labels": False,
+        },
+    ]
+
+    result: list[dict[str, Any]] = []
+    for spec in card_specs:
+        matches: list[dict[str, Any]] = []
+        for entry in application_groups:
+            grp = entry["group"]
+            if grp.risk_band != spec["risk_band"]:
+                continue
+            if grp.action_type != spec["action_type"]:
+                continue
+            if spec["group_kind"] is not None and grp.group_kind != spec["group_kind"]:
+                continue
+            matches.append(entry)
+
+        if not matches:
+            continue
+
+        result.append(
+            {
+                "id": spec["id"],
+                "label": spec["label"],
+                "variant": spec["variant"],
+                "filter": (spec["risk_band"], spec["action_type"], spec["group_kind"]),
+                "count": len(matches),
+                "show_labels": spec["show_labels"],
+                "groups": matches,
+            }
+        )
+
+    return result
+
+
 def _load_ungrouped_findings_for_server(sess: Any, server_id: int) -> list[Finding]:
     """OPEN-Findings ohne `application_group_id` ("Pending grouping"-Bucket)."""
     stmt = (
@@ -305,6 +401,10 @@ def show(server_id: int) -> Any:
         user_default_severity=get_settings_row().severity_threshold,
     )
     section_ctx = _render_findings_section(server, view_filter)
+    # v0.9.3 (ADR-0023 §c): "Was zu tun ist"-Sektion zwischen Header und
+    # Host-Snapshot. Wenn die View nicht im `list`-Mode laeuft, sind die
+    # `application_groups` leer und die Sektion bleibt unsichtbar.
+    action_sections = _build_action_sections(section_ctx.get("application_groups", []))
 
     # Block K (ADR-0018): Header-Stats und Trend-Daten aufsammeln. Alle
     # Aggregations-Calls fuehren je 1 SELECT aus — der Detail-Render bleibt
@@ -375,6 +475,7 @@ def show(server_id: int) -> Any:
         processes=snapshot_ctx["processes"],
         noise_findings=noise_findings,
         noise_total=noise_total,
+        action_sections=action_sections,
         **section_ctx,
     )
 

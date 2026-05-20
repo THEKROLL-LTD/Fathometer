@@ -44,23 +44,30 @@ class MockReviewer:
         self.pass1_call_count = 0
         self.pass2_call_count = 0
 
-    async def pass1_detect_groups(self, findings: Any) -> Pass1Result:
+    async def pass1_detect_groups(self, findings: Any) -> tuple[Pass1Result, dict[str, Any]]:
         await asyncio.sleep(0)
         self.pass1_call_count += 1
+        meta = {"model": "mock-model", "duration_ms": 0}
         if self._pass1_fn is not None:
-            return self._pass1_fn(findings)
+            return self._pass1_fn(findings), meta
         if self._pass1_result is None:
-            return Pass1Result(groups=[], ungrouped_finding_ids=[int(f.id) for f in findings])
-        return self._pass1_result
+            return (
+                Pass1Result(groups=[], ungrouped_finding_ids=[int(f.id) for f in findings]),
+                meta,
+            )
+        return self._pass1_result, meta
 
-    async def pass2_evaluate_groups(self, server: Any, groups: Any) -> Pass2Result:
+    async def pass2_evaluate_groups(
+        self, server: Any, groups: Any
+    ) -> tuple[Pass2Result, dict[str, Any]]:
         await asyncio.sleep(0)
         self.pass2_call_count += 1
+        meta = {"model": "mock-model", "duration_ms": 0}
         if self._pass2_fn is not None:
-            return self._pass2_fn(server, groups)
+            return self._pass2_fn(server, groups), meta
         if self._pass2_result is None:
-            return Pass2Result(evaluations=[])
-        return self._pass2_result
+            return Pass2Result(evaluations=[]), meta
+        return self._pass2_result, meta
 
 
 @pytest.fixture

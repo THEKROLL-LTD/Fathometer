@@ -32,16 +32,21 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import load_settings
 from app.models import ApplicationGroup, Finding, Server
+from app.services.llm_prompts import PASS1_SYSTEM_PROMPT, PASS2_SYSTEM_PROMPT
 
 if TYPE_CHECKING:
     from app.services.llm_client import LlmClient
+
+log = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +62,25 @@ LABEL_PATTERN: re.Pattern[str] = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MAX_REASON_LEN: int = 256
 
 # Final-LLM-Bands (Whitelist; pending/unknown bewusst NICHT zugelassen).
+# Backward-Compat: ``mitigate`` bleibt akzeptiert (Iteration-5-Output, historische
+# Bewertungen), wird aber im Validator auf ``escalate`` umgemappt (mit Warning).
 VALID_RISK_BANDS: frozenset[str] = frozenset({"escalate", "act", "mitigate", "monitor", "noise"})
+
+# v0.9.3: vier aktive Bands plus legacy ``mitigate``. Action-Types kommen
+# strukturell als separates Feld.
+VALID_ACTION_TYPES: frozenset[str] = frozenset({"patch", "mitigate", "watch", "none"})
+
+# Erlaubte ``(risk_band, action_type)``-Kombinationen (Iteration 6, final).
+# Jede andere Kombination wird vom Validator abgelehnt.
+ALLOWED_BAND_ACTION_COMBOS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("escalate", "patch"),
+        ("escalate", "mitigate"),
+        ("act", "patch"),
+        ("monitor", "watch"),
+        ("noise", "none"),
+    }
+)
 
 # Pattern-Sanitization-Limits (ASCII-only, NUL-frei, Laengen-Range).
 _PATH_PREFIX_MIN: int = 1
@@ -130,12 +153,16 @@ PASS2_RESPONSE_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["group_label", "risk_band", "reason"],
+                "required": ["group_label", "risk_band", "action_type", "reason"],
                 "properties": {
                     "group_label": {"type": "string", "maxLength": 64},
                     "risk_band": {
                         "type": "string",
                         "enum": ["escalate", "act", "mitigate", "monitor", "noise"],
+                    },
+                    "action_type": {
+                        "type": "string",
+                        "enum": ["patch", "mitigate", "watch", "none"],
                     },
                     "worst_finding_id": {"type": ["integer", "null"]},
                     "reason": {"type": "string", "maxLength": MAX_REASON_LEN},
@@ -179,12 +206,19 @@ class Pass1Result(BaseModel):
 
 
 class Pass2Evaluation(BaseModel):
-    """Eine Group-Bewertung aus Pass 2."""
+    """Eine Group-Bewertung aus Pass 2.
+
+    ``action_type`` ist ab v0.9.3 Pflicht-Output (vier zulaessige Werte:
+    ``patch``/``mitigate``/``watch``/``none``). ``investigate`` ist
+    Pre-Triage-only und wird vom LLM nie produziert; Pre-Triage-Groups
+    haben ``ApplicationGroup.action_type IS NULL`` bis Pass 2 laeuft.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
     group_label: str
     risk_band: Literal["escalate", "act", "mitigate", "monitor", "noise"]
+    action_type: Literal["patch", "mitigate", "watch", "none"]
     reason: str
     worst_finding_id: int | None = None
 
@@ -211,78 +245,71 @@ class LLMTimeoutError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# System-Prompts (wortgetreu aus ADR-0023)
+# System-Prompts werden aus :mod:`app.services.llm_prompts` re-exportiert.
+# Quelle der Wahrheit sind die Evidenz-Files unter ``docs/blocks/P-evidence/``.
 # ---------------------------------------------------------------------------
 
 
-PASS1_SYSTEM_PROMPT: str = """\
-Du gruppierst Vulnerability-Findings auf einem Linux-Host nach
-Owner-Application. Eine Owner-Application ist die Software die der
-Operator als Einheit installiert/updated (z.B. "k3s", "openssh-server",
-"grafana"). Sub-Komponenten die mit der Owner-Application kommen
-(containerd in k3s, coredns in k3s, kubelet in k3s) gehoeren in die
-Owner-Group, NICHT in eigene Sub-Groups.
-
-WICHTIG fuer die Group-Labels:
-- Waehle Namen so generisch wie moeglich, damit Pfad-Aenderungen bei
-  minor/patch-Updates derselben Application weiter matchen. Beispiel:
-  "k3s", nicht "k3s-1.23".
-- Verschiedene Major-Produkte sind verschiedene Groups: RKE und RKE2 ja,
-  k3s und rke2 ja. Sub-Komponenten einer Application bleiben in derselben
-  Group: kein "k3s-containerd", "k3s-coredns".
-- Distro-OS-Pakete bekommen ihren package_name als Group-Label (z.B.
-  "openssh-server", "openssl"), kein Sub-Splitting.
-- Label-Regex: ^[a-z0-9][a-z0-9_-]{0,63}$ (kleinbuchstaben, Ziffern,
-  _ oder -, max 64 chars, erstes Zeichen alphanumerisch).
-
-Liefere fuer jede Group:
-- label (kurz, kleinbuchstaben, max 64 chars)
-- explanation (max 256 chars, was die Group ist)
-- match_rules: path_prefixes[], pkg_name_exact[], pkg_name_glob[],
-  pkg_purl_pattern[] — so dass zukuenftige aehnliche Findings ohne
-  weiteren LLM-Call automatisch zugeordnet werden koennen
-- finding_ids: Liste der zugeordneten IDs aus dem Input
-
-Jedes Finding aus dem Input MUSS in genau einer Group ODER im
-"ungrouped"-Array landen. Erfinde keine finding_ids die nicht im Input
-sind. Antworte ausschliesslich mit gueltigem JSON nach dem Schema.
-"""
+# ---------------------------------------------------------------------------
+# Reasoning-Block-Extraction (v0.9.3 — GPT-OSS-Harmony, DeepSeek-R1, etc.)
+# ---------------------------------------------------------------------------
 
 
-PASS2_SYSTEM_PROMPT: str = """\
-Du bist ein erfahrener IT-Sicherheits-Analyst. Du bewertest pro
-Application-Group das Risiko auf einem konkreten Host.
+_REASONING_BLOCK_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"<\|channel\|>analysis<\|message\|>.*?<\|end\|>", re.DOTALL),
+    re.compile(r"<think>.*?</think>", re.DOTALL),
+    re.compile(r"\[REASONING\].*?\[/REASONING\]", re.DOTALL),
+)
+_MARKDOWN_JSON_FENCE: re.Pattern[str] = re.compile(r"^```(?:json)?\s*\n(.*?)\n```\s*$", re.DOTALL)
+_GREEDY_BRACES: re.Pattern[str] = re.compile(r"\{.*\}", re.DOTALL)
 
-Bewerte jede Group in eines von fuenf Risikobaendern:
-- escalate: KEV-gelistet und Application ist auf diesem Host aktiv
-  und/oder erreichbar (oder: kritisch ohne Patch-Pfad)
-- act: Application aktiv/erreichbar, Patch verfuegbar oder erwartbar
-  (Operator soll updaten)
-- mitigate: Application aktiv/erreichbar, KEIN Patch verfuegbar oder
-  will_not_fix (Operator muss anders eindaemmen)
-- monitor: Application nicht klar aktiv ODER ohne klare Exposure,
-  beobachten
-- noise: Application erkennbar nicht aktiv (z.B. kein Bluetooth-Modul
-  geladen, kein bluetoothd-Prozess)
 
-Die Werte "pending" und "unknown" sind verboten — das sind reine
-Pre-Triage-Werte aus einer frueheren Engine-Stufe.
+def _extract_json_from_response(content: str) -> str:
+    """Strippt Reasoning-Wrapper, Markdown-Fences, faellt auf Greedy-Brace zurueck.
 
-WICHTIG fuer den Reason-Text:
-- Sage NICHT konkret welche Application-Version den Patch mitbringt.
-  Beispiel verboten: "Update auf k3s >= v1.30.4-rc1". Du kannst nicht
-  zuverlaessig wissen welche k3s-Release welche Go-Toolchain mitzieht.
-- Stattdessen formuliere ehrlich: "Patch in der zugrundeliegenden
-  Library verfuegbar — Operator muss pruefen welche k3s-Release diese
-  Library-Version enthaelt oder Mitigation einsetzen."
-- Bei OS-Distro-Paketen (openssh-server, openssl, etc.) kannst du
-  sagen "Patch verfuegbar im Distro-Repository" oder "Vendor markiert
-  als will-not-fix", aber KEIN konkreter Befehl wie "apt-get install".
-- Reason max 256 chars, ASCII bevorzugt, KEINE NUL-Bytes.
+    Drei Schichten in Reihenfolge — vgl. ADR-0023 §"(d) Reasoning-Block-
+    Handling":
 
-Liefere pro Group: group_label, risk_band, worst_finding_id (oder null),
-reason. Antworte ausschliesslich mit gueltigem JSON nach dem Schema.
-"""
+    1. Bekannte Reasoning-Wrapper-Pattern strippen
+       (Harmony-`<|channel|>analysis<|message|>...<|end|>`, `<think>...</think>`,
+       `[REASONING]...[/REASONING]`).
+    2. Markdown-Code-Fence (` ```json ... ``` `) abloesen falls vorhanden.
+    3. Greedy-Brace-Fallback: vom ersten ``{`` bis zum letzten ``}`` — schuetzt
+       gegen ``"Here is the JSON:\\n{...}\\nLet me know..."``-Begleittext.
+    """
+    s = content
+    for pat in _REASONING_BLOCK_PATTERNS:
+        s = pat.sub("", s)
+    s = s.strip()
+    m = _MARKDOWN_JSON_FENCE.match(s)
+    if m:
+        s = m.group(1).strip()
+    if not s.startswith("{"):
+        m2 = _GREEDY_BRACES.search(s)
+        if m2:
+            s = m2.group(0)
+    return s.strip()
+
+
+def _extract_reasoning(message: Any) -> str | None:
+    """Liest Reasoning-Inhalt von verschiedenen Provider-Patterns:
+
+    * OpenAI o1-Style: ``message.reasoning`` (Direct-Attribute).
+    * DeepSeek-R1: ``message.reasoning_content`` (Direct-Attribute).
+    * DeepInfra GPT-OSS via OpenAI-SDK: ``message.model_extra["reasoning_content"]``
+      (Pydantic-V2-extra-Bucket — ``content`` selbst ist clean JSON).
+    * Fallback: ``None``.
+    """
+    for attr in ("reasoning", "reasoning_content", "thinking"):
+        val = getattr(message, attr, None)
+        if val:
+            return str(val)
+    extra = getattr(message, "model_extra", None) or {}
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        val = extra.get(key)
+        if val:
+            return str(val)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -356,26 +383,36 @@ def _sanitize_purl_pattern(s: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-async def chat_completion_json(
+async def chat_completion_json_with_meta(
     client: LlmClient,
     *,
     system_prompt: str,
     user_prompt: str,
     schema: dict[str, Any],
     max_tokens: int,
-) -> dict[str, Any]:
-    """Duenner Helper um den Block-G-:class:`LlmClient` JSON-Mode-faehig zu machen.
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """LLM-Call mit Meta-Return-Tuple (parsed, meta).
 
-    Wir geben das Schema als ``response_format`` mit Typ ``json_schema``
-    durch — das OpenAI-SDK leitet das an Provider weiter, die
-    Structured-Outputs unterstuetzen (DeepSeek-V3 und kompatible).
+    ``meta`` enthaelt:
 
-    Wirft :class:`LLMTimeoutError` bei Timeout, :class:`LLMInvalidResponseError`
-    wenn die Response keinen gueltigen JSON-Block enthaelt.
+    * ``raw_content`` — der unveraenderte ``message.content``-String (oder
+      ``None`` falls leer).
+    * ``extracted_json`` — der String nachdem
+      :func:`_extract_json_from_response` Reasoning-Wrapper/Fences/etc.
+      gestrippt hat. Identisch zu ``raw_content`` wenn der Provider
+      bereits clean JSON liefert.
+    * ``reasoning_field`` — Provider-Reasoning falls vorhanden (siehe
+      :func:`_extract_reasoning`), sonst ``None``.
+    * ``model`` — das angefragte Modell (``client.model``).
+    * ``duration_ms`` — Wall-Clock-Dauer des SDK-Calls.
+    * ``usage`` — ``response.usage``-Dict falls geliefert, sonst ``None``.
+
+    Wirft :class:`LLMTimeoutError` bei Timeout,
+    :class:`LLMInvalidResponseError` wenn die Response keinen gueltigen
+    JSON-Block enthaelt.
     """
-    # Wir nutzen das Low-Level-SDK direkt, damit wir non-stream JSON-Mode
-    # bekommen — der Block-G-Wrapper kennt nur Stream.
     sdk = client._sdk  # intentional Block-G-Reuse.
+    started_at = time.monotonic()
     try:
         response = await sdk.chat.completions.create(
             model=client.model,
@@ -397,25 +434,71 @@ async def chat_completion_json(
     except TimeoutError as exc:
         raise LLMTimeoutError(str(exc)) from exc
     except Exception as exc:  # pragma: no cover — Provider-Quirks
-        # Wir reichen den Block-G-Timeout-Begriff hoch wenn der SDK selbst
-        # einen ``Timeout``-Subtyp wirft. Bei jeder anderen Exception
-        # haengt der Worker den Job in retry mit backoff.
         if type(exc).__name__.lower().find("timeout") >= 0:
             raise LLMTimeoutError(str(exc)) from exc
         raise
+    duration_ms = int((time.monotonic() - started_at) * 1000)
 
     choices = getattr(response, "choices", None) or []
     if not choices:
         raise LLMInvalidResponseError("LLM response hat keine choices")
-    content = getattr(choices[0].message, "content", None)
-    if not content or not isinstance(content, str):
+    message = choices[0].message
+    raw_content = getattr(message, "content", None)
+    if not raw_content or not isinstance(raw_content, str):
         raise LLMInvalidResponseError("LLM response hat leeren content")
+    reasoning_field = _extract_reasoning(message)
+    extracted = _extract_json_from_response(raw_content)
     try:
-        parsed = json.loads(content)
+        parsed = json.loads(extracted)
     except json.JSONDecodeError as exc:
         raise LLMInvalidResponseError(f"LLM response ist kein valides JSON: {exc}") from exc
     if not isinstance(parsed, dict):
         raise LLMInvalidResponseError("LLM response ist kein JSON-Object")
+
+    usage_obj = getattr(response, "usage", None)
+    usage: dict[str, Any] | None = None
+    if usage_obj is not None:
+        # Pydantic-Model oder Plain-Dict — beides unterstuetzen.
+        if hasattr(usage_obj, "model_dump"):
+            usage = dict(usage_obj.model_dump())
+        elif isinstance(usage_obj, dict):
+            usage = dict(usage_obj)
+        else:
+            usage = {
+                k: getattr(usage_obj, k, None)
+                for k in ("prompt_tokens", "completion_tokens", "total_tokens")
+            }
+
+    meta: dict[str, Any] = {
+        "raw_content": raw_content,
+        "extracted_json": extracted,
+        "reasoning_field": reasoning_field,
+        "model": client.model,
+        "duration_ms": duration_ms,
+        "usage": usage,
+    }
+    return parsed, meta
+
+
+async def chat_completion_json(
+    client: LlmClient,
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    schema: dict[str, Any],
+    max_tokens: int,
+) -> dict[str, Any]:
+    """Backward-Compat-Wrapper um :func:`chat_completion_json_with_meta`.
+
+    Liefert nur das geparste Dict; Meta-Daten werden verworfen.
+    """
+    parsed, _meta = await chat_completion_json_with_meta(
+        client,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        schema=schema,
+        max_tokens=max_tokens,
+    )
     return parsed
 
 
@@ -442,18 +525,30 @@ class LLMRiskReviewer:
 
     # ---- Pass 1 ----------------------------------------------------------
 
-    async def pass1_detect_groups(self, findings: Sequence[Finding]) -> Pass1Result:
-        """LLM-Call mit kompakter Finding-Identitaet, returns validierte Groups."""
+    async def pass1_detect_groups(
+        self, findings: Sequence[Finding]
+    ) -> tuple[Pass1Result, dict[str, Any]]:
+        """LLM-Call mit kompakter Finding-Identitaet.
+
+        Returns ``(validated_result, meta)``. ``meta`` enthaelt
+        ``system_prompt``/``user_prompt``/``raw_content``/``extracted_json``/
+        ``reasoning_field``/``model``/``duration_ms``/``usage`` fuer den
+        :mod:`app.services.llm_debug_log`-Insert im Worker.
+        """
         user_prompt = self._render_pass1_prompt(findings)
         cfg = load_settings()
-        response = await chat_completion_json(
+        response, meta = await chat_completion_json_with_meta(
             self.client,
             system_prompt=PASS1_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             schema=PASS1_RESPONSE_SCHEMA,
             max_tokens=cfg.llm_pass1_max_tokens,
         )
-        return self._validate_pass1_response(response, list(findings))
+        meta = dict(meta)
+        meta["system_prompt"] = PASS1_SYSTEM_PROMPT
+        meta["user_prompt"] = user_prompt
+        meta["max_tokens"] = cfg.llm_pass1_max_tokens
+        return self._validate_pass1_response(response, list(findings)), meta
 
     def _render_pass1_prompt(self, findings: Sequence[Finding]) -> str:
         """Findings als kompakte Tabelle mit den fuer Group-Detection
@@ -602,18 +697,26 @@ class LLMRiskReviewer:
         self,
         server: Server,
         groups_with_findings: Sequence[tuple[ApplicationGroup, list[Finding]]],
-    ) -> Pass2Result:
-        """LLM-Call mit Server-Kontext + Groups, returns validierte Bewertungen."""
+    ) -> tuple[Pass2Result, dict[str, Any]]:
+        """LLM-Call mit Server-Kontext + Groups.
+
+        Returns ``(validated_result, meta)`` — siehe :meth:`pass1_detect_groups`
+        fuer die Meta-Felder.
+        """
         user_prompt = self._render_pass2_prompt(server, groups_with_findings)
         cfg = load_settings()
-        response = await chat_completion_json(
+        response, meta = await chat_completion_json_with_meta(
             self.client,
             system_prompt=PASS2_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             schema=PASS2_RESPONSE_SCHEMA,
             max_tokens=cfg.llm_pass2_max_tokens,
         )
-        return self._validate_pass2_response(response, list(groups_with_findings))
+        meta = dict(meta)
+        meta["system_prompt"] = PASS2_SYSTEM_PROMPT
+        meta["user_prompt"] = user_prompt
+        meta["max_tokens"] = cfg.llm_pass2_max_tokens
+        return self._validate_pass2_response(response, list(groups_with_findings)), meta
 
     def _render_pass2_prompt(
         self,
@@ -626,9 +729,10 @@ class LLMRiskReviewer:
             f"  os: {server.os_pretty_name or server.os_family or '-'}"
             f" {server.os_version or ''}".strip()
         )
-        tag_links = getattr(server, "tag_links", []) or []
-        tags = sorted(link.tag.name for link in tag_links if getattr(link, "tag", None))
-        lines.append(f"  tags: {', '.join(tags) if tags else '-'}")
+        # v0.9.3 (ADR-0023 §"Tags-Exclusion"): Tags werden NICHT mehr an das
+        # LLM weitergereicht — sie sind User-Freitext-Labels ohne garantierte
+        # Semantik. Exposure-Bewertung erfolgt ausschliesslich ueber Listener-
+        # Adressen plus LLM-Reasoning (PUBLIC-EXPOSED/LOOPBACK-ONLY/NO-LISTENER).
 
         listeners = getattr(server, "listeners", []) or []
         if listeners:
@@ -673,8 +777,11 @@ class LLMRiskReviewer:
 
         lines.append(
             "Liefere pro Group: group_label (exakt wie oben), risk_band aus "
-            "{escalate, act, mitigate, monitor, noise}, worst_finding_id "
-            "(MUSS in der Group enthalten sein oder null), reason <= 256 chars."
+            "{escalate, act, monitor, noise}, action_type aus "
+            "{patch, mitigate, watch, none}, worst_finding_id (MUSS in der "
+            "Group enthalten sein), reason <= 256 chars. Die (risk_band, "
+            "action_type)-Kombination MUSS aus der Whitelist im System-Prompt "
+            "kommen."
         )
         return "\n".join(lines)
 
@@ -714,6 +821,29 @@ class LLMRiskReviewer:
                     f"Pass2: Group {label!r} hat ungueltiges risk_band {band!r} "
                     f"(erlaubt: {sorted(VALID_RISK_BANDS)})"
                 )
+            # Legacy-Mapping (ADR-0023 §"Risk-Band-Reduktion auf 4 aktive
+            # Werte"): wenn das LLM trotz neuem Prompt noch ``mitigate`` als
+            # ``risk_band`` liefert (Backward-Compat / Provider-Drift),
+            # mappen wir intern auf ``escalate`` und loggen das.
+            if band == "mitigate":
+                log.warning(
+                    "llm.legacy_mitigate_band_observed",
+                    group_label=label,
+                )
+                band = "escalate"
+
+            action_type = ev_raw.get("action_type")
+            if not isinstance(action_type, str) or action_type not in VALID_ACTION_TYPES:
+                raise LLMInvalidResponseError(
+                    f"Pass2: Group {label!r} hat ungueltiges action_type {action_type!r} "
+                    f"(erlaubt: {sorted(VALID_ACTION_TYPES)})"
+                )
+            if (band, action_type) not in ALLOWED_BAND_ACTION_COMBOS:
+                raise LLMInvalidResponseError(
+                    f"Pass2: Group {label!r} hat unzulaessige (risk_band, action_type) "
+                    f"Kombination ({band!r}, {action_type!r}); "
+                    f"Whitelist: {sorted(ALLOWED_BAND_ACTION_COMBOS)}"
+                )
 
             reason = ev_raw.get("reason")
             if not isinstance(reason, str):
@@ -745,7 +875,14 @@ class LLMRiskReviewer:
             validated.append(
                 Pass2Evaluation(
                     group_label=label,
-                    risk_band=band,
+                    risk_band=cast(
+                        Literal["escalate", "act", "mitigate", "monitor", "noise"],
+                        band,
+                    ),
+                    action_type=cast(
+                        Literal["patch", "mitigate", "watch", "none"],
+                        action_type,
+                    ),
                     reason=reason,
                     worst_finding_id=worst_id,
                 )
@@ -755,12 +892,14 @@ class LLMRiskReviewer:
 
 
 __all__ = [
+    "ALLOWED_BAND_ACTION_COMBOS",
     "LABEL_PATTERN",
     "MAX_REASON_LEN",
     "PASS1_RESPONSE_SCHEMA",
     "PASS1_SYSTEM_PROMPT",
     "PASS2_RESPONSE_SCHEMA",
     "PASS2_SYSTEM_PROMPT",
+    "VALID_ACTION_TYPES",
     "VALID_RISK_BANDS",
     "LLMInvalidResponseError",
     "LLMRiskReviewer",
@@ -770,4 +909,5 @@ __all__ = [
     "Pass2Evaluation",
     "Pass2Result",
     "chat_completion_json",
+    "chat_completion_json_with_meta",
 ]

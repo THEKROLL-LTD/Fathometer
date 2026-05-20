@@ -605,3 +605,307 @@ Erwartete Test-Anzahl: ~120 neue.
 - **Group-Card-Aggregation auf Dashboard-Ebene.** Aktuell zeigt Dashboard pro Finding eine Tabellen-Zeile (mit Group-Spalte). Falls Operator stattdessen pro-Server-pro-Group eine aggregierte Card-View will: eigener UI-Block.
 - **Group-Trend-Reports** (z.B. „k3s-Group ist seit 3 Scans escalate"). Historisierungs-Tabelle für Group-Band-Wechsel.
 - **Pre-Triage-Cuts feinjustieren** basierend auf Block-P-Realdaten — wenn `live`-Mode zeigt dass 80% der `pending`-Findings vom LLM auf `noise` demoted werden, ist die Pre-Triage zu großzügig. Konstanten in Block O anpassen (kein Schema-Change), eigene Bug-Fix-Iteration.
+
+## Update v0.9.3 (2026-05-XX) — Prompt-Iteration und Modell-Default-Wechsel
+
+Nach Block-P-Abschluss (v0.9.0) und zwei Test-Runden mit insgesamt sieben LLM-Modellen wurde der Pass-1-System-Prompt iteriert und der Default-Provider gewechselt. Patch in v0.9.3 ohne Schema-Migration.
+
+**Modell-Default-Wechsel:** von DeepSeek-V3 (vom Block-G-Wrapper geerbt) auf `openai/gpt-oss-120b`. Begründung in drei Punkten: (a) semantisch stärkstes Modell in der Test-Suite, alle zehn Test-2-Kriterien fehlerfrei bestanden; (b) Apache 2.0 lizenziert und self-hostable — DSGVO-Operator-Option ohne Code-Change; (c) Provider-Flexibilität (DeepInfra, Groq, vLLM, Ollama).
+
+**Prompt-Iteration:** der ursprüngliche Pass-1-Prompt aus ADR-0023 §Pass-1 wurde um sieben Härtungs-Aspekte ergänzt, die aus den Test-Befunden hervorgegangen sind:
+
+1. Cross-Language-Bundle-Regel (Regel 6) — Multi-Library-Findings unter gemeinsamem Verzeichnis-Pfad werden als eine Application gruppiert, nicht als mehrere Library-Groups.
+2. Multi-Path-Application-Regel (Regel 7) — Application mit Pfaden in `/usr/local/bin/<app>` UND `/var/lib/<vendor>/<app>/` ist eine Group, nicht zwei.
+3. Trailing-Slash-Pflicht für Directory-Path-Prefixes.
+4. Defense-in-Depth-Vorgabe — Pattern-Layers sollen so vollständig wie sinnvoll befüllt werden.
+5. Anti-Generic-Pattern-Liste — konkrete verbotene Beispiele (`pkg:golang/stdlib`, `pkg:maven/`, Versions-Hashes in Pfaden).
+6. Halluzinations-Schutz — explizites „NEVER invent finding_ids that were not in the input".
+7. Bundle-vs-Library-PURL-Unterscheidung — für Application-Bundles dürfen nur Application-Vendor-PURLs als Pattern, niemals transitive Library-PURLs.
+
+**Volltext des finalen Prompts** plus die Test-Evidenz-Matrix aller sieben Modelle: siehe [`docs/blocks/P-evidence/prompt-pass1-final.md`](../blocks/P-evidence/prompt-pass1-final.md). Das File ist die Quelle der Wahrheit für `PASS1_SYSTEM_PROMPT` in `app/services/llm_prompts.py` und für künftige Prompt-Iterations-Vergleiche.
+
+**Code-Änderungen** für v0.9.3:
+
+- `app/services/llm_prompts.py::PASS1_SYSTEM_PROMPT` — verbatim aus dem Prompt-Final-File übernehmen.
+- `app/config.py::BLOCK_P_LLM_MODEL` (oder die entsprechende Settings-Spalte) — Default auf `"openai/gpt-oss-120b"` umstellen. Operator-Override via Settings-Tab bleibt.
+- `tests/services/test_llm_prompts.py` — neuer Anti-Regression-Test prüft, dass der Prompt-Text die kritischen Regel-Marker enthält („CROSS-LANGUAGE BUNDLES", „MULTI-PATH APPLICATIONS", „DEFENSE IN DEPTH", „AVOID OVER-GENERIC PATTERNS", „BUNDLE PURLs MUST IDENTIFY THE APPLICATION ITSELF").
+- Bestehende Pass-1-Tests in `tests/services/test_llm_risk_reviewer.py` — Mock-Responses mit dem Default-Modell-Bezug aktualisieren falls hartkodiert.
+
+**Backend-Validatoren** (`_validate_pass1_response()`) bleiben unverändert — die drei Validations-Schichten (ID-Treue, Pattern-Konsistenz, Pattern-Generizität) wurden schon in v0.9.0 implementiert und greifen auch bei dem neuen Default-Modell.
+
+**Pass 2 (`risk_evaluation`)** wird in v0.9.3 ebenfalls mit angepasst — drei zusammenhängende Änderungen:
+
+**(a) Tags raus aus dem Host-Context.** Server-Tags sind User-vergebene Freitext-Labels (Block D) für UI-Gruppierung und -Filterung. Sie tragen keine garantierte Semantik („internet-exposed" kann beim einen Operator wörtlich gemeint sein, beim nächsten kosmetisch). Block-P-Risk-Engine verlässt sich deshalb ausschließlich auf objektive Snapshot-Daten (Listener-Adressen für Exposure-Bestimmung). Tags werden weder in den Pass-2-Host-Context aufgenommen noch als Match-Signal in der Engine genutzt. Spätere ADR kann explizite Server-Flags für Exposure-Override einführen (z.B. `network_exposure: public | private | airgapped`, `is_honeypot`, `is_decommissioned`), das wäre dann separates Schema mit garantierter Semantik.
+
+Code-Änderung: `_render_pass2_prompt()` in `app/services/llm_risk_reviewer.py` strippt die Tags aus dem Host-Context-Block (oder hat sie nie aufgenommen falls Implementer-Glück). Bestehende `_validate_pass2_response()`-Logik unverändert.
+
+**(b) Risk-Band-Reduktion auf vier aktive Werte.** Operator-Feedback und Pass-2-Testlauf-Erkenntnis: die Trennlinie zwischen `escalate` (KEV+exposed) und `mitigate` (HIGH+exposed+no-patch) hat sich in der Praxis nicht als hilfreich erwiesen. Beide Bänder kommunizieren „sofort handeln", unterscheiden sich nur in der Aktions-Art (patchen vs. anders mitigieren). Diese Aktions-Art gehört semantisch in den `risk_band_reason`-Text, nicht in einen eigenen Band-Wert.
+
+Neues Mapping:
+
+| Band | Aktiv ab v0.9.3 | Trigger |
+|------|------------------|---------|
+| `escalate` | ja | KEV+exposed · oder · HIGH/CRITICAL+exposed+no-patch (will_not_fix/EOL/keine-Fix-Version) |
+| `act` | ja | HIGH/CRITICAL+exposed+has-patch+not-KEV |
+| `mitigate` | **deprecated** | (LLM produziert keine `mitigate`-Bewertungen mehr; Enum-Wert bleibt für historische Daten und Validator-Backward-Compat erhalten) |
+| `monitor` | ja | moderate Severity · oder · nur RFC1918/Loopback-Listener · oder · unklare Exposure |
+| `noise` | ja | Application nachweislich nicht aktiv |
+| `pending` / `unknown` | ja | Pre-Triage-Output aus Block O, unverändert |
+
+Reason-Texte für escalate-Findings müssen jetzt explizit erwähnen ob ein Patch verfügbar ist (`"Patch available — update immediately"`) oder Mitigation nötig ist (`"No patch available (vendor will_not_fix) — apply firewall rule or disable service"`). Damit sieht der Operator beim Klick aufs escalate-Pill sofort welche Art von Aktion fällig ist.
+
+`ACTION_REQUIRED_MAP` bleibt strukturell:
+- `yes` deckt: escalate, act, mitigate (legacy), pending, unknown
+- `no` deckt: monitor, noise
+
+Code-Änderungen:
+
+- `_render_pass2_prompt()` in `app/services/llm_risk_reviewer.py`: Band-Definitionen im System-Prompt auf vier Werte reduzieren, mitigate-Definition entfällt.
+- `_validate_pass2_response()`: weiterhin alle fünf Werte akzeptieren (`mitigate` für Backward-Compat), aber bei `mitigate`-Ausgabe vom LLM eine Warnung loggen und intern auf `escalate` mappen.
+- DB-CheckConstraint auf `application_groups.risk_band`: unverändert, akzeptiert weiterhin alle fünf Werte.
+- Migration für bestehende `mitigate`-Findings: keine Forced-Migration. Beim nächsten Scan-Re-Ingest werden Findings via natural Re-Evaluation neu bewertet und landen automatisch im neuen Schema (escalate oder act je nach Patch-Status). Nicht-aktive Server mit Alt-Bewertungen behalten `mitigate` für ihre Historie.
+- UI (Dashboard-KPI-Pills + Server-Detail-Group-Cards): `mitigate`-Pill bleibt für historische Daten gerendert (mit Hinweis-Tooltip „legacy band, see reason"), neue Bewertungen produzieren ihn nicht mehr.
+
+**(c) `action_type` plus `group_kind` plus „Was zu tun ist"-UI-Sektion.** Die 4-Band-Reduktion aus Punkt (b) löst das Operator-Problem nur halb: Operator sieht zwar dass ein Finding `escalate`/`act` ist, aber nicht ob er patchen oder anders mitigieren muss. Die Aktions-Art steckt nur im Free-Text-Reason — operativ ungenügend bei mehreren escalate-Groups pro Server.
+
+Drei semantisch unterschiedliche Operator-Workflows müssen visuell getrennt werden:
+
+| Workflow | Aktions-Realität | Wann |
+|----------|------------------|------|
+| Distro patchen | `apt`/`dnf upgrade` löst es | OS-Paket-Group + Patch verfügbar |
+| App-Update einspielen | Vendor-Release abwarten, manuell updaten | Application-Bundle-Group + Patch verfügbar |
+| Mitigieren | Operator brainstormt non-patch Maßnahme | egal welche Group-Kind + kein Patch |
+
+Daraus folgen zwei neue Group-Felder:
+
+**`action_type: varchar(16)`** — vom LLM in Pass 2 gesetzt:
+
+| Wert | Trigger | Erlaubt für risk_band |
+|------|---------|----------------------|
+| `patch` | Patch ist verfügbar, sofort/im Cycle einspielen | escalate (Pfad a) · act |
+| `mitigate` | Kein Patch (will_not_fix/eol/has_fix=no) | escalate (Pfad b) |
+| `watch` | Beobachten, kein Handlungsbedarf | monitor |
+| `none` | Komponente nicht aktiv | noise |
+| `investigate` | LLM hat noch nicht bewertet | pending · unknown |
+
+Backend-Validator prüft erlaubte `(risk_band, action_type)`-Kombinationen analog zu den anderen Validations-Schichten.
+
+**`group_kind: varchar(20)`** — **deterministisch** vom Backend beim Group-Insert aus `match_rules` abgeleitet, **nicht** vom LLM:
+
+| Wert | Ableitung |
+|------|-----------|
+| `application_bundle` | `path_prefixes` ist non-empty (k3s, jenkins, apache2, grafana, …) |
+| `os_package` | nur `pkg_name_exact` und/oder `pkg_purl_pattern` befüllt (openssh-server, openssl, glibc, …) |
+
+Backfill für bestehende Groups in der Migration: `group_kind` wird deterministisch aus den vorhandenen `match_rules` berechnet, `action_type` bleibt NULL bis zum nächsten Pass-2-Re-Eval (LLM setzt es beim nächsten Call).
+
+**Pass-2-Output-Schema** erweitert um das eine Feld:
+
+```json
+{
+  "evaluations": [
+    {
+      "group_label": "apache2",
+      "risk_band": "escalate",
+      "action_type": "mitigate",
+      "worst_finding_id": 2001,
+      "reason": "apache2 listens 0.0.0.0:8080; vendor will_not_fix"
+    }
+  ]
+}
+```
+
+Reason wird kürzer (max ~180 Chars statt 256), weil die Aktions-Art nicht mehr im Free-Text kommuniziert werden muss — sie steckt im strukturierten Feld.
+
+**Neue Server-Detail-UI-Sektion „Was zu tun ist"** zwischen Sub-Line und Host-Snapshot. Sektion wird **komplett ausgeblendet** wenn keine Group mit `risk_band ∈ {escalate, act}` existiert. Sektion enthält bis zu fünf Cards, leere Cards skippen:
+
+| Card | Filter | Sub-Line | Counter |
+|------|--------|----------|---------|
+| ESCALATE · Distro patchen | escalate + patch + os_package | Komma-Liste der Group-Labels (max 3-5 inline, dann „+N more") | Anzahl Groups |
+| ESCALATE · App-Update einspielen | escalate + patch + application_bundle | Komma-Liste der App-Labels | Anzahl Apps |
+| ESCALATE · Kein Patch — mitigieren | escalate + mitigate | Komma-Liste der Group-Labels | Anzahl Groups |
+| ACT · Distro patchen (normal cycle) | act + os_package | **keine** Sub-Liste — bei act zu viel Visual-Noise | Anzahl Groups |
+| ACT · App-Update einspielen (normal cycle) | act + application_bundle | **keine** Sub-Liste | Anzahl Apps |
+
+Jede Card hat `<details>`-Drill-down (default collapsed) mit der Findings-Tabelle für die zugehörigen Groups.
+
+**Was bleibt unverändert** am Server-Detail-View: Header-Pill-Reihe (inkl. „Action needed"-Pill als Top-Level-Bauchgefühl), Host-snapshot-Sektion, Tags-Akkordeon, KPI-Cards mit Sparklines, Lebenszeichen, Severity-Trend, Findings-Tabelle ganz unten.
+
+**Code-Touchpoints** für diesen Punkt:
+
+- `app/models.py::ApplicationGroup` — zwei neue Spalten (`action_type`, `group_kind`) plus CheckConstraints.
+- Migration: zwei `add_column` plus Backfill-Update für `group_kind` aus existierenden `match_rules`.
+- `app/services/group_matcher.py` — Helper `derive_group_kind(match_rules) -> str` für Insert-Time-Derivation.
+- `app/schemas/llm_responses.py` (oder wo das Pass-2-Output-Modell lebt) — `action_type` als Literal im Output-Schema.
+- `app/services/llm_risk_reviewer.py::_validate_pass2_response()` — `(risk_band, action_type)`-Kombinations-Whitelist.
+- `app/views/server_detail.py` — neuer Helper `_build_action_sections(groups)` der die fünf Cards baut, leere skippt, in der dokumentierten Reihenfolge sortiert.
+- `app/templates/servers/_action_needed_section.html` (neu) — Card-Layout mit `<details>`-Drill-down.
+- `app/templates/servers/detail.html` — Sektion einschleusen zwischen Sub-Line und Host-Snapshot, nur rendern wenn `action_sections` non-empty.
+
+**(d) Reasoning-Block-Handling im Response-Parser.** Der Default-Provider-Wechsel auf GPT-OSS-120B (Punkt a) bringt ein Reasoning-Modell ins Spiel — anders als die nativen OpenAI-Strukturierte-Outputs-Modelle aus v0.9.0 produziert GPT-OSS einen `analysis`-Channel (Harmony-Format) bevor es das eigentliche JSON ausliefert. Beobachtetes Token-Volumen im Pass-2-Test: ~1400 Tokens für 5 Groups, davon ~900 Tokens Reasoning. Je nach Provider-Adapter (DeepInfra, Groq, lokales vLLM/Ollama) landet dieser Reasoning-Block entweder in einem separaten `message.reasoning`-Feld, wird komplett gestrippt, oder erscheint in `message.content` vor dem JSON. Letztgenanntes würde unser bestehendes `json.loads(content)` in `chat_completion_json` mit `LLMInvalidResponseError` zerschießen — alle Block-P-Jobs würden silently in `failed` enden.
+
+**Defensive Extraktions-Logik** in `app/services/llm_risk_reviewer.py::_extract_json_from_response()` (neu), drei Schichten in Reihenfolge:
+
+1. **Bekannte Reasoning-Wrapper-Patterns strippen** via Regex:
+   - GPT-OSS Harmony: `<\|channel\|>analysis<\|message\|>.*?<\|end\|>` (mit DOTALL)
+   - DeepSeek-R1 / generic: `<think>.*?</think>`
+   - Llama-Style: `\[REASONING\].*?\[/REASONING\]`
+2. **Markdown-Code-Fences strippen** falls vorhanden: ` ```json\n...\n``` ` → reines JSON.
+3. **Greedy-Brace-Extraktion als Fallback**: vom ersten `{` bis zum letzten `}`, falls noch Begleittext im Response steht.
+
+Der Helper läuft IMMER zwischen `getattr(choices[0].message, "content", ...)` und `json.loads(content)` — auch wenn der aktuelle Provider sauberen JSON liefert, kostet das nichts und schützt vor Provider-Wechsel.
+
+**Reasoning-Extraktion über mehrere Provider-Patterns** — verifiziert durch DeepInfra-Probe-Lauf 2026-05-XX. DeepInfra+GPT-OSS-120B liefert das Reasoning **nicht** als direkt-zugängliches Attribut auf `message`, sondern in der Pydantic-V2-`extra="allow"`-Bucket unter `message.model_extra["reasoning_content"]`. Naive `getattr(message, "reasoning", None)` würde das nicht finden.
+
+```python
+def _extract_reasoning(message) -> str | None:
+    """Reads reasoning content from various provider patterns:
+    - OpenAI o1-style: message.reasoning (direct attribute)
+    - DeepSeek-R1: message.reasoning_content (direct attribute)
+    - DeepInfra GPT-OSS via OpenAI SDK: message.model_extra["reasoning_content"]
+      (Pydantic V2 extra-bucket — content on message itself is clean JSON)
+    - Fallback: None
+    """
+    for attr in ("reasoning", "reasoning_content", "thinking"):
+        val = getattr(message, attr, None)
+        if val:
+            return str(val)
+    extra = getattr(message, "model_extra", None) or {}
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        val = extra.get(key)
+        if val:
+            return str(val)
+    return None
+```
+
+Wert wird ins `llm_debug_log.response_body.reasoning_field` geschrieben (separat von `raw_content` und `extracted_json`), damit Operator beim Debug-Inspect sieht wie das Modell „gedacht" hat.
+
+**DeepInfra-Probe-Befunde (2026-05-XX, openai/gpt-oss-120b):**
+
+- `message.content` ist clean JSON (kein Strip nötig für diesen Provider)
+- `message.model_extra["reasoning_content"]` enthält das Reasoning (Plain-Text, kein Wrapper)
+- Keine `completion_tokens_details.reasoning_tokens`-Aufschlüsselung in `response.usage` (Reasoning-Tokens werden in `completion_tokens` mitgezählt, nicht separat ausgewiesen)
+- Token-Ratio bei 3 Test-Groups: 543 prompt + 616 completion = 1159 total, davon geschätzt ~370 Reasoning und ~240 JSON
+
+Der `_extract_json_from_response`-Helper bleibt trotzdem als Defense-in-Depth implementiert — schützt vor Provider-Wechsel (Groq, vLLM, Ollama liefern möglicherweise nicht so sauber wie DeepInfra) und vor Modell-Updates die das Format ändern können.
+
+**Token-Budget-Konsequenz:** beobachtete Pass-2-Reality ist ~3× höher als die initiale Schätzung (~500 Tokens) wegen Reasoning. Der `LLM_TOKEN_BUDGET_DAILY`-Default wird in v0.9.3 von 1M auf **2M Tokens** angehoben — bei realer Flotte (~100 Pass-2-Calls/Tag × ~1500 Tokens) bleibt das immer noch günstig (~$1-2/Monat bei DeepInfra-Preisen). Operator kann den Wert via ENV-Var weiter justieren.
+
+**Code-Touchpoints für diesen Punkt:**
+
+- `app/services/llm_risk_reviewer.py` — neuer Helper `_extract_json_from_response(content: str) -> str` plus `_REASONING_BLOCK_PATTERNS`-Konstante. Caller in `chat_completion_json` ruft den Helper vor `json.loads()`.
+- `app/services/llm_risk_reviewer.py::chat_completion_json` — liest `message.reasoning`/`reasoning_content` als optionales Feld, gibt es im Rückgabewert-Dict zusätzlich zurück oder loggt es separat für den Debug-Log-Insert.
+- `app/workers/llm_worker.py` — Debug-Log-Insert (Punkt e unten) schreibt `raw_content`, `extracted_json` und `reasoning_field` separat in `response_body`.
+- `app/config.py::LLM_TOKEN_BUDGET_DAILY` — Default von 1_000_000 auf 2_000_000.
+- `tests/services/test_llm_risk_reviewer.py` — vier neue Unit-Tests: `_extract_json_strips_harmony_channel`, `_extract_json_strips_think_tags`, `_extract_json_strips_markdown_fences`, `_extract_json_fallback_greedy_braces`.
+
+**(e) LLM-Debug-Log-Tabelle für Operator-Inspektion.** Block P macht heute LLM-Calls im Worker ohne dass Operator die Request/Response-Bodies nachsehen kann (außer Worker-Log-File, ungroupiert). Für Debugging — vor allem in der Observation-Phase, beim Modell-Wechsel, bei unerwarteten Bewertungen — soll Operator pro Job das Request/Response-Tupel einsehen können.
+
+Neues Schema `llm_debug_log`:
+
+```
+llm_debug_log
+  id              bigserial PK
+  job_type        varchar(32)   -- 'pass1_group_detection' | 'pass2_risk_evaluation'
+  job_id          bigint NULL   -- FK llm_jobs.id ON DELETE SET NULL (referenz lebt
+                                --   Lifecycle-länger als der Job selbst)
+  server_id       int NULL      -- FK servers.id ON DELETE SET NULL (für Filter im UI)
+  group_id        bigint NULL   -- FK application_groups.id ON DELETE SET NULL
+  model           varchar(64)   -- welches Modell, z.B. "openai/gpt-oss-120b"
+  request_body    jsonb         -- vollständiger Request-Body, gecappt
+  response_body   jsonb NULL    -- vollständige Response, gecappt; NULL bei Fehler
+  duration_ms     int
+  status          varchar(16)   -- 'success' | 'failed' | 'timeout' | 'validation_error'
+  error           text NULL
+  created_at      timestamp tz NOT NULL DEFAULT now()
+
+Indizes:
+  ix_llm_debug_log_created  (created_at)  -- für Eviction
+  ix_llm_debug_log_job_type (job_type, created_at DESC)
+  ix_llm_debug_log_group    (group_id) WHERE group_id IS NOT NULL
+```
+
+Eviction-Strategie kombiniert Count- und Time-Based-Limit:
+
+- `LLM_DEBUG_LOG_MAX_ROWS = 500` (Standard) — älteste werden gelöscht wenn Tabelle größer
+- `LLM_DEBUG_LOG_MAX_AGE_DAYS = 14` — Einträge älter werden gelöscht unabhängig vom Count
+- Per-Row Body-Size-Cap: Request/Response werden auf max **64 KB** pro Body getrimmt (Truncation-Marker am Ende), damit ein einzelner Riesen-Response die Tabelle nicht aufbläht
+
+Eviction-Sub-Tick im Worker alle 10 Minuten (analog Stale-Reaper):
+
+```sql
+DELETE FROM llm_debug_log
+WHERE created_at < now() - interval '14 days';
+
+DELETE FROM llm_debug_log
+WHERE id NOT IN (
+  SELECT id FROM llm_debug_log
+  ORDER BY created_at DESC
+  LIMIT 500
+);
+```
+
+Bei realistischer Last (3k Findings, ~100 Application-Groups, ~10 Server-Context-Cluster, Re-Eval täglich) sind das pro Tag etwa 50-150 neue Log-Einträge. Mit dem 500-Row-Cap deckt das 3-10 Tage Historie ab. Bei Bedarf kann Operator den Cap erhöhen, Cost ist nur Disk.
+
+UI: in v0.9.3 zunächst nur DB-Tabelle plus optional ein kompakter Tab unter `/settings/llm-reviewer` der die letzten 50 Einträge listet (job_type/group_label/status/duration/timestamp), Klick auf Eintrag expandiert Request+Response-JSON inline. Mehr UI-Komfort später.
+
+Code-Touchpoints:
+
+- `app/models.py` — neue Klasse `LLMDebugLog`.
+- Alembic-Migration für die neue Tabelle plus Indizes.
+- `app/workers/llm_worker.py::_process_live()` — nach LLM-Call zusätzlich `llm_debug_log`-Insert vor `mark_done()`.
+- `app/workers/llm_worker.py` Eviction-Sub-Tick im Stale-Reaper-Block.
+- `app/config.py` — neue Konstanten `LLM_DEBUG_LOG_MAX_ROWS`, `LLM_DEBUG_LOG_MAX_AGE_DAYS`, `LLM_DEBUG_LOG_BODY_SIZE_CAP`.
+- `app/views/settings.py` — neuer Sub-Tab oder Erweiterung von `/settings/llm-reviewer` mit Debug-Log-Listing.
+- Tests: Insert-Hook im Worker, Eviction greift bei Cap-Überschreitung, Body-Trim wirkt bei großen Bodies, FK-ON-DELETE-SET-NULL beim Löschen eines Jobs.
+
+**(f) Listener-Interpretation: PUBLIC-EXPOSED inkl. RFC1918, LLM-Reasoning statt Hartlogik.** Die ursprüngliche Pass-2-Definition behandelte RFC1918-Listener (`10.x.x.x`, `172.16.x.x`, `192.168.x.x`) als „internal only" und schob entsprechende Findings automatisch auf `monitor`. Operator-Feedback: das ist Wunschdenken. Listener-Adresse alleine ist nur **ein** Indikator für Exposure, nicht die ganze Wahrheit. Realistische Bedrohungsvektoren für einen `10.0.0.5:5432`-Listener:
+
+- **Lateral Movement** — Angreifer kompromittiert irgendeinen anderen Host im selben Netz, danach ist die App trivial erreichbar
+- **Port-Forward am Router** — Operator hat eine DNAT-Regel von public → 10.0.0.5:5432, das LLM weiß das nicht
+- **Reverse-Proxy davor** — nginx auf 0.0.0.0:443 proxied zu `postgres:5432`, de facto public-exposed
+- **VPN-Zugang** — jeder mit VPN-Credentials kann zugreifen
+- **Kompromittierter Endpoint im selben Netz** — Workstation, IoT-Gerät, Drucker mit known CVE
+
+Wir können aus Listener-Daten **nicht** beweisen dass etwas nicht erreichbar ist. Nur das Gegenteil können wir beweisen: `127.0.0.1`/`::1`-Bind ist beweisbar nicht netzwerk-erreichbar (außer Local-Privilege-Escalation, die als separate Angriffsklasse out-of-scope ist für diese Bewertung).
+
+Neue Listener-Klassifikation mit drei Zuständen:
+
+| Zustand | Kriterium | Risk-Interpretation |
+|---------|-----------|---------------------|
+| `PUBLIC-EXPOSED` | Bind auf `0.0.0.0`/`::` ODER auf eine spezifische IP (RFC1918 wie 10.x/172.16.x/192.168.x, IPv6 ULA fc00::/7, ODER eine Public-IP) | Reachable mindestens vom selben Netz-Segment, potenziell von extern via Port-Forward/Reverse-Proxy/VPN/Lateral-Movement. Defensive Annahme: exposed. |
+| `LOOPBACK-ONLY` | Bind ausschließlich auf `127.0.0.1`/`::1` | Beweisbar nicht netzwerk-erreichbar. |
+| `NO-LISTENER` | Komponente aktiv (Prozess, Service, Modul) aber kein Netzwerk-Socket | Library-Code kann theoretisch über andere Prozesse missbraucht werden, kein direkter Netzwerk-Angriffsvektor. |
+
+**Wichtig: LLM-Reasoning statt Hartlogik.** Die Listener-Klassifikation ist nur Input für eine **vom LLM ausgeführte Angriffsketten-Bewertung**. Zwei Korrektur-Pfade die das LLM eigenständig anwenden darf:
+
+1. **LOOPBACK-ONLY/NO-LISTENER → escalate/act hochstufen** wenn das LLM erkennt dass die verwundbare Komponente über einen anderen exposed Service erreichbar ist. Beispiel: eine `liblzma`-Decompression-CVE in einer Library die von einem PUBLIC-EXPOSED-File-Upload-Handler genutzt wird → behandle als PUBLIC-EXPOSED. Eine `liblzma`-CVE in einem Daemon der nur lokal Logs komprimiert → bleibt monitor.
+
+2. **PUBLIC-EXPOSED nicht blind hochstufen** wenn das LLM erkennt dass die spezifische Code-Pfad-Schwachstelle auf diesem Host gar nicht erreicht werden kann. Beispiel: eine LDAP-Parsing-CVE in einem Daemon der LDAP-Support kompiliert hat aber per Config disabled → monitor reicht.
+
+System-Prompt-Anweisung explizit: „Be a thinking analyst. Cite the chain of reasoning in your reason text: which listener observation, which attack path, why exposed/not exposed."
+
+**Konsequenzen:**
+
+- `monitor` wird operativ enger. Default für „aktive Komponente mit verfügbarem Patch" ist jetzt `act`, nicht mehr `monitor`. Operator wird häufiger zur Handlung aufgefordert — defensive Default-Linie.
+- LLM-Bewertung wird weniger deterministisch. Derselbe Finding kann beim Re-Eval anders bewertet werden wenn das Modell die Angriffsketten anders abwägt. Cache (`llm_risk_cache` aus v0.9.0) stabilisiert das auf Cache-Key-Ebene; bei manuellem Cache-Bust oder Modell-Update kann es Drift geben — akzeptabel weil Block-P-Reasoning-Modell sowieso natürliche Varianz zeigt.
+- Reason-Cap muss auf 256 Chars zurück (vorher 200 in Iteration 5), weil die Begründungs-Kette manchmal länger braucht: Listener-Observation + Angriffspfad + Severity-Bezug.
+
+**Spätere Operator-Override-Möglichkeit** als eigene ADR (v0.10.x oder später, wenn Block-P-Realbetrieb zeigt dass die defensive Annahme zu viel `act`/`escalate` produziert): expliziter Server-Flag `network_exposure: airgapped | restricted | open`, der die Listener-Heuristik überschreibt. `airgapped` würde alle PUBLIC-EXPOSED-Listener als LOOPBACK-ONLY behandeln, `restricted` würde nur 0.0.0.0/:: hochstufen aber spezifische RFC1918-IPs als nicht-extern-exposed werten. Out-of-Scope für v0.9.3.
+
+**Test-Case-Auswirkung** (gleiche fünf Groups aus Iteration 5):
+
+| Group | Listener | Iteration 5 | Iteration 6 |
+|-------|----------|-------------|-------------|
+| openssh-server | 0.0.0.0:22 | escalate · patch | escalate · patch (unverändert) |
+| apache2 | 0.0.0.0:8080 | escalate · mitigate | escalate · mitigate (unverändert) |
+| postgresql | 10.0.0.5:5432 | monitor · watch | **act · patch** (RFC1918 jetzt als PUBLIC-EXPOSED) |
+| nginx | 0.0.0.0:443 | escalate · patch | escalate · patch (unverändert) |
+| bluetooth | (kein Modul) | noise · none | noise · none (unverändert) |
+
+**Code-Touchpoints für diesen Punkt:**
+
+- `app/services/llm_prompts.py::PASS2_SYSTEM_PROMPT` — kompletter Exposure-Block neu (3-Zustände-Klassifikation, LLM-Reasoning-Anweisung).
+- `app/services/llm_risk_reviewer.py::_validate_pass2_response()` — Reason-Cap von 200 zurück auf 256 Chars (war in Iteration 5 verkürzt, wird zurückgenommen).
+- `tests/services/test_llm_prompts.py` — Anti-Regression-Test ergänzt um die neuen Marker `PUBLIC-EXPOSED`, `LOOPBACK-ONLY`, `NO-LISTENER`, `Be a thinking analyst`.
+- `docs/blocks/P-evidence/prompt-pass2-final.md` — Iteration 6 als finaler Stand mit der neuen Listener-Klassifikation, alte Iteration 5 als Historie.

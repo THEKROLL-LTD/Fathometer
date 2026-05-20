@@ -80,8 +80,15 @@ def store(
     worst_finding_id: int | None,
     reason: str,
     llm_model: str | None,
+    action_type: str | None = None,
 ) -> LLMRiskCache:
-    """Legt einen neuen Cache-Eintrag an. Caller muss commit."""
+    """Legt einen neuen Cache-Eintrag an. Caller muss commit.
+
+    ``action_type`` ist v0.9.3-Pflichtfeld auf der Group, im Cache aber
+    nullable fuer Forward-Compat mit Pre-v0.9.3-Eintraegen (alte Caches
+    werden beim Restore mit ``action_type=None`` zurueckgespielt; das
+    Worker-``_apply_pass2_to_group`` setzt das Feld dann nicht).
+    """
     entry = LLMRiskCache(
         cache_key=cache_key,
         group_id=group_id,
@@ -89,6 +96,7 @@ def store(
         cve_data_fp=cve_data_fp,
         server_context_fp=server_context_fp,
         risk_band=risk_band,
+        action_type=action_type,
         worst_finding_id=worst_finding_id,
         reason=reason,
         llm_model=llm_model,

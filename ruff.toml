@@ -7,6 +7,9 @@ target-version = "py313"
 extend-exclude = [
     "alembic/versions",
     "agent",
+    # Operator-Probe-Scripts (v0.9.3-Block-P-Modell-Verifikation). Nicht Teil
+    # des deploybaren Codes — Lint-Strenge ist hier zu strikt.
+    "probe_gpt_oss.py",
 ]
 
 [lint]

@@ -380,13 +380,15 @@ class _FakeReviewer:
         self._pass1 = pass1
         self._pass2 = pass2
 
-    async def pass1_detect_groups(self, findings: Any) -> Pass1Result:
+    async def pass1_detect_groups(self, findings: Any) -> tuple[Pass1Result, dict[str, Any]]:
         await asyncio.sleep(0)
-        return self._pass1
+        return self._pass1, {"model": "mock", "duration_ms": 0}
 
-    async def pass2_evaluate_groups(self, server: Any, groups: Any) -> Pass2Result:
+    async def pass2_evaluate_groups(
+        self, server: Any, groups: Any
+    ) -> tuple[Pass2Result, dict[str, Any]]:
         await asyncio.sleep(0)
-        return self._pass2
+        return self._pass2, {"model": "mock", "duration_ms": 0}
 
 
 def test_live_pass1_persists_group_and_assigns_findings(
@@ -492,6 +494,7 @@ def test_live_pass2_writes_cache_and_group_band(
                     Pass2Evaluation(
                         group_label="openssl",
                         risk_band="act",
+                        action_type="patch",
                         reason="sshd active, patch available",
                         worst_finding_id=f1.id,
                     )

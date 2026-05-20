@@ -248,6 +248,7 @@ def test_live_e2e_full_pass1_then_pass2_cycle(
             Pass2Evaluation(
                 group_label="openssh-server",
                 risk_band="act",
+                action_type="patch",
                 reason="Patch im Distro-Repo verfuegbar.",
                 worst_finding_id=finding_ids[0],
             )
@@ -393,6 +394,7 @@ def test_live_e2e_cache_hit_on_identical_rescan(
             Pass2Evaluation(
                 group_label="openssl",
                 risk_band="mitigate",
+                action_type="mitigate",
                 reason="No clear listener.",
                 worst_finding_id=finding_ids[0],
             )

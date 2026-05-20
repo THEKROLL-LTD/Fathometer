@@ -315,6 +315,7 @@ def test_mode_switch_observation_to_live_changes_worker_behavior(
             Pass2Evaluation(
                 group_label="openssl",
                 risk_band="monitor",
+                action_type="watch",
                 reason="No listener.",
                 worst_finding_id=finding_id,
             )

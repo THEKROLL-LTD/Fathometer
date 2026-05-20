@@ -31,6 +31,33 @@
     </p>
   </header>
 
+  {# Sub-Tab-Navigation — Overview vs. Debug Log (v0.9.3, ADR-0023 §e).
+     Settings-Top-Nav ist flach, darum dieser inline-Sub-Tab-Switcher. #}
+  <div role="tablist" class="tabs tabs-bordered" data-test="llm-reviewer-subtabs">
+    <a role="tab"
+       href="{{ url_for('settings.llm_reviewer_view') }}"
+       hx-get="{{ url_for('settings.llm_reviewer_view') }}"
+       hx-target="#settings-content"
+       hx-swap="innerHTML"
+       hx-push-url="true"
+       hx-headers='{"HX-Target": "settings-content"}'
+       class="tab {% if (sub_tab | default('overview')) == 'overview' %}tab-active{% endif %}"
+       data-test="llm-reviewer-subtab-overview">
+      Overview
+    </a>
+    <a role="tab"
+       href="{{ url_for('settings.llm_reviewer_debug_log') }}"
+       hx-get="{{ url_for('settings.llm_reviewer_debug_log') }}"
+       hx-target="#settings-content"
+       hx-swap="innerHTML"
+       hx-push-url="true"
+       hx-headers='{"HX-Target": "settings-content"}'
+       class="tab {% if sub_tab == 'debug_log' %}tab-active{% endif %}"
+       data-test="llm-reviewer-subtab-debug">
+      Debug Log
+    </a>
+  </div>
+
   {# Current-Mode-Card. #}
   <div class="card bg-base-200 shadow-sm" data-test="llm-reviewer-mode-card">
     <div class="card-body">
@@ -40,6 +67,10 @@
           <p class="text-sm opacity-70 mt-1">
             Aktueller Mode:
             <strong class="font-mono ml-1" data-test="llm-current-mode">{{ current_mode }}</strong>
+          </p>
+          <p class="text-xs opacity-70 mt-1">
+            Aktives Modell:
+            <code class="font-mono ml-1" data-test="llm-active-model">{{ active_model or "—" }}</code>
           </p>
         </div>
         <button type="button"

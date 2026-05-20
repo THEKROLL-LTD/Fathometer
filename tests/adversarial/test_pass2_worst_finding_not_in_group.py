@@ -85,6 +85,7 @@ def test_validate_pass2_rejects_worst_finding_not_in_group(bad_worst: int) -> No
             {
                 "group_label": "openssl",
                 "risk_band": "act",
+                "action_type": "patch",
                 "worst_finding_id": bad_worst,
                 "reason": "x",
             }
@@ -113,6 +114,7 @@ def test_validate_pass2_rejects_worst_finding_from_other_group() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "act",
+                "action_type": "patch",
                 "worst_finding_id": 5,  # 5 ist in bash-Group, nicht in openssl
                 "reason": "x",
             }
@@ -130,6 +132,7 @@ def test_validate_pass2_accepts_null_worst_finding() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "monitor",
+                "action_type": "watch",
                 "worst_finding_id": None,
                 "reason": "watch",
             }
@@ -147,6 +150,7 @@ def test_validate_pass2_rejects_non_integer_worst_finding() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "act",
+                "action_type": "patch",
                 "worst_finding_id": "1",
                 "reason": "x",
             }

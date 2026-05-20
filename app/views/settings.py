@@ -45,6 +45,7 @@ from app.forms import (
 from app.models import (
     ApplicationGroup,
     AuditEvent,
+    LLMDebugLog,
     LLMJob,
     LLMRiskCache,
     Server,
@@ -394,6 +395,7 @@ def _llm_reviewer_stats(sess: Any) -> dict[str, Any]:
 
     return {
         "current_mode": setting_row.block_p_llm_mode,
+        "active_model": setting_row.llm_model,
         "job_counts": job_counts,
         "would_call_count": would_call_count,
         "groups_total": groups_total,
@@ -417,6 +419,7 @@ def llm_reviewer_view() -> Any:
         content_template="settings/llm_reviewer.html",
         mode_form=LlmReviewerModeForm(),
         requeue_form=LlmReviewerRequeueForm(),
+        sub_tab="overview",
         **stats,
     )
 
@@ -511,6 +514,47 @@ def llm_reviewer_change_mode() -> Any:
     sess.commit()
     flash(f"LLM-Mode auf '{new_mode}' gesetzt.", "success")
     return redirect(url_for("settings.llm_reviewer_view"))
+
+
+@settings_bp.get("/llm-reviewer/debug-log")
+@login_required
+def llm_reviewer_debug_log() -> Any:
+    """Read-only Operator-Inspektion fuer die letzten LLM-Debug-Log-Eintraege.
+
+    v0.9.3 (ADR-0023 §e): zeigt die letzten 50 ``llm_debug_log``-Rows mit
+    Job-Type, Group, Status, Duration, Timestamp; Klick auf einen Eintrag
+    expandiert Request/Response/Reasoning. Master-Key-Gate ist **nicht**
+    noetig — read-only, Operator-Visibility ohne State-Change.
+
+    Eviction laeuft im Worker (Count-Cap + Time-Cap), darum keine UI-
+    Limit-Pagination — 50 Eintraege decken die nuetzlichste Recent-View ab.
+    """
+    sess = get_session()
+    entries = list(
+        sess.execute(select(LLMDebugLog).order_by(LLMDebugLog.created_at.desc()).limit(50))
+        .scalars()
+        .all()
+    )
+
+    # Group-Label-Lookup fuer die Anzeige. Wir ziehen die referenzierten
+    # Groups in einer einzigen Query (kein N+1) und fallbacken auf "-" wenn
+    # `group_id` NULL oder die Group inzwischen geloescht wurde.
+    group_ids = {e.group_id for e in entries if e.group_id is not None}
+    group_labels: dict[int, str] = {}
+    if group_ids:
+        grp_stmt = select(ApplicationGroup.id, ApplicationGroup.label).where(
+            ApplicationGroup.id.in_(group_ids)
+        )
+        for gid, label in sess.execute(grp_stmt).all():
+            group_labels[int(gid)] = str(label)
+
+    return render_settings(
+        active="llm_reviewer",
+        content_template="settings/llm_debug_log.html",
+        debug_log_entries=entries,
+        group_labels=group_labels,
+        sub_tab="debug_log",
+    )
 
 
 @settings_bp.post("/llm-reviewer/requeue-backlog")

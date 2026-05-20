@@ -55,9 +55,12 @@ llm_settings_bp = Blueprint("llm_settings", __name__, url_prefix="/settings/llm"
 # Preset-Liste fuer den Dropdown im Template — siehe ARCHITECTURE §12.
 LLM_PRESETS: list[dict[str, str]] = [
     {
+        # v0.9.3 (ADR-0023 §"Update v0.9.3"): Default-Modell-Wechsel auf
+        # ``openai/gpt-oss-120b`` — semantisch staerkstes Modell in der
+        # Block-P-Test-Suite, Apache 2.0 self-hostable, Provider-flexibel.
         "name": "DeepInfra",
         "base_url": "https://api.deepinfra.com/v1/openai",
-        "model": "deepseek-ai/DeepSeek-V3",
+        "model": "openai/gpt-oss-120b",
     },
     {
         "name": "OpenAI",

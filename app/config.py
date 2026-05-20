@@ -107,7 +107,11 @@ class Settings(BaseSettings):
     # Tages-Token-Budget. Worker pausiert beim Erreichen des Limits bis zum
     # naechsten 00:00-UTC-Reset. Default 1M Tokens analog ADR-0023 §"Token-
     # Budget".
-    llm_token_budget_daily: int = Field(default=1_000_000, ge=1000, le=10_000_000_000)
+    # v0.9.3: angehoben von 1M auf 2M Tokens — Reasoning-Modelle wie
+    # ``openai/gpt-oss-120b`` produzieren ~3x mehr Tokens (Pass-2-Real:
+    # ~1500 statt 500). Bei ~100 Calls/Tag bleibt das bei DeepInfra
+    # weiterhin unter $1-2/Monat.
+    llm_token_budget_daily: int = Field(default=2_000_000, ge=1000, le=10_000_000_000)
     # Worker-Poll-Intervall (Sekunden). Default 2s — laut ADR irrelevant
     # gegenueber LLM-Latenzen von 30-90s, aber bei `mode=off`/empty-queue
     # die dominante Backoff-Latenz.
@@ -116,6 +120,15 @@ class Settings(BaseSettings):
     # der Stale-Reaper-Sub-Tick die Jobs zurueck in die Queue oder auf
     # `failed` (bei `attempts >= 3`).
     worker_stale_timeout_min: int = Field(default=10, ge=1, le=1440)
+
+    # ----- Block P (ADR-0023) — LLM-Debug-Log (v0.9.3) -----
+    # Operator-Debugging-Tabelle fuer LLM-Job-Request/Response-Bodies.
+    # Eviction laeuft im Worker als Sub-Tick (analog Stale-Reaper).
+    llm_debug_log_max_rows: int = Field(default=500, ge=10, le=100_000)
+    llm_debug_log_max_age_days: int = Field(default=14, ge=1, le=365)
+    # Per-Body-Size-Cap. Bodies werden bei Ueberschreitung getrimmt mit
+    # ``{"__truncated": True, "original_size_bytes": N}`` Marker.
+    llm_debug_log_body_size_cap: int = Field(default=65536, ge=1024, le=1_048_576)
 
     # ----- Agent- und Trivy-Versionen (Block N / ADR-0021) -----
     # Class-Level-Konstanten — NICHT als BaseSettings-Field deklariert, weil

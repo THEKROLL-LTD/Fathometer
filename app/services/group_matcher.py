@@ -160,4 +160,32 @@ def apply_matches_for_server(session: Session, server_id: int) -> int:
     return count
 
 
-__all__ = ["GroupMatcher", "apply_matches_for_server"]
+def derive_group_kind(
+    *,
+    path_prefixes: list[str],
+    pkg_name_exact: list[str],
+    pkg_purl_pattern: list[str],
+    pkg_name_glob: list[str],
+) -> str:
+    """Deterministische Ableitung von :attr:`ApplicationGroup.group_kind`.
+
+    Regel laut ADR-0023 §"Update v0.9.3" Punkt (c):
+
+    * ``application_bundle`` — wenn ``path_prefixes`` non-empty
+      (Bundle-Identitaet primaer ueber Pfad).
+    * ``os_package`` — andernfalls (nur ``pkg_name_exact`` /
+      ``pkg_purl_pattern`` / ``pkg_name_glob`` befuellt).
+
+    ``pkg_name_exact``/``pkg_purl_pattern``/``pkg_name_glob`` werden
+    erwartet, sind aber fuer die Entscheidung nicht ausschlaggebend —
+    die Signatur dokumentiert was der Caller liefern kann.
+    """
+    if path_prefixes:
+        return "application_bundle"
+    # Defense-in-Depth: die ungenutzten Parameter halten den Linter
+    # bei Laune und dokumentieren das volle Match-Rules-Tupel.
+    _ = (pkg_name_exact, pkg_purl_pattern, pkg_name_glob)
+    return "os_package"
+
+
+__all__ = ["GroupMatcher", "apply_matches_for_server", "derive_group_kind"]
