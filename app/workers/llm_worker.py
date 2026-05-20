@@ -585,6 +585,31 @@ async def _process_live(job_id: int) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _aclose_reviewer_client(reviewer: Any) -> None:
+    """Schliesst den httpx-Pool des LLM-Clients sauber.
+
+    Ohne explizites ``aclose()`` haengen die TLS-Verbindungen des
+    httpx-AsyncClient-Pools im Hintergrund bis zum naechsten GC-Lauf —
+    der versucht dann ``AsyncClient.aclose()`` auf einem bereits ge-
+    schlossenen ``asyncio.run()``-Event-Loop und wirft
+    ``RuntimeError('Event loop is closed')`` in den Container-Log
+    (Stacktrace, ~40 Zeilen pro Job, kein Crash aber Resource-Leak).
+
+    Defensiv geschrieben: Mock-Reviewer in Tests haben kein
+    ``client``-Attribut — wir tun dann einfach nichts.
+    """
+    client = getattr(reviewer, "client", None)
+    if client is None:
+        return
+    aclose = getattr(client, "aclose", None)
+    if aclose is None:
+        return
+    try:
+        await aclose()
+    except Exception:  # pragma: no cover — Best-Effort-Cleanup
+        log.debug("llm_worker.client_aclose_failed", exc_info=True)
+
+
 def _usage_tokens(meta: dict[str, Any]) -> tuple[int | None, int | None]:
     """v0.9.5-Helper: (prompt_tokens, completion_tokens) aus meta.usage ziehen.
 
@@ -645,49 +670,54 @@ async def _do_pass1(job_id: int) -> None:
         model_name,
         len(finding_ids),
     )
+    # v0.9.x: try/finally schliesst den httpx-Pool des AsyncOpenAI-Clients
+    # noch innerhalb des asyncio.run()-Event-Loops — sonst Stacktrace im GC.
     try:
-        result, meta = await reviewer.pass1_detect_groups(findings)
-    except LLMInvalidResponseError as exc:
-        # v0.9.5: exc.meta enthaelt die echte LLM-Response (raw_content,
-        # extracted_json, usage, prompts) — Operator sieht jetzt was das
-        # LLM geantwortet hat, auch wenn der Validator wirft.
-        log.warning(
-            "llm_worker.llm_call_failed job_id=%s job_type=pass1 "
-            "error_class=%s error_preview=%.200s",
-            job_id,
-            type(exc).__name__,
-            str(exc),
-        )
-        _record_pass_debug_log(
-            job_id=job_id,
-            job_type="pass1_group_detection",
-            status="validation_error",
-            model=model_name or "-",
-            server_id=job_server_id,
-            group_id=None,
-            meta=getattr(exc, "meta", None),
-            error=str(exc),
-        )
-        raise
-    except LLMTimeoutError as exc:
-        log.warning(
-            "llm_worker.llm_call_failed job_id=%s job_type=pass1 "
-            "error_class=%s error_preview=%.200s",
-            job_id,
-            type(exc).__name__,
-            str(exc),
-        )
-        _record_pass_debug_log(
-            job_id=job_id,
-            job_type="pass1_group_detection",
-            status="timeout",
-            model=model_name or "-",
-            server_id=job_server_id,
-            group_id=None,
-            meta=getattr(exc, "meta", None),
-            error=str(exc),
-        )
-        raise
+        try:
+            result, meta = await reviewer.pass1_detect_groups(findings)
+        except LLMInvalidResponseError as exc:
+            # v0.9.5: exc.meta enthaelt die echte LLM-Response (raw_content,
+            # extracted_json, usage, prompts) — Operator sieht jetzt was das
+            # LLM geantwortet hat, auch wenn der Validator wirft.
+            log.warning(
+                "llm_worker.llm_call_failed job_id=%s job_type=pass1 "
+                "error_class=%s error_preview=%.200s",
+                job_id,
+                type(exc).__name__,
+                str(exc),
+            )
+            _record_pass_debug_log(
+                job_id=job_id,
+                job_type="pass1_group_detection",
+                status="validation_error",
+                model=model_name or "-",
+                server_id=job_server_id,
+                group_id=None,
+                meta=getattr(exc, "meta", None),
+                error=str(exc),
+            )
+            raise
+        except LLMTimeoutError as exc:
+            log.warning(
+                "llm_worker.llm_call_failed job_id=%s job_type=pass1 "
+                "error_class=%s error_preview=%.200s",
+                job_id,
+                type(exc).__name__,
+                str(exc),
+            )
+            _record_pass_debug_log(
+                job_id=job_id,
+                job_type="pass1_group_detection",
+                status="timeout",
+                model=model_name or "-",
+                server_id=job_server_id,
+                group_id=None,
+                meta=getattr(exc, "meta", None),
+                error=str(exc),
+            )
+            raise
+    finally:
+        await _aclose_reviewer_client(reviewer)
 
     pt, ct = _usage_tokens(meta)
     log.info(
@@ -955,65 +985,72 @@ async def _do_pass2(job_id: int) -> None:
         group_id,
         len(group_findings_ids),
     )
+    # v0.9.x: try/finally schliesst den httpx-Pool des AsyncOpenAI-Clients
+    # noch innerhalb des asyncio.run()-Event-Loops — sonst Stacktrace im GC.
     try:
-        with get_session() as detached_session:
-            group_re = detached_session.get(ApplicationGroup, group_id)
-            server_re = detached_session.get(Server, server_id)
-            findings_re = list(
-                detached_session.execute(select(Finding).where(Finding.id.in_(group_findings_ids)))
-                .scalars()
-                .all()
-            )
-            if group_re is None or server_re is None:
-                raise ValueError(
-                    f"pass2 group/server vanished mid-job: "
-                    f"group_id={group_id} server_id={server_id}"
+        try:
+            with get_session() as detached_session:
+                group_re = detached_session.get(ApplicationGroup, group_id)
+                server_re = detached_session.get(Server, server_id)
+                findings_re = list(
+                    detached_session.execute(
+                        select(Finding).where(Finding.id.in_(group_findings_ids))
+                    )
+                    .scalars()
+                    .all()
                 )
-            # Hydrate die Server-Snapshot-Listen damit `_render_pass2_prompt`
-            # alle Felder hat (Server hat keine ORM-Relations dafuer).
-            _hydrate_server_snapshot(detached_session, server_re)
-            pass2_result, pass2_meta = await reviewer.pass2_evaluate_groups(
-                server_re, [(group_re, findings_re)]
+                if group_re is None or server_re is None:
+                    raise ValueError(
+                        f"pass2 group/server vanished mid-job: "
+                        f"group_id={group_id} server_id={server_id}"
+                    )
+                # Hydrate die Server-Snapshot-Listen damit `_render_pass2_prompt`
+                # alle Felder hat (Server hat keine ORM-Relations dafuer).
+                _hydrate_server_snapshot(detached_session, server_re)
+                pass2_result, pass2_meta = await reviewer.pass2_evaluate_groups(
+                    server_re, [(group_re, findings_re)]
+                )
+        except LLMInvalidResponseError as exc:
+            # v0.9.5: meta-Dict aus exc nehmen (siehe Pass-1-Aenderung).
+            log.warning(
+                "llm_worker.llm_call_failed job_id=%s job_type=pass2 "
+                "error_class=%s error_preview=%.200s",
+                job_id,
+                type(exc).__name__,
+                str(exc),
             )
-    except LLMInvalidResponseError as exc:
-        # v0.9.5: meta-Dict aus exc nehmen (siehe Pass-1-Aenderung).
-        log.warning(
-            "llm_worker.llm_call_failed job_id=%s job_type=pass2 "
-            "error_class=%s error_preview=%.200s",
-            job_id,
-            type(exc).__name__,
-            str(exc),
-        )
-        _record_pass_debug_log(
-            job_id=job_id,
-            job_type="pass2_risk_evaluation",
-            status="validation_error",
-            model=model_name or "-",
-            server_id=server_id,
-            group_id=group_id,
-            meta=getattr(exc, "meta", None),
-            error=str(exc),
-        )
-        raise
-    except LLMTimeoutError as exc:
-        log.warning(
-            "llm_worker.llm_call_failed job_id=%s job_type=pass2 "
-            "error_class=%s error_preview=%.200s",
-            job_id,
-            type(exc).__name__,
-            str(exc),
-        )
-        _record_pass_debug_log(
-            job_id=job_id,
-            job_type="pass2_risk_evaluation",
-            status="timeout",
-            model=model_name or "-",
-            server_id=server_id,
-            group_id=group_id,
-            meta=getattr(exc, "meta", None),
-            error=str(exc),
-        )
-        raise
+            _record_pass_debug_log(
+                job_id=job_id,
+                job_type="pass2_risk_evaluation",
+                status="validation_error",
+                model=model_name or "-",
+                server_id=server_id,
+                group_id=group_id,
+                meta=getattr(exc, "meta", None),
+                error=str(exc),
+            )
+            raise
+        except LLMTimeoutError as exc:
+            log.warning(
+                "llm_worker.llm_call_failed job_id=%s job_type=pass2 "
+                "error_class=%s error_preview=%.200s",
+                job_id,
+                type(exc).__name__,
+                str(exc),
+            )
+            _record_pass_debug_log(
+                job_id=job_id,
+                job_type="pass2_risk_evaluation",
+                status="timeout",
+                model=model_name or "-",
+                server_id=server_id,
+                group_id=group_id,
+                meta=getattr(exc, "meta", None),
+                error=str(exc),
+            )
+            raise
+    finally:
+        await _aclose_reviewer_client(reviewer)
 
     pt2, ct2 = _usage_tokens(pass2_meta)
     log.info(

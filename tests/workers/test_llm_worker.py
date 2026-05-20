@@ -1114,3 +1114,58 @@ def test_tick_idle_uses_backoff_sleep(db_app: Flask, monkeypatch: pytest.MonkeyP
             assert sleeps[1] == 3.0
     finally:
         sess.close()
+
+
+# ---------------------------------------------------------------------------
+# v0.9.x: httpx-Pool sauber schliessen (kein "Event loop is closed"-Trace)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_aclose_reviewer_client_calls_client_aclose() -> None:
+    """``_aclose_reviewer_client`` MUSS ``client.aclose()`` rufen sobald der
+    Reviewer ein ``.client``-Attribut hat — damit der httpx-Pool im noch-
+    offenen Event-Loop sauber schliesst und kein GC-Stacktrace entsteht."""
+    aclose_calls = {"n": 0}
+
+    class _SpyClient:
+        async def aclose(self) -> None:
+            aclose_calls["n"] += 1
+
+    class _ReviewerWithSpy:
+        def __init__(self) -> None:
+            self.client = _SpyClient()
+
+    await llm_worker._aclose_reviewer_client(_ReviewerWithSpy())
+    assert aclose_calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_aclose_reviewer_client_tolerates_mock_without_client() -> None:
+    """Test-Mocks (``_FakeReviewer``) haben kein ``client``-Attribut —
+    ``_aclose_reviewer_client`` MUSS das ohne Exception aushalten."""
+
+    class _ReviewerWithoutClient:
+        pass
+
+    # Soll NICHT werfen
+    await llm_worker._aclose_reviewer_client(_ReviewerWithoutClient())
+
+
+@pytest.mark.asyncio
+async def test_aclose_reviewer_client_swallows_aclose_error() -> None:
+    """Wenn ``client.aclose()`` selbst wirft (z.B. Loop schon zu), MUSS
+    ``_aclose_reviewer_client`` defensiv loggen und nicht weiterwerfen —
+    sonst wuerde der Finally-Cleanup eine Exception aus dem urspruenglichen
+    Pfad ueberschreiben."""
+
+    class _FailingClient:
+        async def aclose(self) -> None:
+            raise RuntimeError("Event loop is closed")
+
+    class _ReviewerWithFailingClient:
+        def __init__(self) -> None:
+            self.client = _FailingClient()
+
+    # Soll NICHT werfen
+    await llm_worker._aclose_reviewer_client(_ReviewerWithFailingClient())
