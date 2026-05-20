@@ -4,6 +4,91 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.9.5] — 2026-05-20
+
+Hotfix-Bundle fuer den Block-P-Worker. Vier zusammenhaengende Mini-
+Fixes nach Operator-Beobachtung in Production (k8s):
+
+  Pod-Restart-Loop mit (1) Label-Validator-Reject auf legitimes
+  Distro-Paket-Label "linux-modules-5.15.0-177-generic", (2) leerem
+  Debug-Log-Body bei Validation-Errors (Operator blind), (3) SIGTERM
+  vom k8s-livenessProbe mitten im LLM-Call, (4) viel zu sparsames
+  Worker-Logging.
+
+Keine Schema-Migration, keine Spec-Aenderung (P-evidence-Files und
+ADR-0023 unveraendert).
+
+### Fixed
+
+- **LABEL_PATTERN-Spec-Drift behoben.** ``app/services/llm_risk_
+  reviewer.py::LABEL_PATTERN`` war ``^[a-z0-9][a-z0-9_-]{0,63}$``,
+  Spec (``docs/blocks/P-evidence/prompt-pass1-final.md`` Z. 63 +
+  ``app/services/llm_prompts.py``) sagt ``^[a-z0-9][a-z0-9._-]{0,63}$``
+  (mit Punkt). Punkt ist legitim fuer Distro-Pakete mit Version im
+  Paketnamen wie ``linux-modules-5.15.0-177-generic`` oder
+  ``libstdc++6.0.30``. Backend folgt der Spec.
+
+- **Debug-Log bei Validation-Errors zeigt jetzt die echte LLM-
+  Response.** Bisher: wenn der Backend-Validator nach erfolgreichem
+  LLM-Call wirft (z.B. invalides Label, ungueltige Combo, NUL-Reason),
+  speicherte ``_record_pass_debug_log`` ``meta=None`` und damit leere
+  ``system_prompt``/``user_prompt``/``raw_content``/``extracted_json``-
+  Felder. Operator war im Debug-Log-Tab blind. Jetzt:
+  ``LLMInvalidResponseError`` traegt ein optionales ``.meta``-Attribut;
+  ``LLMRiskReviewer.pass1_detect_groups`` und ``pass2_evaluate_groups``
+  haengen das Meta-Dict bei Validator-Wurf an die Exception. Worker
+  liest ``exc.meta`` und persistiert komplett — Operator sieht die
+  echte LLM-Response inklusive ``raw_content``, ``extracted_json``,
+  ``reasoning_field``, ``usage`` und Prompts.
+
+- **Heartbeat-Daemon-Thread** entkoppelt vom Tick-Loop
+  (``app/workers/llm_worker.py``). Bisher wurde der Heartbeat in
+  ``_tick()`` geschrieben — bei LLM-Call von 60-120s blockierte
+  ``_tick()`` im ``_process_job``, der Heartbeat veraltete, k8s
+  livenessProbe (``HEARTBEAT_MAX_AGE_SEC=30`` in ``healthcheck.py``,
+  ``failureThreshold=3 x periodSeconds=30=90s``) killte den Pod mitten
+  im LLM-Call → Job blieb in ``in_progress`` haengen bis Stale-Reaper
+  nach 5 Minuten requeued. Jetzt: ``_heartbeat_loop`` laeuft als
+  Daemon-Thread, schreibt alle 10s unabhaengig vom Tick. ``main()``
+  startet ihn vor der Schleife (``_start_heartbeat_thread``), bei
+  ``_shutdown`` graceful join mit 5s Timeout
+  (``_stop_heartbeat_thread``). K8s/Docker-Compose-Probe-Settings
+  bleiben unveraendert.
+
+- **Logging-Erweiterung** fuer jede Pass-1- und Pass-2-Phase
+  (``app/workers/llm_worker.py``). Bisher: nur ``job_picked``,
+  ``job_done``, ``job_failed``. Jetzt zusaetzlich
+  ``pass1_started``/``llm_call_started``/``llm_call_completed``/
+  ``llm_call_failed``/``pass1_persist_done``/``pass2_started``/
+  ``pass2_cache_lookup``/``pass2_cache_hit_applied``/
+  ``pass2_persist_done``/``pass1_skipped``/``pass2_skipped``/
+  ``budget_exhausted``/``budget_check_passed`` (DEBUG)/
+  ``stale_reaped_count``/``heartbeat_thread_started``/
+  ``heartbeat_thread_stopped``. Token-Counts aus ``meta.usage`` via
+  neuem ``_usage_tokens(meta)``-Helper defensiv extrahiert.
+
+### Tests
+
+- 12 neue Tests gesamt fuer Heartbeat-Thread, Validator-Meta-Attach,
+  Debug-Log-Insert-bei-Error, Punkt-im-Label-Akzept, Logging-Marker.
+  Full-Suite **1603 passed** (vs. 1591 in v0.9.4), 5 skipped (E2E
+  master-key-abhaengig), 5 deselected (bench/integration). Coverage
+  91 %. ``ruff check``/``ruff format --check``/``mypy app/`` PASS.
+
+### Worker-Realbetriebs-Impact
+
+Pod-Restart-Loop in k8s ist gestoppt: Heartbeat-Thread haelt den
+Worker auch waehrend 60-120s-LLM-Calls "alive", livenessProbe
+gruen. Operator sieht im Debug-Log-Tab jetzt die echte
+LLM-Response auch bei Validator-Errors. Pass-1 mit legitim-
+versionierten Distro-Paket-Labels (Kernel-Module-Bundles)
+laeuft durch.
+
+**Bewusst weggelassen**: Spec-Haertung fuer Kernel-Paket-Labels
+(Regel-1 "no versions" vs Regel-3 "package_name") — Operator-
+Entscheidung, separate ADR falls die Group-Library mit
+``linux-modules-*``-Versionen zu unuebersichtlich wird.
+
 ## [v0.9.4] — 2026-05-20
 
 Hotfix-Patch zu Block P (ADR-0023). Behebt den 400-BadRequestError

@@ -34,6 +34,7 @@ import logging
 import os
 import signal
 import socket
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -109,9 +110,20 @@ def __getattr__(name: str) -> Any:
 
 # Modul-State (graceful Shutdown + Cadence-Tracking).
 _shutdown: bool = False
+# v0.9.5: ``_last_heartbeat_at`` ist Legacy — Heartbeat lebt jetzt im
+# Daemon-Thread (siehe `_heartbeat_loop`). Wir behalten die Variable
+# fuer Test-Hooks/Backward-Compat, schreiben sie aber nicht mehr im
+# `_tick()`.
 _last_heartbeat_at: float = 0.0
 _last_reaper_at: float = 0.0
 _last_debug_log_eviction_at: float = 0.0
+
+# v0.9.5: Heartbeat-Daemon-Thread + Stop-Event. Damit der Heartbeat
+# unabhaengig vom (potentiell 30-120s blockierenden) LLM-Call im
+# `_process_job` weiterlaeuft — sonst kickt die k8s livenessProbe
+# (HEARTBEAT_MAX_AGE_SEC=30 in healthcheck.py) den Pod mitten im Call.
+_heartbeat_thread: threading.Thread | None = None
+_heartbeat_thread_stop: threading.Event = threading.Event()
 
 # Lazy-erzeugte Session-Factory (kein Flask-App-Context).
 _session_factory: sessionmaker[Session] | None = None
@@ -186,6 +198,9 @@ def reset_shutdown_for_tests() -> None:
     _last_heartbeat_at = 0.0
     _last_reaper_at = 0.0
     _last_debug_log_eviction_at = 0.0
+    # v0.9.5: Stop-Event clearen damit Test-Re-Runs den Heartbeat-Thread
+    # nicht im Stop-State festhalten.
+    _heartbeat_thread_stop.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +217,10 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
 
+    # v0.9.5: Heartbeat-Daemon vor der Tick-Schleife starten — laeuft
+    # unabhaengig vom potentiell blockierenden LLM-Call weiter.
+    _start_heartbeat_thread()
+
     log.info(
         "llm_worker.starting worker_id=%s mode=%s poll=%ss stale_timeout_min=%s",
         WORKER_ID,
@@ -217,6 +236,9 @@ def main() -> None:
             log.exception("llm_worker.tick_failed sleeping_and_retrying")
             time.sleep(_poll_interval() * 2)
 
+    # v0.9.5: graceful shutdown — Heartbeat-Thread stoppen + max 5s warten.
+    _stop_heartbeat_thread(timeout=5.0)
+
     log.info("llm_worker.shutdown_complete worker_id=%s", WORKER_ID)
 
 
@@ -231,14 +253,15 @@ def _read_mode_safe() -> str:
 
 
 def _tick() -> None:
-    """Einzelne Iteration der Worker-Schleife."""
-    global _last_heartbeat_at, _last_reaper_at, _last_debug_log_eviction_at
-    now_mono = time.monotonic()
+    """Einzelne Iteration der Worker-Schleife.
 
-    # Heartbeat alle 10s.
-    if now_mono - _last_heartbeat_at > HEARTBEAT_INTERVAL_SEC:
-        _write_heartbeat()
-        _last_heartbeat_at = now_mono
+    v0.9.5: der Heartbeat-Block wurde aus dem Tick entfernt — Heartbeat
+    laeuft jetzt in einem Daemon-Thread (siehe `_heartbeat_loop`), damit
+    er auch wenn `_process_job` 60-120s im LLM-Call blockiert weiter
+    tickt und die k8s livenessProbe nicht den Pod kickt.
+    """
+    global _last_reaper_at, _last_debug_log_eviction_at
+    now_mono = time.monotonic()
 
     # Stale-Reaper alle 60s.
     if now_mono - _last_reaper_at > STALE_REAPER_INTERVAL_SEC:
@@ -266,9 +289,12 @@ def _tick() -> None:
     # Budget-Check — bei Erschoepfung pausieren.
     with get_session() as session:
         if not llm_budget.budget_check(session):
+            # v0.9.5: Budget-Erschoepfung explizit loggen (vorher nur Audit).
+            log.warning("llm_worker.budget_exhausted job_pickup_paused")
             llm_budget.mark_exhausted_audit_once(session)
             time.sleep(_poll_interval())
             return
+        log.debug("llm_worker.budget_check_passed")
 
     job_id = _pick_next_job_id()
     if job_id is None:
@@ -434,6 +460,21 @@ async def _process_live(job_id: int) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _usage_tokens(meta: dict[str, Any]) -> tuple[int | None, int | None]:
+    """v0.9.5-Helper: (prompt_tokens, completion_tokens) aus meta.usage ziehen.
+
+    Defensiv gegen non-dict usage (kann bei manchen Providern ein
+    Pydantic-Model bleiben, das vorher in dict konvertiert wurde — wir
+    pruefen trotzdem nochmal isinstance).
+    """
+    usage = meta.get("usage")
+    if not isinstance(usage, dict):
+        return None, None
+    pt = usage.get("prompt_tokens")
+    ct = usage.get("completion_tokens")
+    return (int(pt) if isinstance(pt, int) else None, int(ct) if isinstance(ct, int) else None)
+
+
 async def _do_pass1(job_id: int) -> None:
     """Pass 1: LLM detected Groups, Backend persistiert Library + Match-Pass."""
     with get_session() as session:
@@ -452,18 +493,46 @@ async def _do_pass1(job_id: int) -> None:
             job.completed_at = datetime.now(UTC)
             job.result = {"skipped": True, "reason": "no findings"}
             session.commit()
+            log.info(
+                "llm_worker.pass1_skipped job_id=%s reason=no_findings",
+                job_id,
+            )
             return
         # Reviewer-Setup
         reviewer, model_name = _build_reviewer(session)
         job_server_id: int | None = job.server_id
 
+    # v0.9.5: Phasen-Logs damit Operator sieht wo wir im Lifecycle stehen.
+    log.info(
+        "llm_worker.pass1_started job_id=%s findings_count=%s server_id=%s",
+        job_id,
+        len(finding_ids),
+        job_server_id,
+    )
+
     # LLM-Call ausserhalb der DB-Session — sonst halten wir die Connection
     # waehrend der 30-90s LLM-Latenz auf.
     result: Pass1Result
     meta: dict[str, Any]
+    log.info(
+        "llm_worker.llm_call_started job_id=%s job_type=pass1 model=%s findings=%s",
+        job_id,
+        model_name,
+        len(finding_ids),
+    )
     try:
         result, meta = await reviewer.pass1_detect_groups(findings)
     except LLMInvalidResponseError as exc:
+        # v0.9.5: exc.meta enthaelt die echte LLM-Response (raw_content,
+        # extracted_json, usage, prompts) — Operator sieht jetzt was das
+        # LLM geantwortet hat, auch wenn der Validator wirft.
+        log.warning(
+            "llm_worker.llm_call_failed job_id=%s job_type=pass1 "
+            "error_class=%s error_preview=%.200s",
+            job_id,
+            type(exc).__name__,
+            str(exc),
+        )
         _record_pass_debug_log(
             job_id=job_id,
             job_type="pass1_group_detection",
@@ -471,11 +540,18 @@ async def _do_pass1(job_id: int) -> None:
             model=model_name or "-",
             server_id=job_server_id,
             group_id=None,
-            meta=None,
+            meta=getattr(exc, "meta", None),
             error=str(exc),
         )
         raise
     except LLMTimeoutError as exc:
+        log.warning(
+            "llm_worker.llm_call_failed job_id=%s job_type=pass1 "
+            "error_class=%s error_preview=%.200s",
+            job_id,
+            type(exc).__name__,
+            str(exc),
+        )
         _record_pass_debug_log(
             job_id=job_id,
             job_type="pass1_group_detection",
@@ -483,10 +559,21 @@ async def _do_pass1(job_id: int) -> None:
             model=model_name or "-",
             server_id=job_server_id,
             group_id=None,
-            meta=None,
+            meta=getattr(exc, "meta", None),
             error=str(exc),
         )
         raise
+
+    pt, ct = _usage_tokens(meta)
+    log.info(
+        "llm_worker.llm_call_completed job_id=%s job_type=pass1 duration_ms=%s "
+        "prompt_tokens=%s completion_tokens=%s reasoning_chars=%s",
+        job_id,
+        meta.get("duration_ms"),
+        pt,
+        ct,
+        len(meta.get("reasoning_field") or ""),
+    )
 
     _record_pass_debug_log(
         job_id=job_id,
@@ -516,6 +603,13 @@ async def _do_pass1(job_id: int) -> None:
             # Block-P §1, ADR-0023).
             llm_budget.budget_consume(session, llm_budget.estimate_tokens(job))
             session.commit()
+    # v0.9.5: Persist-Done-Phase-Log nach erfolgreichem Commit.
+    log.info(
+        "llm_worker.pass1_persist_done job_id=%s groups_count=%s ungrouped_count=%s",
+        job_id,
+        len(result.groups),
+        len(result.ungrouped_finding_ids),
+    )
 
 
 async def _persist_pass1_groups(
@@ -627,6 +721,13 @@ async def _do_pass2(job_id: int) -> None:
             job.completed_at = datetime.now(UTC)
             job.result = {"skipped": True, "reason": "group or server missing"}
             session.commit()
+            log.info(
+                "llm_worker.pass2_skipped job_id=%s reason=group_or_server_missing "
+                "group_id=%s server_id=%s",
+                job_id,
+                group_id,
+                server_id,
+            )
             return
 
         findings = list(
@@ -643,7 +744,24 @@ async def _do_pass2(job_id: int) -> None:
             job.completed_at = datetime.now(UTC)
             job.result = {"skipped": True, "reason": "no findings in group on server"}
             session.commit()
+            log.info(
+                "llm_worker.pass2_skipped job_id=%s reason=no_findings group_id=%s server_id=%s",
+                job_id,
+                group_id,
+                server_id,
+            )
             return
+
+        # v0.9.5: Phasen-Log nach Daten-Hydration.
+        log.info(
+            "llm_worker.pass2_started job_id=%s group_id=%s group_label=%s "
+            "findings_in_group=%s server_id=%s",
+            job_id,
+            group_id,
+            group.label,
+            len(findings),
+            server_id,
+        )
 
         gf_fp = group_findings_fingerprint(findings)
         cve_fp = cve_data_fingerprint(findings)
@@ -651,6 +769,13 @@ async def _do_pass2(job_id: int) -> None:
         cache_key = make_cache_key(group.id, gf_fp, cve_fp, sv_fp)
 
         cached = lookup(session, cache_key)
+        # v0.9.5: Cache-Lookup-Phase-Log (hit/miss).
+        log.info(
+            "llm_worker.pass2_cache_lookup job_id=%s cache_key_prefix=%s result=%s",
+            job_id,
+            cache_key[:16],
+            "hit" if cached is not None else "miss",
+        )
         if cached is not None:
             record_hit(session, cached)
             _apply_pass2_to_group(
@@ -675,6 +800,14 @@ async def _do_pass2(job_id: int) -> None:
                 metadata={"server_id": server_id, "cache_key_prefix": cache_key[:16]},
             )
             session.commit()
+            log.info(
+                "llm_worker.pass2_cache_hit_applied job_id=%s group_id=%s "
+                "risk_band=%s action_type=%s",
+                job_id,
+                group_id,
+                cached.risk_band,
+                cached.action_type,
+            )
             return
 
         # Cache-Miss: Daten fuer den LLM-Call snapshotten.
@@ -689,6 +822,13 @@ async def _do_pass2(job_id: int) -> None:
     # Session-loese Objekte.
     pass2_result: Pass2Result
     pass2_meta: dict[str, Any]
+    log.info(
+        "llm_worker.llm_call_started job_id=%s job_type=pass2 model=%s group_id=%s findings=%s",
+        job_id,
+        model_name,
+        group_id,
+        len(group_findings_ids),
+    )
     try:
         with get_session() as detached_session:
             group_re = detached_session.get(ApplicationGroup, group_id)
@@ -710,6 +850,14 @@ async def _do_pass2(job_id: int) -> None:
                 server_re, [(group_re, findings_re)]
             )
     except LLMInvalidResponseError as exc:
+        # v0.9.5: meta-Dict aus exc nehmen (siehe Pass-1-Aenderung).
+        log.warning(
+            "llm_worker.llm_call_failed job_id=%s job_type=pass2 "
+            "error_class=%s error_preview=%.200s",
+            job_id,
+            type(exc).__name__,
+            str(exc),
+        )
         _record_pass_debug_log(
             job_id=job_id,
             job_type="pass2_risk_evaluation",
@@ -717,11 +865,18 @@ async def _do_pass2(job_id: int) -> None:
             model=model_name or "-",
             server_id=server_id,
             group_id=group_id,
-            meta=None,
+            meta=getattr(exc, "meta", None),
             error=str(exc),
         )
         raise
     except LLMTimeoutError as exc:
+        log.warning(
+            "llm_worker.llm_call_failed job_id=%s job_type=pass2 "
+            "error_class=%s error_preview=%.200s",
+            job_id,
+            type(exc).__name__,
+            str(exc),
+        )
         _record_pass_debug_log(
             job_id=job_id,
             job_type="pass2_risk_evaluation",
@@ -729,10 +884,21 @@ async def _do_pass2(job_id: int) -> None:
             model=model_name or "-",
             server_id=server_id,
             group_id=group_id,
-            meta=None,
+            meta=getattr(exc, "meta", None),
             error=str(exc),
         )
         raise
+
+    pt2, ct2 = _usage_tokens(pass2_meta)
+    log.info(
+        "llm_worker.llm_call_completed job_id=%s job_type=pass2 duration_ms=%s "
+        "prompt_tokens=%s completion_tokens=%s reasoning_chars=%s",
+        job_id,
+        pass2_meta.get("duration_ms"),
+        pt2,
+        ct2,
+        len(pass2_meta.get("reasoning_field") or ""),
+    )
 
     _record_pass_debug_log(
         job_id=job_id,
@@ -796,6 +962,16 @@ async def _do_pass2(job_id: int) -> None:
         # evaluation` ist die Schaetzung konstant 2000.
         llm_budget.budget_consume(session, 2000)
     _ = server_id_snapshot  # keep linter happy
+    # v0.9.5: Persist-Done-Phase-Log nach Result+Cache+Budget-Commit.
+    log.info(
+        "llm_worker.pass2_persist_done job_id=%s group_id=%s risk_band=%s "
+        "action_type=%s worst_finding_id=%s",
+        job_id,
+        group_id,
+        evaluation.risk_band,
+        evaluation.action_type,
+        evaluation.worst_finding_id,
+    )
 
 
 def _record_pass_debug_log(
@@ -1046,6 +1222,12 @@ def _run_stale_reaper() -> None:
         ).fetchall()
         session.commit()
         if requeued or failed:
+            # v0.9.5: Stale-Reaper-Count explizit loggen (vorher nur Audit).
+            log.info(
+                "llm_worker.stale_reaped_count requeued=%s failed=%s",
+                len(requeued),
+                len(failed),
+            )
             _audit(
                 session,
                 "llm.job_reaped",
@@ -1185,6 +1367,60 @@ def _write_heartbeat() -> None:
             session.commit()
     except Exception:  # pragma: no cover — DB-Hickup
         log.exception("llm_worker.heartbeat_failed")
+
+
+def _heartbeat_loop() -> None:
+    """Daemon-Loop der unabhaengig vom Tick alle 10s ``_write_heartbeat()`` ruft.
+
+    v0.9.5: vorher wurde der Heartbeat im ``_tick()`` geschrieben — bei langem
+    LLM-Call (60-120s) blockierte ``_tick()`` im ``_process_job``, der Heartbeat
+    veraltete und k8s livenessProbe (``failureThreshold=3 x periodSeconds=30``
+    = 90s Toleranz, ``HEARTBEAT_MAX_AGE_SEC=30`` in ``healthcheck.py``) killte
+    den Pod mitten im LLM-Call → Job blieb in ``in_progress`` haengen bis der
+    Stale-Reaper ihn nach 5 Minuten requeued hat.
+
+    Daemon-Flag: stirbt automatisch mit dem Hauptprozess. Stop-Event wird
+    parallel via ``_heartbeat_thread_stop.wait(timeout=...)`` abgefragt fuer
+    saubere Shutdown-Latency.
+    """
+    log.info(
+        "llm_worker.heartbeat_thread_started interval_sec=%s",
+        HEARTBEAT_INTERVAL_SEC,
+    )
+    while not _heartbeat_thread_stop.is_set():
+        try:
+            _write_heartbeat()
+        except Exception:  # pragma: no cover
+            log.exception("llm_worker.heartbeat_thread_write_failed")
+        # ``wait`` gibt sofort zurueck wenn Stop-Event gesetzt — saubere
+        # Shutdown-Latency (kein time.sleep() das blockt).
+        _heartbeat_thread_stop.wait(timeout=HEARTBEAT_INTERVAL_SEC)
+    log.info("llm_worker.heartbeat_thread_stopped")
+
+
+def _start_heartbeat_thread() -> threading.Thread:
+    """Startet den Heartbeat-Daemon-Thread (idempotent: returned existing
+    wenn schon alive).
+
+    Wird vom ``main()``-Entrypoint und von Tests genutzt.
+    """
+    global _heartbeat_thread
+    if _heartbeat_thread is not None and _heartbeat_thread.is_alive():
+        return _heartbeat_thread
+    _heartbeat_thread_stop.clear()
+    _heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True, name="llm-worker-hb")
+    _heartbeat_thread.start()
+    return _heartbeat_thread
+
+
+def _stop_heartbeat_thread(timeout: float = 5.0) -> None:
+    """Stoppt den Heartbeat-Thread (Stop-Event + Join). Idempotent."""
+    global _heartbeat_thread
+    _heartbeat_thread_stop.set()
+    t = _heartbeat_thread
+    if t is not None and t.is_alive():
+        t.join(timeout=timeout)
+    _heartbeat_thread = None
 
 
 # ---------------------------------------------------------------------------

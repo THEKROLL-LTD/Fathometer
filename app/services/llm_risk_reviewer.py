@@ -55,8 +55,12 @@ log = structlog.get_logger(__name__)
 
 
 # Label-Whitelist gemaess ADR-0023 §"Backend-Validierung": kleinbuchstaben,
-# Ziffern, ``_-``. Erstes Zeichen alphanumerisch, max 64 chars.
-LABEL_PATTERN: re.Pattern[str] = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+# Ziffern, ``._-``. Erstes Zeichen alphanumerisch, max 64 chars.
+# v0.9.5: Spec-Drift behoben — docs/blocks/P-evidence/prompt-pass1-final.md
+# Z. 63 spezifiziert "^[a-z0-9][a-z0-9._-]{0,63}$" (mit Punkt). Der Punkt
+# ist relevant fuer Distro-Pakete mit Version im Paketnamen
+# (z.B. "linux-modules-5.15.0-177-generic", "libstdc++6.0.30").
+LABEL_PATTERN: re.Pattern[str] = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 # Reason-Hardlimit pro ADR-0023 §"Backend-Validierung".
 MAX_REASON_LEN: int = 256
@@ -237,7 +241,18 @@ class Pass2Result(BaseModel):
 
 
 class LLMInvalidResponseError(ValueError):
-    """LLM-Output ist schema- oder semantik-invalid (Halluzination, falsches Band, ...)."""
+    """LLM-Output ist schema- oder semantik-invalid (Halluzination, falsches Band, ...).
+
+    v0.9.5: optionales ``meta``-Attribut traegt das ``chat_completion_json_with_meta``-
+    Meta-Dict (raw_content, extracted_json, reasoning_field, usage, duration_ms, ...)
+    durch, damit der Worker es beim Debug-Log-Insert persistieren kann auch wenn
+    der Backend-Validator wirft. ``None`` solange noch keine Response da ist
+    (z.B. JSON-Parse-Error vor Schema-Validation).
+    """
+
+    def __init__(self, message: str, *, meta: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.meta: dict[str, Any] | None = meta
 
 
 class LLMTimeoutError(RuntimeError):
@@ -552,7 +567,16 @@ class LLMRiskReviewer:
         meta["system_prompt"] = PASS1_SYSTEM_PROMPT
         meta["user_prompt"] = user_prompt
         meta["max_tokens"] = cfg.llm_pass1_max_tokens
-        return self._validate_pass1_response(response, list(findings)), meta
+        # v0.9.5: bei Validation-Error meta an Exception anhaengen, damit der
+        # Worker auch im Failure-Pfad raw_content/extracted_json/usage in den
+        # llm_debug_log schreibt (vorher: leeres Debug-Log-Body, Operator
+        # blind).
+        try:
+            validated = self._validate_pass1_response(response, list(findings))
+        except LLMInvalidResponseError as exc:
+            exc.meta = meta
+            raise
+        return validated, meta
 
     def _render_pass1_prompt(self, findings: Sequence[Finding]) -> str:
         """Findings als kompakte Tabelle mit den fuer Group-Detection
@@ -720,7 +744,16 @@ class LLMRiskReviewer:
         meta["system_prompt"] = PASS2_SYSTEM_PROMPT
         meta["user_prompt"] = user_prompt
         meta["max_tokens"] = cfg.llm_pass2_max_tokens
-        return self._validate_pass2_response(response, list(groups_with_findings)), meta
+        # v0.9.5: bei Validation-Error meta an Exception anhaengen, damit der
+        # Worker auch im Failure-Pfad raw_content/extracted_json/usage in den
+        # llm_debug_log schreibt (vorher: leeres Debug-Log-Body, Operator
+        # blind).
+        try:
+            validated = self._validate_pass2_response(response, list(groups_with_findings))
+        except LLMInvalidResponseError as exc:
+            exc.meta = meta
+            raise
+        return validated, meta
 
     def _render_pass2_prompt(
         self,

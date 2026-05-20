@@ -868,3 +868,69 @@ async def test_chat_completion_json_sets_temperature_zero() -> None:
         max_tokens=100,
     )
     assert client._sdk.calls[0]["temperature"] == 0
+
+
+# ---------------------------------------------------------------------------
+# v0.9.5 — Meta-Dict an LLMInvalidResponseError anhaengen
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pass1_detect_groups_attaches_meta_to_validation_error() -> None:
+    """v0.9.5: bei Validation-Error muss exc.meta die echte LLM-Response tragen.
+
+    Vorher: Worker schrieb meta=None in den Debug-Log, Operator sah keine
+    Response.
+    """
+    f1 = _make_finding(1)
+    # Invalides Label (Space mittendrin) → triggert Validator-Reject mit
+    # vorhandener Response.
+    bad_payload = {
+        "groups": [
+            {"label": "bad label", "finding_ids": [1], "match_rules": {}},
+        ],
+        "ungrouped": [],
+    }
+    reviewer = LLMRiskReviewer(client=_MockClient(bad_payload))
+    with pytest.raises(LLMInvalidResponseError) as ei:
+        await reviewer.pass1_detect_groups([f1])
+    exc = ei.value
+    assert exc.meta is not None
+    assert "raw_content" in exc.meta
+    assert exc.meta["raw_content"]  # non-empty
+    assert exc.meta["system_prompt"]  # PASS1_SYSTEM_PROMPT
+    assert exc.meta["user_prompt"]  # Rendered Findings-Tabelle
+    assert "duration_ms" in exc.meta
+    # extracted_json sollte ebenfalls da sein (das JSON wurde geparst, nur
+    # die Semantik-Validierung schlug fehl).
+    assert exc.meta["extracted_json"]
+
+
+@pytest.mark.asyncio
+async def test_pass2_evaluate_groups_attaches_meta_to_validation_error() -> None:
+    """v0.9.5: Pass-2-Pendant — Validation-Error trägt meta."""
+    f1 = _make_finding(1, package_name="openssl")
+    server = _make_server()
+    group = _make_group("openssl", [1])
+
+    # Halluzinierter group_label → Validator-Reject mit vorhandener Response.
+    bad_payload = {
+        "evaluations": [
+            {
+                "group_label": "does-not-exist",  # nicht im Input
+                "risk_band": "act",
+                "action_type": "patch",
+                "worst_finding_id": 1,
+                "reason": "fake",
+            },
+        ],
+    }
+    reviewer = LLMRiskReviewer(client=_MockClient(bad_payload))
+    with pytest.raises(LLMInvalidResponseError) as ei:
+        await reviewer.pass2_evaluate_groups(server, [(group, [f1])])
+    exc = ei.value
+    assert exc.meta is not None
+    assert exc.meta.get("raw_content")
+    assert exc.meta.get("system_prompt")
+    assert exc.meta.get("user_prompt")
+    assert "duration_ms" in exc.meta

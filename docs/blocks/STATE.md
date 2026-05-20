@@ -4,6 +4,24 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
+**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer + ADR-0022-Risk-Engine + ADR-0023-LLM-Risk-Reviewer + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 + Worker-Stability v0.9.5 — v0.9.5 (2026-05-20).**
+
+**Patch v0.9.5 abgeschlossen 2026-05-20 — Worker-Stability-Hotfix nach k8s-Pod-Restart-Loop und blindem Debug-Log.** Branch `fix/v0.9.5-worker-stability`. Vier zusammenhängende Mini-Fixes, keine Schema-Migration, Spec-Files unverändert:
+
+- **(1) LABEL_PATTERN-Spec-Drift behoben.** `app/services/llm_risk_reviewer.py::LABEL_PATTERN` von `^[a-z0-9][a-z0-9_-]{0,63}$` auf `^[a-z0-9][a-z0-9._-]{0,63}$` (mit Punkt — wie in Spec `docs/blocks/P-evidence/prompt-pass1-final.md` Z. 63). Punkt ist legitim für Distro-Pakete mit Version im Paketnamen (z.B. `linux-modules-5.15.0-177-generic`, `libstdc++6.0.30`).
+
+- **(2) Debug-Log bei Validation-Errors zeigt jetzt die echte LLM-Response.** `LLMInvalidResponseError` trägt optionales `.meta`-Attribut; `LLMRiskReviewer.pass1_detect_groups`/`pass2_evaluate_groups` hängen das Meta-Dict (raw_content/extracted_json/reasoning_field/usage/prompts) bei Validator-Wurf an die Exception. Worker liest `exc.meta` und persistiert komplett — Operator-Blindheit beim Debug-Log-Inspect behoben.
+
+- **(3) Heartbeat-Daemon-Thread.** Bisher Heartbeat im `_tick()` geschrieben → blockierte 60-120s im LLM-Call → k8s-livenessProbe (`HEARTBEAT_MAX_AGE_SEC=30` × `failureThreshold=3 × periodSeconds=30=90s`) killte den Pod → Job blieb in `in_progress`. Jetzt: `_heartbeat_loop` läuft als Daemon-Thread, schreibt alle 10s unabhängig vom Tick. `main()` startet (`_start_heartbeat_thread`) vor der Schleife, bei `_shutdown` graceful join mit 5s Timeout (`_stop_heartbeat_thread`). K8s/Docker-Compose-Probe-Settings unverändert.
+
+- **(4) Worker-Logging-Erweiterung.** Phasen-Logs für jede Pass-1/Pass-2-Phase (`pass1_started`/`pass2_started`/`llm_call_started`/`llm_call_completed`/`llm_call_failed`/`pass1_persist_done`/`pass2_cache_lookup`/`pass2_cache_hit_applied`/`pass2_persist_done`/`budget_exhausted`/`stale_reaped_count`/`heartbeat_thread_started`+`_stopped`), Token-Counts via neuem `_usage_tokens(meta)`-Helper aus `meta.usage`.
+
+**1603 Tests grün (+12 neue v0.9.5-Tests: 2 Heartbeat-Thread-Lifecycle, 2 Validator-Meta-Attach, 1 Worker-Debug-Log-Insert-bei-Validation-Error, 2 LABEL_PATTERN-Punkt-Accept + Regression, 4 Logging-Marker-Smoke + Edge-Case-Coverage), Coverage 91 %.** `ruff check`/`ruff format --check`/`mypy app/`/`shellcheck agent/*.sh` PASS. `docker compose up -d --build` startet alle drei Container healthy, neues Log `heartbeat_thread_started interval_sec=10.0` direkt nach Start sichtbar.
+
+**Operator-Realbetriebs-Impact:** Pod-Restart-Loop in k8s gestoppt; Heartbeat-Thread hält Worker auch während 60-120s-LLM-Calls "alive". Operator sieht im Debug-Log-Tab jetzt die echte LLM-Response auch bei Validator-Errors (vorher leere Bodies). Pass-1 mit legitim-versionierten Distro-Paket-Labels (Kernel-Module-Bundles) läuft durch. **Bewusst weggelassen:** Spec-Härtung für Kernel-Paket-Labels (Regel-1 "no versions" vs Regel-3 "package_name") — Operator-Entscheidung, separate ADR falls Group-Library mit `linux-modules-*`-Versionen zu unübersichtlich wird. **Tag `v0.9.5` zu setzen.**
+
+---
+
 **MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer + ADR-0022-Risk-Engine + ADR-0023-LLM-Risk-Reviewer + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 — v0.9.4 (2026-05-20).**
 
 **Patch v0.9.4 abgeschlossen 2026-05-20 — Hotfix für 400-BadRequestError aus dem Worker** (`Requested input length 231381 exceeds maximum input length 131071`). Branch `fix/v0.9.4-pass1-batching`. Vier zusammenhängende Mini-Fixes, keine Schema-Migration:
@@ -318,6 +336,8 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 (keiner — v0.9.3-Patch abgeschlossen 2026-05-20, nächster Block oder Patch per User-Entscheidung)
 
 ## Completed
+
+- **v0.9.5-Patch — Worker-Stability: LABEL_PATTERN-Spec-Drift + Validator-Meta-an-Exception + Heartbeat-Thread + Logging-Erweiterung** · abgeschlossen 2026-05-20 · Branch `fix/v0.9.5-worker-stability` · Hotfix nach k8s-Pod-Restart-Loop und blindem Debug-Log. Vier zusammenhaengende Mini-Fixes ohne Schema-Migration und ohne Spec-Aenderung. 1603 Tests grün (+12 v0.9.5-Tests), Coverage 91 %. ruff/format/mypy/shellcheck PASS. Docker-Compose-Up zeigt das neue `heartbeat_thread_started`-Log; drei Container healthy. Detail siehe Status-Sektion oben. Operator-Impact: Pod-Restart-Loop gestoppt, Debug-Log-Tab zeigt echte LLM-Response auch bei Validator-Errors. **Tag `v0.9.5` zu setzen.**
 
 - **v0.9.4-Patch — Pass-1-Batching mit Affinity-Sort + `temperature=0` + Error-Klassifikation + Docker-Healthcheck-Timeout** · abgeschlossen 2026-05-20 · Branch `fix/v0.9.4-pass1-batching` · Hotfix nach Worker-Beobachtung `Requested input length 231381 exceeds maximum input length 131071`. Vier zusammenhaengende Mini-Fixes ohne Schema-Migration. 1591 Tests grün (+20 v0.9.4-Tests in vier Buckets), Coverage 91%. `ruff check`/`ruff format --check`/`mypy app/` (70 source files)/`shellcheck agent/*.sh` PASS. Drei-Container-Compose-Up healthy nach ~30s. Detail siehe Status-Sektion oben. Operator-Impact: 9000-Findings-Flotte braucht jetzt ~90 Pass-1-Jobs à 100 Findings statt 1 Riesen-Job-400-Loop. **Tag `v0.9.4` zu setzen.**
 

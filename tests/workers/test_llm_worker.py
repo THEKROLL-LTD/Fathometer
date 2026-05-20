@@ -682,3 +682,283 @@ def test_budget_exhausted_pauses_pickup(db_app: Flask, monkeypatch: pytest.Monke
             assert audit_count == 1
     finally:
         sess.close()
+
+
+# ---------------------------------------------------------------------------
+# v0.9.5 — Meta-Dict im Debug-Log bei Validation-Error
+# ---------------------------------------------------------------------------
+
+
+class _BadReviewer:
+    """Reviewer der eine LLMInvalidResponseError MIT meta-Attribut wirft.
+
+    Simuliert den Pass-1-Pfad in dem das LLM eine Response liefert, der
+    Backend-Validator sie aber ablehnt (z.B. invalides Label).
+    """
+
+    def __init__(self, meta: dict[str, Any]) -> None:
+        self._meta = meta
+
+    async def pass1_detect_groups(self, findings: Any) -> tuple[Pass1Result, dict[str, Any]]:
+        await asyncio.sleep(0)
+        from app.services.llm_risk_reviewer import LLMInvalidResponseError
+
+        raise LLMInvalidResponseError("simulated label regex violation", meta=self._meta)
+
+
+def test_worker_records_meta_on_validation_error_in_debug_log(
+    db_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v0.9.5: bei LLMInvalidResponseError muss der Debug-Log raw_content/
+    extracted_json aus exc.meta enthalten (vorher: response_body=NULL,
+    Operator blind)."""
+    from app.models import LLMDebugLog
+
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            row = ensure_settings_row(sess)
+            row.block_p_llm_mode = "live"
+            row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=2)
+            sess.commit()
+            server = _make_server(sess)
+            f1 = _make_finding(sess, 9001, server.id, package_name="openssl")
+            sess.commit()
+
+            bad_meta: dict[str, Any] = {
+                "raw_content": '{"groups": [{"label": "bad label", ...}]}',
+                "extracted_json": '{"groups": [{"label": "bad label"}]}',
+                "reasoning_field": None,
+                "model": "mock-model",
+                "duration_ms": 12345,
+                "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+                "system_prompt": "SYSTEM",
+                "user_prompt": "USER",
+                "max_tokens": 4096,
+            }
+
+            def _factory(_session: Any) -> tuple[Any, str]:
+                return _BadReviewer(meta=bad_meta), "mock-model"
+
+            llm_worker.set_reviewer_factory_for_tests(_factory)
+
+            job = _make_job(
+                sess,
+                server_id=server.id,
+                payload={"finding_ids": [f1.id]},
+            )
+            sess.commit()
+            job_id = job.id
+
+            monkeypatch.setattr(time_mod, "sleep", lambda s: None)
+            monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
+
+            llm_worker._tick()
+
+            sess.expire_all()
+            # Job sollte requeued/failed sein (Validator wirft).
+            updated = sess.get(LLMJob, job_id)
+            assert updated is not None
+            assert updated.status in ("queued", "failed")
+
+            # Debug-Log-Row muss existieren und die echte LLM-Response tragen.
+            debug_row = (
+                sess.execute(select(LLMDebugLog).where(LLMDebugLog.job_id == job_id))
+                .scalars()
+                .first()
+            )
+            assert debug_row is not None, "Debug-Log wurde nicht geschrieben"
+            assert debug_row.status == "validation_error"
+            assert debug_row.response_body is not None
+            assert debug_row.response_body.get("raw_content") == bad_meta["raw_content"]
+            assert debug_row.response_body.get("extracted_json") == bad_meta["extracted_json"]
+            # request_body sollte die Prompts aus meta enthalten.
+            assert debug_row.request_body is not None
+            assert debug_row.request_body.get("system_prompt") == "SYSTEM"
+            assert debug_row.request_body.get("user_prompt") == "USER"
+            assert debug_row.duration_ms == 12345
+    finally:
+        sess.close()
+
+
+# ---------------------------------------------------------------------------
+# v0.9.5 — Heartbeat-Thread (entkoppelt vom Tick)
+# ---------------------------------------------------------------------------
+
+
+def test_heartbeat_thread_writes_while_tick_blocks(db_app: Flask) -> None:
+    """v0.9.5: der Daemon-Thread schreibt den Heartbeat unabhaengig davon
+    ob der Tick im LLM-Call blockiert."""
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            row = ensure_settings_row(sess)
+            # Heartbeat auf "alt" setzen damit wir die Aktualisierung sehen.
+            row.llm_worker_heartbeat_at = datetime(2020, 1, 1, tzinfo=UTC)
+            sess.commit()
+            old_hb = row.llm_worker_heartbeat_at
+
+            # Heartbeat-Interval kurz machen wir nicht — der Thread schreibt
+            # initial sofort beim Start. Wir starten, warten kurz, stoppen.
+            llm_worker._start_heartbeat_thread()
+            try:
+                # Daemon-Thread schreibt initial sofort _write_heartbeat().
+                # Wir geben ihm 1s um den ersten Write durchzubringen.
+                time_mod.sleep(1.0)
+                sess.expire_all()
+                row2 = ensure_settings_row(sess)
+                assert row2.llm_worker_heartbeat_at is not None
+                assert row2.llm_worker_heartbeat_at > old_hb
+            finally:
+                llm_worker._stop_heartbeat_thread(timeout=2.0)
+    finally:
+        sess.close()
+
+
+def test_heartbeat_thread_stops_on_event(db_app: Flask) -> None:
+    """v0.9.5: Stop-Event triggert sauberen Thread-Exit innerhalb der Wait-Latency."""
+    with db_app.app_context():
+        t = llm_worker._start_heartbeat_thread()
+        assert t.is_alive()
+        llm_worker._stop_heartbeat_thread(timeout=2.0)
+        # join(timeout) returned → Thread sollte tot sein.
+        assert not t.is_alive()
+
+
+# ---------------------------------------------------------------------------
+# v0.9.5 — Logging-Smoke (Phasen-Marker im Live-Pass1)
+# ---------------------------------------------------------------------------
+
+
+def test_pass1_logs_phase_markers(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.9.5: Live-Pass-1 schreibt pass1_started/llm_call_started/
+    llm_call_completed/pass1_persist_done Phasen-Marker."""
+    import logging as _logging
+
+    # Eigenen Capture-Handler an den Worker-Logger haengen (caplog ist mit
+    # structlog/Flask-App-Logger-Setup nicht zuverlaessig fuer den
+    # ``secscan.llm_worker``-Logger — wir wollen die echten Records sehen,
+    # also direkt am Logger lauschen).
+    captured: list[str] = []
+
+    class _Handler(_logging.Handler):
+        def emit(self, record: _logging.LogRecord) -> None:
+            captured.append(record.getMessage())
+
+    # configure_logging() (App-Factory) ruft logging.config.dictConfig auf,
+    # was alle bestehenden Logger ``disabled=True`` setzt. Wir
+    # reaktivieren den Worker-Logger fuer diesen Test.
+    worker_logger = llm_worker.log
+    prev_level = worker_logger.level
+    prev_disabled = worker_logger.disabled
+    worker_logger.setLevel(_logging.DEBUG)
+    worker_logger.disabled = False
+    handler = _Handler()
+    handler.setLevel(_logging.DEBUG)
+    worker_logger.addHandler(handler)
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            row = ensure_settings_row(sess)
+            row.block_p_llm_mode = "live"
+            row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=2)
+            sess.commit()
+            server = _make_server(sess)
+            f1 = _make_finding(sess, 7001, server.id, package_name="openssl")
+            sess.commit()
+
+            pass1 = Pass1Result(
+                groups=[
+                    Pass1Group(
+                        label="openssl",
+                        explanation=None,
+                        path_prefixes=[],
+                        pkg_name_exact=["openssl"],
+                        pkg_name_glob=[],
+                        pkg_purl_pattern=[],
+                        finding_ids=[f1.id],
+                    )
+                ],
+                ungrouped_finding_ids=[],
+            )
+
+            def _factory(_session: Any) -> tuple[Any, str]:
+                return (
+                    _FakeReviewer(pass1=pass1, pass2=Pass2Result(evaluations=[])),
+                    "mock-model",
+                )
+
+            llm_worker.set_reviewer_factory_for_tests(_factory)
+
+            _make_job(sess, server_id=server.id, payload={"finding_ids": [f1.id]})
+            sess.commit()
+
+            monkeypatch.setattr(time_mod, "sleep", lambda s: None)
+            monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
+
+            llm_worker._tick()
+
+            messages = " | ".join(captured)
+            assert "llm_worker.pass1_started" in messages, f"got: {messages!r}"
+            assert "llm_worker.llm_call_started" in messages
+            assert "llm_worker.llm_call_completed" in messages
+            assert "llm_worker.pass1_persist_done" in messages
+    finally:
+        worker_logger.removeHandler(handler)
+        worker_logger.setLevel(prev_level)
+        worker_logger.disabled = prev_disabled
+        sess.close()
+
+
+def test_pass1_logs_failure_marker_on_validation_error(
+    db_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v0.9.5: bei LLMInvalidResponseError taucht ``llm_call_failed`` im Log auf."""
+    import logging as _logging
+
+    captured: list[str] = []
+
+    class _Handler(_logging.Handler):
+        def emit(self, record: _logging.LogRecord) -> None:
+            captured.append(record.getMessage())
+
+    worker_logger = llm_worker.log
+    prev_level = worker_logger.level
+    prev_disabled = worker_logger.disabled
+    worker_logger.setLevel(_logging.DEBUG)
+    worker_logger.disabled = False
+    handler = _Handler()
+    handler.setLevel(_logging.DEBUG)
+    worker_logger.addHandler(handler)
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            row = ensure_settings_row(sess)
+            row.block_p_llm_mode = "live"
+            row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=2)
+            sess.commit()
+            server = _make_server(sess)
+            f1 = _make_finding(sess, 7101, server.id, package_name="openssl")
+            sess.commit()
+
+            def _factory(_session: Any) -> tuple[Any, str]:
+                return _BadReviewer(meta={"raw_content": "x"}), "mock-model"
+
+            llm_worker.set_reviewer_factory_for_tests(_factory)
+
+            job = _make_job(sess, server_id=server.id, payload={"finding_ids": [f1.id]})
+            sess.commit()
+            _ = job.id  # touch for linter
+
+            monkeypatch.setattr(time_mod, "sleep", lambda s: None)
+            monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
+
+            llm_worker._tick()
+
+            messages = " | ".join(captured)
+            assert "llm_worker.llm_call_failed" in messages, f"got: {messages!r}"
+    finally:
+        worker_logger.removeHandler(handler)
+        worker_logger.setLevel(prev_level)
+        worker_logger.disabled = prev_disabled
+        sess.close()

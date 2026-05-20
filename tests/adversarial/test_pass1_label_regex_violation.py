@@ -1,7 +1,12 @@
 """Adversarial: Pass-1 Group-Labels muessen `LABEL_PATTERN` matchen (ADR-0023).
 
-Whitelist: `^[a-z0-9][a-z0-9_-]{0,63}$` — kleinbuchstaben, Ziffern, `_-`,
+Whitelist: `^[a-z0-9][a-z0-9._-]{0,63}$` — kleinbuchstaben, Ziffern, `._-`,
 erstes Zeichen alphanumerisch, max 64 chars. Alles andere → Reject.
+
+v0.9.5: Der Punkt ist Teil der Whitelist (Spec-Quelle:
+``docs/blocks/P-evidence/prompt-pass1-final.md`` Z. 63). Distro-Pakete mit
+Version im Paketnamen (z.B. ``linux-modules-5.15.0-177-generic``) muessen
+zulaessig sein.
 
 Damit der LLM-Reviewer keine Pfad-Traversal/Script-Injection-faehigen
 Labels in die UI bringt (Label landet in Cards, Templates, Audit-Metadata).
@@ -66,7 +71,6 @@ pytestmark = pytest.mark.usefixtures("app_env")
         pytest.param("foo<script>", id="script-tag"),
         pytest.param("a" * 65, id="too-long-65"),
         pytest.param("foo bar", id="space-mid"),
-        pytest.param("foo.bar", id="dot"),
         pytest.param("foo:bar", id="colon"),
         pytest.param("foo\x00bar", id="nul-byte"),
         pytest.param("foo\nbar", id="newline"),
@@ -97,6 +101,11 @@ def test_validate_pass1_rejects_label_regex_violation(bad_label: str) -> None:
         "ubuntu_pkg",
         "0",
         "0abc",
+        # v0.9.5: Punkt-haltige Labels (Distro-Pakete mit Version im Namen).
+        "linux-modules-5.15.0-177-generic",
+        "foo.bar",
+        "node.js",
+        "lib.so.6",
     ],
 )
 def test_validate_pass1_accepts_compliant_labels(good_label: str) -> None:
@@ -110,6 +119,27 @@ def test_validate_pass1_accepts_compliant_labels(good_label: str) -> None:
     }
     result = reviewer._validate_pass1_response(payload, [_f(1)])
     assert result.groups[0].label == good_label
+
+
+def test_label_pattern_accepts_dots() -> None:
+    """v0.9.5: Punkt-haltige Labels werden vom Pattern akzeptiert."""
+    from app.services.llm_risk_reviewer import LABEL_PATTERN
+
+    assert LABEL_PATTERN.match("linux-modules-5.15.0-177-generic") is not None
+    assert LABEL_PATTERN.match("foo.bar") is not None
+    assert LABEL_PATTERN.match("a.b.c") is not None
+
+
+def test_label_pattern_still_rejects_invalid_chars() -> None:
+    """v0.9.5: Trotz Punkt-Erweiterung bleiben andere Zeichen verboten."""
+    from app.services.llm_risk_reviewer import LABEL_PATTERN
+
+    assert LABEL_PATTERN.match("foo bar") is None  # Space
+    assert LABEL_PATTERN.match("FooBar") is None  # Uppercase
+    assert LABEL_PATTERN.match("foo!") is None  # Sonderzeichen
+    assert LABEL_PATTERN.match("_foo") is None  # leading underscore
+    assert LABEL_PATTERN.match(".foo") is None  # leading dot (erstes Zeichen muss alnum)
+    assert LABEL_PATTERN.match("-foo") is None  # leading dash
 
 
 def test_validate_pass1_rejects_duplicate_labels() -> None:
