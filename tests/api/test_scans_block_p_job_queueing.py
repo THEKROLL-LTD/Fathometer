@@ -567,16 +567,16 @@ def test_pass1_creates_single_job_when_under_batch_size(db_app: Flask) -> None:
     events = _audit_events(db_app, "llm.jobs_queued")
     assert events[-1].event_metadata is not None
     assert events[-1].event_metadata["pass1_queued"] == 1
-    assert events[-1].event_metadata["pass1_batch_size"] == 100
+    assert events[-1].event_metadata["pass1_batch_size"] == 50
 
 
 def test_pass1_splits_into_batches(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
-    """250 Findings + Batch-Size=100 → 3 Jobs mit Groessen [100, 100, 50]."""
+    """130 Findings + Batch-Size=50 (Default) → 3 Jobs mit Groessen [50, 50, 30]."""
     _set_mode(db_app, "observation")
     _sid, key = register_test_server(db_app, name="srv-p-batch-split")
     client = db_app.test_client()
 
-    resp = _post(client, _envelope(vulns=_many_pending_vulns(250)), bearer=key)
+    resp = _post(client, _envelope(vulns=_many_pending_vulns(130)), bearer=key)
     assert resp.status_code == 202, resp.get_data(as_text=True)[:300]
 
     pass1_jobs = [
@@ -584,18 +584,18 @@ def test_pass1_splits_into_batches(db_app: Flask, monkeypatch: pytest.MonkeyPatc
     ]
     pass1_jobs.sort(key=lambda j: j.id)
     sizes = [len(j.payload["finding_ids"]) for j in pass1_jobs]
-    assert sizes == [100, 100, 50]
+    assert sizes == [50, 50, 30]
 
     # Keine Finding-ID landet in zwei Batches.
     all_ids: list[int] = []
     for job in pass1_jobs:
         all_ids.extend(job.payload["finding_ids"])
-    assert len(all_ids) == len(set(all_ids)) == 250
+    assert len(all_ids) == len(set(all_ids)) == 130
 
     events = _audit_events(db_app, "llm.jobs_queued")
     assert events[-1].event_metadata is not None
     assert events[-1].event_metadata["pass1_queued"] == 3
-    assert events[-1].event_metadata["pass1_batch_size"] == 100
+    assert events[-1].event_metadata["pass1_batch_size"] == 50
 
 
 def _set_batch_size(app: Flask, size: int) -> None:

@@ -172,7 +172,7 @@ class LlmClient:
     Wird typisch per Aufruf ueber `build_client_from_settings(...)` erzeugt.
     """
 
-    def __init__(self, *, base_url: str, api_key: str, model: str, timeout: float = 120.0):
+    def __init__(self, *, base_url: str, api_key: str, model: str, timeout: float = 240.0):
         validated = validate_base_url(base_url)
         self._model = model
         self._timeout = timeout
@@ -295,7 +295,7 @@ class LlmNotConfiguredError(RuntimeError):
 
 
 def build_client_from_settings(
-    setting: Setting, *, encryption_key: str, timeout: float = 120.0
+    setting: Setting, *, encryption_key: str, timeout: float = 240.0
 ) -> LlmClient:
     """Baut einen `LlmClient` aus der `Setting`-Zeile.
 
