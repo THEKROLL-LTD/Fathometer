@@ -4,6 +4,32 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
+**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer + ADR-0022-Risk-Engine + ADR-0023-LLM-Risk-Reviewer + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 + Worker-Stability v0.9.5 + Worker-Idle-Throttle v0.9.6 — v0.9.6 (2026-05-20).**
+
+**Patch v0.9.6 abgeschlossen 2026-05-20 — Worker-Idle-CPU-Optimierung + CI-Build-Speedup.** Direkt auf main committed (`acb162d` CI-Workflow-Fix, `2784a86` Worker-Throttle), Tag `v0.9.6` zeigt auf `2784a86`. Keine Schema-Migration, Spec-Files unverändert.
+
+Operator-Befund nach v0.9.5-Deploy: `secscan-llm-worker`-Pod bei leerer Queue zeigte **219 mCPU** (~22% einer Core) — zu viel für „nichts zu tun". Ursache: `_tick()` lief mit 2s-Cadence durch vier separate SQL-Roundtrips (Budget-Reset, Mode-Check, Budget-Check, Pickup), plus Heartbeat-Thread alle 10s → ~126 Queries/Minute Idle-Last.
+
+Drei Throttling-Mechanismen in `app/workers/llm_worker.py`:
+
+- **Mode-Check-Cache** (`MODE_CHECK_INTERVAL_SEC=30`): `_get_mode_throttled()` cached `settings.block_p_llm_mode` für 30s. Mode-Wechsel wirkt nach <30s. Bei Wechsel `llm_worker.mode_changed from=… to=…` geloggt.
+- **Budget-Check-Cache** (`BUDGET_CHECK_INTERVAL_SEC=60`): `_budget_ok_throttled()` cached Budget-OK für 60s und ruft `maybe_reset_budget` im selben Intervall. Trade-off: bei Budget-Erschöpfung mid-Cycle bis 60s weiter Job-Pickup — paar % Overshoot statt stundenlanger Free-Pass.
+- **Idle-Backoff** (`IDLE_BACKOFF_MAX_SEC=30`, `IDLE_BACKOFF_FACTOR=1.5`): bei leerer Queue wächst Sleep exponentiell von `_poll_interval()` (2s) bis 30s-Cap. Erfolgreicher Pickup resettet sofort → Job-Latency bleibt < 2s bei aktiver Queue.
+
+Erwartete Idle-SQL-Last Steady-State: ~2 Queries/Minute (Stale-Reaper + Heartbeat) statt vorher ~126.
+
+**Test-Helper** `invalidate_throttle_caches_for_tests()` neu — Tests die Mode mid-test wechseln rufen ihn explizit zwischen `_tick()`-Aufrufen.
+
+**CI-Workflow-Fix** in `.github/workflows/release.yml`: arm64-Build temporär abgeschaltet (QEMU-Emulation 5-10× langsamer als nativ); GHA-Cache mit expliziter `scope=release` damit Tag-Builds den Cache über Tag-Grenzen teilen. Erwartete Build-Time von ~7m (v0.9.4) auf ~2-3m beim ersten Run, ~30-60s bei Folge-Tag-Builds mit unverändertem `pyproject.toml`. v0.9.6-Build wird der erste „cold" Run mit `scope=release`-Cache-Write, ab v0.9.7-Tag sollten die `CACHED`-Marker im Build-Log sichtbar werden.
+
+**1609 Tests grün** (+6 v0.9.6: Backoff-Exponential, Reset-bei-Pickup, Mode-Cache 30s, Mode-Refresh, Budget-Cache 60s, Idle-Tick-Backoff). Coverage 91%. `ruff check`/`ruff format --check`/`mypy app/`/`shellcheck agent/*.sh` PASS. Docker-Compose-Up nach Build: drei Container healthy, Worker-Log zeigt initial `llm_worker.mode_changed from=None to=observation` (initialer DB-Read), danach keine weiteren Mode-Queries in den folgenden 30s.
+
+**Operator-Realbetriebs-Impact:** Worker-CPU bei leerer Queue erwartet drastisch runter (von 219 mCPU auf < 50 mCPU). Mode-/Budget-Änderungen werden mit max 30/60s Latenz wirksam — operativ irrelevant.
+
+**Bewusst weggelassen:** weitere Hot-Path-Optimierungen (Stale-Reaper-Throttle, Heartbeat-Cadence-Tuning) — aktueller Befund war primär die 2s-Polling-Cadence der vier SQL-Calls, das ist jetzt addressiert. Falls Idle-CPU nach Deploy noch zu hoch ist, py-spy-Profiling als nächster Schritt.
+
+---
+
 **MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer + ADR-0022-Risk-Engine + ADR-0023-LLM-Risk-Reviewer + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 + Worker-Stability v0.9.5 — v0.9.5 (2026-05-20).**
 
 **Patch v0.9.5 abgeschlossen 2026-05-20 — Worker-Stability-Hotfix nach k8s-Pod-Restart-Loop und blindem Debug-Log.** Branch `fix/v0.9.5-worker-stability`. Vier zusammenhängende Mini-Fixes, keine Schema-Migration, Spec-Files unverändert:
@@ -336,6 +362,8 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 (keiner — v0.9.3-Patch abgeschlossen 2026-05-20, nächster Block oder Patch per User-Entscheidung)
 
 ## Completed
+
+- **v0.9.6-Patch — Worker-Idle-CPU-Throttle + CI-Build-Speedup** · abgeschlossen 2026-05-20 · direkt auf main (`acb162d` CI-Workflow, `2784a86` Worker-Throttle), Tag `v0.9.6` zeigt auf `2784a86`. Mode-/Budget-Cache + Idle-Backoff im Worker reduzieren die Idle-SQL-Last von ~126 Queries/Minute auf ~2; CI-Build-Workflow arm64-only und mit `scope=release` GHA-Cache. 1609 Tests grün (+6 v0.9.6), Coverage 91 %. ruff/format/mypy/shellcheck PASS. Detail siehe Status-Sektion oben. **Tag `v0.9.6` gesetzt.**
 
 - **v0.9.5-Patch — Worker-Stability: LABEL_PATTERN-Spec-Drift + Validator-Meta-an-Exception + Heartbeat-Thread + Logging-Erweiterung** · abgeschlossen 2026-05-20 · Branch `fix/v0.9.5-worker-stability` · Hotfix nach k8s-Pod-Restart-Loop und blindem Debug-Log. Vier zusammenhaengende Mini-Fixes ohne Schema-Migration und ohne Spec-Aenderung. 1603 Tests grün (+12 v0.9.5-Tests), Coverage 91 %. ruff/format/mypy/shellcheck PASS. Docker-Compose-Up zeigt das neue `heartbeat_thread_started`-Log; drei Container healthy. Detail siehe Status-Sektion oben. Operator-Impact: Pod-Restart-Loop gestoppt, Debug-Log-Tab zeigt echte LLM-Response auch bei Validator-Errors. **Tag `v0.9.5` zu setzen.**
 

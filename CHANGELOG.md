@@ -4,10 +4,10 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v0.9.6] — 2026-05-20
 
-Worker-Idle-CPU-Optimierung und CI-Build-Speedup — kein Tag, wird
-mit dem naechsten Release zusammen ausgeliefert.
+Worker-Idle-CPU-Optimierung und CI-Build-Speedup. Folge-Patch zu
+v0.9.5; keine Schema-Migration, keine Spec-Aenderung.
 
 ### Changed
 
