@@ -962,3 +962,155 @@ def test_pass1_logs_failure_marker_on_validation_error(
         worker_logger.setLevel(prev_level)
         worker_logger.disabled = prev_disabled
         sess.close()
+
+
+# ---------------------------------------------------------------------------
+# v0.9.6: Idle-Backoff + Mode-/Budget-Throttle
+# ---------------------------------------------------------------------------
+
+
+def test_idle_backoff_grows_exponentially_until_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bei aufeinanderfolgenden Leer-Pickups klettert die Sleep-Dauer von
+    ``_poll_interval()`` (2s) ueber Faktor 1.5 hoch bis 30s-Cap."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(llm_worker.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(llm_worker, "_poll_interval", lambda: 2.0)
+
+    llm_worker.invalidate_throttle_caches_for_tests()
+    for _ in range(10):
+        llm_worker._idle_sleep_and_backoff()
+
+    assert sleeps[0] == 2.0
+    assert sleeps[1] == 3.0
+    assert sleeps[2] == 4.5
+    # Cap nach einigen Iterationen erreicht.
+    assert sleeps[-1] == llm_worker.IDLE_BACKOFF_MAX_SEC
+    assert sleeps[-2] == llm_worker.IDLE_BACKOFF_MAX_SEC
+
+
+def test_idle_backoff_resets_on_pickup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nach erfolgreichem Pickup setzt ``_reset_idle_backoff`` den Zaehler
+    zurueck sodass der naechste Idle-Cycle wieder bei 2s startet."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(llm_worker.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(llm_worker, "_poll_interval", lambda: 2.0)
+
+    llm_worker.invalidate_throttle_caches_for_tests()
+    for _ in range(5):
+        llm_worker._idle_sleep_and_backoff()
+    assert sleeps[-1] > 2.0
+
+    llm_worker._reset_idle_backoff()
+    llm_worker._idle_sleep_and_backoff()
+    assert sleeps[-1] == 2.0
+
+
+def test_mode_check_is_cached_30s(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Aufeinanderfolgende ``_get_mode_throttled``-Aufrufe innerhalb des
+    Cache-Fensters lesen die DB nicht erneut."""
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            row = ensure_settings_row(sess)
+            row.block_p_llm_mode = "live"
+            sess.commit()
+
+            llm_worker.invalidate_throttle_caches_for_tests()
+
+            sql_count = {"n": 0}
+            real_ensure = llm_worker.ensure_settings_row
+
+            def _counting_ensure(s: Any) -> Any:
+                sql_count["n"] += 1
+                return real_ensure(s)
+
+            monkeypatch.setattr(llm_worker, "ensure_settings_row", _counting_ensure)
+
+            assert llm_worker._get_mode_throttled() == "live"
+            assert llm_worker._get_mode_throttled() == "live"
+            assert llm_worker._get_mode_throttled() == "live"
+            assert sql_count["n"] == 1
+    finally:
+        sess.close()
+
+
+def test_mode_check_refreshes_after_cache_expiry(db_app: Flask) -> None:
+    """Nach Ablauf des Cache-Intervals wird die DB wieder gelesen."""
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            row = ensure_settings_row(sess)
+            row.block_p_llm_mode = "off"
+            sess.commit()
+
+            llm_worker.invalidate_throttle_caches_for_tests()
+            assert llm_worker._get_mode_throttled() == "off"
+
+            row = ensure_settings_row(sess)
+            row.block_p_llm_mode = "live"
+            sess.commit()
+            # Innerhalb der Cache-Window: noch alter Wert.
+            assert llm_worker._get_mode_throttled() == "off"
+
+            # Cache-Window kuenstlich abgelaufen.
+            llm_worker._mode_cached_at = (
+                llm_worker.time.monotonic() - llm_worker.MODE_CHECK_INTERVAL_SEC - 1
+            )
+            assert llm_worker._get_mode_throttled() == "live"
+    finally:
+        sess.close()
+
+
+def test_budget_check_is_cached_60s(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Budget-Check liest die DB nur alle 60s, nicht pro Tick."""
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            row = ensure_settings_row(sess)
+            row.llm_token_budget_used_today = 0
+            row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=2)
+            sess.commit()
+
+            llm_worker.invalidate_throttle_caches_for_tests()
+
+            sql_count = {"n": 0}
+            real_check = llm_worker.llm_budget.budget_check
+
+            def _counting_check(s: Any) -> bool:
+                sql_count["n"] += 1
+                return real_check(s)
+
+            monkeypatch.setattr(llm_worker.llm_budget, "budget_check", _counting_check)
+
+            assert llm_worker._budget_ok_throttled() is True
+            assert llm_worker._budget_ok_throttled() is True
+            assert llm_worker._budget_ok_throttled() is True
+            assert sql_count["n"] == 1
+    finally:
+        sess.close()
+
+
+def test_tick_idle_uses_backoff_sleep(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.9.6: leere Queue → ``_tick`` schlaeft mit dem Backoff-Wert,
+    der ueber aufeinanderfolgende Idle-Ticks waechst."""
+    sess = _open_sess(db_app)
+    try:
+        with db_app.app_context():
+            row = ensure_settings_row(sess)
+            row.block_p_llm_mode = "live"
+            row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=2)
+            sess.commit()
+
+            sleeps: list[float] = []
+            monkeypatch.setattr(llm_worker.time, "sleep", lambda s: sleeps.append(s))
+            monkeypatch.setattr(llm_worker, "_poll_interval", lambda: 2.0)
+
+            llm_worker.invalidate_throttle_caches_for_tests()
+            llm_worker._tick()
+            llm_worker._tick()
+
+            assert len(sleeps) == 2
+            assert sleeps[0] == 2.0
+            assert sleeps[1] == 3.0
+    finally:
+        sess.close()

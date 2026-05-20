@@ -4,6 +4,66 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Worker-Idle-CPU-Optimierung und CI-Build-Speedup — kein Tag, wird
+mit dem naechsten Release zusammen ausgeliefert.
+
+### Changed
+
+- **Worker-Idle-Polling drastisch reduziert** (``app/workers/
+  llm_worker.py``). Operator-Befund: ``secscan-llm-worker``-Pod
+  zeigt 219 mCPU im Leerlauf bei leerer Queue — zu viel fuer
+  einen Worker der "nichts zu tun" hat. Ursache: ``_tick()`` fuehrt
+  alle 2s vier separate SQL-Roundtrips aus (Budget-Reset, Mode-Check,
+  Budget-Check, Pickup) plus Heartbeat-Thread alle 10s. Ergibt
+  ~126 Queries/Minute Idle-Last.
+
+  Drei Throttling-Mechanismen:
+
+  - **Mode-Check-Cache (``MODE_CHECK_INTERVAL_SEC=30``).**
+    ``_get_mode_throttled()`` cached ``settings.block_p_llm_mode``
+    fuer 30s. Mode-Wechsel via Settings-UI wird nach <30s wirksam.
+    Bei Wechsel wird ``llm_worker.mode_changed from=... to=...``
+    geloggt.
+  - **Budget-Check-Cache (``BUDGET_CHECK_INTERVAL_SEC=60``).**
+    ``_budget_ok_throttled()`` cached die Budget-OK-Antwort fuer 60s
+    und ruft ``maybe_reset_budget`` im selben Intervall. Trade-off:
+    bei Budget-Erschoepfung mid-Cycle koennen noch bis 60s lang Jobs
+    gepickt werden — paar Prozent Overshoot statt stundenlanger
+    Free-Pass.
+  - **Idle-Backoff** (``IDLE_BACKOFF_MAX_SEC=30``,
+    ``IDLE_BACKOFF_FACTOR=1.5``). Bei leerer Queue waechst die
+    Sleep-Dauer exponentiell von ``_poll_interval()`` (2s default)
+    bis 30s-Cap. Erfolgreicher Pickup setzt den Backoff sofort
+    zurueck — Job-Latency bleibt < 2s sobald Jobs reinkommen.
+
+  Erwartete Idle-SQL-Last nach Steady-State (Queue dauerhaft leer):
+  ~2 Queries/Minute (Stale-Reaper + Heartbeat) statt vorher ~126.
+  Bei aktiver Queue keine Aenderung — Job-Pickup laeuft sofort beim
+  ersten Idle-Tick.
+
+  Test-Helper ``invalidate_throttle_caches_for_tests()`` neu —
+  Tests die den Mode mid-test wechseln muessen den Cache explizit
+  invalidieren bevor sie den naechsten ``_tick()`` machen.
+
+- **CI-Build-Workflow** (``.github/workflows/release.yml``): arm64-
+  Build temporaer abgeschaltet (QEMU-Emulation 5-10x langsamer als
+  native amd64); GHA-Cache mit expliziter ``scope=release`` damit
+  Tag-Builds den Cache ueber Tag-Grenzen teilen. Erwartete Buildtime
+  von ~7m (v0.9.4) auf ~2-3m beim ersten Run, ~30-60s bei Folge-
+  Tag-Builds mit unveraendertem ``pyproject.toml``.
+
+### Tests
+
+- 6 neue Worker-Tests fuer Idle-Backoff + Mode-/Budget-Cache.
+- 1 Integration-Test angepasst (Mode-Switch-Test invalidiert
+  Cache explizit).
+- Full-Suite: **1609 passed** (vs. 1603 in v0.9.5), 5 skipped (E2E
+  master-key-abhaengig), 5 deselected (bench/integration).
+  Coverage 91 %. ``ruff check``/``ruff format --check``/``mypy app/``
+  PASS.
+
 ## [v0.9.5] — 2026-05-20
 
 Hotfix-Bundle fuer den Block-P-Worker. Vier zusammenhaengende Mini-

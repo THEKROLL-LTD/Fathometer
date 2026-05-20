@@ -85,6 +85,23 @@ STALE_REAPER_INTERVAL_SEC: float = 60.0
 # v0.9.3 (ADR-0023 §"(e) LLM-Debug-Log-Tabelle"): Eviction-Sub-Tick fuer
 # `llm_debug_log`. Wir laufen alle 10 Minuten (analog Stale-Reaper-Cadence).
 DEBUG_LOG_EVICTION_INTERVAL_SEC: float = 600.0
+# v0.9.6: Idle-CPU-Reduktion. Mode-Wechsel ist Operator-Action; alle 2s die
+# Settings-Row zu pollen ist Verschwendung. Cache 30s — Mode-Switch wird also
+# binnen <30s wirksam, was operativ vollkommen ausreicht.
+MODE_CHECK_INTERVAL_SEC: float = 30.0
+# v0.9.6: Budget-Check throttle. Token-Budget aendert sich nur post-LLM-Call
+# (via budget_consume) — Idle-Worker sieht keine Aenderung. 60s-Cadence
+# bedeutet: bei Budget-Erschoepfung mid-Cycle koennen noch bis zu ~60s lang
+# Jobs gepickt werden bevor die Pause greift. Akzeptabel — ein paar Prozent
+# ueber dem Daily-Cap ist operativ irrelevant, Hauptsache nicht stundenlang
+# overshoot.
+BUDGET_CHECK_INTERVAL_SEC: float = 60.0
+# v0.9.6: Idle-Backoff. Bei leerer Queue klettert die Sleep-Dauer exponentiell
+# von `worker_poll_interval_sec` (2s default) hoch bis zum Cap. Bei jedem
+# erfolgreichen Pickup wird der Backoff sofort wieder auf den Default-Poll
+# resettet — Job-Latency bleibt damit < 2s sobald die Queue gefuellt wird.
+IDLE_BACKOFF_MAX_SEC: float = 30.0
+IDLE_BACKOFF_FACTOR: float = 1.5
 
 
 def _poll_interval() -> float:
@@ -117,6 +134,17 @@ _shutdown: bool = False
 _last_heartbeat_at: float = 0.0
 _last_reaper_at: float = 0.0
 _last_debug_log_eviction_at: float = 0.0
+
+# v0.9.6: Mode-/Budget-Caching + Idle-Backoff. Reduziert die Idle-SQL-Last
+# (vorher ~120 Queries/Minute bei leerer Queue) drastisch.
+_cached_mode: str | None = None
+_mode_cached_at: float = 0.0
+_cached_budget_ok: bool = True
+_budget_cached_at: float = 0.0
+# Aktuelle Sleep-Dauer bei leerer Queue. ``None`` = noch nie idle gewesen
+# (oder direkt nach Pickup zurueckgesetzt). Beim ersten Idle-Tick startet
+# der Backoff bei ``_poll_interval()``.
+_idle_backoff_sec: float | None = None
 
 # v0.9.5: Heartbeat-Daemon-Thread + Stop-Event. Damit der Heartbeat
 # unabhaengig vom (potentiell 30-120s blockierenden) LLM-Call im
@@ -201,6 +229,26 @@ def reset_shutdown_for_tests() -> None:
     # v0.9.5: Stop-Event clearen damit Test-Re-Runs den Heartbeat-Thread
     # nicht im Stop-State festhalten.
     _heartbeat_thread_stop.clear()
+    # v0.9.6: Mode-/Budget-Cache + Idle-Backoff zwischen Test-Runs zuruecksetzen.
+    invalidate_throttle_caches_for_tests()
+
+
+def invalidate_throttle_caches_for_tests() -> None:
+    """Test-Hook — leert die v0.9.6-Throttle-Caches.
+
+    Wird vom autouse-``reset_shutdown_for_tests`` aufgerufen, kann aber auch
+    *innerhalb* eines Tests genutzt werden wenn die Test-Logik den Mode oder
+    Budget-Zustand mid-test aendert und einen frischen DB-Read im naechsten
+    ``_tick()`` braucht (sonst wuerde der Cache noch den alten Wert
+    zurueckliefern — siehe ``MODE_CHECK_INTERVAL_SEC = 30s``).
+    """
+    global _cached_mode, _mode_cached_at, _cached_budget_ok, _budget_cached_at
+    global _idle_backoff_sec
+    _cached_mode = None
+    _mode_cached_at = 0.0
+    _cached_budget_ok = True
+    _budget_cached_at = 0.0
+    _idle_backoff_sec = None
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +300,87 @@ def _read_mode_safe() -> str:
         return "off"
 
 
+def _get_mode_throttled() -> str:
+    """Liest ``settings.block_p_llm_mode`` mit Cache.
+
+    v0.9.6: bei einer Cadence von 2s das Settings-Row zu lesen ist Idle-CPU-
+    Verschwendung. Mode-Wechsel ist Operator-Action, ein Cache von 30s ist
+    operativ unbedenklich. Defensive Default ``off`` bei DB-Fehler.
+    """
+    global _cached_mode, _mode_cached_at
+    now = time.monotonic()
+    if _cached_mode is None or (now - _mode_cached_at) > MODE_CHECK_INTERVAL_SEC:
+        try:
+            with get_session() as session:
+                row = ensure_settings_row(session)
+                new_mode = str(row.block_p_llm_mode or "off")
+        except Exception:  # pragma: no cover — DB-Hickup
+            log.exception("llm_worker.mode_check_failed defaulting_to_off")
+            new_mode = "off"
+        if new_mode != _cached_mode:
+            log.info("llm_worker.mode_changed from=%s to=%s", _cached_mode, new_mode)
+        _cached_mode = new_mode
+        _mode_cached_at = now
+    return _cached_mode
+
+
+def _budget_ok_throttled() -> bool:
+    """Prueft Budget mit Cache + macht den 00:00-UTC-Reset wenn faellig.
+
+    v0.9.6: Token-Budget aendert sich nur post-LLM-Call (via ``budget_consume``)
+    — ein Idle-Worker sieht hier keine Aenderung, das Pollen alle 2s ist
+    verschwendet. 60s Cache bedeutet: nach Budget-Erschoepfung koennen noch
+    bis ~60s lang Jobs gepickt werden. Operativ irrelevant — paar Prozent
+    Overshoot, kein stundenlanger Free-Pass.
+
+    Ruft ``maybe_reset_budget`` im selben Throttle-Interval damit der
+    00:00-UTC-Reset zuverlaessig binnen 60s greift.
+    """
+    global _cached_budget_ok, _budget_cached_at
+    now = time.monotonic()
+    if (now - _budget_cached_at) > BUDGET_CHECK_INTERVAL_SEC:
+        try:
+            with get_session() as session:
+                llm_budget.maybe_reset_budget(session)
+                ok = llm_budget.budget_check(session)
+                if not ok:
+                    # v0.9.5: Budget-Erschoepfung explizit loggen.
+                    log.warning("llm_worker.budget_exhausted job_pickup_paused")
+                    llm_budget.mark_exhausted_audit_once(session)
+                else:
+                    log.debug("llm_worker.budget_check_passed")
+        except Exception:  # pragma: no cover — DB-Hickup
+            log.exception("llm_worker.budget_check_failed defaulting_to_ok")
+            ok = True
+        _cached_budget_ok = ok
+        _budget_cached_at = now
+    return _cached_budget_ok
+
+
+def _idle_sleep_and_backoff() -> None:
+    """Sleep bei leerer Queue mit exponentieller Backoff bis Cap.
+
+    Bei jedem aufeinanderfolgenden Leer-Pickup steigt die Sleep-Dauer um
+    ``IDLE_BACKOFF_FACTOR``, max ``IDLE_BACKOFF_MAX_SEC``. Reset auf
+    ``_poll_interval()`` erfolgt im Caller sobald ein Pickup gelingt.
+    """
+    global _idle_backoff_sec
+    if _idle_backoff_sec is None:
+        _idle_backoff_sec = _poll_interval()
+    else:
+        _idle_backoff_sec = min(
+            _idle_backoff_sec * IDLE_BACKOFF_FACTOR,
+            IDLE_BACKOFF_MAX_SEC,
+        )
+    time.sleep(_idle_backoff_sec)
+
+
+def _reset_idle_backoff() -> None:
+    """Setzt den Idle-Backoff zurueck — Caller ruft das beim Pickup."""
+    global _idle_backoff_sec
+    _idle_backoff_sec = None
+
+
 def _tick() -> None:
     """Einzelne Iteration der Worker-Schleife.
 
@@ -259,6 +388,11 @@ def _tick() -> None:
     laeuft jetzt in einem Daemon-Thread (siehe `_heartbeat_loop`), damit
     er auch wenn `_process_job` 60-120s im LLM-Call blockiert weiter
     tickt und die k8s livenessProbe nicht den Pod kickt.
+
+    v0.9.6: Mode-Check, Budget-Check und Budget-Reset throttled ueber
+    Modul-Caches (siehe ``_get_mode_throttled`` und ``_budget_ok_throttled``).
+    Bei leerer Queue klettert die Sleep-Dauer exponentiell bis 30s
+    (``_idle_sleep_and_backoff``). Reduziert die Idle-SQL-Last drastisch.
     """
     global _last_reaper_at, _last_debug_log_eviction_at
     now_mono = time.monotonic()
@@ -273,34 +407,25 @@ def _tick() -> None:
         _run_debug_log_eviction()
         _last_debug_log_eviction_at = now_mono
 
-    # Budget-Reset pruefen (passiert um 00:00 UTC).
-    with get_session() as session:
-        llm_budget.maybe_reset_budget(session)
-
-    # Mode-Check — bei `off` kein Pickup.
-    with get_session() as session:
-        row = ensure_settings_row(session)
-        mode = str(row.block_p_llm_mode or "off")
-
+    # Mode-Check (cached 30s).
+    mode = _get_mode_throttled()
     if mode == "off":
-        time.sleep(_poll_interval())
+        _idle_sleep_and_backoff()
         return
 
-    # Budget-Check — bei Erschoepfung pausieren.
-    with get_session() as session:
-        if not llm_budget.budget_check(session):
-            # v0.9.5: Budget-Erschoepfung explizit loggen (vorher nur Audit).
-            log.warning("llm_worker.budget_exhausted job_pickup_paused")
-            llm_budget.mark_exhausted_audit_once(session)
-            time.sleep(_poll_interval())
-            return
-        log.debug("llm_worker.budget_check_passed")
+    # Budget-Check (cached 60s) — inkludiert maybe_reset_budget.
+    if not _budget_ok_throttled():
+        _idle_sleep_and_backoff()
+        return
 
     job_id = _pick_next_job_id()
     if job_id is None:
-        time.sleep(_poll_interval())
+        _idle_sleep_and_backoff()
         return
 
+    # Pickup erfolgreich — Backoff zuruecksetzen, damit der naechste Idle-
+    # Cycle wieder bei `_poll_interval()` startet.
+    _reset_idle_backoff()
     _process_job(job_id, mode)
 
 

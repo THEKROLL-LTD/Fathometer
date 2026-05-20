@@ -347,6 +347,9 @@ def test_mode_switch_observation_to_live_changes_worker_behavior(
         finally:
             sess.close()
 
+    # v0.9.6: Mode-Cache invalidieren — sonst sieht der naechste Tick noch
+    # das gecachte "observation" und der Test schlaegt fehl.
+    llm_worker.invalidate_throttle_caches_for_tests()
     llm_worker._tick()
     assert mock_reviewer.pass1_call_count == 1
 
