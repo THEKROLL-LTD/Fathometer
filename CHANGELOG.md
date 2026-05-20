@@ -4,7 +4,104 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
-## [v0.9.3] — TBD
+## [v0.9.4] — 2026-05-20
+
+Hotfix-Patch zu Block P (ADR-0023). Behebt den 400-BadRequestError
+aus dem Worker-Log:
+
+    Requested input length 231381 exceeds maximum input length 131071
+
+Pass-1 (group_detection) hat in einem einzigen LLM-Request alle un-
+groupierten pending Findings eines Servers gerendert — bei realer
+Flotte sprengt das die 131k-Token-Context-Window von
+``openai/gpt-oss-120b``. Vier zusammenhaengende Mini-Fixes, eine
+Migration entfaellt (kein Schema-Change).
+
+### Fixed
+
+- **Pass-1-Batching mit Affinity-Sort.** ``app/api/scans.py``
+  Block-P-Hook splittet ungroupierte Findings jetzt in Batches à
+  ``llm_pass1_findings_per_batch`` (Default 100, konfigurierbar via
+  ``SECSCAN_LLM_PASS1_FINDINGS_PER_BATCH``, range 5..2000). Vor dem
+  Split laeuft ein deterministischer Affinity-Sort
+  (``app/services/group_matcher.py::affinity_sort_for_pass1``) nach
+  ``(target_path-Top-3-Segments, package_name, id)`` — Findings die
+  zur selben Owner-Application gehoeren landen damit benachbart und
+  gehen im selben Chunk zum LLM. Idempotenz von Group-Labels via
+  ``temperature=0`` (Fix 2) + Backend-Merge in
+  ``_persist_pass1_groups`` (via Label-Lookup) macht Cross-Batch-
+  Konsistenz robust ohne Schema-Change. Pass-2-Jobs haengen via
+  ``depends_on`` am LETZTEN Pass-1-Job des Batches — Single-
+  Concurrency-Worker verarbeitet sie in created_at ASC, also alle
+  vorherigen Batches sind ``done`` bevor Pass-2 startet.
+
+- **``temperature=0`` im LLM-Call.** ``chat_completion_json_with_meta``
+  in ``app/services/llm_risk_reviewer.py`` setzt jetzt explizit
+  ``temperature=0`` im SDK-Aufruf. Spec
+  (``docs/blocks/P-evidence/prompt-pass{1,2}-final.md``) hatte das
+  immer vorgesehen, im Worker-Call fehlte es bisher — Spec-Drift.
+  Hilft der Label-Idempotenz fuer das Pass-1-Batching (Fix 1).
+
+- **``BadRequestError`` wird als LLM-Fehler klassifiziert.**
+  ``app/workers/llm_worker.py::_classify_error`` und die
+  ``is_timeout_or_llm``-Marker-Liste erkennen jetzt OpenAI-SDK-
+  Fehler (``BadRequestError``, ``APIStatusError``, ``error code:``)
+  als ``llm_api_error`` statt ``other``. Folge: Audit-Metadata und
+  Worker-Log markieren den Fehler korrekt als LLM-bezogen.
+
+- **Docker-Healthcheck-Timeout 5s → 10s** fuer den
+  ``secscan-llm-worker``-Container. Pre-existing Issue seit
+  Block-P-v0.9.1 (Slim-Healthcheck): Cold-Python-Process plus
+  DB-Connect dauert unter ARM64/RKE2 ~6s, 5s Timeout produzierte
+  ``unhealthy`` trotz funktionalem Worker. Heartbeat-Cadence intern
+  (10s) und Healthcheck-Schwellwert (30s) sind unveraendert —
+  Probe-Latenz ist davon entkoppelt.
+
+### Added
+
+- ``probe_response_format.py`` (Operator-Diagnose-Skript,
+  ``ruff.toml``-Exclude analog ``probe_gpt_oss.py``): testet
+  ``response_format``-Varianten gegen DeepInfra + GPT-OSS-120B mit
+  vollem Error-Body-Print, dokumentiert dass alle vier Varianten
+  (json_schema strict=True/False, json_object, none) 200 OK
+  liefern — ``response_format`` war NICHT der 400-Grund.
+
+### Changed
+
+- ``llm.jobs_queued``-Audit-Event-Metadata: ``pass1_queued`` zaehlt
+  jetzt die Anzahl Batches (statt 0/1), neue Felder
+  ``pass1_batch_size`` (None falls keine Pass-1-Jobs queued).
+
+### Tests
+
+- 20 neue Tests gesamt (4 Affinity-Sort-Unit-Tests in
+  ``tests/services/test_group_matcher.py``, 5 Batching-Tests in
+  ``tests/api/test_scans_block_p_job_queueing.py``, 2
+  ``temperature=0``-Asserts in ``tests/services/
+  test_llm_risk_reviewer.py``, 9 Error-Klassifikations-Tests in
+  ``tests/workers/test_error_classification.py``). Full-Suite:
+  **1591 passed**, 5 skipped, 5 deselected. Coverage haelt 91 %.
+
+### Spec-Files unveraendert
+
+- ADR-0023 ``Update v0.9.3``-Sektion, ``docs/blocks/P-evidence/
+  prompt-pass{1,2}-final.md`` — v0.9.4 ist reines Verteilungs-/
+  Latenz-Fix, keine Bewertungs-Semantik-Aenderung.
+
+### Worker-Impact
+
+Bei einer realen Flotte mit ~9000 ungroupierten Findings (User-
+Beobachtung am 2026-05-20):
+- vorher: 1 Pass-1-Job mit 231k Tokens → 400 → 3x failed →
+  ``status='failed'``, kein Block-P-Output
+- nachher: ~90 Pass-1-Jobs à 100 Findings, jeweils ~25k Tokens →
+  alle 200 → Groups werden inkrementell via Label-Merge in
+  ``application_groups`` aufgebaut.
+
+Cost-Schaetzung bei DeepInfra-Preisen: ~$0.30 fuer den initialen
+9000-Findings-Re-Eval, danach traegt der GroupMatcher-Cache.
+
+## [v0.9.3] — 2026-05-20
 
 Pass-1-Prompt-Iteration und Modell-Default-Wechsel fuer Block P
 (ADR-0023). Kein Schema-Change, keine Migration. Reine Logik- und

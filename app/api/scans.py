@@ -50,7 +50,11 @@ from app.schemas.scan_envelope import Envelope
 from app.services.agent_version import version_lt
 from app.services.findings_ingest import ingest_scan as run_ingest
 from app.services.findings_ingest import server_is_active
-from app.services.group_matcher import GroupMatcher, apply_matches_for_server
+from app.services.group_matcher import (
+    GroupMatcher,
+    affinity_sort_for_pass1,
+    apply_matches_for_server,
+)
 from app.services.host_state_ingest import persist_host_state
 from app.services.llm_fingerprints import group_findings_fingerprint
 from app.services.risk_engine import RiskBand, pretriage
@@ -400,15 +404,32 @@ def ingest_scan() -> Response | tuple[Response, int]:
             .all()
         )
         pass1_job_id: int | None = None
+        pass1_batches_count = 0
+        cfg = cast(Settings, current_app.config["SECSCAN_SETTINGS"])
+        batch_size = cfg.llm_pass1_findings_per_batch
         if ungrouped:
-            pass1_job = LLMJob(
-                job_type="group_detection",
-                server_id=server.id,
-                payload={"finding_ids": [f.id for f in ungrouped]},
-            )
-            sess.add(pass1_job)
-            sess.flush()
-            pass1_job_id = pass1_job.id
+            # v0.9.4: Affinity-Sort + Batch-Split. Ein einziger Pass-1-Job
+            # mit allen ungrouped Findings konnte das 131k-Context-Window
+            # von gpt-oss-120b sprengen (231k Input-Tokens beobachtet).
+            # Sort gruppiert Findings derselben Owner-Application benachbart,
+            # damit der Batch-Split keinen Bundle-Kontext zerreisst.
+            sorted_findings = affinity_sort_for_pass1(ungrouped)
+            sorted_ids = [f.id for f in sorted_findings]
+            batches = [
+                sorted_ids[i : i + batch_size] for i in range(0, len(sorted_ids), batch_size)
+            ]
+            last_job: LLMJob | None = None
+            for batch_ids in batches:
+                job = LLMJob(
+                    job_type="group_detection",
+                    server_id=server.id,
+                    payload={"finding_ids": batch_ids},
+                )
+                sess.add(job)
+                sess.flush()  # job.id verfuegbar — Pass-2 haengt am letzten
+                last_job = job
+            pass1_job_id = last_job.id if last_job is not None else None
+            pass1_batches_count = len(batches)
 
         # 3) Fuer jede betroffene Group ein Pass-2-Job, sofern Fingerprint
         # sich geaendert hat oder noch keine Bewertung existiert.
@@ -468,7 +489,11 @@ def ingest_scan() -> Response | tuple[Response, int]:
             target_type="server",
             target_id=server.id,
             metadata={
-                "pass1_queued": 1 if pass1_job_id is not None else 0,
+                # v0.9.4: ehemals 0/1, jetzt N (Batch-Count). Bestandstests
+                # die gegen 0/1 geprueft haben wurden auf den konkreten
+                # Batch-Count angepasst.
+                "pass1_queued": pass1_batches_count,
+                "pass1_batch_size": batch_size if pass1_batches_count else None,
                 "pass2_queued": pass2_queued,
                 "mode": settings_row.block_p_llm_mode,
             },

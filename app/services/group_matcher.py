@@ -17,6 +17,7 @@ Match-Pass :meth:`GroupMatcher.reload` auf, damit die Library frisch ist.
 from __future__ import annotations
 
 import fnmatch
+from collections.abc import Sequence
 from threading import Lock
 
 from sqlalchemy import func, select
@@ -188,4 +189,36 @@ def derive_group_kind(
     return "os_package"
 
 
-__all__ = ["GroupMatcher", "apply_matches_for_server", "derive_group_kind"]
+def affinity_sort_for_pass1(findings: Sequence[Finding]) -> list[Finding]:
+    """Sortiert Findings nach (target_path-Top-3-Segments, package_name).
+
+    Ziel: Findings die zur selben Owner-Application gehoeren landen
+    benachbart und damit beim Batch-Split im selben Chunk. Das LLM
+    sieht dann den Cross-Language-/Multi-Path-Kontext (Pass-1-Regel 6
+    und 7) und kann Bundle-Group-Labels konsistent vergeben.
+
+    Sort-Key:
+      - primaer: Top-3-Path-Segments des target_path
+        (z.B. "/var/lib/rancher" oder "/home/webapp")
+      - sekundaer: package_name (haelt gleiche OS-Pakete beieinander)
+      - tertiaer: id (deterministischer Tiebreak)
+    """
+
+    def _key(f: Finding) -> tuple[str, str, int]:
+        path = f.target_path or ""
+        parts = path.split("/")
+        # parts[0] ist leer wenn path mit / beginnt; nimm die ersten
+        # drei nicht-leeren Segments
+        segs = [p for p in parts if p]
+        bucket = "/" + "/".join(segs[:3]) if segs else ""
+        return (bucket, f.package_name or "", int(f.id))
+
+    return sorted(findings, key=_key)
+
+
+__all__ = [
+    "GroupMatcher",
+    "affinity_sort_for_pass1",
+    "apply_matches_for_server",
+    "derive_group_kind",
+]

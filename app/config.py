@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     # Depth gegen runaway-Outputs).
     llm_pass1_max_tokens: int = Field(default=4096, ge=256, le=32768)
     llm_pass2_max_tokens: int = Field(default=2048, ge=256, le=32768)
+    # Pass-1-Batch-Cap. Default 100 = ~25k Input-Tokens (sicher unter
+    # 131k Context-Window von gpt-oss-120b). Operator kann via
+    # SECSCAN_LLM_PASS1_FINDINGS_PER_BATCH ueberschreiben.
+    llm_pass1_findings_per_batch: int = Field(default=100, ge=5, le=2000)
 
     # ----- Block P (ADR-0023) — Worker- und Token-Budget-Settings -----
     # Tages-Token-Budget. Worker pausiert beim Erreichen des Limits bis zum

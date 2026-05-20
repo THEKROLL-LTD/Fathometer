@@ -27,7 +27,11 @@ from app.models import (
     FindingType,
     Severity,
 )
-from app.services.group_matcher import GroupMatcher, apply_matches_for_server
+from app.services.group_matcher import (
+    GroupMatcher,
+    affinity_sort_for_pass1,
+    apply_matches_for_server,
+)
 from tests._helpers import register_test_server
 
 
@@ -283,3 +287,65 @@ def test_empty_library_returns_none_when_unloaded(db_app: Flask) -> None:
     matcher = GroupMatcher.get()
     f = _make_finding(server_id, package_name="anything")
     assert matcher.match(f) is None
+
+
+# ---------------------------------------------------------------------------
+# v0.9.4 — affinity_sort_for_pass1 (Pass-1-Batching)
+# ---------------------------------------------------------------------------
+
+
+def _bare_finding(fid: int, *, target_path: str | None, package_name: str = "p") -> Finding:
+    """Lightweight Finding ohne DB — affinity_sort_for_pass1 ist rein in-memory."""
+    f = _make_finding(server_id=1, target_path=target_path, package_name=package_name)
+    f.id = fid
+    return f
+
+
+def test_affinity_sort_groups_same_path_prefix() -> None:
+    """Findings mit gleichem Top-3-Pfad-Prefix landen benachbart."""
+    findings = [
+        _bare_finding(10, target_path="/d/e/f/y.py"),
+        _bare_finding(11, target_path="/a/b/c/x.py"),
+        _bare_finding(12, target_path="/a/b/c/z.py"),
+    ]
+    sorted_ = affinity_sort_for_pass1(findings)
+    ids = [f.id for f in sorted_]
+    # /a/b/c/* kommt vor /d/e/f/* (lexikografisch); beide /a/b/c-Findings
+    # liegen benachbart.
+    assert ids == [11, 12, 10]
+
+
+def test_affinity_sort_handles_empty_target_path() -> None:
+    """Findings ohne target_path landen in einem eigenen Bucket — kein Crash."""
+    findings = [
+        _bare_finding(1, target_path="/a/b/c/x"),
+        _bare_finding(2, target_path=None),
+        _bare_finding(3, target_path=""),
+    ]
+    sorted_ = affinity_sort_for_pass1(findings)
+    # Empty-Path-Bucket "" kommt vor "/a/b/c" (lexikografisch),
+    # die beiden empty-path findings liegen aneinander.
+    ids = [f.id for f in sorted_]
+    assert ids[:2] == [2, 3]
+    assert ids[-1] == 1
+
+
+def test_affinity_sort_deterministic_for_identical_keys() -> None:
+    """Identischer Pfad + Package → Tiebreak nach id ASC."""
+    findings = [
+        _bare_finding(5, target_path="/x/y/z/a", package_name="pkg"),
+        _bare_finding(3, target_path="/x/y/z/a", package_name="pkg"),
+        _bare_finding(4, target_path="/x/y/z/a", package_name="pkg"),
+    ]
+    sorted_ = affinity_sort_for_pass1(findings)
+    assert [f.id for f in sorted_] == [3, 4, 5]
+
+
+def test_affinity_sort_secondary_key_is_package_name() -> None:
+    """Gleicher Top-3-Pfad-Prefix → Sort innerhalb nach package_name."""
+    findings = [
+        _bare_finding(1, target_path="/a/b/c/file1", package_name="zlib"),
+        _bare_finding(2, target_path="/a/b/c/file2", package_name="alpha"),
+    ]
+    sorted_ = affinity_sort_for_pass1(findings)
+    assert [f.id for f in sorted_] == [2, 1]

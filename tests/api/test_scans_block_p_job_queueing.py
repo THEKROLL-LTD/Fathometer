@@ -536,3 +536,210 @@ def test_group_matcher_reload_picks_up_new_group_between_ingests(
     assert len(server_b_jobs) == 1
     assert server_b_jobs[0].job_type == "risk_evaluation"
     assert server_b_jobs[0].payload["group_id"] == grp_id
+
+
+# ---------------------------------------------------------------------------
+# v0.9.4 — Pass-1-Batching mit Affinity-Sort
+# ---------------------------------------------------------------------------
+
+
+def _many_pending_vulns(count: int, *, pkg_prefix: str = "pkg") -> list[dict[str, Any]]:
+    """Erzeugt ``count`` distinkte HIGH-Severity-Vulns mit verschiedenen Paketen."""
+    return [
+        _pending_vuln(f"CVE-2024-{50_000 + i:05d}", pkg=f"{pkg_prefix}-{i:03d}")
+        for i in range(count)
+    ]
+
+
+def test_pass1_creates_single_job_when_under_batch_size(db_app: Flask) -> None:
+    """50 ungrouped Findings + Default-Batch-Size=100 → genau 1 group_detection-Job."""
+    _set_mode(db_app, "observation")
+    _sid, key = register_test_server(db_app, name="srv-p-batch-small")
+    client = db_app.test_client()
+
+    resp = _post(client, _envelope(vulns=_many_pending_vulns(50)), bearer=key)
+    assert resp.status_code == 202, resp.get_data(as_text=True)[:300]
+
+    pass1_jobs = [j for j in _all_jobs(db_app) if j.job_type == "group_detection"]
+    assert len(pass1_jobs) == 1
+    assert len(pass1_jobs[0].payload["finding_ids"]) == 50
+
+    events = _audit_events(db_app, "llm.jobs_queued")
+    assert events[-1].event_metadata is not None
+    assert events[-1].event_metadata["pass1_queued"] == 1
+    assert events[-1].event_metadata["pass1_batch_size"] == 100
+
+
+def test_pass1_splits_into_batches(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """250 Findings + Batch-Size=100 → 3 Jobs mit Groessen [100, 100, 50]."""
+    _set_mode(db_app, "observation")
+    _sid, key = register_test_server(db_app, name="srv-p-batch-split")
+    client = db_app.test_client()
+
+    resp = _post(client, _envelope(vulns=_many_pending_vulns(250)), bearer=key)
+    assert resp.status_code == 202, resp.get_data(as_text=True)[:300]
+
+    pass1_jobs = [
+        j for j in _all_jobs(db_app) if j.job_type == "group_detection" and j.server_id == _sid
+    ]
+    pass1_jobs.sort(key=lambda j: j.id)
+    sizes = [len(j.payload["finding_ids"]) for j in pass1_jobs]
+    assert sizes == [100, 100, 50]
+
+    # Keine Finding-ID landet in zwei Batches.
+    all_ids: list[int] = []
+    for job in pass1_jobs:
+        all_ids.extend(job.payload["finding_ids"])
+    assert len(all_ids) == len(set(all_ids)) == 250
+
+    events = _audit_events(db_app, "llm.jobs_queued")
+    assert events[-1].event_metadata is not None
+    assert events[-1].event_metadata["pass1_queued"] == 3
+    assert events[-1].event_metadata["pass1_batch_size"] == 100
+
+
+def _set_batch_size(app: Flask, size: int) -> None:
+    """Setzt llm_pass1_findings_per_batch im App-Settings-Singleton."""
+    from app.config import Settings
+
+    settings: Settings = app.config["SECSCAN_SETTINGS"]
+    # Pydantic v2 BaseSettings: Field-Assign ist erlaubt mit model_copy oder
+    # direkt via __dict__ — wir mutieren in-place fuer den Test.
+    object.__setattr__(settings, "llm_pass1_findings_per_batch", size)
+
+
+def test_pass1_affinity_sort_groups_by_path_prefix(db_app: Flask) -> None:
+    """6 Findings mit zwei verschiedenen Top-3-Pfad-Prefixen, Batch-Size=3.
+
+    Erwartung: Batch 1 enthaelt ausschliesslich Findings aus einem Pfad-Cluster,
+    Batch 2 enthaelt ausschliesslich Findings des anderen.
+    """
+    _set_batch_size(db_app, 3)
+    _set_mode(db_app, "observation")
+    _sid, key = register_test_server(db_app, name="srv-p-affinity")
+    client = db_app.test_client()
+
+    # 3 Lang-Pkg-Findings unter /home/webapp/...
+    # 3 OS-Pkg-Findings (kein target_path == "" → eigener Bucket)
+    webapp_vulns = [
+        {
+            "VulnerabilityID": f"CVE-2024-60{i:03d}",
+            "PkgName": f"flask-dep-{i}",
+            "InstalledVersion": "1.0",
+            "Severity": "HIGH",
+            "PkgPath": f"/home/webapp/lib/dep{i}.py",
+        }
+        for i in range(3)
+    ]
+    # OS-Pkgs (kein PkgPath in Trivy-Output → target_path bleibt leer/parent).
+    os_vulns = [_pending_vuln(f"CVE-2024-70{i:03d}", pkg=f"sys-pkg-{i}") for i in range(3)]
+
+    # Trivy-Envelope mit zwei Results: einer lang-pkgs (mit Pfaden), einer os-pkgs.
+    envelope = {
+        "agent_version": "0.3.0",
+        "host": {
+            "os_family": "ubuntu",
+            "os_version": "22.04",
+            "os_pretty_name": "Ubuntu 22.04",
+            "kernel_version": "5.15.0",
+            "architecture": "x86_64",
+            "trivy_version": "0.70.2",
+        },
+        "scan": {
+            "SchemaVersion": 2,
+            "Trivy": {"Version": "0.70.2"},
+            "Results": [
+                {
+                    "Target": "/home/webapp/Pipfile.lock",
+                    "Class": "lang-pkgs",
+                    "Type": "pipenv",
+                    "Vulnerabilities": webapp_vulns,
+                },
+                {
+                    "Target": "ubuntu",
+                    "Class": "os-pkgs",
+                    "Type": "ubuntu",
+                    "Vulnerabilities": os_vulns,
+                },
+            ],
+        },
+        "host_state": _minimal_host_state(),
+    }
+    resp = _post(client, envelope, bearer=key)
+    assert resp.status_code == 202, resp.get_data(as_text=True)[:300]
+
+    pass1_jobs = [
+        j for j in _all_jobs(db_app) if j.job_type == "group_detection" and j.server_id == _sid
+    ]
+    pass1_jobs.sort(key=lambda j: j.id)
+    assert len(pass1_jobs) == 2, [len(j.payload["finding_ids"]) for j in pass1_jobs]
+
+    findings = _findings(db_app, _sid)
+    by_id = {f.id: f for f in findings}
+
+    def _cluster(finding_ids: list[int]) -> set[str]:
+        clusters: set[str] = set()
+        for fid in finding_ids:
+            f = by_id[fid]
+            tp = f.target_path or ""
+            if tp.startswith("/home/webapp"):
+                clusters.add("webapp")
+            else:
+                clusters.add("os")
+        return clusters
+
+    clusters_batch0 = _cluster(pass1_jobs[0].payload["finding_ids"])
+    clusters_batch1 = _cluster(pass1_jobs[1].payload["finding_ids"])
+    # Jeder Batch hat genau einen Cluster (keine Vermischung).
+    assert len(clusters_batch0) == 1
+    assert len(clusters_batch1) == 1
+    # Die beiden Batches haben verschiedene Cluster.
+    assert clusters_batch0 != clusters_batch1
+
+
+def test_pass2_depends_on_last_pass1_job(db_app: Flask) -> None:
+    """Bei mehreren Pass-1-Batches zeigt Pass-2.depends_on auf den HOECHSTEN
+    Pass-1-Job (Worker verarbeitet ORDER BY created_at, der letzte ist erst
+    `done` wenn alle vorherigen durch sind)."""
+    _set_batch_size(db_app, 50)
+    _set_mode(db_app, "observation")
+    # Bestehende Library-Group, damit auch ein Pass-2-Job entsteht.
+    _insert_group(db_app, label="grouped-pkg", pkg_name_exact=["grouped-pkg"])
+    _sid, key = register_test_server(db_app, name="srv-p-batch-dep")
+    client = db_app.test_client()
+
+    # 120 ungrouped + 1 grouped (matched library).
+    ungrouped = _many_pending_vulns(120, pkg_prefix="ungroup")
+    grouped = [_pending_vuln("CVE-2024-99999", pkg="grouped-pkg")]
+    resp = _post(client, _envelope(vulns=ungrouped + grouped), bearer=key)
+    assert resp.status_code == 202
+
+    server_jobs = [j for j in _all_jobs(db_app) if j.server_id == _sid]
+    pass1_jobs = sorted(
+        (j for j in server_jobs if j.job_type == "group_detection"),
+        key=lambda j: j.id,
+    )
+    pass2_jobs = [j for j in server_jobs if j.job_type == "risk_evaluation"]
+
+    assert len(pass1_jobs) == 3  # 120 / 50 → 50,50,20
+    assert len(pass2_jobs) == 1
+    assert pass2_jobs[0].depends_on == pass1_jobs[-1].id
+
+
+def test_jobs_queued_audit_includes_batches_count(db_app: Flask) -> None:
+    """Audit-Event ``llm.jobs_queued`` enthaelt ``pass1_queued=N`` und
+    ``pass1_batch_size`` (= konfigurierte Cap)."""
+    _set_batch_size(db_app, 50)
+    _set_mode(db_app, "observation")
+    _sid, key = register_test_server(db_app, name="srv-p-batch-audit")
+    client = db_app.test_client()
+
+    resp = _post(client, _envelope(vulns=_many_pending_vulns(120)), bearer=key)
+    assert resp.status_code == 202
+
+    events = _audit_events(db_app, "llm.jobs_queued")
+    assert len(events) == 1
+    meta = events[0].event_metadata
+    assert meta is not None
+    assert meta["pass1_queued"] == 3
+    assert meta["pass1_batch_size"] == 50

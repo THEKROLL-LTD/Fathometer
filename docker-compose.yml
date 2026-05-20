@@ -81,9 +81,14 @@ services:
       SECSCAN_LLM_CACHE_MAX_ROWS: ${SECSCAN_LLM_CACHE_MAX_ROWS:-100000}
       SECSCAN_LOG_LEVEL: ${SECSCAN_LOG_LEVEL:-INFO}
     healthcheck:
+      # timeout: 10s — Cold-Python-Process + DB-Connect liegt unter ARM64-RKE2
+      # bei ~6s gemessen (v0.9.4-Befund). 5s waren zu knapp und produzierten
+      # false-unhealthy trotz funktionalem Worker. Heartbeat-Cadence intern
+      # ist 10s, Schwellwert im Healthcheck 30s — die Probe-Latenz selbst
+      # ist davon entkoppelt.
       test: ["CMD", "python", "-m", "app.workers.healthcheck"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
       start_period: 20s
 

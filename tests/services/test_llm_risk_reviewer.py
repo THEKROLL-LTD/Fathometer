@@ -34,6 +34,8 @@ from app.services.llm_risk_reviewer import (
     LLMRiskReviewer,
     _extract_json_from_response,
     _extract_reasoning,
+    chat_completion_json,
+    chat_completion_json_with_meta,
 )
 
 # ---------------------------------------------------------------------------
@@ -809,3 +811,60 @@ class TestGptOssSmokeMockMode:
         assert [g.label for g in result.groups] == ["openssl"]
         assert result.groups[0].finding_ids == [1, 2]
         assert meta["extracted_json"].endswith("}")
+
+
+# ---------------------------------------------------------------------------
+# v0.9.4 — temperature=0 wird im SDK-Call gesetzt
+# ---------------------------------------------------------------------------
+
+
+class _CapturingSDK:
+    """Mock-SDK das die `create()`-kwargs aufzeichnet und ein Minimal-Response liefert."""
+
+    def __init__(self, response_payload: dict[str, Any] | str) -> None:
+        self._payload = response_payload
+        self.calls: list[dict[str, Any]] = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs: Any) -> Any:
+        self.calls.append(dict(kwargs))
+        content = json.dumps(self._payload) if isinstance(self._payload, dict) else self._payload
+        message = SimpleNamespace(content=content)
+        choice = SimpleNamespace(message=message)
+        return SimpleNamespace(choices=[choice], usage=None)
+
+
+class _CapturingClient:
+    def __init__(self, response_payload: dict[str, Any] | str) -> None:
+        self._sdk = _CapturingSDK(response_payload)
+        self.model = "mock-model"
+
+
+@pytest.mark.asyncio
+async def test_chat_completion_json_with_meta_sets_temperature_zero() -> None:
+    """v0.9.4 Fix 2: ``chat_completion_json_with_meta`` MUSS ``temperature=0``
+    an das SDK reichen (Spec: P-evidence/prompt-pass{1,2}-final.md)."""
+    client = _CapturingClient({"ok": True})
+    _parsed, _meta = await chat_completion_json_with_meta(
+        client,  # type: ignore[arg-type]
+        system_prompt="sys",
+        user_prompt="usr",
+        schema={},
+        max_tokens=100,
+    )
+    assert len(client._sdk.calls) == 1
+    assert client._sdk.calls[0]["temperature"] == 0
+
+
+@pytest.mark.asyncio
+async def test_chat_completion_json_sets_temperature_zero() -> None:
+    """Backward-Compat-Wrapper reicht ``temperature=0`` mit weiter."""
+    client = _CapturingClient({"ok": True})
+    _ = await chat_completion_json(
+        client,  # type: ignore[arg-type]
+        system_prompt="sys",
+        user_prompt="usr",
+        schema={},
+        max_tokens=100,
+    )
+    assert client._sdk.calls[0]["temperature"] == 0

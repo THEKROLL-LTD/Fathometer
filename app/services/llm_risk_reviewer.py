@@ -422,6 +422,10 @@ async def chat_completion_json_with_meta(
             ],
             stream=False,
             max_tokens=max_tokens,
+            # v0.9.4: explizit temperature=0 wie in P-evidence/prompt-pass{1,2}-final.md
+            # spezifiziert — wichtig fuer Idempotenz bei Pass-1-Group-Labels
+            # (Batch-Merge-Logik braucht deterministische Outputs).
+            temperature=0,
             response_format={
                 "type": "json_schema",
                 "json_schema": {

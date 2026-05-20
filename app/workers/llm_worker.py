@@ -1094,7 +1094,18 @@ def _requeue_or_fail(job_id: int, error: str) -> None:
     ``status='failed'`` gesetzt und Audit ``llm.job_failed`` geschrieben.
     """
     is_timeout_or_llm = any(
-        marker in error.lower() for marker in ("timeout", "llminvalidresponse", "llmtimeout")
+        marker in error.lower()
+        for marker in (
+            "timeout",
+            "llminvalidresponse",
+            "llmtimeout",
+            # v0.9.4: OpenAI-SDK-Fehler (z.B. ``BadRequestError`` bei
+            # Context-Window-Ueberschreitung) sollen ebenfalls als
+            # LLM-Fehler klassifiziert werden, damit Audit-Metadata und
+            # Log-Zeile is_llm=True ausweisen.
+            "badrequest",
+            "apistatuserror",
+        )
     )
     with get_session() as session:
         job = session.get(LLMJob, job_id)
@@ -1152,6 +1163,11 @@ def _classify_error(error: str) -> str:
         return "timeout"
     if "llminvalidresponse" in el:
         return "invalid_response"
+    # v0.9.4: OpenAI-SDK-Fehlerketten — ``BadRequestError`` (z.B.
+    # Context-Window-Ueberschreitung), allgemeines ``APIStatusError``
+    # oder die textuelle ``Error code: NNN``-Markierung.
+    if "badrequest" in el or "apistatuserror" in el or "error code:" in el:
+        return "llm_api_error"
     return "other"
 
 

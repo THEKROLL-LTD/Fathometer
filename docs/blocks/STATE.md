@@ -4,6 +4,28 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
+**MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer + ADR-0022-Risk-Engine + ADR-0023-LLM-Risk-Reviewer + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 — v0.9.4 (2026-05-20).**
+
+**Patch v0.9.4 abgeschlossen 2026-05-20 — Hotfix für 400-BadRequestError aus dem Worker** (`Requested input length 231381 exceeds maximum input length 131071`). Branch `fix/v0.9.4-pass1-batching`. Vier zusammenhängende Mini-Fixes, keine Schema-Migration:
+
+- **(1) Pass-1-Batching mit Affinity-Sort.** `app/api/scans.py` Block-P-Hook splittet ungroupierte Findings in Batches à `llm_pass1_findings_per_batch` (Default 100, range 5..2000, ENV-konfigurierbar via `SECSCAN_LLM_PASS1_FINDINGS_PER_BATCH`) nach deterministischem Affinity-Sort im neuen Helper `app/services/group_matcher.py::affinity_sort_for_pass1` (Sort-Key `(target_path-Top-3-Segments, package_name, id)`). Pass-2-Jobs hängen via `depends_on` am letzten Pass-1-Job des Batches — Single-Concurrency-Worker arbeitet `llm_jobs` ORDER BY created_at ab, alle Pass-1-Batches sind also `done` bevor Pass-2 startet. Cross-Batch-Konsistenz für Group-Labels über Label-Idempotenz (`temperature=0` aus Fix 2) plus Backend-Merge in `_persist_pass1_groups`.
+
+- **(2) `temperature=0` im LLM-Call.** `chat_completion_json_with_meta` in `app/services/llm_risk_reviewer.py` setzt jetzt explizit `temperature=0` — Spec-Drift behoben, P-evidence-Files hatten das immer vorgesehen.
+
+- **(3) `BadRequestError`/`APIStatusError` als LLM-Fehler klassifiziert.** `app/workers/llm_worker.py::_classify_error` und die `is_timeout_or_llm`-Marker-Liste erkennen OpenAI-SDK-Fehler jetzt als `llm_api_error` (statt `other`). Audit-Metadata und Worker-Log markieren entsprechend.
+
+- **(4) Docker-Compose-Healthcheck-Timeout 5s → 10s** für den `secscan-llm-worker`-Container (`docker-compose.yml`). Pre-existing seit v0.9.1: Cold-Python-Probe inkl. DB-Connect dauert unter ARM64 ~6s, 5s waren zu knapp. Heartbeat-Cadence intern (10s) und Healthcheck-Schwellwert (30s) unverändert.
+
+**1591 Tests grün (+20 neue v0.9.4-Tests: 4 Affinity-Sort, 5 Pass-1-Batching mit Audit-Count und Pass-2-depends_on-Verifikation, 2 `temperature=0`-Asserts, 9 Error-Classification). Coverage 91 %** (Threshold 85 %). `ruff check`/`ruff format --check`/`mypy app/`/`shellcheck agent/*.sh` PASS. `docker compose up -d --build` startet drei Container alle healthy nach ~30s, `/healthz` 200. Image-Size unverändert ~192 MB.
+
+**Operator-Impact** bei 9000-Findings-Flotte (User-Beobachtung 2026-05-20): vorher 1 Pass-1-Job mit 231k Tokens → 3× 400 → `status='failed'`, kein Block-P-Output; **nachher** ~90 Pass-1-Jobs à 100 Findings (~25k Tokens je Job) sequenziell sauber, ApplicationGroups inkrementell aufgebaut via Label-Merge. Cost-Schätzung bei DeepInfra-Preisen: ~$0.30 für den initialen Re-Eval, danach trägt der GroupMatcher-Cache.
+
+**Operator-Diagnose-Skript** `probe_response_format.py` im Repo (analog `probe_gpt_oss.py` im `ruff.toml`-Exclude) — testet `response_format`-Varianten gegen DeepInfra mit vollem Error-Body-Print, dokumentiert dass alle vier Varianten 200 OK liefern (das war NICHT der 400-Grund).
+
+**Spec-Files unverändert** (ADR-0023 Update v0.9.3, P-evidence/prompt-pass{1,2}-final.md) — v0.9.4 ist reines Verteilungs-/Latenz-Fix ohne Bewertungs-Semantik-Änderung. **Tag `v0.9.4` zu setzen.**
+
+---
+
 **MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer + ADR-0022-Risk-Engine + ADR-0023-LLM-Risk-Reviewer + Block-P-Iteration v0.9.3 — v0.9.3 (2026-05-20).**
 
 **Patch v0.9.3 abgeschlossen 2026-05-20 — sieben zusammenhängende Block-P-Anpassungen** (kein neuer Block, ein konsolidiertes Patch-Release mit einer einzigen Alembic-Migration `0007_block_p_v093.py`). Branch `feat/v0.9.3-block-p-iteration`. Reviewer **APPROVE** (alle 29 DoD-Items grün, drei kosmetische Doku-NOTES adressiert). Security-Auditor **ACCEPTABLE WITH NOTES → APPROVED** (alle acht Pflicht-Punkte PASS, Privacy-Disclaimer im Debug-Log-Tab als Hotfix nachgereicht). **1571 Tests grün (+94 vs. v0.9.0; +81 neue v0.9.3-Tests in 5 Buckets plus 13 Fix-Anpassungen für Tuple-Return-Refactor und neue Pass-2-action_type-Pflicht in Adversarial-/Worker-Tests). Coverage **91 %** (Threshold 85 %). `ruff check`/`ruff format --check`/`mypy app/` (70 source files)/`shellcheck agent/*.sh` PASS. Alembic-Roundtrip (0006 ↔ 0007) PASS gegen Postgres-17-Container. `docker compose up -d --build` startet drei Container (`db`, `app`, `secscan-llm-worker`) healthy nach ~25s, `/healthz` 200, `/settings/llm-reviewer` 302 (Login-Redirect erwartet). Image-Size unverändert ~192 MB (kein Lib-Hinzufügen, nur Code-Erweiterung).
@@ -296,6 +318,8 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 (keiner — v0.9.3-Patch abgeschlossen 2026-05-20, nächster Block oder Patch per User-Entscheidung)
 
 ## Completed
+
+- **v0.9.4-Patch — Pass-1-Batching mit Affinity-Sort + `temperature=0` + Error-Klassifikation + Docker-Healthcheck-Timeout** · abgeschlossen 2026-05-20 · Branch `fix/v0.9.4-pass1-batching` · Hotfix nach Worker-Beobachtung `Requested input length 231381 exceeds maximum input length 131071`. Vier zusammenhaengende Mini-Fixes ohne Schema-Migration. 1591 Tests grün (+20 v0.9.4-Tests in vier Buckets), Coverage 91%. `ruff check`/`ruff format --check`/`mypy app/` (70 source files)/`shellcheck agent/*.sh` PASS. Drei-Container-Compose-Up healthy nach ~30s. Detail siehe Status-Sektion oben. Operator-Impact: 9000-Findings-Flotte braucht jetzt ~90 Pass-1-Jobs à 100 Findings statt 1 Riesen-Job-400-Loop. **Tag `v0.9.4` zu setzen.**
 
 - **v0.9.3-Patch — Block-P-Iteration: Pass-1-/Pass-2-Prompt-Iteration + Modell-Default-Wechsel + Tags-Exclusion + Risk-Band-Reduktion + `action_type`/`group_kind` + „Was zu tun ist"-UI + Reasoning-Block-Parser + defensive Listener-Interpretation + `llm_debug_log`** · abgeschlossen 2026-05-20 · Branch `feat/v0.9.3-block-p-iteration` · Reviewer **APPROVE** (29/29 DoD-Items grün; drei kosmetische Doku-NOTES als Re-Open-Trigger gelistet). Security-Auditor **ACCEPTABLE WITH NOTES → APPROVED** (8/8 Pflicht-Punkte PASS; Privacy-Disclaimer im Debug-Log-Template als Hotfix nachgereicht). 1571 Tests grün (+94 vs. v0.9.0), Coverage 91%; 421+ adversarial PASS (mit `action_type`-Pflicht und Combo-Whitelist-Erweiterung in den existierenden Pass-2-Adversarials). `ruff check`/`ruff format --check`/`mypy app/` (70 source files)/`shellcheck agent/*.sh` PASS. Alembic-Roundtrip 0006↔0007 PASS gegen Postgres-17. Drei-Container-Compose-Up healthy. Image-Size unverändert ~192 MB. **Tag `v0.9.3` zu setzen.** Detail siehe Status-Sektion oben. Optionale Folge-PRs: README-DSGVO-Hinweis für Host-Snapshot-Felder beim externen LLM-Provider; CHANGELOG-Stil-Konsolidierung.
 
