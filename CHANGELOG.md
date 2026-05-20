@@ -4,6 +4,51 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [v0.9.2] — 2026-05-20
+
+Bugfix-Release. Schliesst eine Distribution-Luecke aus Block-O (ADR-0022),
+die die komplette Block-P-LLM-Pipeline auf produzierten Hosts silently
+deaktiviert hat.
+
+### Fixed
+
+- **``lib_host_state.sh`` wird vom Bootstrap-Installer mit ausgeliefert.**
+  Die in Block O eingefuehrte Host-State-Collector-Library wurde nie ins
+  Whitelist-Set in ``app/views/agent_install.py`` aufgenommen und nie
+  vom ``/install.sh``-Template heruntergeladen. Folge auf jedem Host
+  ohne manuell kopierte Library: der Agent loggt
+  ``Warning: lib_host_state.sh not found next to agent; host_state will
+  be omitted``, das Envelope landet ohne ``host_state`` am Backend, die
+  Pre-Triage greift Regel 1 (kein Snapshot) und setzt **alle** Findings
+  auf ``risk_band=unknown``. Der Block-P-Scan-Ingest-Hook filtert aber
+  auf ``risk_band=pending`` und queue't damit nie einen Pass-1-Job —
+  die LLM-Pipeline laeuft nicht an, der Worker pollt eine leere Queue.
+
+  Zwei Aenderungen, gemeinsam wirksam:
+  - ``_AGENT_FILE_WHITELIST`` um ``lib_host_state.sh`` erweitert.
+    ``GET /agent/files/lib_host_state.sh`` liefert jetzt ``200``.
+  - ``download_agent_script()`` im ``install.sh.j2``-Template auf einen
+    Loop ``(secscan-agent.sh, lib_host_state.sh)`` umgestellt. Beide
+    Files landen mit Mode 0755 in ``$SECSCAN_BIN_DIR``.
+
+### Tests
+
+- ``tests/views/test_agent_install.py``:
+  - ``test_agent_files_serves_lib_host_state_sh`` verifiziert HTTP 200
+    + ``text/x-shellscript`` + identifizierenden Marker.
+  - ``test_install_sh_downloads_lib_host_state`` greppt das gerenderte
+    Installer-Template auf den Loop-Eintrag — Regression-Schutz, falls
+    jemand spaeter wieder nur ``secscan-agent.sh`` allein faehrt.
+
+### Compat
+
+- Operator-Hinweis: bereits installierte Hosts profitieren erst nach
+  einem Re-Run von ``/install.sh`` (oder einem manuellen ``scp`` der
+  Library). Sobald der naechste Scan mit ``host_state`` ankommt, rechnet
+  die Pre-Triage automatisch alle ``unknown``-Findings neu — die werden
+  zu ``pending``/``monitor``/``noise`` umsortiert und der Block-P-Hook
+  queue't dann den Pass-1-Job.
+
 ## [v0.9.1] — 2026-05-20
 
 Bugfix-Release. Behebt einen Liveness/Readiness-Probe-Restart-Loop des

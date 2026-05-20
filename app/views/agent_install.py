@@ -33,7 +33,18 @@ agent_install_bp = Blueprint("agent_install", __name__)
 # Whitelist der lieferbaren Agent-Files. `send_from_directory` schuetzt
 # zusaetzlich gegen Path-Traversal, aber die Whitelist macht den Schutz
 # explizit und auditbar.
-_AGENT_FILE_WHITELIST: frozenset[str] = frozenset({"secscan-agent.sh", "secscan-register.sh"})
+#
+# `lib_host_state.sh` (Block O, ADR-0022) wird vom `secscan-agent.sh` als
+# Source-Library erwartet. Fehlt sie, kommt `host_state` nicht im Envelope
+# an → Pre-Triage faellt auf `risk_band=unknown` → Block-P-LLM-Pipeline
+# wird silently disabled. Daher zwingend mit ausliefern (v0.9.2).
+_AGENT_FILE_WHITELIST: frozenset[str] = frozenset(
+    {
+        "secscan-agent.sh",
+        "secscan-register.sh",
+        "lib_host_state.sh",
+    }
+)
 
 
 @agent_install_bp.route("/agent/version", methods=["GET"])

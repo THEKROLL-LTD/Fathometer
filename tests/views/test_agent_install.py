@@ -80,6 +80,23 @@ def test_agent_files_serves_secscan_register_sh(db_app: Flask) -> None:
     assert "secscan-register.sh" in body or "secscan-register" in body
 
 
+def test_agent_files_serves_lib_host_state_sh(db_app: Flask) -> None:
+    """v0.9.2: ``lib_host_state.sh`` muss ueber die Whitelist erreichbar sein.
+
+    Begruendung: der Bootstrap-Installer laedt diese Library neben
+    ``secscan-agent.sh`` herunter. Fehlt sie auf dem Host, ist ``host_state``
+    im Envelope leer → Pre-Triage liefert ``risk_band=unknown`` → die
+    komplette Block-P-LLM-Pipeline wird silently disabled.
+    """
+    client = db_app.test_client()
+    resp = client.get("/agent/files/lib_host_state.sh")
+    assert resp.status_code == 200
+    assert resp.mimetype == "text/x-shellscript"
+    body = resp.get_data(as_text=True)
+    # Identifizierender Marker aus dem Datei-Header.
+    assert "lib_host_state.sh" in body
+
+
 def test_agent_files_install_sh_not_in_whitelist(db_app: Flask) -> None:
     """`install.sh` ist ein eigenes Endpoint, NICHT ueber `/agent/files/`."""
     client = db_app.test_client()
@@ -143,6 +160,25 @@ def test_install_sh_has_resolved_backend_url(db_app: Flask) -> None:
     # `SECSCAN_URL` ist auf eine echte URL gerendert (Test-Setup: host_url-
     # Fallback).
     assert 'SECSCAN_URL="http' in body
+
+
+def test_install_sh_downloads_lib_host_state(db_app: Flask) -> None:
+    """v0.9.2: das Installer-Template muss ``lib_host_state.sh`` neben
+    ``secscan-agent.sh`` in dasselbe Bin-Directory legen.
+
+    Ohne diesen Download fehlt die Library auf dem Host → Agent sendet
+    kein ``host_state`` → Pre-Triage faellt auf ``risk_band=unknown``,
+    Block-P-LLM-Pipeline ist deaktiviert. Regression-Schutz fuer diese
+    stille Distribution-Luecke.
+    """
+    client = db_app.test_client()
+    body = client.get("/install.sh").get_data(as_text=True)
+    # Download-URL muss im Skript stehen — wir greppen auf den Filename,
+    # nicht auf die volle URL (host-portion variiert nach Umgebung).
+    assert "lib_host_state.sh" in body
+    # Beide Files muessen ueber den Loop iteriert werden (sichert die
+    # gemeinsame Install-Logik ab).
+    assert "secscan-agent.sh lib_host_state.sh" in body
 
 
 def test_install_sh_is_public(db_app: Flask) -> None:
