@@ -36,6 +36,77 @@ from flask import Flask
 from flask.testing import FlaskClient
 
 # ---------------------------------------------------------------------------
+# Auto-Marker (feedback_tests_unit_only)
+# ---------------------------------------------------------------------------
+#
+# Default pytest invocation (`pytest`) laeuft nur Unit-Tests, alles mit
+# echter DB / Live-Service bleibt aussen vor (Acceptance-Suite). Marker
+# werden pfadbasiert vergeben in ``pytest_collection_modifyitems``:
+#
+# - ``acceptance``: Tests die echte Postgres-Migration, ORM-Round-Trips,
+#   Postgres-spezifische Constraints, oder Live-LLM-Integration brauchen.
+#   Standard-Pytest schliesst sie aus (siehe ``pytest.ini`` ``addopts``).
+#   Run via ``pytest -m acceptance`` bei RC-Vorbereitung.
+#
+# - ``todo_mock``: Tests die heute noch echte DB benutzen, aber langfristig
+#   zu Mocks refactored werden sollen (LOW/MED/HIGH-Kategorisierung in
+#   ADR-Anhang). Bleiben aktiv, sind nur zum Wiederfinden markiert.
+#   Run-Liste sehen via ``pytest -m todo_mock --collect-only -q``.
+#
+# Files die in keine der zwei Kategorien fallen sind reine Unit-Tests
+# (kein DB-Fixture noetig) und laufen ohne Marker.
+
+# Files die als Acceptance gelten — hauptsaechlich Migration-Schema-Tests,
+# ORM-Round-Trip-Tests mit Postgres-spezifischen Constraints und Live-E2E.
+_ACCEPTANCE_PATH_PREFIXES: tuple[str, ...] = (
+    "tests/migrations/",
+    "tests/models/",
+    "tests/integration/test_block_p_e2e_live",
+    "tests/integration/test_block_p_e2e_observation",
+    "tests/integration/test_block_p_mode_switch",
+)
+
+# Files die in der LOW-Kategorie sind und schon zu Mocks refactored wurden.
+# Diese werden NICHT mit todo_mock markiert. Wird erweitert wenn weitere
+# LOW-Files migriert sind.
+_MOCKED_UNIT_FILES: frozenset[str] = frozenset(
+    {
+        # Liste wird im Zuge der LOW-Migration erweitert.
+        "tests/audit/test_log_event.py",
+        "tests/services/test_diff_view.py",
+        "tests/services/test_findings_ingest.py",
+        "tests/services/test_findings_ingest_cause_mapping.py",
+        "tests/services/test_findings_ingest_vendor_status.py",
+        "tests/services/test_kev_events.py",
+    }
+)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Auto-Marker pro Test-Pfad."""
+    for item in items:
+        rel_path = str(item.fspath).rsplit("secscan/", 1)[-1]
+
+        if any(rel_path.startswith(p) for p in _ACCEPTANCE_PATH_PREFIXES):
+            item.add_marker(pytest.mark.acceptance)
+            continue
+
+        if rel_path in _MOCKED_UNIT_FILES:
+            continue
+
+        # Verbleibende Tests die DB-Fixtures nutzen: todo_mock-Marker.
+        # Heuristik: wenn das Test-File irgendwo "db_app" oder "migrated_db"
+        # importiert/nutzt, ist es ein DB-abhaengiger Test der refactored
+        # werden muss.
+        try:
+            src = item.fspath.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "db_app" in src or "migrated_db" in src or "postgres_url" in src:
+            item.add_marker(pytest.mark.todo_mock)
+
+
+# ---------------------------------------------------------------------------
 # Block-A-Fixtures (DB-frei).
 # ---------------------------------------------------------------------------
 

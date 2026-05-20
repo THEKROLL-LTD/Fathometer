@@ -1,48 +1,37 @@
-"""Unit-Tests fuer `app.services.diff_view.compute_diff` (Block E).
+"""Unit-Tests fuer `app.services.diff_view.compute_diff` (Block E) ohne DB.
 
-Drei Hauptszenarien:
-- Kein Scan -> alles leer, beide Timestamps `None`.
-- Genau ein Scan -> alle non-resolved Findings landen in `new`,
-  `previous_scan_at=None`.
-- Zwei Scans -> Findings mit `first_seen_at >= previous_scan_at` -> `new`,
-  Findings mit `status=RESOLVED` und `resolved_at >= previous_scan_at` -> `resolved`.
+`compute_diff` macht 1-3 `session.execute(...)`-Calls:
+
+1. Scan-Times (`select(Scan.received_at).order_by(...).limit(2)`) →
+   `.scalars().all()` liefert [current_at, previous_at] oder kuerzer.
+2. Wenn ein Scan: `select(Finding)` fuer New-Bucket → `.scalars().all()`.
+3. Wenn zwei Scans: zwei separate `select(Finding)` (New + Resolved) →
+   `.scalars().all()`.
+
+Wir mocken `session.execute(...).scalars().all()` mit einer side_effect-
+Sequenz und verifizieren die Call-Reihenfolge und das DiffSection-Ergebnis.
 
 `changed=[]` ist **by design** leer (siehe `diff_view`-Modul-Docstring: keine
-Field-Level-History im Schema). Der Test dokumentiert das explizit.
+Field-Level-History im Schema). Wir testen das explizit.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
+from unittest.mock import MagicMock
 
-from flask import Flask
-
-from app.db import get_session_factory
 from app.models import (
     AttackVector,
     Finding,
     FindingClass,
     FindingStatus,
     FindingType,
-    Scan,
     Severity,
 )
 from app.services.diff_view import compute_diff
-from tests._helpers import register_test_server
 
 _T0 = datetime(2026, 4, 1, 9, 0, tzinfo=UTC)
-
-
-def _add(app: Flask, items: list[object]) -> None:
-    factory = get_session_factory(app)
-    with app.app_context():
-        sess = factory()
-        try:
-            for obj in items:
-                sess.add(obj)
-            sess.commit()
-        finally:
-            sess.close()
 
 
 def _new_finding(
@@ -70,133 +59,114 @@ def _new_finding(
     )
 
 
+def _mock_session_with_executes(execute_results: list[Any]) -> MagicMock:
+    """Erzeugt eine MagicMock-Session, deren `.execute()` der Reihe nach durchgeht.
+
+    Jedes Element in `execute_results` ist die `scalars().all()`-Liste die
+    der jeweilige Call liefern soll. So koennen wir die drei moeglichen
+    `compute_diff`-Pfade (0/1/2 Scans) modellieren.
+    """
+    session = MagicMock()
+    execute_returns = []
+    for payload in execute_results:
+        result_obj = MagicMock()
+        result_obj.scalars.return_value.all.return_value = payload
+        execute_returns.append(result_obj)
+    session.execute.side_effect = execute_returns
+    return session
+
+
 # ---------------------------------------------------------------------------
 # Szenarien
 # ---------------------------------------------------------------------------
 
 
-def test_zero_scans_returns_empty_diff(db_app: Flask) -> None:
-    sid, _ = register_test_server(db_app, name="srv-diff-zero")
+def test_zero_scans_returns_empty_diff() -> None:
+    """Keine Scan-Zeiten -> leere DiffSection, beide Timestamps None."""
+    session = _mock_session_with_executes([[]])  # scan-times = []
 
-    factory = get_session_factory(db_app)
-    with db_app.app_context():
-        sess = factory()
-        try:
-            diff = compute_diff(sess, sid)
-        finally:
-            sess.close()
+    diff = compute_diff(session, server_id=1)
 
     assert diff.new == []
     assert diff.resolved == []
     assert diff.changed == []
     assert diff.previous_scan_at is None
     assert diff.current_scan_at is None
+    # Nur EIN execute-Call (Scan-Times).
+    assert session.execute.call_count == 1
 
 
-def test_one_scan_marks_all_findings_as_new(db_app: Flask) -> None:
-    sid, _ = register_test_server(db_app, name="srv-diff-one")
+def test_one_scan_marks_all_findings_as_new() -> None:
+    """Genau ein Scan -> alle non-resolved Findings landen in `new`."""
     scan_at = _T0
-    _add(
-        db_app,
+    open_finding = _new_finding(server_id=1, key="CVE-2026-A001", first_seen_at=scan_at)
+    # RESOLVED-Findings tauchen im "new"-Bucket des Erst-Scans nicht auf —
+    # die Query filtert via `status != RESOLVED`, wir liefern also nur den
+    # Open-Finding.
+
+    session = _mock_session_with_executes(
         [
-            Scan(server_id=sid, received_at=scan_at),
-            _new_finding(server_id=sid, key="CVE-2026-A001", first_seen_at=scan_at),
-            _new_finding(
-                server_id=sid,
-                key="CVE-2026-A002",
-                first_seen_at=scan_at,
-                status=FindingStatus.RESOLVED,
-                resolved_at=scan_at,
-            ),
-        ],
+            [scan_at],  # scan-times = [current]
+            [open_finding],  # findings für New-Bucket
+        ]
     )
 
-    factory = get_session_factory(db_app)
-    with db_app.app_context():
-        sess = factory()
-        try:
-            diff = compute_diff(sess, sid)
-        finally:
-            sess.close()
+    diff = compute_diff(session, server_id=1)
 
-    keys = [f.identifier_key for f in diff.new]
-    # RESOLVED-Findings tauchen im "new"-Bucket des Erst-Scans nicht auf.
-    assert keys == ["CVE-2026-A001"]
+    assert [f.identifier_key for f in diff.new] == ["CVE-2026-A001"]
     assert diff.resolved == []
+    assert diff.changed == []
     assert diff.previous_scan_at is None
     assert diff.current_scan_at == scan_at
+    # Zwei execute-Calls: Scan-Times + New-Bucket.
+    assert session.execute.call_count == 2
 
 
-def test_two_scans_classify_new_and_resolved(db_app: Flask) -> None:
-    """Zwei Scans -> Findings nach `first_seen_at`/`resolved_at` klassifiziert."""
-    sid, _ = register_test_server(db_app, name="srv-diff-two")
+def test_two_scans_classify_new_and_resolved() -> None:
+    """Zwei Scans -> Findings nach `first_seen_at`/`resolved_at` klassifiziert.
+
+    Die SQL-Filter (first_seen_at >= prev_at; resolved_at >= prev_at) werden
+    DB-seitig ausgewertet — wir mocken die schon gefilterten Returns. Test
+    verifiziert dass die zwei Buckets korrekt an `DiffSection` durchgereicht
+    werden.
+    """
     prev_at = _T0
     curr_at = _T0 + timedelta(hours=24)
-    older_at = _T0 - timedelta(hours=1)
-
-    _add(
-        db_app,
-        [
-            Scan(server_id=sid, received_at=prev_at),
-            Scan(server_id=sid, received_at=curr_at),
-            # Bereits vorher gesehen (vor previous_at) -> NICHT in new.
-            _new_finding(server_id=sid, key="CVE-2026-B001", first_seen_at=older_at),
-            # Genau zum previous_at zuerst gesehen -> in new (>= previous_at).
-            _new_finding(server_id=sid, key="CVE-2026-B002", first_seen_at=prev_at),
-            # Nach previous_at zuerst gesehen -> in new.
-            _new_finding(
-                server_id=sid,
-                key="CVE-2026-B003",
-                first_seen_at=prev_at + timedelta(hours=2),
-            ),
-            # Resolved zwischen previous und current -> in resolved.
-            _new_finding(
-                server_id=sid,
-                key="CVE-2026-B004",
-                first_seen_at=older_at,
-                status=FindingStatus.RESOLVED,
-                resolved_at=prev_at + timedelta(hours=3),
-            ),
-            # Resolved VOR previous_at -> nicht in resolved.
-            _new_finding(
-                server_id=sid,
-                key="CVE-2026-B005",
-                first_seen_at=older_at - timedelta(hours=10),
-                status=FindingStatus.RESOLVED,
-                resolved_at=older_at - timedelta(hours=5),
-            ),
-        ],
+    # New-Bucket (first_seen_at >= prev_at)
+    new_b002 = _new_finding(server_id=1, key="CVE-2026-B002", first_seen_at=prev_at)
+    new_b003 = _new_finding(
+        server_id=1,
+        key="CVE-2026-B003",
+        first_seen_at=prev_at + timedelta(hours=2),
+    )
+    # Resolved-Bucket (resolved_at >= prev_at)
+    resolved_b004 = _new_finding(
+        server_id=1,
+        key="CVE-2026-B004",
+        first_seen_at=prev_at - timedelta(hours=10),
+        status=FindingStatus.RESOLVED,
+        resolved_at=prev_at + timedelta(hours=3),
     )
 
-    factory = get_session_factory(db_app)
-    with db_app.app_context():
-        sess = factory()
-        try:
-            diff = compute_diff(sess, sid)
-        finally:
-            sess.close()
+    session = _mock_session_with_executes(
+        [
+            [curr_at, prev_at],  # scan-times (DESC-sortiert)
+            [new_b002, new_b003],  # New-Bucket
+            [resolved_b004],  # Resolved-Bucket
+        ]
+    )
 
-    new_keys = {f.identifier_key for f in diff.new}
-    resolved_keys = {f.identifier_key for f in diff.resolved}
+    diff = compute_diff(session, server_id=1)
 
-    # `new`: first_seen_at >= previous_at.
-    #   B001 first_seen = older_at < prev_at -> NICHT in new.
-    #   B002 first_seen = prev_at            -> in new.
-    #   B003 first_seen = prev_at + 2h       -> in new.
-    #   B004 first_seen = older_at < prev_at -> NICHT in new (aber resolved).
-    #   B005 first_seen sehr alt             -> NICHT in new.
-    assert new_keys == {"CVE-2026-B002", "CVE-2026-B003"}, new_keys
-
-    # `resolved`: status=RESOLVED + resolved_at >= previous_at.
-    #   B004 resolved_at = prev_at + 3h -> in resolved.
-    #   B005 resolved_at sehr alt        -> NICHT.
-    assert resolved_keys == {"CVE-2026-B004"}, resolved_keys
-
+    assert {f.identifier_key for f in diff.new} == {"CVE-2026-B002", "CVE-2026-B003"}
+    assert {f.identifier_key for f in diff.resolved} == {"CVE-2026-B004"}
     assert diff.previous_scan_at == prev_at
     assert diff.current_scan_at == curr_at
+    # Drei execute-Calls: Scan-Times + New + Resolved.
+    assert session.execute.call_count == 3
 
 
-def test_diff_changed_is_empty_documented_limitation(db_app: Flask) -> None:
+def test_diff_changed_is_empty_documented_limitation() -> None:
     """`changed` ist im MVP **immer** leer.
 
     Das Schema persistiert keine Field-Level-History — ein echter Vergleich
@@ -205,22 +175,17 @@ def test_diff_changed_is_empty_documented_limitation(db_app: Flask) -> None:
     deshalb bewusst `changed=[]`. Wenn das je geaendert wird, muss eine
     ADR diesen Test brechen.
     """
-    sid, _ = register_test_server(db_app, name="srv-diff-changed")
-    _add(
-        db_app,
+    prev_at = _T0
+    curr_at = _T0 + timedelta(hours=24)
+    finding = _new_finding(server_id=1, key="CVE-2026-C001", first_seen_at=prev_at)
+
+    session = _mock_session_with_executes(
         [
-            Scan(server_id=sid, received_at=_T0),
-            Scan(server_id=sid, received_at=_T0 + timedelta(hours=24)),
-            _new_finding(server_id=sid, key="CVE-2026-C001", first_seen_at=_T0),
-        ],
+            [curr_at, prev_at],  # scan-times
+            [finding],  # new-bucket
+            [],  # resolved-bucket leer
+        ]
     )
 
-    factory = get_session_factory(db_app)
-    with db_app.app_context():
-        sess = factory()
-        try:
-            diff = compute_diff(sess, sid)
-        finally:
-            sess.close()
-
+    diff = compute_diff(session, server_id=1)
     assert diff.changed == []

@@ -1,14 +1,18 @@
-"""Block O Phase B (ADR-0022) — Vendor-Status + Provider-Severity-Map im Ingest.
+"""Block O Phase B (ADR-0022) — Vendor-Status + Provider-Severity-Map-Mapping.
+
+Unit-Tests fuer die pure Mapping-Logic von `_build_finding_row`/
+`_extract_cause_fields`. Kein DB-Roundtrip noetig — wir verifizieren die
+Felder direkt aus dem dict, das spaeter in den Bulk-Upsert geht.
 
 Cases (Block-O-Brief Task #5 DoD):
-* Trivy `Status="will_not_fix"` → Finding `vendor_status="will_not_fix"`.
+* Trivy `Status="will_not_fix"` → Row-`vendor_status="will_not_fix"`.
 * Trivy `Status="end_of_life"` → `vendor_status="eol"`.
 * Trivy `Status="Foobar"` → `vendor_status="unknown"`.
 * Trivy `Status=None` (kein Feld) → `vendor_status=None`.
-* Trivy `VendorSeverity={"nvd":"high","ubuntu":"medium"}` → 1:1 persistiert.
+* Trivy `VendorSeverity={"nvd":"high","ubuntu":"medium"}` → 1:1.
 * Trivy `VendorSeverity={"nvd":3,"ubuntu":2}` (Integer-Variante) →
   `{"nvd":"high","ubuntu":"medium"}` durch Envelope-Pre-Validator normalisiert.
-* Re-Ingest mit jetzt fehlenden Feldern → Spalten auf NULL.
+* Re-Ingest mit jetzt fehlenden Feldern → Row-Spalten `None`.
 """
 
 from __future__ import annotations
@@ -16,13 +20,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from flask import Flask
-from sqlalchemy import select
-
-from app.db import get_session_factory
-from app.models import Finding, Server
 from app.schemas.scan_envelope import Envelope
-from app.services.findings_ingest import ingest_scan
+from app.services.findings_ingest import _CLASS_MAP, _build_finding_row
+
+_NOW = datetime(2026, 5, 20, 12, 0, 0, tzinfo=UTC)
 
 
 def _envelope(*, vulns: list[dict[str, Any]]) -> Envelope:
@@ -53,43 +54,22 @@ def _envelope(*, vulns: list[dict[str, Any]]) -> Envelope:
     )
 
 
-def _create_server(app: Flask, name: str) -> int:
-    factory = get_session_factory(app)
-    with app.app_context():
-        sess = factory()
-        try:
-            srv = Server(name=name, api_key_hash="x" * 64, expected_scan_interval_h=24)
-            sess.add(srv)
-            sess.flush()
-            sid = srv.id
-            sess.commit()
-            return sid
-        finally:
-            sess.close()
-
-
-def _ingest(app: Flask, server_id: int, env: Envelope) -> None:
-    factory = get_session_factory(app)
-    with app.app_context():
-        sess = factory()
-        try:
-            srv = sess.execute(select(Server).where(Server.id == server_id)).scalar_one()
-            ingest_scan(srv, env, session=sess, now=datetime.now(tz=UTC))
-            sess.commit()
-        finally:
-            sess.close()
-
-
-def _findings(app: Flask, server_id: int) -> list[Finding]:
-    factory = get_session_factory(app)
-    with app.app_context():
-        sess = factory()
-        try:
-            return list(
-                sess.execute(select(Finding).where(Finding.server_id == server_id)).scalars().all()
+def _build_rows(env: Envelope) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for result in env.scan.results:
+        fc = _CLASS_MAP[result.normalized_class()]
+        for vuln in result.vulnerabilities or []:
+            rows.append(
+                _build_finding_row(
+                    server_id=1,
+                    vuln=vuln,
+                    finding_class=fc,
+                    target=result.target,
+                    result=result,
+                    now=_NOW,
+                )
             )
-        finally:
-            sess.close()
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -97,8 +77,7 @@ def _findings(app: Flask, server_id: int) -> list[Finding]:
 # ---------------------------------------------------------------------------
 
 
-def test_vendor_status_will_not_fix(db_app: Flask) -> None:
-    sid = _create_server(db_app, "srv-wnf")
+def test_vendor_status_will_not_fix() -> None:
     env = _envelope(
         vulns=[
             {
@@ -110,14 +89,12 @@ def test_vendor_status_will_not_fix(db_app: Flask) -> None:
             }
         ]
     )
-    _ingest(db_app, sid, env)
-    rows = _findings(db_app, sid)
+    rows = _build_rows(env)
     assert len(rows) == 1
-    assert rows[0].vendor_status == "will_not_fix"
+    assert rows[0]["vendor_status"] == "will_not_fix"
 
 
-def test_vendor_status_end_of_life_normalized_to_eol(db_app: Flask) -> None:
-    sid = _create_server(db_app, "srv-eol")
+def test_vendor_status_end_of_life_normalized_to_eol() -> None:
     env = _envelope(
         vulns=[
             {
@@ -129,13 +106,11 @@ def test_vendor_status_end_of_life_normalized_to_eol(db_app: Flask) -> None:
             }
         ]
     )
-    _ingest(db_app, sid, env)
-    rows = _findings(db_app, sid)
-    assert rows[0].vendor_status == "eol"
+    rows = _build_rows(env)
+    assert rows[0]["vendor_status"] == "eol"
 
 
-def test_vendor_status_foobar_normalized_to_unknown(db_app: Flask) -> None:
-    sid = _create_server(db_app, "srv-foobar")
+def test_vendor_status_foobar_normalized_to_unknown() -> None:
     env = _envelope(
         vulns=[
             {
@@ -147,13 +122,11 @@ def test_vendor_status_foobar_normalized_to_unknown(db_app: Flask) -> None:
             }
         ]
     )
-    _ingest(db_app, sid, env)
-    rows = _findings(db_app, sid)
-    assert rows[0].vendor_status == "unknown"
+    rows = _build_rows(env)
+    assert rows[0]["vendor_status"] == "unknown"
 
 
-def test_vendor_status_missing_field_is_none(db_app: Flask) -> None:
-    sid = _create_server(db_app, "srv-no-status")
+def test_vendor_status_missing_field_is_none() -> None:
     env = _envelope(
         vulns=[
             {
@@ -164,9 +137,8 @@ def test_vendor_status_missing_field_is_none(db_app: Flask) -> None:
             }
         ]
     )
-    _ingest(db_app, sid, env)
-    rows = _findings(db_app, sid)
-    assert rows[0].vendor_status is None
+    rows = _build_rows(env)
+    assert rows[0]["vendor_status"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -174,9 +146,8 @@ def test_vendor_status_missing_field_is_none(db_app: Flask) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_vendor_severity_string_variant_persisted(db_app: Flask) -> None:
-    """Trivy schreibt `VendorSeverity` als lowercase-Strings → 1:1 persistiert."""
-    sid = _create_server(db_app, "srv-vs-str")
+def test_vendor_severity_string_variant_persisted() -> None:
+    """Trivy schreibt `VendorSeverity` als lowercase-Strings → 1:1."""
     env = _envelope(
         vulns=[
             {
@@ -188,14 +159,12 @@ def test_vendor_severity_string_variant_persisted(db_app: Flask) -> None:
             }
         ]
     )
-    _ingest(db_app, sid, env)
-    rows = _findings(db_app, sid)
-    assert rows[0].severity_by_provider == {"nvd": "high", "ubuntu": "medium"}
+    rows = _build_rows(env)
+    assert rows[0]["severity_by_provider"] == {"nvd": "high", "ubuntu": "medium"}
 
 
-def test_vendor_severity_integer_variant_normalized(db_app: Flask) -> None:
-    """Trivy schreibt VendorSeverity als Integer (interner Code) → mapped via INT_MAP."""
-    sid = _create_server(db_app, "srv-vs-int")
+def test_vendor_severity_integer_variant_normalized() -> None:
+    """Integer-Codes 1/2/3/4 werden durch den Envelope-Pre-Validator zu lowercase-Strings."""
     env = _envelope(
         vulns=[
             {
@@ -203,19 +172,17 @@ def test_vendor_severity_integer_variant_normalized(db_app: Flask) -> None:
                 "PkgName": "glibc",
                 "InstalledVersion": "2.35",
                 "Severity": "HIGH",
-                # Integer-Variante: 3=high, 2=medium, 4=critical, 1=low.
+                # 3=high, 2=medium, 4=critical, 1=low.
                 "VendorSeverity": {"nvd": 3, "ubuntu": 2},
             }
         ]
     )
-    _ingest(db_app, sid, env)
-    rows = _findings(db_app, sid)
-    assert rows[0].severity_by_provider == {"nvd": "high", "ubuntu": "medium"}
+    rows = _build_rows(env)
+    assert rows[0]["severity_by_provider"] == {"nvd": "high", "ubuntu": "medium"}
 
 
-def test_vendor_severity_missing_is_none(db_app: Flask) -> None:
-    """Kein `VendorSeverity` im Envelope → Spalte ist None."""
-    sid = _create_server(db_app, "srv-vs-none")
+def test_vendor_severity_missing_is_none() -> None:
+    """Kein `VendorSeverity` im Envelope → Row-Spalte ist None."""
     env = _envelope(
         vulns=[
             {
@@ -226,18 +193,16 @@ def test_vendor_severity_missing_is_none(db_app: Flask) -> None:
             }
         ]
     )
-    _ingest(db_app, sid, env)
-    rows = _findings(db_app, sid)
-    assert rows[0].severity_by_provider is None
+    rows = _build_rows(env)
+    assert rows[0]["severity_by_provider"] is None
 
 
 # ---------------------------------------------------------------------------
-# Re-Ingest: fehlendes Feld -> NULL (Quelle der Wahrheit = aktueller Scan)
+# Re-Ingest: fehlendes Feld -> None (aktueller Scan = Quelle der Wahrheit)
 # ---------------------------------------------------------------------------
 
 
-def test_re_ingest_drops_vendor_status_and_severity_map_when_missing(db_app: Flask) -> None:
-    sid = _create_server(db_app, "srv-reingest-drop")
+def test_re_ingest_drops_vendor_status_and_severity_map_when_missing() -> None:
     env1 = _envelope(
         vulns=[
             {
@@ -250,10 +215,9 @@ def test_re_ingest_drops_vendor_status_and_severity_map_when_missing(db_app: Fla
             }
         ]
     )
-    _ingest(db_app, sid, env1)
-    rows1 = _findings(db_app, sid)
-    assert rows1[0].vendor_status == "will_not_fix"
-    assert rows1[0].severity_by_provider == {"nvd": "medium", "ubuntu": "low"}
+    rows1 = _build_rows(env1)
+    assert rows1[0]["vendor_status"] == "will_not_fix"
+    assert rows1[0]["severity_by_provider"] == {"nvd": "medium", "ubuntu": "low"}
 
     # Zweiter Scan ohne Status und ohne VendorSeverity.
     env2 = _envelope(
@@ -266,8 +230,7 @@ def test_re_ingest_drops_vendor_status_and_severity_map_when_missing(db_app: Fla
             }
         ]
     )
-    _ingest(db_app, sid, env2)
-    rows2 = _findings(db_app, sid)
+    rows2 = _build_rows(env2)
     assert len(rows2) == 1
-    assert rows2[0].vendor_status is None
-    assert rows2[0].severity_by_provider is None
+    assert rows2[0]["vendor_status"] is None
+    assert rows2[0]["severity_by_provider"] is None
