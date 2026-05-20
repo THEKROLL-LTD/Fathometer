@@ -256,7 +256,19 @@ class LLMInvalidResponseError(ValueError):
 
 
 class LLMTimeoutError(RuntimeError):
-    """LLM-Call hat das konfigurierte Timeout ueberschritten."""
+    """LLM-Call hat das konfigurierte Timeout ueberschritten.
+
+    v0.9.x: optionales ``meta``-Attribut analog :class:`LLMInvalidResponseError`
+    damit der Worker beim Debug-Log-Insert auch im Timeout-Pfad die
+    verfuegbaren Felder (model, max_tokens, duration_ms_until_timeout, plus
+    system_prompt/user_prompt sobald der Reviewer-Wrapper sie anhaengt)
+    persistieren kann. Vorher: Timeouts schrieben ``meta=None`` → Debug-Log
+    leer, Operator-Blindheit.
+    """
+
+    def __init__(self, message: str, *, meta: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.meta: dict[str, Any] | None = meta
 
 
 # ---------------------------------------------------------------------------
@@ -451,10 +463,33 @@ async def chat_completion_json_with_meta(
             },
         )
     except TimeoutError as exc:
-        raise LLMTimeoutError(str(exc)) from exc
+        # v0.9.x: meta-Dict an Timeout-Exception haengen (analog zum
+        # LLMInvalidResponseError-Pfad) damit der Debug-Log nicht leer
+        # bleibt. Reviewer-Wrapper (pass1/pass2) reichert um Prompts an.
+        timeout_meta: dict[str, Any] = {
+            "raw_content": None,
+            "extracted_json": None,
+            "reasoning_field": None,
+            "model": client.model,
+            "duration_ms": int((time.monotonic() - started_at) * 1000),
+            "usage": None,
+            "finish_reason": None,
+            "max_tokens": max_tokens,
+        }
+        raise LLMTimeoutError(str(exc), meta=timeout_meta) from exc
     except Exception as exc:  # pragma: no cover — Provider-Quirks
         if type(exc).__name__.lower().find("timeout") >= 0:
-            raise LLMTimeoutError(str(exc)) from exc
+            timeout_meta = {
+                "raw_content": None,
+                "extracted_json": None,
+                "reasoning_field": None,
+                "model": client.model,
+                "duration_ms": int((time.monotonic() - started_at) * 1000),
+                "usage": None,
+                "finish_reason": None,
+                "max_tokens": max_tokens,
+            }
+            raise LLMTimeoutError(str(exc), meta=timeout_meta) from exc
         raise
     duration_ms = int((time.monotonic() - started_at) * 1000)
 
@@ -581,13 +616,26 @@ class LLMRiskReviewer:
         """
         user_prompt = self._render_pass1_prompt(findings)
         cfg = load_settings()
-        response, meta = await chat_completion_json_with_meta(
-            self.client,
-            system_prompt=PASS1_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            schema=PASS1_RESPONSE_SCHEMA,
-            max_tokens=cfg.llm_pass1_max_tokens,
-        )
+        # v0.9.x: try/except um chat_completion_json_with_meta — bei Timeout
+        # ODER frueh-wurf-Invalid-Response (leeren content / JSON-Parse-Fail)
+        # haengt der Helper schon meta an die Exception, aber OHNE die
+        # Prompts. Hier reichern wir um system_prompt/user_prompt an, damit
+        # der Debug-Log im Worker komplett sichtbar ist.
+        try:
+            response, meta = await chat_completion_json_with_meta(
+                self.client,
+                system_prompt=PASS1_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                schema=PASS1_RESPONSE_SCHEMA,
+                max_tokens=cfg.llm_pass1_max_tokens,
+            )
+        except (LLMInvalidResponseError, LLMTimeoutError) as exc:
+            if exc.meta is None:
+                exc.meta = {}
+            exc.meta["system_prompt"] = PASS1_SYSTEM_PROMPT
+            exc.meta["user_prompt"] = user_prompt
+            exc.meta["max_tokens"] = cfg.llm_pass1_max_tokens
+            raise
         meta = dict(meta)
         meta["system_prompt"] = PASS1_SYSTEM_PROMPT
         meta["user_prompt"] = user_prompt
@@ -758,13 +806,22 @@ class LLMRiskReviewer:
         """
         user_prompt = self._render_pass2_prompt(server, groups_with_findings)
         cfg = load_settings()
-        response, meta = await chat_completion_json_with_meta(
-            self.client,
-            system_prompt=PASS2_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            schema=PASS2_RESPONSE_SCHEMA,
-            max_tokens=cfg.llm_pass2_max_tokens,
-        )
+        # v0.9.x: try/except um chat_completion_json_with_meta — analog Pass-1.
+        try:
+            response, meta = await chat_completion_json_with_meta(
+                self.client,
+                system_prompt=PASS2_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                schema=PASS2_RESPONSE_SCHEMA,
+                max_tokens=cfg.llm_pass2_max_tokens,
+            )
+        except (LLMInvalidResponseError, LLMTimeoutError) as exc:
+            if exc.meta is None:
+                exc.meta = {}
+            exc.meta["system_prompt"] = PASS2_SYSTEM_PROMPT
+            exc.meta["user_prompt"] = user_prompt
+            exc.meta["max_tokens"] = cfg.llm_pass2_max_tokens
+            raise
         meta = dict(meta)
         meta["system_prompt"] = PASS2_SYSTEM_PROMPT
         meta["user_prompt"] = user_prompt

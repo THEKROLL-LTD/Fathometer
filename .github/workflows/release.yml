@@ -1,13 +1,22 @@
 name: release
 
-# Baut das Container-Image bei jedem semver-Tag (v*.*.*) und pusht es nach
-# GitHub Container Registry (ghcr.io). Sichtbarkeit des Package muss einmalig
-# in den Repo/Owner-Einstellungen auf "private" gesetzt werden (Settings →
-# Packages → secscan → Change visibility). Workflow selbst pusht nur, er
-# verändert die Sichtbarkeit nicht.
+# Baut das Container-Image und pusht es nach GitHub Container Registry
+# (ghcr.io). Zwei Trigger-Pfade:
+#
+#  - **Tag-Push** (`v*.*.*`): voller Semver-Release. Tags `0.9.7`, `0.9`, `0`,
+#    `latest`, `v0.9.7` werden gesetzt.
+#  - **main-Push**: Dev-Builds mit `sha-<short>`-Tag. Damit kann der Operator
+#    bei Bedarf einen unreleased Commit deployen ohne extra-Tag setzen zu
+#    muessen. `latest` bleibt unberuehrt (zeigt weiter auf den letzten
+#    semver-Release).
+#
+# Sichtbarkeit des Package muss einmalig in den Repo/Owner-Einstellungen auf
+# "private" gesetzt werden (Settings → Packages → secscan → Change
+# visibility). Workflow selbst pusht nur, er verändert die Sichtbarkeit nicht.
 
 on:
   push:
+    branches: [main]
     tags:
       - "v*.*.*"
   # Manuelles Re-Build eines bestehenden Tags möglich, ohne neuen Tag zu
@@ -70,14 +79,17 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.image.outputs.name }}
-          # Bei semver-Tag v0.2.0: ghcr-Tags `0.2.0`, `0.2`, `0`, `latest`.
-          # Plus der raw `v0.2.0`-Tag, falls jemand exakt zitieren will.
+          # Tag-Push (v0.2.0): ghcr-Tags `0.2.0`, `0.2`, `0`, `latest`,
+          #   `v0.2.0` (raw).
+          # main-Push: nur `sha-<short>` (z.B. `sha-3962ac6`). Kein latest,
+          #   kein semver — soll keine "Stable Release"-Erwartung wecken.
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
             type=ref,event=tag
+            type=sha,format=short,enable=${{ github.ref == 'refs/heads/main' }}
           labels: |
             org.opencontainers.image.title=secscan
             org.opencontainers.image.description=Self-hosted Trivy filesystem-scan triage

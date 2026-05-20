@@ -179,10 +179,20 @@ class LlmClient:
         # `openai` SDK akzeptiert leere API-Keys nicht; lokale Ollama-Setups
         # nehmen aber jeden Dummy-String. Wir setzen auf "ollama" wenn leer.
         effective_key = api_key or "ollama"
+        # v0.9.x: SDK-interne Retries ausschalten. Wir haben unseren eigenen
+        # Worker-Retry-Mechanismus (`_requeue_or_fail` mit MAX_ATTEMPTS=3 und
+        # exponential Backoff in `llm_jobs.next_attempt_at`). Doppelte Retries
+        # blockieren den Worker bei DeepInfra-Stoerungen 4-6 Minuten pro
+        # Versuch — beobachtet 2026-05-20: Pass-1-Job 1 mit 6m13s SDK-Retry-
+        # Schleife → Job-Latency vervielfacht, Visibility-Luecke (Debug-Log
+        # bleibt leer waehrend SDK still retried). Mit max_retries=0 fliegt
+        # ein DeepInfra-Fehler sofort hoch, Worker entscheidet via
+        # `_requeue_or_fail` ob requeue-mit-Backoff oder Final-Fail.
         self._sdk: AsyncOpenAI = AsyncOpenAI(
             base_url=validated,
             api_key=effective_key,
             timeout=timeout,
+            max_retries=0,
         )
         # Capture letzte Usage damit der Caller sie nach dem Stream lesen kann.
         self._last_usage: StreamUsage = StreamUsage(prompt_tokens=None, completion_tokens=None)
