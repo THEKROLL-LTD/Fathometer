@@ -319,6 +319,93 @@ parallel-Update-Vorfall beobachtet wird.
 
 ---
 
+## TD-010 — Tailwind via CDN-JIT, nicht via Vite-Build
+
+**Was:** Die App laedt Tailwind v3 als Browser-JIT-Compiler ueber
+`<script src="https://cdn.tailwindcss.com/3.4.16">` (`app/templates/base_app.html`
+und `app/templates/base.html`). Das CDN-Skript scannt zur Browser-Runtime
+den DOM, generiert CSS on-the-fly fuer gefundene Klassen und reagiert
+ueber einen MutationObserver auf DOM-Aenderungen.
+
+**Warum (Symptom):** Beobachtet 2026-05-21 nach Phase-Q-Merge: Klick vom
+Dashboard auf einen Sidebar-Server-Link rendert `/servers/<id>` per HTMX-
+Pane-Swap. Die KPI-Sparkline-SVGs (`_kpi_card.html`, viewBox 0 0 100 100,
+`class="w-full h-full block"`) fielen auf intrinsische Default-Hoehe von
+300 px statt 22 px — Layout komplett zerschossen, bis der Operator manuell
+reloadete. Browser-DevTools bestaetigt: nach HTMX-Swap fehlt die CSS-Regel
+`.h-full { height: 100%; }` komplett in den generierten Rules. `.w-full`
+und `.block` sind da, weil sie schon im Dashboard-Initial-DOM vorkommen.
+
+Ursache: der CDN-JIT-MutationObserver erfasst Klassen-Strings, die noch
+nie im DOM auftauchten, nicht zuverlaessig. Klassen wie `h-full`, die nur
+in HTMX-nachgeladenen Subtrees vorkommen (Server-Detail, Settings-Sub-
+Pages), bekommen kein generiertes CSS. Tailwinds offizielle Doku sagt
+das CDN-Skript ist "for development only, not for production".
+
+**Mitigation aktuell (eingebaut Block-Q-Followup, 2026-05-21):**
+
+1. *Schicht 3:* SVG-Container-Hoehe per Attribut statt CSS-Klasse:
+   `<svg width="100%" height="22" class="block">` statt
+   `class="w-full h-full block"`. Drei Chart-Templates angepasst
+   (`_kpi_card.html`, `_stacked_bar_chart.html`, `_heartbeat_large.html`).
+   SVG-Attribute sind layout-immun gegen jede CSS-Race.
+2. *Schicht 2:* Inline-Safelist im `base_app.html` vor dem CDN-Script-Tag:
+   `window.tailwind.config = { safelist: ["h-full", ...] }`. Garantiert
+   dass die gelisteten Klassen schon beim initialen JIT-Bootstrap CSS
+   bekommen, unabhaengig davon ob sie im Initial-DOM auftauchen.
+3. *Lint-Test:* `tests/templates/test_tailwind_safelist.py` prueft per
+   Unit-Test (kein DB/HTTP), dass alle als high-risk markierten Klassen
+   (`h-full`, `h-screen`, `h-fit`, `min-h-full`, `min-h-screen`), die
+   irgendwo in einem Template benutzt werden, in der Safelist stehen.
+   Verhindert dass ein Frontend-Implementer das Problem unbemerkt
+   reproduziert.
+
+Die Mitigation funktioniert, aber sie ist Pflege-Last: jede neue high-
+risk-Klasse muss in `_HIGH_RISK_CLASSES` und in die Safelist nachgezogen
+werden. Bei arbitrary-value-Klassen (`h-[42px]`, `w-[180px]`) skaliert
+das schlecht.
+
+**Loesung:** Tailwind-CDN-Skript komplett austauschen gegen einen Vite-
+Build-Step, der zur Image-Build-Zeit alle Templates scannt und ein
+deterministisches CSS-Bundle erzeugt. Damit faellt der Browser-Runtime-
+JIT weg, alle Klassen werden Build-Zeit-deterministisch erkannt, der
+MutationObserver-Race ist obsolet.
+
+Stack-Implikation: Vite braucht Node/npm im Build-Stage. ADR-001 hat
+das im MVP-Scope verboten. Mit dieser Migration faellt diese Vorgabe —
+also separate ADR oder Update von ADR-001 als Vorbedingung. Eine ADR-
+konforme Zwischen-Variante waere das Tailwind-Standalone-Binary (~30 MB
+Linux-Binary, kein Node), das den Build ohne npm macht — dafuer fehlt
+aber das Vite-Eco-System (Asset-Versioning, Source-Maps, DaisyUI-Plugin-
+Integration), das mittelfristig ohnehin gewuenscht ist.
+
+Vite-Build-Skizze:
+
+- `frontend/package.json` mit `tailwindcss`, `daisyui`, `@tailwindcss/forms`,
+  `@tailwindcss/typography`, `vite`.
+- `frontend/tailwind.config.js` mit `content: ["../app/templates/**/*.html",
+  "../app/static/js/**/*.js"]` — Tailwind scannt alle Jinja-Templates
+  Build-Zeit.
+- Multi-Stage-Dockerfile: Stage 1 (Node) `npm ci && npm run build` →
+  generiert `app/static/css/app.css`. Stage 2 (Python) kopiert nur das
+  fertige CSS, hat keine Node-Abhaengigkeit zur Runtime.
+- `base_app.html` / `base.html` ersetzen den CDN-Script-Tag durch
+  `<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">`.
+- Safelist + Lint-Test obsolet, koennen geloescht werden.
+
+**Aufwand:** ~3-4 Std fuer den ersten Build-Setup (Vite-Config, Tailwind-
+Config-Migration der CDN-Optionen `?plugins=forms,typography`, Multi-
+Stage-Dockerfile, CI-Anpassung). Plus eine ADR zum ADR-001-Update bzw.
+neuer ADR die Vite-Build-Pipeline begruenden.
+
+**Wann:** Sobald die naechste high-risk-Klasse das Symptom reproduziert
+oder die Safelist >5 Eintraege hat (= Skalierungs-Grenze der Mitigation
+erreicht). Spaetestens bei v1.0 vor Production-Release — CDN-JIT in
+Produktion ist offiziell nicht supported und kann jederzeit von Tailwind
+deprecated werden.
+
+---
+
 ## Konventionen fuer neue Eintraege
 
 - ID: `TD-NNN`, fortlaufend.

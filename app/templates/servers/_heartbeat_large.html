@@ -22,9 +22,12 @@
      - unknown          -> rgba(0,0,0,0.4)
 #}
 {%- set n = cells | length -%}
+{# SVG-Groesse via Attribut statt `w-full h-full`-Klasse: Tailwind-CDN
+   registriert `h-full` nicht zuverlaessig bei HTMX-nachgeladenen Subtrees
+   (TD-010). Attribut-Sizing ist immun gegen den Race. #}
 <div class="w-full" style="height: 56px;">
   <svg viewBox="0 0 50 100" preserveAspectRatio="none"
-       class="w-full h-full block"
+       width="100%" height="56" class="block"
        role="img"
        aria-label="Heartbeat letzte {{ n }} Tage">
     {%- if n > 0 -%}

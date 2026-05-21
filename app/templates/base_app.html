@@ -49,6 +49,26 @@
     })();
   </script>
 
+  {# Tailwind-CDN-Safelist (siehe TD-010):
+     Tailwind-CDN-JIT scannt nur den initialen DOM und generiert CSS-Regeln
+     nur fuer dort gefundene Klassen. Klassen, die ausschliesslich in HTMX-
+     nachgeladenen Subtrees auftauchen (Server-Detail, Settings, etc.),
+     werden vom MutationObserver nicht zuverlaessig erfasst — Layout bricht
+     dann nach Pane-Swap (z.B. h-full ohne CSS -> SVG faellt auf intrinsische
+     Default-Hoehe von 300 px). Diese Safelist garantiert dass die hier
+     gelisteten Klassen schon beim initialen JIT-Bootstrap CSS bekommen.
+     Pflege: Eintrag hinzufuegen sobald eine Klasse in einem HTMX-Subtree-
+     Template auftaucht und auf einer Dashboard-/Login-Initial-Seite fehlt.
+     Der Lint-Test `tests/templates/test_tailwind_safelist.py` schuetzt
+     gegen Drift fuer high-risk-Klassen wie h-full/h-screen. #}
+  <script>
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = {
+      safelist: [
+        "h-full",
+      ],
+    };
+  </script>
   {# Tailwind + DaisyUI via CDN — siehe ADR-0001. Pins identisch zu base.html. #}
   <script src="https://cdn.tailwindcss.com/3.4.16?plugins=forms,typography"></script>
   <link

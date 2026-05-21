@@ -85,7 +85,10 @@
       {%- set vmax = data | max -%}
       {%- set vmin = data | min -%}
       {%- set vrange = vmax - vmin -%}
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block" role="img" aria-label="{{ label }} Verlauf {{ data_len }} Tage">
+      {# SVG-Groesse via Attribut statt `w-full h-full`-Klasse: Tailwind-CDN
+         registriert `h-full` nicht zuverlaessig bei HTMX-nachgeladenen
+         Subtrees (TD-010). Attribut-Sizing ist immun gegen den Race. #}
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" width="100%" height="22" class="block" role="img" aria-label="{{ label }} Verlauf {{ data_len }} Tage">
         {%- if vrange == 0 -%}
         <path d="M0,92 L100,92" fill="none" stroke="{{ stroke_color }}" stroke-width="2.5" stroke-opacity="0.35" stroke-linecap="round" />
         {%- else -%}
@@ -109,7 +112,7 @@
         {%- endif -%}
       </svg>
     {%- else -%}
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block" role="img" aria-label="{{ label }} keine History"></svg>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" width="100%" height="22" class="block" role="img" aria-label="{{ label }} keine History"></svg>
     {%- endif -%}
   </div>
 {%- if _link_url -%}

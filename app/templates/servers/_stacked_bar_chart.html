@@ -12,9 +12,12 @@
    Inline-SVG, keine Chart-Library — ADR-0001.
 #}
 {%- set n = days_data | length -%}
+{# SVG-Groesse via Attribut statt `w-full h-full`-Klasse: Tailwind-CDN
+   registriert `h-full` nicht zuverlaessig bei HTMX-nachgeladenen Subtrees
+   (TD-010). Attribut-Sizing ist immun gegen den Race. #}
 <div class="w-full" style="height: 220px;">
   <svg viewBox="0 0 50 100" preserveAspectRatio="none"
-       class="w-full h-full block"
+       width="100%" height="220" class="block"
        role="img"
        aria-label="Severity Trend ueber {{ n }} Tage">
     {%- if n > 0 -%}
