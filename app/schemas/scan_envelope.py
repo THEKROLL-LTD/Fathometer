@@ -893,6 +893,32 @@ class HostStateBlock(BaseModel):
         return _filter_ascii_strings(v, MAX_SERVICES, MAX_SERVICE_NAME_LENGTH)
 
 
+class TrivyDbBlock(BaseModel):
+    """Top-Level-`trivy_db`-Block aus dem Envelope (Agent >= 0.3.1).
+
+    Trivy 0.70 schreibt `DataSource`/`UpdatedAt` nicht zuverlaessig in
+    `scan.Metadata`. Der Agent extrahiert die echten DB-Metadaten aus
+    `trivy version --format json` und sendet sie separat.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    version: str | None = Field(default=None, max_length=32)
+    updated_at: datetime | None = None
+    next_update_at: datetime | None = None
+    downloaded_at: datetime | None = None
+
+    @field_validator("version")
+    @classmethod
+    def _validate_version(cls, v: str | None) -> str | None:
+        v = _no_nul_bytes(v)
+        if v is None or v == "":
+            return None
+        if not _PRINTABLE_ASCII_RE.match(v):
+            raise ValueError("trivy_db.version muss druckbares ASCII sein")
+        return v
+
+
 class Envelope(BaseModel):
     """Wrapper-Envelope fuer `POST /api/scans`.
 
@@ -907,6 +933,7 @@ class Envelope(BaseModel):
     host: HostBlock
     scan: TrivyReport
     host_state: HostStateBlock | None = None
+    trivy_db: TrivyDbBlock | None = None
 
     @field_validator("agent_version")
     @classmethod
@@ -980,6 +1007,7 @@ __all__: list[str] = [
     "RegisterRequest",
     "TrivyCVSSEntry",
     "TrivyDataSource",
+    "TrivyDbBlock",
     "TrivyEPSSBlock",
     "TrivyMetadata",
     "TrivyOSBlock",

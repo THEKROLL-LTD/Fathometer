@@ -123,6 +123,39 @@ def _safe_vuln(raw_vuln: Any, *, server_name: str) -> TrivyVulnerability | None:
         return None
 
 
+def _extract_trivy_db_meta(envelope: Envelope) -> tuple[str | None, datetime | None]:
+    """Liest Trivy-DB-Version und UpdatedAt aus Envelope oder Metadata-Fallback.
+
+    Bevorzugt den ``envelope.trivy_db``-Top-Level-Block (Agent >= 0.3.1),
+    faellt fuer alte Agents auf ``envelope.scan.metadata.data_source``
+    zurueck.
+
+    Hinweis Legacy-Fallback: ``metadata.data_source.name``/``.id`` liefert
+    den Vuln-Provider-Namen (z.B. ``"ghsa"``, ``"debian"``), NICHT die
+    Trivy-DB-Schema-Version. Das ist ungenau aber besser als NULL —
+    sobald der Host auf Agent >= 0.3.1 aktualisiert ist, liefert der Top-
+    Level-Block die echte Schema-Version (``"2"``).
+    """
+    trivy_db_version: str | None = None
+    trivy_db_updated_at: datetime | None = None
+
+    if envelope.trivy_db is not None:
+        if envelope.trivy_db.version:
+            trivy_db_version = envelope.trivy_db.version
+        if envelope.trivy_db.updated_at is not None:
+            trivy_db_updated_at = envelope.trivy_db.updated_at
+
+    if trivy_db_version is None or trivy_db_updated_at is None:
+        metadata = envelope.scan.metadata
+        if metadata is not None:
+            if trivy_db_version is None and metadata.data_source is not None:
+                trivy_db_version = metadata.data_source.name or metadata.data_source.id
+            if trivy_db_updated_at is None and metadata.updated_at is not None:
+                trivy_db_updated_at = metadata.updated_at
+
+    return trivy_db_version, trivy_db_updated_at
+
+
 _TARGET_MAX_LEN = 160  # bleibt mit pkg_name unter 256.
 
 
@@ -439,19 +472,11 @@ def ingest_scan(
             resolved_count = len(ids_to_resolve)
 
     # ---- 4. Server-Felder denormalisieren -----------------------------
-    metadata = envelope.scan.metadata
     trivy_version: str | None = None
     if envelope.scan.trivy is not None:
         trivy_version = envelope.scan.trivy.version
 
-    trivy_db_version: str | None = None
-    trivy_db_updated_at: datetime | None = None
-    if metadata is not None:
-        if metadata.data_source is not None:
-            # Bevorzugt `Name` (z.B. "ghsa", "ubuntu"), sonst `ID`.
-            trivy_db_version = metadata.data_source.name or metadata.data_source.id
-        if metadata.updated_at is not None:
-            trivy_db_updated_at = metadata.updated_at
+    trivy_db_version, trivy_db_updated_at = _extract_trivy_db_meta(envelope)
 
     server.last_scan_at = now
     server.os_family = envelope.host.os_family

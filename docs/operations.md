@@ -24,6 +24,31 @@ Wenn der Server keinen Outbound-Zugriff hat:
 - LLM-Provider muss intern erreichbar sein (z.B. eigener Ollama).
 - Trivy-Binary muss vorab im Agent-Image bzw. Host verfuegbar sein.
 
+## Agent-Updates
+
+Ab Agent `0.3.1` aktualisiert sich `secscan-agent.sh` vor jedem Scan selbst,
+wenn `/agent/version` eine neuere `current_agent_version` meldet. Das Skript
+laedt die neue Version ueber `/agent/files/secscan-agent.sh`, legt
+`secscan-agent.sh.bak` als Operator-Recovery an und re-exec't sich einmalig.
+Falls `lib_host_state.sh` vorhanden ist, wird sie best-effort mit aktualisiert;
+Versions-Mismatch fuehrt nur dazu, dass `host_state` ausgelassen wird.
+
+Bestehende Agents kleiner `0.3.1` haben den Auto-Update-Code noch nicht. Diese
+Hosts muessen einmalig manuell auf `0.3.1` aktualisiert werden; danach sind
+Folgeversionen self-updating. Alte Agents bleiben serverseitig erlaubt
+(`MIN_AGENT_VERSION=0.1.0`), koennen aber weiterhin leere
+`trivy_db_*`-Spalten liefern, bis sie aktualisiert sind.
+
+**Recovery via `.bak`-Files:** wenn ein Auto-Update funktional kaputtgeht,
+liegt der vorherige Skript-Stand unter `secscan-agent.sh.bak` bzw.
+`lib_host_state.sh.bak`. Rollback: `mv secscan-agent.sh.bak secscan-agent.sh`.
+
+**Race-Limitation:** bei sehr kurzen Cron-Intervallen (<5 Min) koennen zwei
+parallel laufende Agent-Instanzen sich beim Auto-Update gegenseitig die
+`.bak`-Datei ueberschreiben — Recovery-File enthaelt dann ggf. den bereits
+ersetzten Stand statt des urspruenglichen. Empfehlung: Cron-Intervalle
+&ge;5 Min halten. Echter Fix via `flock` ist als TechDebt vorgemerkt.
+
 ## Block-Q-Feed-Pull (ADR-0024)
 
 ### Health-Checks

@@ -260,6 +260,65 @@ Pull braucht eigene Engine-Connection-Pool-Konfiguration.
 
 ---
 
+## TD-008 — Auto-Update ohne End-to-End-Verifikation des Skript-Inhalts
+
+**Was:** ``agent/secscan-agent.sh::auto_update_self`` laedt das neue Skript
+ueber HTTPS, prueft Shebang + ``AGENT_VERSION="..."`` als Sanity-Marker,
+sendet seit TICKET-001-Review optional einen ``Authorization: Bearer
+$SECSCAN_API_KEY``-Header mit. Aber keine kryptografische Verifikation
+des Skript-Inhalts.
+
+**Warum:** Wenn ein Angreifer den DNS hijacken, eine eigene CA in
+``/etc/ssl/certs`` einschleusen, oder direkt das Backend kompromittieren
+kann, kann er ein malicious Skript ausliefern das beim naechsten Cron-
+Run als root ausgefuehrt wird (Agent laeuft typischerweise als root weil
+Trivy rootfs-Scan root braucht).
+
+**Loesung:** Server liefert ``X-Content-SHA256``-Header im
+``/agent/files/...``-Response. Agent berechnet ``sha256sum`` der
+heruntergeladenen Datei und vergleicht. Bei Mismatch: Replace abbrechen,
+``.bak`` bleibt unangetastet.
+
+Optional zusaetzlich: Server signiert das Skript mit einem Build-Key
+(``cosign`` o.ae.), Agent verifiziert Signatur. Hoeherer Aufwand
+(Key-Management).
+
+**Aufwand:** Hash-Verify ~30 Min (Server-Endpoint-Erweiterung + Agent-
+Check + Test). Signatur-Verify ~1 Tag plus Key-Rotation-Konzept.
+
+**Wann:** Bevor wir Multi-Tenant gehen oder ein Operator ein internet-
+exponiertes Backend deployed.
+
+---
+
+## TD-009 — Auto-Update Race bei parallelen Cron-Runs
+
+**Was:** Zwei Agent-Instanzen die gleichzeitig den Auto-Update-Pfad
+durchlaufen koennen sich die ``.bak``-Recovery-Datei gegenseitig
+ueberschreiben. Atomic-``mv`` garantiert dass das Skript selbst nicht
+korrupt wird, aber das ``.bak`` enthaelt nach einer Race ggf. den
+bereits-ersetzten Stand statt des Original-Skripts.
+
+**Warum:** Cron-Intervalle <5 Min sind unueblich aber moeglich. Wenn das
+Update das einzige Verteidigungsmittel gegen einen kaputten Agent-Stand
+ist, sollte Recovery deterministisch funktionieren.
+
+**Loesung:** ``flock`` um den Auto-Update-Block:
+```bash
+exec 200>"/var/run/secscan-agent-update.lock"
+if ! flock -n 200; then
+  log "Auto-Update: another instance is updating, skipping"
+  return 0
+fi
+```
+
+**Aufwand:** ~15 Min Code + Test.
+
+**Wann:** Wenn ein Operator <5 Min Cron-Intervalle braucht oder ein
+parallel-Update-Vorfall beobachtet wird.
+
+---
+
 ## Konventionen fuer neue Eintraege
 
 - ID: `TD-NNN`, fortlaufend.

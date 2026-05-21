@@ -16,6 +16,14 @@ Pfad pro Finding gelookupt. Trivy bleibt unveraendert als Scanner.
 
 ### Added
 
+- **Agent 0.3.1 self-update + Trivy-DB-Metadaten**: Der Agent prueft vor
+  jedem Scan `/agent/version`, laedt bei neuerer Server-Version
+  `secscan-agent.sh` von `/agent/files/secscan-agent.sh`, legt `.bak`-
+  Recovery-Kopien an und re-exec't sich einmalig mit Guard gegen Loops.
+  Zusaetzlich sendet er top-level `trivy_db` aus
+  `trivy version --format json`, damit `servers.trivy_db_version` und
+  `trivy_db_updated_at` nicht mehr faelschlich `NULL` bleiben, wenn Trivy
+  die DB-Metadaten nur pro Vulnerability statt in `scan.Metadata` schreibt.
 - **Drei neue DB-Tabellen** (Migration 0008):
   - ``epss_scores`` (~250k Zeilen, ~10 MB): ``cve_id`` PK,
     ``epss_score``, ``epss_percentile``, ``updated_at``.

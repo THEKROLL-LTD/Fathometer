@@ -16,6 +16,7 @@ wir die Bauschicht (`_build_finding_row`, `_disambiguated_package_name`,
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from app.services.findings_ingest import (
     _SEVERITY_MAP,
     _build_finding_row,
     _disambiguated_package_name,
+    _extract_trivy_db_meta,
     _safe_vuln,
 )
 
@@ -49,6 +51,12 @@ def _envelope_dict(scan: dict[str, Any]) -> dict[str, Any]:
         },
         "scan": scan,
     }
+
+
+def _minimal_scan(**extra: Any) -> dict[str, Any]:
+    scan: dict[str, Any] = {"SchemaVersion": 2, "Results": []}
+    scan.update(extra)
+    return scan
 
 
 @pytest.fixture(scope="module")
@@ -235,6 +243,104 @@ def test_adversarial_fixture_survives_build_when_per_vuln_filtered(
     # Reference-Stripping: nur https-URLs.
     ref_row = next(r for r in rows if r["identifier_key"] == "CVE-2026-00010")
     assert ref_row["references"] == ["https://example.com/ok"], ref_row["references"]
+
+
+# ---------------------------------------------------------------------------
+# Trivy-DB-Metadaten aus Envelope/Fallback.
+# ---------------------------------------------------------------------------
+
+
+def test_trivy_db_block_takes_precedence() -> None:
+    updated_at = "2026-05-21T01:03:33Z"
+    env = Envelope.model_validate(
+        {
+            **_envelope_dict(_minimal_scan()),
+            "trivy_db": {
+                "version": "2",
+                "updated_at": updated_at,
+                "next_update_at": "2026-05-22T01:03:33Z",
+                "downloaded_at": "2026-05-21T06:24:41Z",
+            },
+        }
+    )
+
+    version, db_updated_at = _extract_trivy_db_meta(env)
+
+    assert version == "2"
+    assert db_updated_at == datetime(2026, 5, 21, 1, 3, 33, tzinfo=UTC)
+
+
+def test_trivy_db_falls_back_to_scan_metadata() -> None:
+    env = Envelope.model_validate(
+        _envelope_dict(
+            _minimal_scan(
+                Metadata={
+                    "DataSource": {"ID": "trivy-db", "Name": "ghsa"},
+                    "UpdatedAt": "2026-05-20T10:00:00Z",
+                }
+            )
+        )
+    )
+
+    version, db_updated_at = _extract_trivy_db_meta(env)
+
+    assert version == "ghsa"
+    assert db_updated_at == datetime(2026, 5, 20, 10, 0, 0, tzinfo=UTC)
+
+
+def test_trivy_db_missing_everywhere_returns_none() -> None:
+    env = Envelope.model_validate(_envelope_dict(_minimal_scan()))
+
+    assert _extract_trivy_db_meta(env) == (None, None)
+
+
+def test_trivy_db_mixes_top_level_and_metadata_fallback() -> None:
+    env = Envelope.model_validate(
+        {
+            **_envelope_dict(
+                _minimal_scan(
+                    Metadata={
+                        "DataSource": {"ID": "fallback-db", "Name": "fallback-name"},
+                        "UpdatedAt": "2026-05-20T10:00:00Z",
+                    }
+                )
+            ),
+            "trivy_db": {"version": "2", "updated_at": None},
+        }
+    )
+
+    version, db_updated_at = _extract_trivy_db_meta(env)
+
+    assert version == "2"
+    assert db_updated_at == datetime(2026, 5, 20, 10, 0, 0, tzinfo=UTC)
+
+
+def test_envelope_accepts_trivy_db_block() -> None:
+    env = Envelope.model_validate(
+        {
+            **_envelope_dict(_minimal_scan()),
+            "trivy_db": {"version": "2", "updated_at": "2026-05-21T01:03:33Z"},
+        }
+    )
+
+    assert env.trivy_db is not None
+    assert env.trivy_db.version == "2"
+
+
+def test_trivy_db_ignores_extra_fields() -> None:
+    env = Envelope.model_validate(
+        {
+            **_envelope_dict(_minimal_scan()),
+            "trivy_db": {
+                "version": "2",
+                "updated_at": "2026-05-21T01:03:33Z",
+                "unexpected": {"nested": "value"},
+            },
+        }
+    )
+
+    assert env.trivy_db is not None
+    assert not hasattr(env.trivy_db, "unexpected")
 
 
 # ---------------------------------------------------------------------------

@@ -33,6 +33,12 @@
 #   - Collectors live in `agent/lib_host_state.sh` (sourcable for tests
 #     and Block-P reuse).
 #
+# TICKET-001 — v0.3.1 changes:
+#   - Auto-update check before every scan. The agent downloads a newer
+#     `secscan-agent.sh` from the backend, keeps a `.bak` copy for operator
+#     rollback, then re-execs itself once.
+#   - Adds top-level `trivy_db` metadata from `trivy version --format json`.
+#
 # Requirements: bash >= 4, curl, jq, gzip, trivy (>= 0.70.0)
 #               (https://aquasecurity.github.io/trivy/)
 #
@@ -56,26 +62,178 @@
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.3.0"
+readonly AGENT_VERSION="0.3.1"
+readonly REQUIRED_LIB_HOST_STATE_VERSION="0.3.1"
 readonly TRIVY_BIN="${SECSCAN_TRIVY_PATH:-trivy}"
 readonly SCAN_PATH="${SECSCAN_SCAN_PATH:-/}"
 readonly TIMEOUT_SEC="${SECSCAN_TIMEOUT_SEC:-60}"
 
 log() { printf '[secscan-agent] %s\n' "$*" >&2; }
 
+version_lt() {
+  local semver_re='^([0-9]+)\.([0-9]+)\.([0-9]+)(-rc\.?([0-9]+))?([.+-][A-Za-z0-9._-]+)?$'
+  [[ "$1" =~ $semver_re ]] || return 1
+  local a_major="${BASH_REMATCH[1]}" a_minor="${BASH_REMATCH[2]}" a_patch="${BASH_REMATCH[3]}" a_rc="${BASH_REMATCH[5]:-}"
+  [[ "$2" =~ $semver_re ]] || return 1
+  local b_major="${BASH_REMATCH[1]}" b_minor="${BASH_REMATCH[2]}" b_patch="${BASH_REMATCH[3]}" b_rc="${BASH_REMATCH[5]:-}"
+  [[ "$1" = "$2" ]] && return 1
+
+  if ((10#$a_major != 10#$b_major)); then
+    ((10#$a_major < 10#$b_major))
+    return $?
+  fi
+  if ((10#$a_minor != 10#$b_minor)); then
+    ((10#$a_minor < 10#$b_minor))
+    return $?
+  fi
+  if ((10#$a_patch != 10#$b_patch)); then
+    ((10#$a_patch < 10#$b_patch))
+    return $?
+  fi
+
+  # Bei gleicher Basisversion gilt: rc < final. Zwei rc-Versionen werden
+  # numerisch verglichen. Andere Suffixe sind nach Regex erlaubt, triggern
+  # aber kein Update gegen dieselbe Basisversion.
+  if [[ -n "$a_rc" && -z "$b_rc" ]]; then
+    return 0
+  fi
+  if [[ -z "$a_rc" && -n "$b_rc" ]]; then
+    return 1
+  fi
+  if [[ -n "$a_rc" && -n "$b_rc" ]]; then
+    ((10#$a_rc < 10#$b_rc))
+    return $?
+  fi
+  return 1
+}
+
+resolve_self_path() {
+  if self_path="$(readlink -f "$0" 2>/dev/null)" && [[ -n "$self_path" ]]; then
+    printf '%s\n' "$self_path"
+    return 0
+  fi
+
+  local self_dir self_base
+  self_dir="$(cd "$(dirname "$0")" && pwd)"
+  self_base="$(basename "$0")"
+  printf '%s/%s\n' "$self_dir" "$self_base"
+}
+
+auto_update_self() {
+  if [[ "${SECSCAN_AGENT_UPDATED:-0}" = "1" ]]; then
+    return 0
+  fi
+  if [[ -z "${SECSCAN_URL:-}" ]]; then
+    return 0
+  fi
+
+  local ver_json server_version
+  ver_json="$(curl -fsS --max-time 5 "${SECSCAN_URL%/}/agent/version" 2>/dev/null || true)"
+  if [[ -z "$ver_json" ]]; then
+    log "Auto-Update: server unreachable, skipping"
+    return 0
+  fi
+
+  server_version="$(printf '%s' "$ver_json" | jq -r '.current_agent_version // empty' 2>/dev/null)"
+  if [[ -z "$server_version" ]] || [[ "$server_version" = "$AGENT_VERSION" ]]; then
+    return 0
+  fi
+  if ! version_lt "$AGENT_VERSION" "$server_version"; then
+    log "Auto-Update: server version $server_version is not newer than local $AGENT_VERSION, skipping"
+    return 0
+  fi
+
+  log "Auto-Update: server version $server_version, local $AGENT_VERSION; updating"
+
+  local tmpfile self_path self_dir lib_path
+  self_path="$(resolve_self_path)"
+  self_dir="$(dirname "$self_path")"
+  lib_path="$self_dir/lib_host_state.sh"
+  tmpfile="$(mktemp -t secscan-agent.XXXXXX.sh)"
+
+  # Authorization-Header beim Download: das `/agent/files/...`-Endpoint ist
+  # heute by-design un-authenticated (Bootstrap-Installer-Konvention), wir
+  # senden den API-Key trotzdem mit. Der Server akzeptiert ihn als optionalen
+  # Header und kann ihn fuer Audit/Rate-Limits nutzen; spaetere Endpoint-
+  # Hardening (Auth-Pflicht) bricht den Agent nicht.
+  local auth_header=()
+  if [[ -n "${SECSCAN_API_KEY:-}" ]]; then
+    auth_header=(-H "Authorization: Bearer ${SECSCAN_API_KEY}")
+  fi
+
+  if ! curl -fsS --max-time 30 "${auth_header[@]+"${auth_header[@]}"}" -o "$tmpfile" "${SECSCAN_URL%/}/agent/files/secscan-agent.sh"; then
+    log "Auto-Update: download failed, keeping current version"
+    rm -f "$tmpfile"
+    return 0
+  fi
+  if ! head -1 "$tmpfile" | grep -q '^#!/'; then
+    log "Auto-Update: downloaded script has no shebang, keeping current version"
+    rm -f "$tmpfile"
+    return 0
+  fi
+  if ! grep -q "AGENT_VERSION=\"$server_version\"" "$tmpfile"; then
+    log "Auto-Update: downloaded script does not declare version $server_version, keeping current version"
+    rm -f "$tmpfile"
+    return 0
+  fi
+
+  local lib_tmp=""
+  if [[ -f "$lib_path" ]]; then
+    lib_tmp="$(mktemp -t lib_host_state.XXXXXX.sh)"
+    if ! curl -fsS --max-time 30 "${auth_header[@]+"${auth_header[@]}"}" -o "$lib_tmp" "${SECSCAN_URL%/}/agent/files/lib_host_state.sh" 2>/dev/null; then
+      log "Auto-Update: helper download failed, skipping helper replace"
+      rm -f "$lib_tmp"
+      lib_tmp=""
+    elif ! head -1 "$lib_tmp" | grep -q '^#!/'; then
+      log "Auto-Update: helper has no shebang, skipping helper replace"
+      rm -f "$lib_tmp"
+      lib_tmp=""
+    fi
+  fi
+
+  cp -p "$self_path" "$self_path.bak" 2>/dev/null || true
+  if [[ -n "$lib_tmp" ]]; then
+    cp -p "$lib_path" "$lib_path.bak" 2>/dev/null || true
+    chmod +x "$lib_tmp"
+    if ! mv "$lib_tmp" "$lib_path"; then
+      log "Auto-Update: helper replace failed, continuing with agent replace"
+      rm -f "$lib_tmp"
+    fi
+  fi
+
+  chmod +x "$tmpfile"
+  if ! mv "$tmpfile" "$self_path"; then
+    log "Auto-Update: agent replace failed, keeping current version"
+    rm -f "$tmpfile"
+    return 0
+  fi
+
+  log "Auto-Update: updated to $server_version, re-exec"
+  export SECSCAN_AGENT_UPDATED=1
+  exec "$self_path" "$@"
+}
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 \
     || { log "Error: '$1' not found in PATH"; exit 1; }
 }
 
+if [[ "${SECSCAN_AGENT_SOURCE_ONLY:-0}" = "1" ]]; then
+  # shellcheck disable=SC2317
+  return 0 2>/dev/null || exit 0
+fi
+
 # ----- Prerequisites -----------------------------------------------------
 require_cmd curl
 require_cmd jq
 require_cmd gzip
-require_cmd "$TRIVY_BIN"
 
 : "${SECSCAN_URL:?SECSCAN_URL is not set}"
 : "${SECSCAN_API_KEY:?SECSCAN_API_KEY is not set}"
+
+auto_update_self "$@"
+
+require_cmd "$TRIVY_BIN"
 
 # ----- Host-state collectors (Block O, v0.3.0) ---------------------------
 # Sourcable companion library next to this script. We resolve the path via
@@ -87,6 +245,10 @@ if [[ -r "${_agent_dir}/lib_host_state.sh" ]]; then
   # shellcheck disable=SC1091
   . "${_agent_dir}/lib_host_state.sh"
   _has_host_state_lib=1
+  if [[ -z "${LIB_HOST_STATE_VERSION:-}" ]] || [[ "$LIB_HOST_STATE_VERSION" != "$REQUIRED_LIB_HOST_STATE_VERSION" ]]; then
+    log "Warning: lib_host_state.sh version mismatch (need=${REQUIRED_LIB_HOST_STATE_VERSION}, found=${LIB_HOST_STATE_VERSION:-missing}); host_state will be omitted"
+    _has_host_state_lib=0
+  fi
 else
   log "Warning: lib_host_state.sh not found next to agent; host_state will be omitted"
   _has_host_state_lib=0
@@ -125,6 +287,28 @@ arch="$(uname -m)"
 
 # Block N (ADR-0021) — capture the trivy CLI version for the envelope.
 trivy_version="$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo "unknown")"
+
+# `trivy version --format json` ist normalerweise <1s. Hard-Cap auf 10s
+# damit ein haengender DB-Update-Lock o.ae. den Scan nicht blockiert.
+# `timeout` ist GNU-coreutils; falls nicht verfuegbar (sehr alte BusyBox)
+# faellt der Aufruf zurueck ohne Cap — kein Showstopper.
+if command -v timeout >/dev/null 2>&1; then
+  trivy_db_meta_raw="$(timeout 10 "$TRIVY_BIN" version --format json 2>/dev/null || echo '')"
+else
+  trivy_db_meta_raw="$("$TRIVY_BIN" version --format json 2>/dev/null || echo '')"
+fi
+trivy_db_block="null"
+if [[ -n "$trivy_db_meta_raw" ]] && printf '%s' "$trivy_db_meta_raw" | jq -e '.VulnerabilityDB' >/dev/null 2>&1; then
+  trivy_db_block="$(printf '%s' "$trivy_db_meta_raw" | jq -c '{
+    version: (.VulnerabilityDB.Version | tostring),
+    updated_at: .VulnerabilityDB.UpdatedAt,
+    next_update_at: .VulnerabilityDB.NextUpdate,
+    downloaded_at: .VulnerabilityDB.DownloadedAt
+  }')"
+  log "Trivy-DB meta: version=$(printf '%s' "$trivy_db_block" | jq -r .version) updated_at=$(printf '%s' "$trivy_db_block" | jq -r .updated_at)"
+else
+  log "Warning: trivy version --format json returned no VulnerabilityDB data; sending trivy_db=null"
+fi
 
 log "Host: ${os_pretty} (kernel ${kernel_version}, ${arch}, trivy ${trivy_version})"
 
@@ -196,6 +380,7 @@ payload="$(jq -n \
   --arg trivy_ver     "$trivy_version" \
   --slurpfile scan    "$trivy_out" \
   --argjson host_state "$host_state_json" \
+  --argjson trivy_db "$trivy_db_block" \
   '{
     agent_version: $agent_version,
     host: {
@@ -206,7 +391,8 @@ payload="$(jq -n \
       architecture:   $arch,
       trivy_version:  $trivy_ver
     },
-    scan: $scan[0]
+    scan: $scan[0],
+    trivy_db: $trivy_db
   }
   + (if $host_state == null then {} else {host_state: $host_state} end)')"
 
