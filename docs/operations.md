@@ -9,7 +9,7 @@ Der Server braucht HTTPS-Zugriff auf folgende externe Endpunkte:
 | Endpunkt | Zweck | Block | Frequenz |
 |---|---|---|---|
 | `https://epss.empiricalsecurity.com/epss_scores-current.csv.gz` | EPSS-Scores-Feed (FIRST.org) | Q (ADR-0024) | alle 24h |
-| `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json` | KEV-Katalog | Q (ADR-0024) | alle 24h |
+| `https://raw.githubusercontent.com/cisagov/kev-data/main/known_exploited_vulnerabilities.json` | KEV-Katalog (CISA-GitHub-Mirror) | Q (ADR-0024) | alle 24h |
 | LLM-Provider-Endpunkt (vom Operator gewaehlt) | Pass-1/Pass-2-LLM-Calls | G/P | pro Scan |
 | `https://github.com/aquasecurity/trivy/releases/...` | Trivy-Binary-Download (Agent) | N (ADR-0021) | einmalig pro Agent-Install |
 

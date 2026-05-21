@@ -174,8 +174,14 @@ class Settings(BaseSettings):
         description="HTTPS-URL des EPSS-Daily-CSV-Snapshots (gzipped).",
     )
     feed_kev_url: str = Field(
-        default="https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-        description="HTTPS-URL des CISA-KEV-JSON-Feeds.",
+        default="https://raw.githubusercontent.com/cisagov/kev-data/main/known_exploited_vulnerabilities.json",
+        description=(
+            "HTTPS-URL des CISA-KEV-JSON-Feeds. Default ist der offizielle "
+            "GitHub-Mirror (cisagov/kev-data) — identisches JSON-Schema, "
+            "kein Cloudflare-Bot-Block (cisa.gov direkt blockt Hetzner-/"
+            "Cloud-IP-Ranges mit 403). Override fuer Air-Gap / interne "
+            "Proxies via SECSCAN_FEED_KEV_URL."
+        ),
     )
     feed_pull_interval_hours: int = Field(
         default=24,

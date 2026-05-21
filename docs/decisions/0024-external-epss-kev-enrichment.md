@@ -29,7 +29,9 @@ Wir reichern EPSS und KEV **serverseitig** aus zwei oeffentlichen Daily-Feeds an
 **Datenquellen:**
 
 - **EPSS:** `https://epss.empiricalsecurity.com/epss_scores-current.csv.gz` — taegliches Full-Dataset von FIRST.org, CSV-Format mit `cve,epss,percentile`. ~250k Zeilen, ~3 MB gzipped, ~25 MB ungezippt. Update um ~06:00 UTC.
-- **KEV:** `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json` — CISA-Katalog als JSON, ~1500 Eintraege, ~1 MB. Update unregelmaessig (mehrmals pro Woche).
+- **KEV:** `https://raw.githubusercontent.com/cisagov/kev-data/main/known_exploited_vulnerabilities.json` — CISA-GitHub-Mirror als JSON, ~1500 Eintraege, ~1 MB. Update unregelmaessig (mehrmals pro Woche).
+
+  Hinweis: cisa.gov-Direktquelle (`https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`) ist identisch im Schema, wird aber von Cloudflare/WAF auf Cloud-IP-Ranges (Hetzner, DigitalOcean, ...) mit 403 Forbidden geblockt. Beobachtet 2026-05-21 auf Hetzner-RZ. Der GitHub-Mirror ist von CISA offiziell betrieben (`cisagov`-Org) und hat keinen Bot-Block.
 
 **Worker-Tick:**
 
@@ -110,7 +112,7 @@ Eviction in `feed_pull_log`: hard-cap 100 Zeilen pro `feed_name`, im selben Work
 ```
 class FeedEnrichmentWorker:
     EPSS_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
-    KEV_URL  = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    KEV_URL  = "https://raw.githubusercontent.com/cisagov/kev-data/main/known_exploited_vulnerabilities.json"
 
     EPSS_INTERVAL_HOURS = 24
     KEV_INTERVAL_HOURS  = 24
@@ -206,7 +208,7 @@ Idempotent. Wird auch nach jedem nachfolgenden Pull ausgefuehrt, weil neue KEV-E
 
 ### Operative Aspekte
 
-- **Outbound-Network-Anforderung neu**: Server braucht HTTPS-Zugriff auf `epss.empiricalsecurity.com` und `cisa.gov`. Dokumentieren in `docs/operations.md`.
+- **Outbound-Network-Anforderung neu**: Server braucht HTTPS-Zugriff auf `epss.empiricalsecurity.com` und `raw.githubusercontent.com`. Dokumentieren in `docs/operations.md`.
 - **Air-Gap-Setup**: per `SECSCAN_FEED_DISABLED=true`-Env-Var komplett abschaltbar. Findings bleiben dann ohne EPSS/KEV-Anreicherung. UI/Pass-2 funktionieren weiter (Prompt sagt explizit "treat `epss=n/a` as unknown").
 - **Pull-Failure-Verhalten**: log + `status='failed'` in `feed_pull_log`, naechster Tick versucht erneut. Bestehende Daten bleiben unveraendert (kein TRUNCATE bei Failure).
 - **Feed-Freshness-Anzeige im UI (MVP)**: zweizeiliger Block am Ende der LLM-Settings-Seite (`app/views/llm_settings.py`), gerendert aus `feed_pull_log`. Format:
