@@ -69,23 +69,56 @@ _HIGH_RISK_CLASSES: tuple[str, ...] = (
 _INITIAL_DOM_TEMPLATES: tuple[str, ...] = (
     "base.html",
     "base_app.html",
+    "login.html",
     "layout/",
     "sidebar/",
+    "dashboard/",
+    # `_partials/` ist gemischt: einige Partials (Risk-Pill, Action-Card)
+    # werden auf dem Dashboard inkludiert (Initial-DOM), andere
+    # (group_findings_table, application_group_card) sind HTMX-only.
+    # Pragmatisch zaehlen wir den ganzen Ordner als Initial-DOM — die im
+    # Dashboard-Pfad gelesenen Partials decken die Klassen auch fuer die
+    # Subtree-Partials ab (CDN-JIT generiert das CSS einmal pro Klasse).
+    # Wenn ein zukuenftiges Partial _nur_ via HTMX rendert und eine neue
+    # arbitrary-value-Klasse einfuehrt, faengt der Test sie nicht — dann
+    # Eintrag manuell in Safelist nachziehen.
+    "_partials/",
+    "_empty/",
+    "errors/",
 )
 
 
 def _extract_safelist() -> set[str]:
-    """Liest das `safelist`-Array aus `base_app.html` (heuristisch, regex)."""
+    """Liest das `safelist`-Array aus `base_app.html`.
+
+    Bracket-Counting statt simpler Regex, weil die Safelist-Eintraege selbst
+    eckige Klammern enthalten koennen (`w-[180px]`, `max-w-[44ch]`).
+    """
     text = _BASE_APP.read_text(encoding="utf-8")
-    # Suche das erste `safelist: [ ... ]` direkt nach `window.tailwind.config`.
-    match = re.search(r"safelist\s*:\s*\[([^\]]*)\]", text, re.DOTALL)
-    assert match is not None, (
+    anchor = text.find("safelist:")
+    assert anchor != -1, (
         "Safelist-Block in base_app.html nicht gefunden — siehe TD-010 und das "
         "Inline-Skript vor dem CDN-`<script src=cdn.tailwindcss.com>`-Tag."
     )
-    raw_entries = match.group(1)
+    bracket_start = text.find("[", anchor)
+    assert bracket_start != -1, "Safelist-Block ohne `[` nach `safelist:`"
+    depth = 0
+    bracket_end = -1
+    for idx in range(bracket_start, len(text)):
+        ch = text[idx]
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                bracket_end = idx
+                break
+    assert bracket_end != -1, "Safelist-Block hat unausbalancierte Klammern"
+    raw = text[bracket_start + 1 : bracket_end]
+    # Inline-Kommentare (`// ...`) ausblenden bevor wir am Komma splitten.
+    raw_no_comments = re.sub(r"//[^\n]*", "", raw)
     out: set[str] = set()
-    for entry in raw_entries.split(","):
+    for entry in raw_no_comments.split(","):
         cleaned = entry.strip().strip('"').strip("'")
         if cleaned:
             out.add(cleaned)
@@ -138,8 +171,7 @@ def test_safelist_entries_used_in_templates() -> None:
 def _is_initial_dom_only(paths: list[str]) -> bool:
     """True wenn alle `paths` zum Initial-DOM-Set gehoeren (kein Race)."""
     return all(
-        any(p == prefix or p.startswith(prefix) for prefix in _INITIAL_DOM_TEMPLATES)
-        for p in paths
+        any(p == prefix or p.startswith(prefix) for prefix in _INITIAL_DOM_TEMPLATES) for p in paths
     )
 
 
@@ -168,6 +200,58 @@ def test_high_risk_classes_in_htmx_subtrees_are_safelisted() -> None:
             missing.append((risk_cls, paths))
     assert not missing, "\n".join(
         f"High-risk-Klasse {cls!r} in {paths} verwendet (HTMX-Subtree), "
+        f"fehlt in Safelist (base_app.html). Siehe TD-010."
+        for cls, paths in missing
+    )
+
+
+# Arbitrary-value-Klassen (Tailwind `[]`-Bracket-Notation): selbe Race-
+# Anfaelligkeit wie die `_HIGH_RISK_CLASSES`, nur dass jede einzelne Auspraegung
+# eine eigene Klasse ist — der CDN-JIT muss sie genau in dieser Form schon
+# beim Page-Load gesehen haben.
+#
+# Matched: w-[..], h-[..], min-w-[..], max-w-[..], min-h-[..], max-h-[..],
+# leading-[..], gap-[..], etc. Die Pattern-Familien sind eng — wir greifen
+# defensiv die Sizing-/Spacing-Klassen, weil dort Layout-Brueche entstehen.
+_ARBITRARY_VALUE_RE = re.compile(
+    r"^(?:w|h|min-w|max-w|min-h|max-h|leading|gap|space-[xy])-\[[^\]]+\]$"
+)
+
+
+def test_arbitrary_value_classes_in_htmx_subtrees_are_safelisted() -> None:
+    """Pflicht-Marker fuer arbitrary-value-Klassen (`w-[180px]`, `max-w-[44ch]`).
+
+    Beobachtet 2026-05-22: `w-[180px]` auf der KPI-Card in `_kpi_card.html`
+    wurde nach HTMX-Pane-Swap vom CDN-JIT nicht erfasst — Card-Breite
+    kollabierte auf intrinsische Flex-Item-Breite. Pattern ist dasselbe
+    wie bei `h-full` (TD-010); jede arbitrary-value-Klasse ist ihre
+    eigene CSS-Regel und damit eigene Race-Anfaelligkeit.
+
+    Eine Klasse, die ueberlappend ein Initial-DOM-Template und ein HTMX-
+    Subtree-Template benutzt, ist sicher — Tailwind generiert das CSS aus
+    dem Initial-DOM-Scan, der HTMX-Subtree erbt es.
+    """
+    safelist = _extract_safelist()
+    classes_in_use = _scan_template_classes()
+    missing: list[tuple[str, list[str]]] = []
+    for cls, paths in classes_in_use.items():
+        if not _ARBITRARY_VALUE_RE.match(cls):
+            continue
+        if _is_initial_dom_only(paths):
+            continue  # nur im Initial-DOM, sicher
+        # Klasse muss auch in mindestens einem Initial-DOM-Template stehen,
+        # ODER in der Safelist eingetragen sein.
+        initial_dom_paths = [
+            p
+            for p in paths
+            if any(p == prefix or p.startswith(prefix) for prefix in _INITIAL_DOM_TEMPLATES)
+        ]
+        if initial_dom_paths:
+            continue  # ueberlappende Verwendung → JIT scannt sie auf Initial-DOM
+        if cls not in safelist:
+            missing.append((cls, paths))
+    assert not missing, "\n".join(
+        f"Arbitrary-value-Klasse {cls!r} in {paths} verwendet (nur HTMX-Subtree), "
         f"fehlt in Safelist (base_app.html). Siehe TD-010."
         for cls, paths in missing
     )

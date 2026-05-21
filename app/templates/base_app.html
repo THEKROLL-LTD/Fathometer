@@ -65,7 +65,21 @@
     window.tailwind = window.tailwind || {};
     window.tailwind.config = {
       safelist: [
+        // Vertikale Layout-Klasse (Settings-Sub-Pages).
         "h-full",
+        // Arbitrary-value-Klassen aus HTMX-Subtree-Templates.
+        // `w-[180px]` ist die einzige sichtbar-kritische (KPI-Card-Breite,
+        // verifiziert broken 2026-05-22). Die `max-w-[Nch]`/`min-w-[Nch]`-
+        // Eintraege sichern Text-Truncation in den Findings-/Pending-/Group-
+        // Tabellen ab — ohne sie wuerden Zeilenumbruechen wackeln, was als
+        // Drift-Schutz egal-aber-billig in die Safelist gehoert.
+        "w-[180px]",
+        "max-w-[22ch]",
+        "max-w-[24ch]",
+        "max-w-[28ch]",
+        "max-w-[44ch]",
+        "min-w-[12ch]",
+        "min-h-[1.75rem]",
       ],
     };
   </script>
