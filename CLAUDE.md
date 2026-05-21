@@ -8,6 +8,8 @@ Diese Datei wird bei jedem Claude-Code-Start gelesen. Verbindlich für die Haupt
 2. **`docs/blocks/STATE.md`** — aktueller Block, completed Blöcke, offene Tasks, Blocker.
 3. **`docs/blocks/<aktueller-block>.md`** — Aufgaben und maschinell prüfbare Definition of Done.
 4. **`docs/decisions/`** — ADRs. Nicht ohne Grund von dort abweichen; neue Entscheidungen als neue ADR ablegen.
+5. **`docs/techdebt.md`** — bekannte technische Schulden (lebende Liste mit TD-IDs). Vor einem Refactor reinschauen ob bereits ein TD-Eintrag dazu existiert. Neue Tech-Schulden als neuen `TD-NNN`-Eintrag mit Was/Warum/Lösung/Aufwand/Wann eintragen statt im Code zu kommentieren.
+6. **`docs/operations.md`** — Operator-Notizen (Outbound-URLs, Air-Gap-Setup, Feed-Pull-Health-Checks).
 
 Subagent-Aufrufe nennen die zu lesenden Sektions-Nummern explizit (nicht "lies das Repo").
 
