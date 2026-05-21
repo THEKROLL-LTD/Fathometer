@@ -60,6 +60,10 @@
           {% include "_partials/action_required_pill.html" %}
         {% endwith %}
         {# Status-Pill-Reihe. Reihenfolge: schlimmster Marker zuerst. #}
+        {# ADR-0025 §4: aktive Server ohne Auffaelligkeit zeigen KEINE
+           Status-Pille mehr — Pills signalisieren Aufmerksamkeit, nicht
+           Hintergrund-Rauschen. Die `active`-Pille in der Settings-Server-
+           Liste bleibt unangetastet (anderer Kontext). #}
         {% if server.revoked_at %}
           <span class="badge badge-sm badge-error font-mono"
                 title="Widerrufen am {{ server.revoked_at.strftime('%Y-%m-%d %H:%M') }}">
@@ -70,8 +74,6 @@
                 title="Stillgelegt am {{ server.retired_at.strftime('%Y-%m-%d %H:%M') }}">
             retired
           </span>
-        {% else %}
-          <span class="badge badge-sm badge-success font-mono">active</span>
         {% endif %}
         {% if scan_stale %}
           <span class="badge badge-sm badge-warning font-mono"

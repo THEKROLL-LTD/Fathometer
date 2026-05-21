@@ -294,7 +294,12 @@ def test_detail_bulk_ack_button_has_disabled_binding(db_app: Flask) -> None:
 
 
 def test_detail_status_pill_shows_stale_when_scan_stale(db_app: Flask) -> None:
-    """Server mit `last_scan_at` aelter als `expected_scan_interval_h` -> stale-Pill."""
+    """Server mit `last_scan_at` aelter als `expected_scan_interval_h` -> stale-Pill.
+
+    ADR-0025 / Block Q Phase D: die `active`-Default-Pille wurde aus dem
+    Server-Detail-Header entfernt. Der `stale`-Marker bleibt erhalten, aber
+    es darf KEINE `>active<`-Badge mehr im Header rendern.
+    """
     create_admin_user(db_app)
     # Letzter Scan vor 48h, expected_scan_interval_h=24 -> stale.
     stale_scan = datetime.now(tz=UTC) - timedelta(hours=48)
@@ -309,8 +314,8 @@ def test_detail_status_pill_shows_stale_when_scan_stale(db_app: Flask) -> None:
     resp = client.get(f"/servers/{sid}")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    # active-Pill und stale-Pill nebeneinander.
-    assert ">active<" in body
+    # stale-Pill ohne aktive-Pill — Phase Q.D entfernt den active-Default.
+    assert ">active<" not in body, "active-Pill darf laut ADR-0025 nicht mehr rendern"
     assert (
         ">\n            stale\n          <" in body
         or ">stale<" in body
