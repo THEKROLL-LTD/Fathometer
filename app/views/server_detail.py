@@ -25,7 +25,7 @@ from typing import Any
 import structlog
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import login_required
-from sqlalchemy import func, select
+from sqlalchemy import func, nulls_last, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from werkzeug.wrappers import Response as WerkzeugResponse
@@ -115,41 +115,61 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     """Liefert die Application-Groups fuer den Server, sortiert nach Risk-Band.
 
     Block P (ADR-0023): Findings werden in der Server-Detail-Findings-Section
-    nach `application_group_id` gruppiert. Wir laden:
+    nach `application_group_id` gruppiert.
 
-      1. Alle Groups die mindestens ein OPEN-Finding auf dem Server haben.
-      2. Pro Group: die OPEN-Findings, sortiert nach §15
-         (KEV/EPSS/CVSS/Severity-Tiebreak).
-      3. Falls `group.worst_finding_id` gesetzt: das Worst-Finding-Objekt.
+    Block Q (ADR-0025 §2): der Loader rendert nur noch das Card-Inventar.
+    Die Findings-Tabellen pro Group werden vom Browser via HTMX-Lazy-Load
+    nachgefordert (`group_findings_fragment`-Endpoint). Damit fallen die
+    frueheren Per-Group-Findings-Queries weg; statt N+1 fuehren wir exakt
+    drei aggregierte Queries aus:
+
+      1. Count-Aggregat: pro Group die Anzahl OPEN-Findings auf diesem
+         Server. Liefert gleichzeitig die Liste relevanter Group-IDs.
+      2. Group-Metadaten: ein `IN (...)`-Batch der `ApplicationGroup`-Zeilen
+         fuer die im Count-Aggregat ermittelten IDs.
+      3. Worst-Finding-Batch: ein `IN (...)`-Batch der Worst-Finding-
+         Objekte (server-gefiltert, damit Cross-Server-Drift unsichtbar
+         bleibt).
 
     Sortierung der Groups: DESC nach `RISK_BAND_SORT_RANK` — escalate first,
     NULL-Band-Groups (Worker arbeitet noch) als `pending`-Rank-40 einsortiert.
 
-    Rueckgabe-Format: list[dict] mit Keys `group`, `findings`, `worst_finding`.
+    Rueckgabe-Format: list[dict] mit Keys `group`, `count`, `worst_finding`.
     Das ist absichtlich keine Dataclass, weil Templates direkt dict-Access
-    nutzen und keine Typ-Stabilitaet brauchen.
+    nutzen und keine Typ-Stabilitaet brauchen. Block-Q hat `findings`
+    bewusst aus dem Vertrag entfernt — siehe ADR-0025 §2.
     """
-    # Alle Groups die mindestens ein OPEN-Finding auf diesem Server haben.
-    # `distinct()` damit pro Group ein Eintrag rauskommt; `selectinload` waere
-    # ueberkopf weil Findings ohnehin in einer Folge-Query gezielt geladen
-    # werden (Sortierung nach §15).
-    groups_stmt = (
-        select(ApplicationGroup)
-        .join(Finding, Finding.application_group_id == ApplicationGroup.id)
+    # (1) Count-Aggregat: liefert sowohl die Group-IDs (mindestens 1 OPEN-
+    # Finding auf diesem Server) als auch den Counter-Wert pro Group fuer
+    # den Card-Header. Damit entfaellt die alte DISTINCT-JOIN-Query.
+    count_stmt = (
+        select(Finding.application_group_id, func.count(Finding.id))
         .where(
             Finding.server_id == server_id,
             Finding.status == FindingStatus.OPEN,
+            Finding.application_group_id.is_not(None),
         )
-        .distinct()
+        .group_by(Finding.application_group_id)
     )
-    groups = list(sess.execute(groups_stmt).scalars().all())
+    counts_by_id: dict[int, int] = {
+        int(group_id): int(n)
+        for group_id, n in sess.execute(count_stmt).all()
+        if group_id is not None
+    }
 
-    if not groups:
+    if not counts_by_id:
         return []
 
-    # Worst-Finding-Lookup vorbereiten — `worst_finding_id` ist kein FK,
-    # darum manuell auflueoesen. Filter auf Server, damit ein veralteter
-    # Cross-Server-Verweis nicht stiltlich angezeigt wird.
+    # (2) Group-Metadaten-Batch: nur fuer die Groups die im Count-Aggregat
+    # auftauchen. Reihenfolge ist hier egal; wir sortieren unten manuell
+    # nach Risk-Band-Rank.
+    group_ids = list(counts_by_id.keys())
+    groups_stmt = select(ApplicationGroup).where(ApplicationGroup.id.in_(group_ids))
+    groups = list(sess.execute(groups_stmt).scalars().all())
+
+    # (3) Worst-Finding-Batch: `worst_finding_id` ist kein FK, darum manuell
+    # aufloesen. Filter auf Server, damit ein veralteter Cross-Server-Verweis
+    # nicht stillschweigend angezeigt wird.
     wf_ids = [g.worst_finding_id for g in groups if g.worst_finding_id is not None]
     worst_by_id: dict[int, Finding] = {}
     if wf_ids:
@@ -157,32 +177,12 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
         for f in sess.execute(worst_stmt).scalars().all():
             worst_by_id[f.id] = f
 
-    # Findings pro Group laden — eine Query pro Group ist akzeptabel: die
-    # Anzahl Groups pro Server liegt bei 5-15 (Operator-Realitaet), und die
-    # Block-K-Sort-Order braucht dieselben Tiebreaker wie der Server-weite
-    # Listen-Modus. Wir reuse `list_findings()` mit einem Group-Filter via
-    # Direct-Query (FindingsFilter hat keinen `application_group_id`-Slot,
-    # weil das eine Server-Detail-spezifische Achse ist).
     result: list[dict[str, Any]] = []
     for grp in groups:
-        findings_stmt = (
-            select(Finding)
-            .where(
-                Finding.server_id == server_id,
-                Finding.application_group_id == grp.id,
-                Finding.status == FindingStatus.OPEN,
-            )
-            .order_by(
-                Finding.is_kev.desc(),
-                Finding.cvss_v3_score.desc().nullslast(),
-                Finding.first_seen_at.asc(),
-            )
-        )
-        grp_findings = list(sess.execute(findings_stmt).scalars().all())
         result.append(
             {
                 "group": grp,
-                "findings": grp_findings,
+                "count": counts_by_id.get(grp.id, 0),
                 "worst_finding": (
                     worst_by_id.get(grp.worst_finding_id)
                     if grp.worst_finding_id is not None
@@ -472,6 +472,54 @@ def show(server_id: int) -> Any:
         noise_total=noise_total,
         action_sections=action_sections,
         **section_ctx,
+    )
+
+
+@server_detail_bp.get("/<int:server_id>/groups/<int:group_id>/findings")
+@login_required
+def group_findings_fragment(server_id: int, group_id: int) -> str:
+    """HTMX-Lazy-Load-Endpoint fuer die Findings-Tabelle einer Application-Group.
+
+    Block Q (ADR-0025 §2): Application-Group-Cards rendern initial nur
+    Count + Worst-Finding-Metadaten. Sobald der Operator das Card-`<details>`
+    aufklappt, holt das HTMX-Pattern dieses Fragment nach.
+
+    Rueckgabe ist ein HTML-Partial (`_partials/group_findings_table.html`)
+    ohne `<html>`/`<body>`-Huelle. 404, wenn der Server nicht existiert oder
+    die angefragte Group auf diesem Server keine OPEN-Findings hat —
+    letzteres deckt sowohl Cross-Server- als auch Cross-Group-ID-Probing ab.
+
+    Sortierung ist Spec-fix (siehe ADR-0025 §2): KEV desc, EPSS desc nulls
+    last, CVSS desc nulls last, `first_seen_at` asc. Der Endpoint kennt
+    keine URL-Parameter.
+    """
+    server = _load_server_with_tags(server_id)
+    if server is None:
+        abort(404)
+    sess = get_session()
+    findings = list(
+        sess.execute(
+            select(Finding)
+            .where(
+                Finding.server_id == server_id,
+                Finding.application_group_id == group_id,
+                Finding.status == FindingStatus.OPEN,
+            )
+            .order_by(
+                Finding.is_kev.desc(),
+                nulls_last(Finding.epss_score.desc()),
+                nulls_last(Finding.cvss_v3_score.desc()),
+                Finding.first_seen_at.asc(),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not findings:
+        abort(404)
+    return render_template(
+        "_partials/group_findings_table.html",
+        findings=findings,
     )
 
 

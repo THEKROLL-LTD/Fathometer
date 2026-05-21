@@ -1,12 +1,14 @@
-{# Application-Group-Card im `evaluating`-State (Block P, ADR-0023).
+{# Application-Group-Card im `evaluating`-State (Block P, ADR-0023; ADR-0025 §2).
 
    Wird gerendert wenn `group.risk_band IS NULL` — also Pass 1 ist durch
    (Group existiert mit Label), aber Pass 2 hat noch keinen Risk-Band
    geschrieben. Block-L-Polling fueltert die UI nach.
 
    Render-Vertrag:
-     - `group`    : ApplicationGroup (mit `id`, `label`, `explanation?`).
-     - `findings` : list[Finding] der Group, fuer den Count.
+     - `group` : ApplicationGroup (mit `id`, `label`, `explanation?`).
+     - `count` : int — Anzahl OPEN-Findings dieser Group (aus dem Aggregat-
+                 Loader, Block-Q Phase B). Findings selbst werden NICHT
+                 eager mitgegeben.
 #}
 <div class="card bg-base-200/40 rounded-box p-4 mb-3"
      data-test="group-evaluating-{{ group.id }}">
@@ -27,7 +29,7 @@
             data-test="group-evaluating-spinner"
             aria-label="Evaluating"></span>
       <span class="text-xs" data-test="group-evaluating-text">
-        Evaluating risk for {{ findings | length }} {% if (findings | length) == 1 %}finding{% else %}findings{% endif %}...
+        Evaluating risk for {{ count }} {% if count == 1 %}finding{% else %}findings{% endif %}...
       </span>
     </div>
   </div>

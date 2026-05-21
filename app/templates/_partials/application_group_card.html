@@ -1,16 +1,23 @@
-{# Application-Group-Card (Block P, ADR-0023 §UI-Konsequenzen).
+{# Application-Group-Card (Block P, ADR-0023 §UI-Konsequenzen; ADR-0025 §2).
 
    Render-Vertrag:
      - `group`         : ApplicationGroup — mit `id`, `label`, `explanation`,
                          `risk_band`, `risk_band_reason`, `worst_finding_id`.
-     - `findings`      : list[Finding] — alle Findings dieser Group, in der
-                         Default-Sort-Reihenfolge (KEV/EPSS/CVSS/Severity).
+     - `count`         : int — Anzahl OPEN-Findings dieser Group (aus dem
+                         Aggregat-Loader, Block-Q Phase B). Findings selbst
+                         werden NICHT mehr eager mitgegeben.
      - `worst_finding` : Finding | None — bereits aufgeloest aus
                          `group.worst_finding_id` (kann None sein, wenn der
                          Eintrag inzwischen geloescht wurde).
-     - `open_default`  : bool — default `false`. Wenn true: `<details open>`,
-                         das Drill-down ist beim Render expanded (typisch
-                         escalate/act/mitigate/pending/unknown-Groups).
+     - `server`        : Server — wird fuer den HTMX-`url_for` benoetigt
+                         (`server.id` als Pfad-Parameter).
+
+   Default-Verhalten:
+     - Die Card rendert IMMER `<details>` ohne `open`-Attribut (collapsed).
+       Die Findings-Tabelle wird per HTMX nachgeladen, sobald der Operator
+       das innere `<summary>` oeffnet (`server_detail.group_findings_fragment`).
+     - Die fruehere `_open_default`-Logik (escalate/act/mitigate/pending/
+       unknown automatisch expanded) entfaellt ersatzlos (ADR-0025 §2).
 
    Sicherheit:
      - `group.label` und `group.explanation` sind LLM-Output, durch das
@@ -20,7 +27,6 @@
        wird in einer `<pre class="font-mono">`-Box gerendert — strict-escape
        reicht, keine Markdown-Pipeline.
 #}
-{%- set _open_default = open_default | default(false) -%}
 {%- set _band = group.risk_band or 'pending' -%}
 <div class="card bg-base-200/40 rounded-box p-4 mb-3"
      data-test="group-card-{{ group.id }}">
@@ -43,7 +49,7 @@
         {% include "_partials/risk_band_pill.html" %}
       {% endwith %}
       <span class="badge badge-ghost badge-sm" data-test="group-findings-count">
-        {{ findings | length }} {% if (findings | length) == 1 %}finding{% else %}findings{% endif %}
+        {{ count }} {% if count == 1 %}finding{% else %}findings{% endif %}
       </span>
     </div>
   </div>
@@ -71,13 +77,20 @@
   {% endif %}
 
   <details class="mt-3"
-           {% if _open_default %}open{% endif %}
            data-test="group-findings-details">
     <summary class="cursor-pointer text-sm opacity-80 select-none">
-      Show all {{ findings | length }} {% if (findings | length) == 1 %}finding{% else %}findings{% endif %}
+      Show all {{ count }} {% if count == 1 %}finding{% else %}findings{% endif %}
     </summary>
-    <div class="mt-2">
-      {% include "_partials/group_findings_table.html" %}
+    <div class="mt-2"
+         hx-get="{{ url_for('server_detail.group_findings_fragment',
+                            server_id=server.id, group_id=group.id) }}"
+         hx-trigger="toggle once from:closest details, click once from:closest summary"
+         hx-swap="innerHTML"
+         data-test="group-findings-lazy-slot">
+      <div class="opacity-60 text-xs italic px-3 py-2">
+        <span class="loading loading-spinner loading-xs align-middle mr-1"></span>
+        Lade Findings...
+      </div>
     </div>
   </details>
 </div>

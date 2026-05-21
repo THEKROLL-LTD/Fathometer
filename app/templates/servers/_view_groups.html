@@ -1,21 +1,28 @@
-{# Server-Detail-Findings-Section: Application-Group-Cards (Block P, ADR-0023).
+{# Server-Detail-Findings-Section: Application-Group-Cards (Block P, ADR-0023;
+   Block-Q Phase B, ADR-0025 §2).
 
    Variablen-Vertrag (durchgereicht von `_findings_section.html`):
      - `application_groups` : list[dict] — jede dict-Entry hat:
                               `group` (ApplicationGroup),
-                              `findings` (list[Finding]),
+                              `count` (int, OPEN-Findings dieser Group),
                               `worst_finding` (Finding|None).
                               Reihenfolge bereits nach RISK_BAND_SORT_RANK
                               DESC vom Backend (`_load_application_groups_
                               for_server()`).
+                              KEIN `findings`-Feld mehr — Findings werden
+                              je Card lazy via HTMX nachgeladen
+                              (`server_detail.group_findings_fragment`).
      - `ungrouped_findings` : list[Finding] — Findings ohne
                               `application_group_id` (Pending-grouping-
-                              Sektion am Ende).
+                              Sektion am Ende; bleibt in Phase B unveraendert,
+                              wird in Phase C auf Lazy umgestellt).
      - `server`             : Server.
 
-   Default-Expand-Logik:
-     - escalate / act / mitigate / pending / unknown  -> `<details open>`.
-     - monitor / noise / NULL (evaluating)           -> collapsed.
+   Default-Verhalten:
+     - Alle Application-Group-Cards rendern default COLLAPSED. Die
+       fruehere `_expanded_bands`-Auto-Open-Logik entfaellt (ADR-0025 §2);
+       Findings werden per HTMX nachgeladen, wenn der Operator die innere
+       "Show all N findings"-Section oeffnet.
 
    Wenn eine Group keinen `risk_band` hat (Pass 2 nicht durch), rendern wir
    `group_evaluating_card.html` statt `application_group_card.html`. Block-L-
@@ -26,7 +33,6 @@
    wiederverwendet. Wenn beide Listen leer sind, zeigen wir den vertrauten
    Empty-State-Block aus Block K.
 #}
-{%- set _expanded_bands = ['escalate', 'act', 'mitigate', 'pending', 'unknown'] -%}
 {% if not application_groups and not ungrouped_findings %}
   <div class="card bg-base-200">
     <div class="card-body items-center text-center py-10">
@@ -42,18 +48,17 @@
     <div class="space-y-3" data-test="application-groups-section">
       {% for entry in application_groups %}
         {%- set _grp = entry.group -%}
-        {%- set _findings = entry.findings -%}
+        {%- set _count = entry.count -%}
         {%- set _wf = entry.worst_finding -%}
         {% if _grp.risk_band is none %}
-          {% with group=_grp, findings=_findings %}
+          {% with group=_grp, count=_count %}
             {% include "_partials/group_evaluating_card.html" %}
           {% endwith %}
         {% else %}
-          {%- set _open = _grp.risk_band in _expanded_bands -%}
           {% with group=_grp,
-                  findings=_findings,
+                  count=_count,
                   worst_finding=_wf,
-                  open_default=_open %}
+                  server=server %}
             {% include "_partials/application_group_card.html" %}
           {% endwith %}
         {% endif %}
