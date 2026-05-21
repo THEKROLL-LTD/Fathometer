@@ -4,6 +4,32 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
+**Block Q geplant — Server-Detail- und Dashboard-Entschlackung, dedizierte Findings-Seite — Spec abgenommen 2026-05-21.** Zielversion v0.10.0, Branch `feat/block-q-slim-down`, Spec [ADR-0025](../decisions/0025-server-detail-and-findings-slim-down.md), Tasks [docs/blocks/Q-slim-down.md](Q-slim-down.md). Auslöser: Operator-Befund 2026-05-21 zu langer Render-Zeit auf `/servers/<id>` (Code-Analyse identifizierte N+1 in `_load_application_groups_for_server`, Eager-Render aller Group-Drill-down-Tabellen, 272 ungroupierte Findings als verstecktes DOM auf einer k3s-Fixture); plus organisatorischer Wunsch Dashboard und Findings-Triage als zwei separate Surfaces zu trennen.
+
+**Was Block Q tut (fünf Punkte, kein neues Feature, reiner Umbau):**
+
+1. **Findings-Modi `gruppiert` und `diff` ersatzlos entfernen.** Code (`compute_diff`, `DiffSection`, `group_findings_by_package`, `PackageGroup`), Templates (`_view_group.html`, `_view_diff.html`), CSV-Mode-Varianten und Tests werden gestrichen. `?mode=group`/`?mode=diff`-URLs werden still ignoriert, rendern den List-Pfad.
+2. **Application-Group-Cards default collapsed, Findings via HTMX lazy.** Neuer Endpoint `GET /servers/<id>/groups/<gid>/findings`. Initial-Render reduziert auf 1 GROUP-BY-Counts-Query plus Group-Metadaten plus Worst-Finding-Batch — die heutige Per-Group-Findings-Query-Schleife entfällt.
+3. **Pending-Grouping-Sektion gleich behandelt.** Initial-Render = 1 GROUP-BY-Counts-Query nach `risk_band`. Pro Band ein collapsed `<details>` mit Pill plus Count; Findings via Lazy-Endpoint `GET /servers/<id>/findings/pending?risk_band=<band>`.
+4. **`active`-Status-Pille aus dem Server-Detail-Header.** Pill-Reihe nur noch für revoked/retired plus auffällige Marker (stale, db veraltet, agent-/trivy-outdated). Settings-Server-Liste behält die Pille (anderer Kontext).
+5. **Cross-Server-Findings-Tabelle wandert auf neue `/findings`-Seite.** Neuer Nav-Eintrag neben „Dashboard", Default-State leer (Empty-State mit `total_findings`-Counter), expliziter „Anwenden"-Submit (kein Auto-Submit mehr), klassische nummerierte Pagination mit 50 Findings/Seite. Dashboard verliert die Findings-Section ersatzlos; KPI-Cards, Risk-Band-Pills und Severity-Strip bleiben. KPI-Card-Klicks zeigen jetzt auf `/findings?…`.
+
+**Was Block Q bewusst nicht tut:**
+
+- *Triple-Aggregations-Konsolidierung im Server-Detail-Header.* Die drei `_load_findings()`-Aufrufe in `compute_tendency` + `severity_snapshots_for_server` + `daily_severity_counts_for_server` (drei identische DB-Queries plus drei O(F×50)-Python-Loops über dieselbe Datenbasis) bleiben unberührt — separater Performance-Folge-Block (vermutlich Block R) mit Re-Open-Trigger in ADR-0025.
+- *Endless-Scroll auf Findings.* Page-based gewinnt wegen URL-Stabilität, Bookmark-Tauglichkeit und CSV-Scope-Klarheit.
+- *Bulk-Ack über Application-Group-Grenzen.* Selection-Scope bleibt auf expandierte Cards beschränkt.
+- *Statusänderung an ADR-0018/0020 auf `Superseded by ADR-0025`.* Optionaler Doku-PR nach Block-Q-Merge, nicht Teil des Blocks.
+- *Mobile-responsive Findings-Tabelle.* Out-of-scope per ADR-0009.
+
+**Vorgehensweise:**
+
+Phase A (Modi-Ausbau) → Phase B (Group-Cards Lazy) → Phase C (Pending Lazy) → Phase D (Header-Pille) → Phase E (Findings-Seite + Dashboard-Schrumpfung) → Phase F (Spec-Edits) → Phase G (Verifikation, Performance-Bench, CI-Gates). Reviewer ist über Spec-Touchpoints in ARCHITECTURE.md §7 (Server-Detail-Sektion plus neue `/findings`-Erwähnung) plus ADR-0025-Bezug zu informieren.
+
+**Keine Schema-Migration.** Alle Änderungen sind Code/Template/Test/Doku.
+
+---
+
 **MVP + UI v2 + ADR-0016-Refinement + ADR-0017-Pane-Konsolidierung + ADR-0018-Server-Detail-Redesign + ADR-0019-Polling + ADR-0020-Dashboard-Redesign + ADR-0021-Bootstrap-Installer + ADR-0022-Risk-Engine + ADR-0023-LLM-Risk-Reviewer + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 + Worker-Stability v0.9.5 + Worker-Idle-Throttle v0.9.6 — v0.9.6 (2026-05-20).**
 
 **Patch v0.9.6 abgeschlossen 2026-05-20 — Worker-Idle-CPU-Optimierung + CI-Build-Speedup.** Direkt auf main committed (`acb162d` CI-Workflow-Fix, `2784a86` Worker-Throttle), Tag `v0.9.6` zeigt auf `2784a86`. Keine Schema-Migration, Spec-Files unverändert.

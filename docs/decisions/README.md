@@ -23,12 +23,14 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0015](0015-gunicorn-gthread-for-sse.md) | Gunicorn `gthread`-Worker-Class für SSE-Endpoints | Akzeptiert |
 | [0016](0016-header-and-profile-dropdown.md) | Header-Navigation kompakt, Settings und Audit ins Profile-Dropdown (Block-I-Refinement) | Teilweise abgelöst durch 0020 (Dashboard-Pane-Layout) |
 | [0017](0017-dashboard-pane-single-partial.md) | Dashboard-Detail-Pane als ein gemeinsames Partial (kein HX-vs-Full-Page-Drift) | Akzeptiert |
-| [0018](0018-server-detail-visual-alignment.md) | Server-Detail-Redesign (Layout, KPI-Sparklines, Trend-Berechnung, sortierbare Findings-Tabelle) | Akzeptiert |
+| [0018](0018-server-detail-visual-alignment.md) | Server-Detail-Redesign (Layout, KPI-Sparklines, Trend-Berechnung, sortierbare Findings-Tabelle) | Teilweise abgelöst durch 0025 (Modi-Reduktion, Header-Pille, Lazy-Load) |
 | [0019](0019-dashboard-polling-not-sse.md) | Dashboard-Live-Updates via HTMX-Polling statt SSE (LLM-Stream bleibt SSE) | Akzeptiert |
-| [0020](0020-dashboard-cross-server-findings.md) | Dashboard-Redesign: Cross-Server-Findings-Tabelle, KPI-Sparklines, Entfernung von /findings/search (Block M) | Akzeptiert |
+| [0020](0020-dashboard-cross-server-findings.md) | Dashboard-Redesign: Cross-Server-Findings-Tabelle, KPI-Sparklines, Entfernung von /findings/search (Block M) | Teilweise abgelöst durch 0025 (Findings-Section wandert auf eigene Seite) |
 | [0021](0021-agent-bootstrap-installer.md) | Agent-Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding (Block N) | Akzeptiert |
 | [0022](0022-risk-based-prioritization.md) | Risk-basierte Priorisierung: Pre-Triage-Engine, Host-Snapshot, Vendor-Severity, UI-Redesign (Block O) | Akzeptiert |
 | [0023](0023-llm-risk-reviewer-and-application-grouping.md) | LLM-Risk-Reviewer mit Application-Grouping (Two-Pass) und asynchroner Job-Queue (Block P) | Akzeptiert |
+| [0024](0024-external-epss-kev-enrichment.md) | Externe EPSS-/KEV-Anreicherung | Akzeptiert |
+| [0025](0025-server-detail-and-findings-slim-down.md) | Server-Detail- und Dashboard-Entschlackung, dedizierte Findings-Seite (Block Q) | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 
