@@ -1,6 +1,6 @@
 ## ADR-0022 — Risk-basierte Priorisierung: Pre-Triage, Host-Snapshot, Vendor-Severity, UI-Redesign
 
-**Status:** Akzeptiert · **Akzeptiert:** 2026-05-18 · **Datum:** 2026-05-18 · **Bezug:** ARCHITECTURE §6 (Wrapper-Envelope wird um `host_state`-Block erweitert), §7 (Dashboard-Layout wird umgebaut — Risk-zentrisch statt CVSS-zentrisch), §11 (Client-Agent sammelt zusätzliche Host-Daten), §15 (Sortier-Defaults bekommen `risk_band` als primären Sort-Key, CVSS-Severity rutscht zum Tiebreak). ADR-0020 (Dashboard-Cross-Server-Findings) bleibt strukturell unberührt — Tabelle und Filter-Bar bleiben, KPI-Cards werden inhaltlich umgebaut. ADR-0021 (Agent-Bootstrap, Ursachen-Felder) wird durch diesen Block **erweitert**, nicht abgelöst — die fünf Ursachen-Spalten am `Finding` bleiben Eingaben für die spätere LLM-Phase.
+**Status:** Akzeptiert (Spec §Audit-Events teilweise abgelöst durch ADR-0027) · **Akzeptiert:** 2026-05-18 · **Datum:** 2026-05-18 · **Bezug:** ARCHITECTURE §6 (Wrapper-Envelope wird um `host_state`-Block erweitert), §7 (Dashboard-Layout wird umgebaut — Risk-zentrisch statt CVSS-zentrisch), §11 (Client-Agent sammelt zusätzliche Host-Daten), §15 (Sortier-Defaults bekommen `risk_band` als primären Sort-Key, CVSS-Severity rutscht zum Tiebreak). ADR-0020 (Dashboard-Cross-Server-Findings) bleibt strukturell unberührt — Tabelle und Filter-Bar bleiben, KPI-Cards werden inhaltlich umgebaut. ADR-0021 (Agent-Bootstrap, Ursachen-Felder) wird durch diesen Block **erweitert**, nicht abgelöst — die fünf Ursachen-Spalten am `Finding` bleiben Eingaben für die spätere LLM-Phase.
 
 ## Kontext
 
@@ -323,8 +323,9 @@ EPSS/KEV-Datenbank-Updates zwischen Scans schlagen sich erst beim nächsten Scan
 Neue Audit-Event-Typen:
 
 - `risk.pretriage_evaluated` — pro Scan, Body `{counters: {pending: N, monitor: N, noise: N, unknown: N}, server_id: ...}`.
-- `risk.band_changed` — pro Finding wenn der Band sich ändert. Body enthält alt + neu + Source (engine/llm/manual) + Reason. Deckt sowohl Pre-Triage-Klassifikation als auch zukünftige LLM-Updates und Demote-Events ab.
 - `host_state.snapshot_received` — pro Scan mit Snapshot, Body `{tools_available: [...], gaps: [...], listener_count: N, process_count: N}`.
+
+`risk.band_changed` wurde durch ADR-0027 ersatzlos entfernt (Noise-Reduktion 2026-05-22). Das Aggregat `risk.pretriage_evaluated` deckt den Audit-Bedarf fuer Band-Bewegungen ab.
 
 ## Begründung
 

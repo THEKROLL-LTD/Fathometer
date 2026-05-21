@@ -342,21 +342,6 @@ def ingest_scan() -> Response | tuple[Response, int]:
         evaluation = pretriage(finding, server, snapshot_available)
         new_band = evaluation.band.value
 
-        if finding.risk_band != new_band:
-            log_event(
-                "risk.band_changed",
-                target_type="finding",
-                target_id=str(finding.id),
-                metadata={
-                    "from": finding.risk_band,
-                    "to": new_band,
-                    "source": "engine",
-                    "reason": evaluation.reason,
-                },
-                actor=server.name,
-                session=sess,
-            )
-
         finding.risk_band = new_band
         finding.risk_band_reason = evaluation.reason
         finding.risk_band_source = "engine"

@@ -27,10 +27,11 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0019](0019-dashboard-polling-not-sse.md) | Dashboard-Live-Updates via HTMX-Polling statt SSE (LLM-Stream bleibt SSE) | Akzeptiert |
 | [0020](0020-dashboard-cross-server-findings.md) | Dashboard-Redesign: Cross-Server-Findings-Tabelle, KPI-Sparklines, Entfernung von /findings/search (Block M) | Teilweise abgelöst durch 0025 (Findings-Section wandert auf eigene Seite) |
 | [0021](0021-agent-bootstrap-installer.md) | Agent-Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding (Block N) | Akzeptiert |
-| [0022](0022-risk-based-prioritization.md) | Risk-basierte Priorisierung: Pre-Triage-Engine, Host-Snapshot, Vendor-Severity, UI-Redesign (Block O) | Akzeptiert |
+| [0022](0022-risk-based-prioritization.md) | Risk-basierte Priorisierung: Pre-Triage-Engine, Host-Snapshot, Vendor-Severity, UI-Redesign (Block O) | Akzeptiert (§Audit-Events teilweise abgelöst durch 0027) |
 | [0023](0023-llm-risk-reviewer-and-application-grouping.md) | LLM-Risk-Reviewer mit Application-Grouping (Two-Pass) und asynchroner Job-Queue (Block P) | Akzeptiert |
 | [0024](0024-external-epss-kev-enrichment.md) | Externe EPSS-/KEV-Anreicherung | Akzeptiert |
 | [0025](0025-server-detail-and-findings-slim-down.md) | Server-Detail- und Dashboard-Entschlackung, dedizierte Findings-Seite (Block Q) | Akzeptiert |
+| [0027](0027-no-per-finding-risk-band-audit.md) | Keine per-Finding-`risk_band`-Audit-Events | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

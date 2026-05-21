@@ -56,6 +56,10 @@ Pfad pro Finding gelookupt. Trivy bleibt unveraendert als Scanner.
 
 ### Changed
 
+- **`risk.band_changed`-Audit-Events ersatzlos entfernt** (ADR-0027).
+  Das Aggregat ``risk.pretriage_evaluated`` bleibt die einzige Audit-Spur
+  fuer Band-Uebergaenge. Bestehende historische Events bleiben in der
+  Tabelle erhalten; es gibt keine Cleanup-Migration.
 - Findings erben jetzt nach Pass-2-Erfolg und bei jedem Re-Ingest das
   finale ``risk_band`` ihrer ``ApplicationGroup``. Dadurch zaehlt die
   Server-Detail-Pill ``Action needed`` nur noch wirklich ungruppierte

@@ -12,7 +12,7 @@ Konkret muss gelten:
   * `finding.risk_band_source` bleibt `"llm"`.
   * `finding.risk_band_reason` bleibt unveraendert.
   * `finding.risk_band_computed_at` bleibt unveraendert.
-  * Kein neues `risk.band_changed`-Audit-Event fuer diese Finding-ID.
+  * Field-Level-Invarianten bleiben auch nach Re-Ingest erhalten.
 
 Plus: in einer Mischmenge engine+llm muss die Pre-Triage genau die
 engine-Findings re-evaluieren und die llm-Findings unangetastet lassen.
@@ -29,7 +29,7 @@ from flask import Flask
 from sqlalchemy import select
 
 from app.db import get_session_factory
-from app.models import AuditEvent, Finding
+from app.models import Finding
 from tests._helpers import register_test_server
 
 # ---------------------------------------------------------------------------
@@ -100,23 +100,6 @@ def _findings(app: Flask, server_id: int) -> list[Finding]:
             sess.close()
 
 
-def _band_changed_events_for(app: Flask, finding_ids: set[int]) -> list[AuditEvent]:
-    """Liefert nur `risk.band_changed`-Events fuer die genannten Finding-IDs."""
-    factory = get_session_factory(app)
-    with app.app_context():
-        sess = factory()
-        try:
-            rows = list(
-                sess.execute(select(AuditEvent).where(AuditEvent.action == "risk.band_changed"))
-                .scalars()
-                .all()
-            )
-            ids_as_str = {str(fid) for fid in finding_ids}
-            return [r for r in rows if r.target_id in ids_as_str]
-        finally:
-            sess.close()
-
-
 def _set_llm_band(
     app: Flask,
     *,
@@ -155,7 +138,7 @@ def _set_llm_band(
 
 def test_llm_act_band_not_overwritten_on_reingest(db_app: Flask) -> None:
     """`risk_band="act"` mit `risk_band_source="llm"` ueberlebt Re-Ingest:
-    keine Feld-Aenderung, kein `risk.band_changed`-Audit.
+    keine Feld-Aenderung.
 
     Pre-Triage wuerde fuer LOW-Severity ohne KEV/EPSS sonst `noise` setzen —
     der LLM-Override hat Vorrang und darf nicht abgewertet werden.
@@ -186,10 +169,6 @@ def test_llm_act_band_not_overwritten_on_reingest(db_app: Flask) -> None:
         computed_at=fixed_ts,
     )
 
-    # Audit-Snapshot fuer diese Finding-ID VOR dem zweiten Ingest.
-    before = _band_changed_events_for(db_app, {fid})
-    before_count = len(before)
-
     # Re-Ingest mit identischen Daten — LLM-Band muss stehen bleiben.
     r2 = _post(client, _envelope(vulns), bearer=key)
     assert r2.status_code == 202, r2.get_data(as_text=True)[:200]
@@ -209,13 +188,6 @@ def test_llm_act_band_not_overwritten_on_reingest(db_app: Flask) -> None:
         f"risk_band_computed_at wurde ueberschrieben: {f.risk_band_computed_at}"
     )
 
-    # KEIN neues band_changed-Audit fuer diese Finding-ID.
-    after = _band_changed_events_for(db_app, {fid})
-    assert len(after) == before_count, (
-        f"Erwartete keine neuen risk.band_changed-Events fuer fid={fid}, "
-        f"got {len(after) - before_count} neue."
-    )
-
 
 # ---------------------------------------------------------------------------
 # Test 2: gemischte Menge engine + llm — nur engine wird re-evaluiert.
@@ -229,7 +201,7 @@ def test_mixed_engine_and_llm_only_engine_reevaluated(db_app: Flask) -> None:
 
     Re-Ingest mit Severity-Upgrade des engine-Findings (LOW -> HIGH) muss:
       * engine_finding -> Band wechselt auf `pending` (HIGH-Trigger).
-      * llm_finding -> alles unveraendert, kein neues band_changed-Event.
+      * llm_finding -> alles unveraendert.
     """
     sid, key = register_test_server(db_app, name="srv-adv-mixed")
     client = db_app.test_client()
@@ -263,12 +235,7 @@ def test_mixed_engine_and_llm_only_engine_reevaluated(db_app: Flask) -> None:
         computed_at=fixed_ts,
     )
 
-    # Engine-Finding-ID fuer die Audit-Pruefung holen.
-    findings_pre = {f.identifier_key: f for f in _findings(db_app, sid)}
-    engine_fid = findings_pre["CVE-2024-60001"].id
-
-    before_llm = _band_changed_events_for(db_app, {llm_fid})
-    before_engine = _band_changed_events_for(db_app, {engine_fid})
+    assert llm_fid > 0
 
     # Re-Ingest: engine-Vuln wird zu HIGH eskaliert; LLM-Vuln gleich.
     vulns_reingest = [
@@ -304,25 +271,3 @@ def test_mixed_engine_and_llm_only_engine_reevaluated(db_app: Flask) -> None:
     assert llm_f.risk_band_source == "llm"
     assert llm_f.risk_band_reason == "LLM final: exposed and exploitable"
     assert llm_f.risk_band_computed_at == fixed_ts
-
-    # Audit-Pruefung:
-    #  - llm_fid: KEIN neues band_changed-Event.
-    #  - engine_fid: GENAU ein neues band_changed-Event (`noise` -> `pending`).
-    after_llm = _band_changed_events_for(db_app, {llm_fid})
-    after_engine = _band_changed_events_for(db_app, {engine_fid})
-
-    assert len(after_llm) == len(before_llm), (
-        f"LLM-Finding bekam unerwartet ein band_changed-Audit: "
-        f"{len(after_llm) - len(before_llm)} neu."
-    )
-    new_engine_events = len(after_engine) - len(before_engine)
-    assert new_engine_events == 1, (
-        f"Engine-Finding sollte genau 1 neues band_changed-Audit haben, got {new_engine_events}."
-    )
-
-    # Konkretes Mapping pruefen — letztes Event ist die Eskalation noise->pending.
-    last_engine_event = after_engine[-1]
-    assert last_engine_event.event_metadata is not None
-    assert last_engine_event.event_metadata["from"] == "noise"
-    assert last_engine_event.event_metadata["to"] == "pending"
-    assert last_engine_event.event_metadata["source"] == "engine"

@@ -4,14 +4,14 @@ Cases:
 * Vollstaendiger Ingest mit Snapshot → alle Findings haben
   `risk_band ∈ {noise, monitor, pending, unknown}`, `risk_band_source="engine"`,
   `risk_band_computed_at` gesetzt.
-* Re-Ingest mit identischem Snapshot + identischen Findings → keine
-  `risk.band_changed`-Audits, Bands unveraendert.
+* Re-Ingest mit identischem Snapshot + identischen Findings → Bands bleiben
+  deterministisch, `risk.pretriage_evaluated` wird pro Scan geschrieben.
 * Re-Ingest mit Trivy-DB-Update das ein CVE jetzt KEV-listet → Finding
-  wechselt von `noise`/`monitor` auf `pending`, Audit `risk.band_changed`.
+  wechselt von `noise`/`monitor` auf `pending`, Aggregat-Counter zeigt `pending`.
 * Ingest ohne `host_state` → alle Findings haben `risk_band="unknown"`,
   Reason enthaelt "host snapshot missing".
 * Finding mit `risk_band_source="llm"` und `risk_band="act"` (manuell gesetzt)
-  → Re-Ingest ueberschreibt das NICHT, kein `risk.band_changed`, Counter zaehlt `act`.
+  → Re-Ingest ueberschreibt das NICHT, Counter zaehlt `act`.
 """
 
 from __future__ import annotations
@@ -198,26 +198,22 @@ def test_re_ingest_identical_no_band_change_audits(db_app: Flask) -> None:
     resp1 = _post(client, payload, bearer=key)
     assert resp1.status_code == 202
 
-    # Initialer Wechsel `None -> noise` ist ein band_changed-Event.
-    changes_1 = _audit_events(db_app, action="risk.band_changed")
-    assert len(changes_1) == 1
-    assert changes_1[0].event_metadata is not None
-    assert changes_1[0].event_metadata["from"] is None
-    assert changes_1[0].event_metadata["to"] == "noise"
-
-    # Zweiter Ingest mit identischen Daten — keine zusaetzlichen band_changed.
+    # Zweiter Ingest mit identischen Daten — Band bleibt stabil, Aggregat kommt erneut.
     resp2 = _post(client, payload, bearer=key)
     assert resp2.status_code == 202
-
-    changes_2 = _audit_events(db_app, action="risk.band_changed")
-    assert len(changes_2) == 1  # gleich geblieben
 
     findings = _findings(db_app, _sid)
     assert len(findings) == 1
     assert findings[0].risk_band == "noise"
 
+    evals = _audit_events(db_app, action="risk.pretriage_evaluated")
+    assert len(evals) == 2
+    for event in evals:
+        assert event.event_metadata is not None
+        assert event.event_metadata["counters"]["noise"] == 1
 
-def test_re_ingest_with_kev_promotion_emits_band_changed(db_app: Flask) -> None:
+
+def test_re_ingest_with_kev_promotion_updates_aggregate_counter(db_app: Flask) -> None:
     _sid, key = register_test_server(db_app, name="srv-pre-kev")
     client = db_app.test_client()
 
@@ -251,12 +247,12 @@ def test_re_ingest_with_kev_promotion_emits_band_changed(db_app: Flask) -> None:
     assert findings[0].risk_band == "pending"
     assert findings[0].is_kev is True
 
-    # Zwei band_changed-Audits gesamt: None→noise und noise→pending.
-    changes = _audit_events(db_app, action="risk.band_changed")
-    # `from`-Werte: erstes Event None, zweites "noise".
-    transitions = [(c.event_metadata["from"], c.event_metadata["to"]) for c in changes]
-    assert (None, "noise") in transitions
-    assert ("noise", "pending") in transitions
+    evals = _audit_events(db_app, action="risk.pretriage_evaluated")
+    assert len(evals) == 2
+    assert evals[0].event_metadata is not None
+    assert evals[0].event_metadata["counters"].get("pending", 0) == 0
+    assert evals[1].event_metadata is not None
+    assert evals[1].event_metadata["counters"]["pending"] == 1
 
 
 def test_ingest_without_host_state_assigns_unknown(db_app: Flask) -> None:
@@ -285,7 +281,7 @@ def test_ingest_without_host_state_assigns_unknown(db_app: Flask) -> None:
 
 def test_llm_band_not_overwritten_by_re_ingest(db_app: Flask) -> None:
     """Block-P-Simulation: Finding traegt `risk_band_source="llm"` + `risk_band="act"`.
-    Re-Ingest darf das NICHT ueberschreiben, kein `risk.band_changed`, Counter `act`.
+    Re-Ingest darf das NICHT ueberschreiben, Counter `act`.
     """
     _sid, key = register_test_server(db_app, name="srv-pre-llm-keep")
     client = db_app.test_client()
@@ -316,10 +312,6 @@ def test_llm_band_not_overwritten_by_re_ingest(db_app: Flask) -> None:
         finally:
             sess.close()
 
-    # Audit-Events-Snapshot vor dem zweiten Ingest.
-    before = _audit_events(db_app, action="risk.band_changed")
-    before_count = len(before)
-
     # Zweiter Ingest — Pre-Triage muss `act` stehen lassen.
     resp2 = _post(client, _envelope(host_state=_minimal_host_state(), vulns=vulns), bearer=key)
     assert resp2.status_code == 202
@@ -330,10 +322,6 @@ def test_llm_band_not_overwritten_by_re_ingest(db_app: Flask) -> None:
     assert f2.risk_band == "act"
     assert f2.risk_band_source == "llm"
     assert f2.risk_band_reason == "LLM final: exposed sshd, patch available"
-
-    # Keine zusaetzlichen band_changed-Events fuer dieses Finding.
-    after = _audit_events(db_app, action="risk.band_changed")
-    assert len(after) == before_count
 
     # Counter im pretriage_evaluated-Event zaehlt das LLM-`act` mit.
     evals = _audit_events(db_app, action="risk.pretriage_evaluated")

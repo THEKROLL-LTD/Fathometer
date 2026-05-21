@@ -452,12 +452,6 @@ for f in session.query(Finding).filter_by(server_id=server.id, status=FindingSta
 
     eval_ = pretriage(f, server, snapshot_available)
 
-    if f.risk_band != eval_.band.value:
-        audit_event("risk.band_changed",
-                    target_id=str(f.id),
-                    body={"from": f.risk_band, "to": eval_.band.value,
-                          "source": "engine", "reason": eval_.reason})
-
     f.risk_band = eval_.band.value
     f.risk_band_reason = eval_.reason
     f.risk_band_source = "engine"
@@ -472,8 +466,8 @@ audit_event("risk.pretriage_evaluated", server_id=server.id,
 
 - Integration-Test in `tests/api/test_scans_risk_pretriage.py`:
   - Vollständiger Ingest mit Snapshot → alle Findings haben gesetzten `risk_band ∈ {noise, monitor, pending, unknown}`.
-  - Re-Ingest mit gleichem Snapshot + gleichen Findings → Bands unverändert, keine `risk.band_changed`-Audits.
-  - Re-Ingest nach Trivy-DB-Update mit KEV-Listing eines vorher harmlosen CVE → Finding ändert Band auf `pending`, Audit-Event geschrieben.
+  - Re-Ingest mit gleichem Snapshot + gleichen Findings → Bands unverändert, `risk.pretriage_evaluated`-Counter identisch.
+  - Re-Ingest nach Trivy-DB-Update mit KEV-Listing eines vorher harmlosen CVE → Finding ändert Band auf `pending`, Aggregat-Counter zeigt `pending`.
   - Ingest ohne `host_state` (alter Agent) → alle Findings haben `risk_band="unknown"`.
   - Finding mit `risk_band_source="llm"` und `risk_band="act"` aus Block-P-Simulation → Re-Ingest überschreibt das **nicht**.
 
@@ -670,7 +664,7 @@ Pflicht für Block O. Audit-Punkte:
 3. **Bulk-Ack-Noise-Endpoint filtert server-side.** Adversarial-Test muss zeigen dass eingeschleuste IDs nicht durchkommen.
 4. **Snapshot-Pydantic-Validatoren sind strikt** für IP-Literal, Port-Range, ASCII-only.
 5. **`risk_band`-Spalte hat keinen direkten User-Input-Pfad.** Operator kann nur via Acknowledgement entscheiden, nicht via Risk-Band-API.
-6. **Audit-Events sind vollständig.** Jede Band-Bewegung produziert `risk.band_changed`. Test verifiziert.
+6. **Audit-Events sind aggregiert.** Pro Scan wird `risk.pretriage_evaluated` mit Band-Counter-Dict geschrieben; Field-Level-Invarianten sichern Band-Uebergaenge in Tests ab (siehe ADR-0027).
 7. **Host-Snapshot-Daten DSGVO-Aspekt.** Prozess-Args können User-Pfade enthalten (z.B. `/home/alice/...`). Auditor prüft Privacy-Implikationen — Mitigation falls relevant: Privacy-Notice im Setup-Wizard (Block B).
 8. **LLM-gesetzte Bands überleben Re-Ingest.** Test verifiziert dass `risk_band_source='llm'` nicht durch Pre-Triage überschrieben wird.
 
