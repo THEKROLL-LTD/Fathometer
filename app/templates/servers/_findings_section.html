@@ -18,7 +18,10 @@
      - `view_filter`   : FindingsViewFilter (sort/dir/...)
      - `findings`      : list[Finding]
      - `application_groups` : list[dict] (Application-Group-Cards)
-     - `ungrouped_findings` : list[Finding] (Pending-Grouping-Sektion)
+     - `pending_grouping_counts` : dict[str, int] (Counts pro Risk-Band
+                            fuer die Pending-Grouping-Sektion in
+                            `_view_groups.html`; Findings lazy via
+                            `server_detail.pending_findings_fragment`)
      - `ack_form`      : AcknowledgeForm
      - `reopen_form`   : ReopenForm
      - `note_form`     : NoteForm

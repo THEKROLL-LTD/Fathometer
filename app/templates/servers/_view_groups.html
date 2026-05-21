@@ -12,10 +12,14 @@
                               KEIN `findings`-Feld mehr — Findings werden
                               je Card lazy via HTMX nachgeladen
                               (`server_detail.group_findings_fragment`).
-     - `ungrouped_findings` : list[Finding] — Findings ohne
-                              `application_group_id` (Pending-grouping-
-                              Sektion am Ende; bleibt in Phase B unveraendert,
-                              wird in Phase C auf Lazy umgestellt).
+     - `pending_grouping_counts` : dict[str, int] — Counts pro Risk-Band
+                              fuer Findings ohne `application_group_id`
+                              (OPEN-only). Keys: escalate/act/mitigate/
+                              pending/unknown/monitor/noise. Default 0
+                              fuer alle 7 Bands. Findings selbst werden
+                              pro Band lazy via HTMX vom Endpoint
+                              `server_detail.pending_findings_fragment`
+                              nachgeladen (ADR-0025 §3, Block-Q Phase C).
      - `server`             : Server.
 
    Default-Verhalten:
@@ -29,11 +33,14 @@
    Polling fueltert die UI auf, sobald der Worker fertig ist.
 
    Ungrouped-Findings werden in einer eigenen "Pending grouping"-Sektion am
-   Ende dargestellt, mit dem Block-K-Tabellen-Markup (`_view_list.html`)
-   wiederverwendet. Wenn beide Listen leer sind, zeigen wir den vertrauten
+   Ende dargestellt. Pro Risk-Band-Bucket wird ein collapsed `<details>`-
+   Rollup gerendert; Findings selbst kommen lazy via HTMX
+   (`server_detail.pending_findings_fragment?risk_band=<band>`).
+   Wenn beide (Groups und Pending) leer sind, zeigen wir den vertrauten
    Empty-State-Block aus Block K.
 #}
-{% if not application_groups and not ungrouped_findings %}
+{%- set _has_pending = (pending_grouping_counts.values() | sum) > 0 -%}
+{% if not application_groups and not _has_pending %}
   <div class="card bg-base-200">
     <div class="card-body items-center text-center py-10">
       <p class="opacity-60">Keine offenen Findings auf diesem Server.</p>
@@ -67,29 +74,48 @@
   {% endif %}
 
   {# Ungrouped-Findings — "Pending grouping"-Sektion am Ende.
-     Wir wiederverwenden das Block-K-Tabellen-Markup (`_view_list.html`)
-     mit `findings=ungrouped_findings` ueber ein `{% with %}`-Scope, damit
-     die existierende Sort/Bulk/Modal-Logik unveraendert greift. #}
-  {% if ungrouped_findings %}
+     Pro Risk-Band ein collapsed `<details>`-Rollup mit Pill + Count.
+     Findings werden lazy per HTMX vom Endpoint
+     `server_detail.pending_findings_fragment` nachgeladen (ADR-0025 §3). #}
+  {%- set _total_pending = pending_grouping_counts.values() | sum -%}
+  {% if _total_pending > 0 %}
     <section class="mt-6" data-test="pending-grouping-section">
       <header class="flex items-center gap-2 mb-2">
-        <span class="loading loading-spinner loading-xs opacity-60"
-              aria-hidden="true"></span>
+        <span class="loading loading-spinner loading-xs opacity-60" aria-hidden="true"></span>
         <h3 class="text-sm font-mono uppercase tracking-[0.12em] opacity-65">
           Pending grouping
         </h3>
         <span class="badge badge-ghost badge-sm">
-          {{ ungrouped_findings | length }}
-          {% if (ungrouped_findings | length) == 1 %}finding{% else %}findings{% endif %}
+          {{ _total_pending }} {% if _total_pending == 1 %}finding{% else %}findings{% endif %}
         </span>
       </header>
       <p class="text-xs opacity-60 mb-2">
         These findings have not been assigned to an application group yet.
         The risk reviewer worker will pick them up shortly.
       </p>
-      {% with findings=ungrouped_findings %}
-        {% include "servers/_view_list.html" %}
-      {% endwith %}
+      <div class="space-y-1">
+        {% for band, count in pending_grouping_counts.items() if count > 0 %}
+          <details class="rounded border border-base-300 bg-base-200/40"
+                   data-test="pending-band-{{ band }}">
+            <summary class="px-3 py-2 cursor-pointer flex items-center gap-3">
+              {% with band_value=band, as_link=false, compact=true, show_count=false %}
+                {% include "_partials/risk_band_pill.html" %}
+              {% endwith %}
+              <span class="opacity-70 text-sm">{{ count }} findings</span>
+            </summary>
+            <div hx-get="{{ url_for('server_detail.pending_findings_fragment',
+                                    server_id=server.id) }}?risk_band={{ band }}"
+                 hx-trigger="toggle once from:closest details, click once from:closest summary"
+                 hx-swap="innerHTML"
+                 data-test="pending-band-lazy-slot">
+              <div class="opacity-60 text-xs italic px-3 py-2">
+                <span class="loading loading-spinner loading-xs align-middle mr-1"></span>
+                Lade Findings…
+              </div>
+            </div>
+          </details>
+        {% endfor %}
+      </div>
     </section>
   {% endif %}
 {% endif %}

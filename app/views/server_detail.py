@@ -304,23 +304,35 @@ def _build_action_sections(
     return result
 
 
-def _load_ungrouped_findings_for_server(sess: Any, server_id: int) -> list[Finding]:
-    """OPEN-Findings ohne `application_group_id` ("Pending grouping"-Bucket)."""
+def _load_pending_grouping_counts(sess: Any, server_id: int) -> dict[str, int]:
+    """Liefert pro Risk-Band die Anzahl OPEN-Findings ohne Application-Group.
+
+    Block Q (ADR-0025 §3): Pending-Grouping-Sektion rendert nur die
+    Counts; Findings werden via HTMX vom `pending_findings_fragment`-
+    Endpoint lazy nachgeladen.
+
+    Rueckgabe-Format: dict[risk_band -> count]. Alle bekannten Bands
+    sind als Keys vorhanden, defaulten auf 0; Insertion-Order entspricht
+    der operativen Dringlichkeit (escalate zuerst, noise zuletzt), damit
+    Templates die Buckets ohne eigene Sortier-Logik in der erwarteten
+    Reihenfolge ueber `.items()` iterieren koennen.
+    """
     stmt = (
-        select(Finding)
+        select(Finding.risk_band, func.count(Finding.id))
         .where(
             Finding.server_id == server_id,
             Finding.application_group_id.is_(None),
             Finding.status == FindingStatus.OPEN,
         )
-        .order_by(
-            Finding.is_kev.desc(),
-            Finding.cvss_v3_score.desc().nullslast(),
-            Finding.first_seen_at.asc(),
-        )
-        .limit(500)
+        .group_by(Finding.risk_band)
     )
-    return list(sess.execute(stmt).scalars().all())
+    raw: dict[str, int] = {}
+    for band, n in sess.execute(stmt).all():
+        if band is not None:
+            raw[band] = int(n)
+    # Dict in fester Risk-Band-Sort-Order aufbauen — Python 3.7+ haelt
+    # Insertion-Order, das bestimmt die Rendering-Reihenfolge im Template.
+    return {band: raw.get(band, 0) for band in _PENDING_BANDS}
 
 
 def _render_findings_section(
@@ -361,7 +373,7 @@ def _render_findings_section(
     # primaere Render-Quelle nutzt und die flache Liste nur als
     # Fallback/Sort-Ueberschreibung haelt.
     application_groups = _load_application_groups_for_server(sess, server.id)
-    ungrouped_findings = _load_ungrouped_findings_for_server(sess, server.id)
+    pending_grouping_counts: dict[str, int] = _load_pending_grouping_counts(sess, server.id)
 
     return {
         "server": server,
@@ -369,7 +381,7 @@ def _render_findings_section(
         "counts": counts,
         "findings": findings_list,
         "application_groups": application_groups,
-        "ungrouped_findings": ungrouped_findings,
+        "pending_grouping_counts": pending_grouping_counts,
         "ack_form": AcknowledgeForm(),
         "reopen_form": ReopenForm(),
         "note_form": NoteForm(),
@@ -382,6 +394,20 @@ def _render_findings_section(
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+
+# Whitelist der Risk-Bands fuer die Pending-Grouping-Sektion (ADR-0025 §3).
+# Wird sowohl vom Default-Loader (`_load_pending_grouping_counts`) als auch
+# vom Lazy-Endpoint (`pending_findings_fragment`) konsumiert.
+_PENDING_BANDS: tuple[str, ...] = (
+    "escalate",
+    "act",
+    "mitigate",
+    "pending",
+    "unknown",
+    "monitor",
+    "noise",
+)
 
 
 @server_detail_bp.get("/<int:server_id>")
@@ -520,6 +546,59 @@ def group_findings_fragment(server_id: int, group_id: int) -> str:
     return render_template(
         "_partials/group_findings_table.html",
         findings=findings,
+    )
+
+
+@server_detail_bp.get("/<int:server_id>/findings/pending")
+@login_required
+def pending_findings_fragment(server_id: int) -> str:
+    """HTMX-Lazy-Load-Endpoint fuer die Pending-Grouping-Findings pro Risk-Band.
+
+    Block Q (ADR-0025 §3): die Pending-Grouping-Sektion rendert initial nur
+    pro Risk-Band einen collapsed `<details>`-Rollup mit Count. Sobald der
+    Operator das Bucket-`<details>` aufklappt, holt das HTMX-Pattern das
+    `<tbody>`-Fragment hier nach.
+
+    Rueckgabe ist ein HTML-Partial (`_partials/pending_findings_table.html`).
+    400, wenn `risk_band` fehlt oder nicht in der Whitelist
+    (`_PENDING_BANDS`) liegt. 404, wenn der Server nicht existiert oder der
+    Bucket auf diesem Server keine OPEN-Findings hat.
+
+    Sortierung ist Spec-fix (siehe ADR-0025 §15-Default): KEV desc, EPSS desc
+    nulls last, CVSS desc nulls last, `first_seen_at` asc.
+    """
+    band = request.args.get("risk_band")
+    if band not in _PENDING_BANDS:
+        abort(400)
+    server = _load_server_with_tags(server_id)
+    if server is None:
+        abort(404)
+    sess = get_session()
+    findings = list(
+        sess.execute(
+            select(Finding)
+            .where(
+                Finding.server_id == server_id,
+                Finding.application_group_id.is_(None),
+                Finding.status == FindingStatus.OPEN,
+                Finding.risk_band == band,
+            )
+            .order_by(
+                Finding.is_kev.desc(),
+                nulls_last(Finding.epss_score.desc()),
+                nulls_last(Finding.cvss_v3_score.desc()),
+                Finding.first_seen_at.asc(),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not findings:
+        abort(404)
+    return render_template(
+        "_partials/pending_findings_table.html",
+        findings=findings,
+        risk_band=band,
     )
 
 
