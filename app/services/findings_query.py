@@ -1,17 +1,21 @@
 """Findings-Query-Service fuer die Triage-Hauptansicht (Block E).
 
-ARCHITECTURE.md §5 (Findings-Schema), §7 (View-Modi auf `/servers/<id>`),
+ARCHITECTURE.md §5 (Findings-Schema), §7 (List-View auf `/servers/<id>`),
 §15 (Triage-Sortierung: KEV desc, EPSS desc nulls last, CVSS desc nulls
 last, Severity desc, first_seen_at asc).
 
-Drei oeffentliche Entry-Points:
+Oeffentliche Entry-Points:
 
 - `list_findings(...)` fuer den *Liste*-View.
-- `group_findings_by_package(...)` fuer den *Gruppiert-nach-Paket*-View.
 - `count_findings(...)` fuer die Header-Badges (open/ack/resolved-Zaehler).
+- `list_findings_cross_server(...)` fuer die Cross-Server-Findings-Tabelle.
 
 Alle Queries sind ORM-basiert (kein `text()` ohne Bind) und nutzen ein
 gemeinsames Filter-Dataclass `FindingsFilter`.
+
+ADR-0025 / Block Q: die frueher hier lebenden Aggregations-Helper fuer
+den Paket-Gruppen-View wurden ersatzlos entfernt — der Modus ist seit
+ADR-0025 §(1) durch die Application-Group-Cards abgeloest.
 
 Sortierung-Detail (siehe §15):
 - KEV-Findings *immer* zuoberst (`is_kev DESC`).
@@ -29,7 +33,7 @@ darunter. So sieht der Operator zuerst die System-Paket-Findings.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -187,15 +191,6 @@ _CLASS_VALUES_BY_FILTER: dict[FindingsClassFilter, list[str] | None] = {
     "os-pkgs": [FindingClass.OS_PKGS.value],
     "lang-pkgs": [FindingClass.LANG_PKGS.value],
     "both": None,
-}
-
-
-_SEVERITY_RANK_TABLE: dict[Severity, int] = {
-    Severity.CRITICAL: 4,
-    Severity.HIGH: 3,
-    Severity.MEDIUM: 2,
-    Severity.LOW: 1,
-    Severity.UNKNOWN: 0,
 }
 
 
@@ -419,85 +414,6 @@ def list_findings(
         stmt = stmt.order_by(primary_clause, Finding.identifier_key.asc())
     stmt = stmt.limit(limit)
     return list(session.execute(stmt).scalars().all())
-
-
-# ---------------------------------------------------------------------------
-# Public API: Group-by-Package
-# ---------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class PackageGroup:
-    """Aggregations-Ergebnis fuer eine Paket-Zeile im *Gruppiert*-View."""
-
-    package_name: str
-    findings: list[Finding] = field(default_factory=list)
-    count_open: int = 0
-    count_total: int = 0
-    has_kev: bool = False
-    max_epss: float | None = None
-    max_cvss: float | None = None
-    highest_severity: Severity | None = None
-
-    @property
-    def severity_rank(self) -> int:
-        """Numerischer Rank der hoechsten Severity (CRITICAL=4 .. UNKNOWN=0)."""
-        if self.highest_severity is None:
-            return -1
-        return _SEVERITY_RANK_TABLE[self.highest_severity]
-
-
-def group_findings_by_package(
-    session: Session,
-    server_id: int,
-    filt: FindingsFilter,
-) -> list[PackageGroup]:
-    """Gruppiert Findings nach `package_name`.
-
-    Sortierung der Gruppen (analog §15 fuer Aggregate):
-      1. `has_kev` desc.
-      2. `max_epss` desc nulls last.
-      3. `max_cvss` desc nulls last.
-      4. `severity_rank` desc.
-      5. `package_name` asc.
-
-    Innerhalb einer Gruppe sind die `findings` wieder per Standard-Order
-    sortiert (KEV/EPSS/CVSS/Severity/first_seen_at) — `list_findings`
-    bringt sie schon in dieser Reihenfolge.
-    """
-    findings = list_findings(session, server_id, filt, limit=5000)
-
-    groups: dict[str, PackageGroup] = {}
-    for f in findings:
-        bucket = groups.setdefault(f.package_name, PackageGroup(package_name=f.package_name))
-        bucket.findings.append(f)
-        bucket.count_total += 1
-        if f.status == FindingStatus.OPEN:
-            bucket.count_open += 1
-        if f.is_kev:
-            bucket.has_kev = True
-        if f.epss_score is not None and (bucket.max_epss is None or f.epss_score > bucket.max_epss):
-            bucket.max_epss = f.epss_score
-        if f.cvss_v3_score is not None and (
-            bucket.max_cvss is None or f.cvss_v3_score > bucket.max_cvss
-        ):
-            bucket.max_cvss = f.cvss_v3_score
-        if (
-            bucket.highest_severity is None
-            or _SEVERITY_RANK_TABLE[f.severity] > _SEVERITY_RANK_TABLE[bucket.highest_severity]
-        ):
-            bucket.highest_severity = f.severity
-
-    def _sort_key(g: PackageGroup) -> tuple[int, float, float, int, str]:
-        return (
-            -1 if g.has_kev else 0,
-            -(g.max_epss or 0.0),
-            -(g.max_cvss or 0.0),
-            -g.severity_rank,
-            g.package_name.lower(),
-        )
-
-    return sorted(groups.values(), key=_sort_key)
 
 
 # ---------------------------------------------------------------------------
@@ -733,9 +649,7 @@ __all__ = [
     "FindingsSortDir",
     "FindingsSortKey",
     "FindingsStatusFilter",
-    "PackageGroup",
     "count_findings",
-    "group_findings_by_package",
     "list_findings",
     "list_findings_cross_server",
 ]

@@ -1,8 +1,10 @@
 """Tests fuer `/servers/<id>` und Tag-Add/Remove (Block D + Block E).
 
 Deckt Detail-View, 404-Pfad, HTMX-Tag-Editor (Add/Remove inkl. Audit-
-Events und CSRF-Schutz) und die drei View-Modi der Findings-Sektion
-(list/group/diff) inklusive Filter und KEV-Sort-Sichtbarkeit ab.
+Events und CSRF-Schutz) und die Findings-Sektion (List-Modus, einziger
+verbleibender Modus nach Block Q) inklusive Filter und Sortierung ab.
+Legacy-URLs `?mode=group` und `?mode=diff` werden ohne Redirect/Fehler
+auf den List-Pfad gerendert (siehe ADR-0025).
 """
 
 from __future__ import annotations
@@ -422,32 +424,41 @@ def test_show_default_renders_list_mode(db_app: Flask) -> None:
     assert "CVE-2026-D001" in body
 
 
-def test_show_mode_group_renders_collapse_elements(db_app: Flask) -> None:
+def test_legacy_group_mode_url_renders_list(db_app: Flask) -> None:
+    """ADR-0025 (1): `?mode=group` wird still ignoriert; List-Body rendert.
+
+    Kein Redirect (kein 302), kein 4xx/5xx, kein Marker des entfernten
+    Group-Templates. Der Standard-List-Body muss sichtbar sein
+    (`id="findings-section"`).
+    """
     create_admin_user(db_app)
-    sid = _setup_findings_server(db_app, "srv-mode-group")
+    sid = _setup_findings_server(db_app, "srv-legacy-mode-group")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-2026-D101", package_name="openssl")
-    _add_finding(db_app, server_id=sid, identifier_key="CVE-2026-D102", package_name="openssl")
     client = db_app.test_client()
     login(client)
     resp = client.get(f"/servers/{sid}?mode=group")
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.status_code
     body = resp.get_data(as_text=True)
-    # DaisyUI-Collapse markiert das Group-Layout (siehe _view_group.html).
-    assert "collapse" in body
-    assert "openssl" in body
+    # Legacy-Template-Marker dürfen nicht mehr im Output sein.
+    assert 'data-test="mode-group"' not in body
+    assert 'data-test="mode-diff"' not in body
+    # Standard-List-Body rendert.
+    assert 'id="findings-section"' in body
 
 
-def test_show_mode_diff_renders_diff_section(db_app: Flask) -> None:
+def test_legacy_diff_mode_url_renders_list(db_app: Flask) -> None:
+    """ADR-0025 (1): `?mode=diff` wird still ignoriert; List-Body rendert."""
     create_admin_user(db_app)
-    sid = _setup_findings_server(db_app, "srv-mode-diff")
-    # Ohne Scan: "Noch kein Scan eingegangen."
+    sid = _setup_findings_server(db_app, "srv-legacy-mode-diff")
+    _add_finding(db_app, server_id=sid, identifier_key="CVE-2026-D102", package_name="openssl")
     client = db_app.test_client()
     login(client)
     resp = client.get(f"/servers/{sid}?mode=diff")
-    assert resp.status_code == 200
-    body = resp.get_data(as_text=True).lower()
-    # Diff-Sektion: Header-Begriff "diff" oder "veraendert" muss vorkommen.
-    assert ("neu" in body) or ("noch kein scan" in body) or ("veraendert" in body)
+    assert resp.status_code == 200, resp.status_code
+    body = resp.get_data(as_text=True)
+    assert 'data-test="mode-group"' not in body
+    assert 'data-test="mode-diff"' not in body
+    assert 'id="findings-section"' in body
 
 
 def test_show_filter_status_acknowledged_filters(db_app: Flask) -> None:

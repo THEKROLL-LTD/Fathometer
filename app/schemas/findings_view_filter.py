@@ -1,7 +1,12 @@
 """Pydantic-Schema fuer den Findings-View-Filter auf `/servers/<id>`.
 
 ARCHITECTURE.md §7: alle Filter im URL-Query-String fuer teilbare Links.
-Block-E nutzt zusaetzlich `mode` (list/group/diff).
+
+ADR-0025 / Block Q: das frueher hier lebende `mode`-Feld (`list/group/diff`)
+ist ersatzlos entfallen — es gibt nur noch einen Render-Modus
+(Application-Group-Cards bzw. flache Tabelle bei aktivem Filter / `?flat=1`).
+Ein etwaiger `?mode=`-Param in der URL wird in `from_request` still
+ignoriert; veraltete Bookmarks landen damit nicht in 4xx.
 
 Ungueltige Werte werden **stillschweigend auf den Default zurueckgesetzt**
 und nur geloggt — eine Bookmark mit veraltetem `severity=xy` darf nicht in
@@ -27,13 +32,11 @@ from app.services.findings_query import (
 log = structlog.get_logger(__name__)
 
 
-ViewMode = Literal["list", "group", "diff"]
 SortKey = Literal["risk", "cve", "pkg", "epss", "cvss", "sev", "status", "first_seen", "group"]
 SortDir = Literal["asc", "desc"]
 RiskBandFilter = Literal["escalate", "act", "mitigate", "pending", "unknown", "monitor", "noise"]
 ActionRequiredFilter = Literal["yes", "no"]
 
-_VALID_MODES: frozenset[str] = frozenset({"list", "group", "diff"})
 _VALID_STATUS: frozenset[str] = frozenset({"open", "acknowledged", "resolved", "all"})
 _VALID_CLASS: frozenset[str] = frozenset({"os-pkgs", "lang-pkgs", "both"})
 _VALID_SEVERITIES: frozenset[str] = frozenset({"critical", "high", "medium", "low", "all"})
@@ -54,7 +57,6 @@ class FindingsViewFilter(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    mode: ViewMode = "list"
     status: FindingsStatusFilter = "open"
     finding_class: FindingsClassFilter = "both"
     severity: Severity | None = None
@@ -101,12 +103,10 @@ class FindingsViewFilter(BaseModel):
         anzeigen" und uebersteuert das User-Setting. Damit zeigt ein frisch
         geoeffneter Server-Detail-Tab per Default nur HIGH+ statt aller 4000
         LOW-Findings, ohne dass Bookmark-URLs ihre Wirkung verlieren.
-        """
-        mode_raw = (args.get("mode") or "list").strip().lower()
-        if mode_raw not in _VALID_MODES:
-            log.debug("findings_filter.mode_rejected", value=mode_raw)
-            mode_raw = "list"
 
+        ADR-0025 / Block Q: ein etwaiger `?mode=`-Param wird hier still
+        ignoriert — der Modus ist seit Block Q nicht mehr im Schema.
+        """
         status_raw = (args.get("status") or "open").strip().lower()
         if status_raw not in _VALID_STATUS:
             log.debug("findings_filter.status_rejected", value=status_raw)
@@ -169,7 +169,6 @@ class FindingsViewFilter(BaseModel):
                     log.debug("findings_filter.application_group_rejected", value=ag_raw)
 
         return cls(
-            mode=mode_raw,  # type: ignore[arg-type]
             status=status_raw,  # type: ignore[arg-type]
             finding_class=class_raw,  # type: ignore[arg-type]
             severity=severity,
@@ -201,9 +200,7 @@ class FindingsViewFilter(BaseModel):
         `override` erlaubt Filter-Switches in der UI (z.B. "selber Filter,
         anderer Modus") ohne den State manuell zu kopieren.
         """
-        parts: list[tuple[str, str]] = [
-            ("mode", self.mode),
-        ]
+        parts: list[tuple[str, str]] = []
         if self.status != "open":
             parts.append(("status", self.status))
         if self.finding_class != "both":
@@ -259,5 +256,4 @@ __all__ = [
     "RiskBandFilter",
     "SortDir",
     "SortKey",
-    "ViewMode",
 ]

@@ -39,13 +39,7 @@
    and (not server.trivy_db_updated_at
         or server.trivy_db_updated_at | is_older_than_h(168)) %}
 {# Triage-Queue-Anzahl fuer den Eyebrow-Counter in der Findings-Sektion. #}
-{% if view_filter.mode == 'list' %}
-  {% set total_findings = findings | length %}
-{% elif view_filter.mode == 'group' %}
-  {% set total_findings = groups | sum(attribute='count_total') if groups else 0 %}
-{% else %}
-  {% set total_findings = (diff.new | length + diff.resolved | length) if diff else 0 %}
-{% endif %}
+{% set total_findings = findings | length %}
 
 <div class="px-6 py-6 max-w-[1600px] divide-y divide-base-content/10"
      x-data="{ tagEditorOpen: false, trendRange: '50T' }">

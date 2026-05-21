@@ -48,7 +48,6 @@ from app.models import Finding, FindingNote, FindingStatus
 from app.schemas.dashboard_filter import DashboardFilter
 from app.schemas.findings_view_filter import FindingsViewFilter
 from app.services.csv_export import (
-    CsvExportMode,
     stream_findings_csv,
     stream_findings_csv_cross_server,
 )
@@ -427,9 +426,6 @@ def group_acknowledge() -> WerkzeugResponse | str:
 # ---------------------------------------------------------------------------
 
 
-_VALID_CSV_MODES: frozenset[str] = frozenset({"flach", "gruppiert", "diff"})
-
-
 @findings_bp.get("/export.csv")
 @login_required
 def export_csv() -> Response:
@@ -441,12 +437,10 @@ def export_csv() -> Response:
     einzuschraenken — ohne `server_id` exportieren wir ueber die ganze
     Flotte.
 
-    `mode` (Block K, ADR-0018):
-      - `flach`     (Default) — flache Liste.
-      - `gruppiert` — flache Liste plus Spalte `Group` (Paket-Name),
-                      primaer nach Gruppe sortiert.
-      - `diff`      — nur Diff-Findings (neu/resolved seit vorletztem
-                      Scan) plus Spalte `DiffStatus`. Braucht `server_id`.
+    ADR-0025 / Block Q: die frueheren `?mode=`-Varianten (`flach`/
+    `gruppiert`/`diff`) entfallen ersatzlos; der Export liefert immer die
+    flache gefilterte Findings-Liste. Ein etwaiger `?mode=`-Param wird
+    still ignoriert.
     """
     sess = get_session()
 
@@ -492,21 +486,11 @@ def export_csv() -> Response:
     )
     findings_filter = view_filter.to_findings_filter()
 
-    mode_raw = (request.args.get("mode") or "flach").strip().lower()
-    # `mode` aus dem FindingsViewFilter ist "list/group/diff" (Block E) —
-    # der CSV-Endpoint nutzt seine eigene Whitelist mit deutschen Werten,
-    # damit die URL der UI-Buttons (flach/gruppiert/diff) 1:1 erhalten
-    # bleibt. Ungueltige Werte fallen leise auf `flach` zurueck.
-    if mode_raw not in _VALID_CSV_MODES:
-        mode_raw = "flach"
-    mode: CsvExportMode = mode_raw  # type: ignore[assignment]
-
     log.info(
         "findings.csv_export",
         server_id=server_id,
         status=view_filter.status,
         kev_only=view_filter.kev_only,
-        mode=mode,
         sort=view_filter.sort,
         dir=view_filter.dir,
     )
@@ -516,7 +500,6 @@ def export_csv() -> Response:
             sess,
             server_id=server_id,
             filter_obj=findings_filter,
-            mode=mode,
             sort=view_filter.sort,
             dir=view_filter.dir,
         ),

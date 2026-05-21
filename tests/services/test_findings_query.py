@@ -7,7 +7,6 @@ Geprueft werden:
 - Class-Toggle (`both` -> OS oben, `os-pkgs` / `lang-pkgs` filtern korrekt).
 - Status- / KEV- / Severity-Min- / Search-Filter.
 - `limit`-Cap.
-- `group_findings_by_package` Aggregations- und Sortier-Logik.
 - `count_findings` ignoriert den Status-Filter.
 
 Findings werden direkt via ORM angelegt — kompakter als der Ingest-Pfad und
@@ -34,7 +33,6 @@ from app.models import (
 from app.services.findings_query import (
     FindingsFilter,
     count_findings,
-    group_findings_by_package,
     list_findings,
 )
 from tests._helpers import register_test_server
@@ -472,121 +470,6 @@ def test_limit_caps_results(db_app: Flask) -> None:
         finally:
             sess.close()
     assert len(rows) == 2
-
-
-# ---------------------------------------------------------------------------
-# group_findings_by_package
-# ---------------------------------------------------------------------------
-
-
-def test_group_aggregates_per_package(db_app: Flask) -> None:
-    sid, _ = register_test_server(db_app, name="srv-group")
-    _persist(
-        db_app,
-        [
-            _make_finding(
-                server_id=sid,
-                identifier_key="CVE-2026-1301",
-                package_name="openssl",
-                severity=Severity.HIGH,
-                is_kev=True,
-                epss_score=0.7,
-                cvss_v3_score=8.0,
-                status=FindingStatus.OPEN,
-            ),
-            _make_finding(
-                server_id=sid,
-                identifier_key="CVE-2026-1302",
-                package_name="openssl",
-                severity=Severity.CRITICAL,
-                is_kev=False,
-                epss_score=0.5,
-                cvss_v3_score=9.5,
-                status=FindingStatus.ACKNOWLEDGED,
-            ),
-            _make_finding(
-                server_id=sid,
-                identifier_key="CVE-2026-1303",
-                package_name="nginx",
-                severity=Severity.LOW,
-                is_kev=False,
-                epss_score=0.01,
-                cvss_v3_score=3.5,
-                status=FindingStatus.OPEN,
-            ),
-        ],
-    )
-    with db_app.app_context():
-        sess = _session(db_app)
-        try:
-            groups = group_findings_by_package(
-                sess, sid, FindingsFilter(status="all", finding_class="os-pkgs")
-            )
-        finally:
-            sess.close()
-
-    groups_by_name = {g.package_name: g for g in groups}
-    openssl = groups_by_name["openssl"]
-    nginx = groups_by_name["nginx"]
-
-    assert openssl.count_total == 2
-    assert openssl.count_open == 1
-    assert openssl.has_kev is True
-    assert openssl.max_epss == 0.7
-    assert openssl.max_cvss == 9.5
-    assert openssl.highest_severity == Severity.CRITICAL
-
-    assert nginx.count_total == 1
-    assert nginx.has_kev is False
-    assert nginx.highest_severity == Severity.LOW
-
-
-def test_group_sort_kev_first_then_epss(db_app: Flask) -> None:
-    """Gruppen-Sort: KEV-Pakete zuerst, dann max_epss desc."""
-    sid, _ = register_test_server(db_app, name="srv-group-sort")
-    _persist(
-        db_app,
-        [
-            _make_finding(
-                server_id=sid,
-                identifier_key="CVE-2026-1401",
-                package_name="alpha",
-                is_kev=False,
-                epss_score=0.9,
-                cvss_v3_score=9.0,
-                severity=Severity.CRITICAL,
-            ),
-            _make_finding(
-                server_id=sid,
-                identifier_key="CVE-2026-1402",
-                package_name="bravo",
-                is_kev=True,
-                epss_score=0.01,
-                cvss_v3_score=2.0,
-                severity=Severity.LOW,
-            ),
-            _make_finding(
-                server_id=sid,
-                identifier_key="CVE-2026-1403",
-                package_name="charlie",
-                is_kev=False,
-                epss_score=0.5,
-                cvss_v3_score=5.0,
-                severity=Severity.MEDIUM,
-            ),
-        ],
-    )
-    with db_app.app_context():
-        sess = _session(db_app)
-        try:
-            groups = group_findings_by_package(
-                sess, sid, FindingsFilter(status="all", finding_class="os-pkgs")
-            )
-        finally:
-            sess.close()
-    names = [g.package_name for g in groups]
-    # bravo zuerst (KEV), dann alpha (EPSS 0.9 > 0.5).
-    assert names == ["bravo", "alpha", "charlie"], names
 
 
 # ---------------------------------------------------------------------------

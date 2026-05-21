@@ -1,19 +1,24 @@
-{# Findings-Sektion fuer den Server-Detail-View (Block K, ADR-0018).
+{# Findings-Sektion fuer den Server-Detail-View (Block K, ADR-0018 / ADR-0025).
 
    Refactor gegenueber Block E:
      - Filter-Form (Status/Klasse/Severity-Min/KEV/Suche) entfernt.
      - Counts-Pills (open/ack/resolved/KEV) entfernt — leben jetzt in der
        HeaderStats-Sektion oberhalb.
      - Sortierbare Spaltenheader via `sort_header()`-Macro.
-     - Mode-Segment als `join btn-xs` (flach/gruppiert/diff) statt Tabs.
      - Bulk-Ack-Button + CSV-Button in der Toolbar.
+
+   Block Q (ADR-0025): die View-Modi `gruppiert` und `diff` sind ersatzlos
+   entfallen. Der einzige verbleibende Modus ist die List-Ansicht
+   (Application-Group-Cards bzw. flache Tabelle bei aktivem Filter oder
+   `?flat=1`). Mode-Segment-Buttons und CSV-Dropdown-Varianten sind
+   entsprechend zurueckgebaut.
 
    Variablen-Vertrag (gesetzt in `app/views/server_detail.py`):
      - `server`        : Server (eager-loaded tag_links.tag)
-     - `view_filter`   : FindingsViewFilter (sort/dir/mode/...)
-     - `findings`      : list[Finding] — fuer mode=list
-     - `groups`        : list[PackageGroup] — fuer mode=group
-     - `diff`          : DiffSection | None — fuer mode=diff
+     - `view_filter`   : FindingsViewFilter (sort/dir/...)
+     - `findings`      : list[Finding]
+     - `application_groups` : list[dict] (Application-Group-Cards)
+     - `ungrouped_findings` : list[Finding] (Pending-Grouping-Sektion)
      - `ack_form`      : AcknowledgeForm
      - `reopen_form`   : ReopenForm
      - `note_form`     : NoteForm
@@ -30,42 +35,15 @@
   <header class="flex items-end justify-between gap-3 flex-wrap">
     <div>
       <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">
-        Triage Queue · {{ total_findings | default(findings | length if findings else (groups | length if groups else 0)) }} Findings
+        Triage Queue · {{ total_findings | default(findings | length if findings else 0) }} Findings
       </div>
       <h2 class="font-mono text-base font-medium mt-1">Findings</h2>
     </div>
     <div class="flex items-center gap-2 flex-wrap">
-      {# Mode-Segment — jeder Button swappt das `#findings-section`-Partial
-         per HTMX (kein Full-Page-Reload, sonst springt die Scroll-Position).
-         Plain-Href bleibt als Fallback fuer ohne-JS / Mittelklick. Pattern
-         deckungsgleich zu `sort_header()` im `_macros.html`. #}
-      <div class="join" role="group" aria-label="Findings-Modus">
-        {% for mode_value, mode_label in [
-          ('list',  'flach'),
-          ('group', 'gruppiert'),
-          ('diff',  'diff'),
-        ] %}
-          {%- set mode_qs = view_filter.to_query_string(override={'mode': mode_value}) -%}
-          {%- set mode_url = url_for('server_detail.show', server_id=server.id) ~ '?' ~ mode_qs -%}
-          <a href="{{ mode_url }}"
-             hx-get="{{ mode_url }}"
-             hx-target="#findings-section"
-             hx-select="#findings-section"
-             hx-swap="outerHTML"
-             hx-push-url="true"
-             class="join-item btn btn-xs {% if view_filter.mode == mode_value %}btn-active{% else %}btn-ghost{% endif %}"
-             role="button"
-             aria-pressed="{{ 'true' if view_filter.mode == mode_value else 'false' }}"
-             data-test="mode-{{ mode_value }}">
-            {{ mode_label }}
-          </a>
-        {% endfor %}
-      </div>
-
       {# Bulk-Ack-Button: oeffnet das Modal (Block-F `bulkAckIds`-Pattern,
          siehe `static/js/bulk_ack.js`). Disabled wenn keine Auswahl. Die
          Selection-State sitzt im umgebenden Alpine-Scope aus
-         `_view_list.html`/`_view_group.html` (via `bulkAckIds(() => selected)`).
+         `_view_list.html` (via `bulkAckIds(() => selected)`).
          Da die Bulk-Bar bereits in den View-Partials inline lebt, brauchen wir
          den Button hier nicht zu duplizieren — wir verlinken die sticky Bar
          per Hash-Anchor und blenden sie sowieso ein, sobald `selected.length>0`.
@@ -105,29 +83,17 @@
         </div>
       {% endif %}
 
-      {# CSV-Export-Dropdown: Mode-abhaengig (flach/gruppiert/diff).
+      {# CSV-Export (Block Q / ADR-0025): nur noch eine flache Variante,
          `view_filter.to_query_string()` traegt alle aktiven Sort/Filter mit. #}
-      <details class="dropdown dropdown-end">
-        <summary class="btn btn-xs btn-ghost gap-1.5" data-test="findings-csv-export">
-          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
-          </svg>
-          csv exportieren
-        </summary>
-        <ul class="dropdown-content z-30 menu menu-sm bg-base-100 border border-base-300 rounded-box shadow-lg mt-1 w-48">
-          {% for csv_mode, csv_label in [
-            ('flach', 'flach'),
-            ('gruppiert', 'gruppiert (nach Paket)'),
-            ('diff', 'diff (seit letztem Scan)'),
-          ] %}
-            <li>
-              <a href="{{ url_for('findings.export_csv') }}?server_id={{ server.id }}&{{ view_filter.to_query_string(override={'mode': csv_mode}) }}"
-                 download
-                 data-test="csv-mode-{{ csv_mode }}">{{ csv_label }}</a>
-            </li>
-          {% endfor %}
-        </ul>
-      </details>
+      <a href="{{ url_for('findings.export_csv') }}?server_id={{ server.id }}&{{ view_filter.to_query_string() }}"
+         download
+         class="btn btn-xs btn-ghost gap-1.5"
+         data-test="findings-csv-export">
+        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+        </svg>
+        csv exportieren
+      </a>
     </div>
   </header>
 
@@ -161,15 +127,9 @@
   ) %}
   {% set _sort_default = view_filter.sort == 'risk' and view_filter.dir == 'desc' %}
   {% set _force_flat = request.args.get('flat') == '1' %}
-  {% if view_filter.mode == 'list' %}
-    {% if _force_flat or _filters_active or not _sort_default %}
-      {% include "servers/_view_list.html" %}
-    {% else %}
-      {% include "servers/_view_groups.html" %}
-    {% endif %}
-  {% elif view_filter.mode == 'group' %}
-    {% include "servers/_view_group.html" %}
+  {% if _force_flat or _filters_active or not _sort_default %}
+    {% include "servers/_view_list.html" %}
   {% else %}
-    {% include "servers/_view_diff.html" %}
+    {% include "servers/_view_groups.html" %}
   {% endif %}
 </section>

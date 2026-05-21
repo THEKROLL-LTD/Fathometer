@@ -1,12 +1,16 @@
 """Server-Detail-View `/servers/<id>` — Triage-Hauptansicht (Block E).
 
-Erweitert den Block-D-Header um die Findings-Sektion mit drei View-Modi:
-- `mode=list`  (Default) — flache Tabelle, Default-Sort nach §15.
-- `mode=group` — gruppiert nach `package_name`.
-- `mode=diff`  — Diff der letzten zwei Scans (siehe `diff_view`).
+Erweitert den Block-D-Header um die Findings-Sektion im einzigen
+verbleibenden View-Modus: Application-Group-Cards plus Pending-Grouping-
+Sektion bzw. flache Tabelle bei aktivem Finding-Filter oder `?flat=1`.
 
-URL-Filter (alle optional, Defaults sicher): `mode`, `status`, `class`,
-`severity`, `kev_only`, `q`.
+ADR-0025 / Block Q: die frueheren View-Modi `gruppiert` und `diff` sind
+ersatzlos entfallen; veraltete Bookmarks mit altem `mode`-Query-Param
+werden still ignoriert.
+
+URL-Filter (alle optional, Defaults sicher): `status`, `class`,
+`severity`, `kev_only`, `q`, `risk_band`, `action_required`,
+`application_group`, `sort`, `dir`, `flat`.
 
 HTMX-Pattern: bei `HX-Request: true` rendert der Endpoint die Detail-
 Pane-Fragment-Variante von `servers/detail.html` (Server-Header +
@@ -51,11 +55,8 @@ from app.models import (
     Tag,
 )
 from app.schemas.findings_view_filter import FindingsViewFilter
-from app.services.diff_view import DiffSection, compute_diff
 from app.services.findings_query import (
-    PackageGroup,
     count_findings,
-    group_findings_by_package,
     list_findings,
 )
 from app.services.heartbeat_aggregation import DailyStatus, heartbeats_for_servers
@@ -333,46 +334,40 @@ def _render_findings_section(
     auch beim HTMX-Partial-Render genutzt.
 
     Block P (ADR-0023): zusaetzlich werden die Application-Groups und ihre
-    Findings geladen — die Section-Hauptansicht (`mode=list`) gruppiert
-    nach Application-Group statt nach Risk-Band auf Finding-Ebene.
+    Findings geladen — die Section-Hauptansicht gruppiert nach Application-
+    Group statt nach Risk-Band auf Finding-Ebene.
+
+    Block Q (ADR-0025): es gibt nur noch einen Modus (die frueheren
+    `mode=group` und `mode=diff` sind ersatzlos entfallen). Der Helper
+    laedt unkonditional die flache Liste + Application-Groups +
+    Pending-Grouping-Sektion-Daten; das Template entscheidet via
+    `_filters_active`/`_force_flat`/`_sort_default` ob Group-Cards oder
+    flache Tabelle gerendert werden.
     """
     sess = get_session()
     findings_filter = view_filter.to_findings_filter()
 
     counts = count_findings(sess, server.id, findings_filter)
 
-    findings_list: list[Any] = []
-    groups: list[PackageGroup] = []
-    diff: DiffSection | None = None
-    application_groups: list[dict[str, Any]] = []
-    ungrouped_findings: list[Finding] = []
-
-    if view_filter.mode == "list":
-        findings_list = list_findings(
-            sess,
-            server.id,
-            findings_filter,
-            sort=view_filter.sort,
-            dir=view_filter.dir,
-        )
-        # Block P: Group-Aufschluesselung — laeuft ergaenzend zur Listen-
-        # Query, weil das Template (siehe `_findings_section.html`) die
-        # Groups als primaere Render-Quelle nutzt und die flache Liste
-        # nur als Fallback/Sort-Ueberschreibung haelt.
-        application_groups = _load_application_groups_for_server(sess, server.id)
-        ungrouped_findings = _load_ungrouped_findings_for_server(sess, server.id)
-    elif view_filter.mode == "group":
-        groups = group_findings_by_package(sess, server.id, findings_filter)
-    else:  # diff
-        diff = compute_diff(sess, server.id)
+    findings_list = list_findings(
+        sess,
+        server.id,
+        findings_filter,
+        sort=view_filter.sort,
+        dir=view_filter.dir,
+    )
+    # Block P: Group-Aufschluesselung — laeuft ergaenzend zur Listen-Query,
+    # weil das Template (siehe `_findings_section.html`) die Groups als
+    # primaere Render-Quelle nutzt und die flache Liste nur als
+    # Fallback/Sort-Ueberschreibung haelt.
+    application_groups = _load_application_groups_for_server(sess, server.id)
+    ungrouped_findings = _load_ungrouped_findings_for_server(sess, server.id)
 
     return {
         "server": server,
         "view_filter": view_filter,
         "counts": counts,
         "findings": findings_list,
-        "groups": groups,
-        "diff": diff,
         "application_groups": application_groups,
         "ungrouped_findings": ungrouped_findings,
         "ack_form": AcknowledgeForm(),

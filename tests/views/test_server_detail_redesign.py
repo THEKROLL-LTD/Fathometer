@@ -341,56 +341,7 @@ def test_detail_status_pill_shows_db_veraltet_when_db_stale(db_app: Flask) -> No
 
 
 # ---------------------------------------------------------------------------
-# CSV-Export-Modi (Block K)
+# CSV-Export-Modi (Block K) — `gruppiert`/`diff` mit ADR-0025 entfallen.
+# Nur noch der einzige Default-Mode (flach) existiert; siehe
+# tests/services/test_csv_export.py.
 # ---------------------------------------------------------------------------
-
-
-def test_csv_export_mode_grouped_includes_group_column(db_app: Flask) -> None:
-    """`mode=gruppiert` -> Spalte `Group` in der CSV, Sortierung nach Package."""
-    create_admin_user(db_app)
-    sid = _create_server(db_app, name="srv-csv-group")
-    # Zwei Findings auf unterschiedlichen Paketen — `gruppiert` sortiert
-    # primaer nach package_name asc.
-    _add_finding(db_app, server_id=sid, identifier_key="CVE-G-001", package_name="zlib")
-    _add_finding(db_app, server_id=sid, identifier_key="CVE-G-002", package_name="alpine-base")
-    client = db_app.test_client()
-    login(client)
-    resp = client.get(f"/findings/export.csv?server_id={sid}&mode=gruppiert")
-    assert resp.status_code == 200
-    body = resp.get_data(as_text=True)
-    # Header-Zeile enthaelt `Group` als erste Spalte.
-    first_line = body.splitlines()[0]
-    assert first_line.startswith("Group,"), f"Header-Zeile: {first_line!r}"
-    # Body-Zeilen sind nach Paket sortiert: alpine-base vor zlib.
-    pos_alpine = body.find("alpine-base")
-    pos_zlib = body.find("zlib")
-    assert pos_alpine != -1 and pos_zlib != -1, body[:400]
-    assert pos_alpine < pos_zlib, "gruppiert-Mode: alpine-base muss vor zlib stehen"
-
-
-def test_csv_export_mode_diff_includes_diffstatus_column(db_app: Flask) -> None:
-    """`mode=diff` -> Spalte `DiffStatus`."""
-    create_admin_user(db_app)
-    sid = _create_server(db_app, name="srv-csv-diff")
-    client = db_app.test_client()
-    login(client)
-    resp = client.get(f"/findings/export.csv?server_id={sid}&mode=diff")
-    assert resp.status_code == 200
-    body = resp.get_data(as_text=True)
-    first_line = body.splitlines()[0]
-    assert first_line.startswith("DiffStatus,"), f"Header-Zeile: {first_line!r}"
-
-
-def test_csv_export_mode_diff_no_previous_scan_emits_notice(db_app: Flask) -> None:
-    """Server ohne vorherigen Scan -> Hinweis-Zeile als erste Body-Zeile."""
-    create_admin_user(db_app)
-    sid = _create_server(db_app, name="srv-csv-diff-empty")
-    client = db_app.test_client()
-    login(client)
-    resp = client.get(f"/findings/export.csv?server_id={sid}&mode=diff")
-    assert resp.status_code == 200
-    body = resp.get_data(as_text=True)
-    lines = body.splitlines()
-    assert len(lines) >= 2, f"erwartet Header + Hinweis-Zeile, habe {lines}"
-    # Erste Body-Zeile enthaelt den Hinweis.
-    assert "Kein vorheriger Scan zum Vergleich" in lines[1], f"Body-Zeile 1: {lines[1]!r}"
