@@ -501,6 +501,7 @@ def list_findings_cross_server(
     filt: DashboardFilter,
     *,
     limit: int = 200,
+    offset: int = 0,
     sort: FindingsCrossSortKey = "risk",
     dir: FindingsSortDir = "desc",
     now: datetime | None = None,
@@ -533,7 +534,10 @@ def list_findings_cross_server(
     deterministische Reihenfolge bei Ties. Wenn `sort` nicht in der
     Whitelist ist, faellt die Funktion auf `sev/desc` zurueck.
 
-    `limit` greift nur auf das Listen-Ergebnis, nicht auf `total_count`.
+    `limit` und `offset` greifen nur auf das Listen-Ergebnis, nicht auf
+    `total_count` (Block-Q, ADR-0025 §(5): klassische Pagination mit fester
+    Seitengroesse, `total_count` weiterhin exakt aus dem gefilterten
+    Subselect).
     """
     from app.services.stale_detection import is_stale
 
@@ -637,7 +641,7 @@ def list_findings_cross_server(
         _severity_rank_expr().desc(),
         Finding.identifier_key.asc(),
     ]
-    list_stmt = base_stmt.order_by(primary_clause, *tiebreaks).limit(limit)
+    list_stmt = base_stmt.order_by(primary_clause, *tiebreaks).offset(offset).limit(limit)
     results = list(session.execute(list_stmt).scalars().unique().all())
     return results, total_count
 

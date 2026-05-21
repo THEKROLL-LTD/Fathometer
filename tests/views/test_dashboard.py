@@ -1,18 +1,21 @@
-"""Tests fuer das Dashboard `/` (Block M, ADR-0020).
+"""Tests fuer das Dashboard `/` (Block M / Block Q, ADR-0020 / ADR-0025).
 
-Block M hat die Dashboard-Pane-Struktur komplett umgebaut:
+Block M hatte die Cross-Server-Findings-Tabelle als Triage-Surface auf
+das Dashboard gestellt. Block Q (ADR-0025) hat diese Tabelle wieder
+ausgelagert auf eine dedizierte `/findings`-Seite — das Dashboard zeigt
+seitdem nur noch:
 
-  - Quick-Stats sind zu KPI-Cards mit 50-Tage-Sparklines geworden
-    (`_kpi_card.html` mit `link_url`-Parameter, Tasks #9/#9a).
-  - Cross-Server-Findings-Tabelle als Triage-Surface ersetzt die alte
-    Server-Card-Grid und die abgeschaffte `/findings/search`-View.
-  - Filter-Bar wandert in die Findings-Section (Hybrid-Auto-Submit, ohne
-    `Anwenden`-Button).
-  - Aufmerksamkeits-Sektion und Platzhalter sind ersatzlos entfernt.
+  - die KPI-Strip (Action-Required-Cards, Risk-Band-Pills, Severity-Strip)
+    aus Block O (ADR-0022).
+  - keinen Findings-Tabellen-Render mehr, keine Filter-Bar im Pane.
 
 Die Sidebar (Block I, `base_app.html`) bleibt mit Quick-Stats-Counter und
 Server-Liste unangetastet — die wird in `test_sidebar_layout.py` geprueft,
 nicht hier.
+
+Findings-Tabelle / Filter-/Sort-/Pagination-Verhalten ist auf
+`tests/views/test_findings_index.py` und
+`tests/services/test_findings_query_cross.py` umgezogen.
 """
 
 from __future__ import annotations
@@ -146,10 +149,9 @@ def test_dashboard_redirects_when_not_logged_in(db_app: Flask) -> None:
 
 
 def test_dashboard_renders_empty_state_when_no_servers(db_app: Flask) -> None:
-    """Die Sidebar zeigt weiterhin den `no_servers`-Empty-State, wenn die
-    Flotte leer ist. Im Dashboard-Pane selbst wird die Findings-Section
-    mit einem dedizierten Empty-State (`data-test="findings-empty"`)
-    angezeigt."""
+    """Die Sidebar zeigt den `no_servers`-Empty-State, wenn die Flotte leer
+    ist. ADR-0025 (Block Q): Findings-Section ist nicht mehr im Dashboard.
+    """
     create_admin_user(db_app)
     client = db_app.test_client()
     login(client)
@@ -157,8 +159,9 @@ def test_dashboard_renders_empty_state_when_no_servers(db_app: Flask) -> None:
     assert resp.status_code == 200, resp.get_data(as_text=True)[:400]
     body = resp.get_data(as_text=True)
     assert 'data-empty="no_servers"' in body, body[:600]
-    # Findings-Section ist auch ohne Server vorhanden (mit Empty-Inhalt).
-    assert 'data-test="dashboard-findings-section"' in body
+    # Block Q (ADR-0025): KEIN Findings-Section-Marker mehr im Dashboard.
+    assert 'data-test="dashboard-findings-section"' not in body
+    assert 'data-test="sort-header-server"' not in body
 
 
 # ---------------------------------------------------------------------------
@@ -195,177 +198,15 @@ def test_dashboard_renders_risk_kpi_strip(db_app: Flask) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Findings-Tabelle mit Server-Spalte + Tag-Pills
+# KPI-Card-Links auf `/findings`
 # ---------------------------------------------------------------------------
 
 
-def test_dashboard_renders_findings_table_with_server_column(db_app: Flask) -> None:
-    """`data-test="sort-header-server"` im Header; pro Row Server-Name +
-    Tag-Pills (Block M, Task #10)."""
-    create_admin_user(db_app)
-    sid_prod = _create_server(db_app, name="srv-prod", tags=["prod"])
-    sid_web = _create_server(db_app, name="srv-web", tags=["web"])
-    _add_finding(db_app, server_id=sid_prod, identifier_key="CVE-2024-0001")
-    _add_finding(db_app, server_id=sid_web, identifier_key="CVE-2024-0002")
-    client = db_app.test_client()
-    login(client)
-    body = client.get("/").get_data(as_text=True)
+def test_dashboard_action_required_cards_link_to_findings_view(db_app: Flask) -> None:
+    """Block Q (ADR-0025): Action-Required-Cards linken auf `/findings` mit
+    `?action_required=yes|no` als Query. KEIN HTMX-Swap mehr.
 
-    # Server-Sort-Header vorhanden.
-    assert 'data-test="sort-header-server"' in body
-    # Server-Namen in Tabelle.
-    assert "srv-prod" in body
-    assert "srv-web" in body
-    # Tag-Pills (`#prod`, `#web`) — escaped Form (`#` ist nicht reserviert).
-    assert "#prod" in body
-    assert "#web" in body
-
-
-# ---------------------------------------------------------------------------
-# Q-Filter
-# ---------------------------------------------------------------------------
-
-
-def test_dashboard_filter_q_matches_cve_identifier(db_app: Flask) -> None:
-    """`?q=CVE-2024-6387` → exakt diese CVE in der Tabelle."""
-    create_admin_user(db_app)
-    sid = _create_server(db_app, name="q-srv-cve")
-    _add_finding(db_app, server_id=sid, identifier_key="CVE-2024-6387")
-    _add_finding(db_app, server_id=sid, identifier_key="CVE-2024-9999")
-    client = db_app.test_client()
-    login(client)
-    body = client.get("/?q=CVE-2024-6387").get_data(as_text=True)
-
-    # Findings-Tabelle: 6387 vorhanden, 9999 nicht.
-    # Wir suchen explizit in der dashboard-findings-section.
-    section_start = body.find('data-test="dashboard-findings-section"')
-    assert section_start >= 0
-    section = body[section_start:]
-    assert "CVE-2024-6387" in section
-    assert "CVE-2024-9999" not in section
-
-
-def test_dashboard_filter_q_matches_package_substring(db_app: Flask) -> None:
-    """`?q=openssh` matched mehrere Findings."""
-    create_admin_user(db_app)
-    sid = _create_server(db_app, name="q-srv-pkg")
-    _add_finding(db_app, server_id=sid, identifier_key="CVE-A", package_name="openssh-server")
-    _add_finding(db_app, server_id=sid, identifier_key="CVE-B", package_name="openssh-client")
-    _add_finding(db_app, server_id=sid, identifier_key="CVE-C", package_name="curl")
-    client = db_app.test_client()
-    login(client)
-    body = client.get("/?q=openssh").get_data(as_text=True)
-
-    section_start = body.find('data-test="dashboard-findings-section"')
-    section = body[section_start:]
-    assert "openssh-server" in section
-    assert "openssh-client" in section
-    # `curl` ist in der Tabelle nicht zu finden (Findings-Section).
-    # Wir suchen das Finding selbst (CVE-C) anstatt `curl`, weil `curl`
-    # potenziell in Skripten/Footer auftauchen koennte.
-    assert "CVE-C" not in section
-
-
-def test_dashboard_filter_q_matches_server_name(db_app: Flask) -> None:
-    """`?q=edge-02` matched alle Findings auf dem Server."""
-    create_admin_user(db_app)
-    sid_edge = _create_server(db_app, name="edge-02")
-    sid_core = _create_server(db_app, name="core-01")
-    _add_finding(db_app, server_id=sid_edge, identifier_key="CVE-EDGE-1")
-    _add_finding(db_app, server_id=sid_edge, identifier_key="CVE-EDGE-2")
-    _add_finding(db_app, server_id=sid_core, identifier_key="CVE-CORE-1")
-    client = db_app.test_client()
-    login(client)
-    body = client.get("/?q=edge-02").get_data(as_text=True)
-
-    section_start = body.find('data-test="dashboard-findings-section"')
-    section = body[section_start:]
-    assert "CVE-EDGE-1" in section
-    assert "CVE-EDGE-2" in section
-    assert "CVE-CORE-1" not in section
-
-
-# ---------------------------------------------------------------------------
-# Status-Filter
-# ---------------------------------------------------------------------------
-
-
-def test_dashboard_filter_status_acknowledged_only_changes_table(
-    db_app: Flask,
-) -> None:
-    """KPI-Counter bleiben OPEN; Tabelle nur ACK (ADR-0020 Sparkline-Semantik:
-    KPI-Counter sind filter-unabhaengig OPEN-Counter)."""
-    create_admin_user(db_app)
-    sid = _create_server(db_app, name="ack-srv")
-    _add_finding(db_app, server_id=sid, identifier_key="CVE-OPEN-1")
-    _add_finding(
-        db_app,
-        server_id=sid,
-        identifier_key="CVE-ACK-1",
-        status=FindingStatus.ACKNOWLEDGED,
-    )
-    client = db_app.test_client()
-    login(client)
-    body = client.get("/?status=acknowledged").get_data(as_text=True)
-
-    section_start = body.find('data-test="dashboard-findings-section"')
-    section = body[section_start:]
-    # Nur das ACK-Finding in der Tabelle.
-    assert "CVE-ACK-1" in section
-    assert "CVE-OPEN-1" not in section
-
-    # Block O (ADR-0022): die KPI-Strip-Counter sind weiterhin filter-
-    # unabhaengig OPEN — d.h. das 1 OPEN-Finding muss in den Action-Cards/
-    # Severity-Strip reflektiert sein, auch wenn die Tabelle gerade auf
-    # `status=acknowledged` filtert.
-    # Sub-Counter ist im Action-Card-Markup; wir pruefen nur dass die Counter-
-    # Strukturen vorhanden sind. Konkrete Werte werden in
-    # `test_dashboard_risk_kpis.py` getestet.
-    assert 'data-test="action-required-card-yes"' in body
-    assert 'data-test="action-required-card-no"' in body
-
-
-# ---------------------------------------------------------------------------
-# Sort
-# ---------------------------------------------------------------------------
-
-
-def test_dashboard_filter_sort_by_server_asc(db_app: Flask) -> None:
-    """`sort=server&dir=asc` → Server-Reihenfolge alphabetisch."""
-    create_admin_user(db_app)
-    sid_c = _create_server(db_app, name="charlie")
-    sid_a = _create_server(db_app, name="alpha")
-    sid_b = _create_server(db_app, name="bravo")
-    _add_finding(db_app, server_id=sid_c, identifier_key="CVE-C")
-    _add_finding(db_app, server_id=sid_a, identifier_key="CVE-A")
-    _add_finding(db_app, server_id=sid_b, identifier_key="CVE-B")
-    client = db_app.test_client()
-    login(client)
-    body = client.get("/?sort=server&dir=asc").get_data(as_text=True)
-
-    # Tabelle ausschneiden.
-    section_start = body.find('data-test="dashboard-findings-section"')
-    section = body[section_start:]
-
-    # Reihenfolge: alpha vor bravo vor charlie (data-server-id-Reihenfolge).
-    a_pos = section.find("alpha")
-    b_pos = section.find("bravo")
-    c_pos = section.find("charlie")
-    assert 0 < a_pos < b_pos < c_pos, (
-        f"Erwartet alphabetisch, got alpha={a_pos} bravo={b_pos} charlie={c_pos}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# KPI-Card-Klick setzt Filter
-# ---------------------------------------------------------------------------
-
-
-def test_dashboard_action_required_cards_set_filter(db_app: Flask) -> None:
-    """Block O (ADR-0022): Action-Required-Cards setzen `?action_required=yes|no`.
-
-    Risk-Band-Pills setzen `?risk_band=<band>`. Klick fuehrt HTMX-Swap auf
-    `#findings-section`.
+    Risk-Band-Pills linken analog auf `/findings?risk_band=<band>`.
     """
     create_admin_user(db_app)
     _create_server(db_app, name="kpi-click-srv")
@@ -373,7 +214,7 @@ def test_dashboard_action_required_cards_set_filter(db_app: Flask) -> None:
     login(client)
     body = client.get("/").get_data(as_text=True)
 
-    # Action-needed-Card.
+    # Action-needed-Card linkt auf /findings?action_required=yes.
     yes_card = re.search(
         r'<a[^>]*data-test="action-required-card-yes"[^>]*>',
         body,
@@ -381,26 +222,30 @@ def test_dashboard_action_required_cards_set_filter(db_app: Flask) -> None:
     )
     assert yes_card is not None
     yes_tag = yes_card.group(0)
-    assert "action_required=yes" in yes_tag, yes_tag
-    assert "#findings-section" in yes_tag, yes_tag
+    assert "/findings?action_required=yes" in yes_tag, yes_tag
+    # ADR-0025: Full-Page-Nav, kein HTMX-Swap.
+    assert "hx-get=" not in yes_tag, yes_tag
+    assert "#findings-section" not in yes_tag, yes_tag
 
-    # Safe-Card.
+    # Safe-Card linkt auf /findings?action_required=no.
     no_card = re.search(
         r'<a[^>]*data-test="action-required-card-no"[^>]*>',
         body,
         re.DOTALL,
     )
     assert no_card is not None
-    assert "action_required=no" in no_card.group(0)
+    assert "/findings?action_required=no" in no_card.group(0)
 
-    # Eine Beispiel-Risk-Band-Pill (Pending) setzt risk_band=pending.
+    # Risk-Band-Pill (Pending) linkt auf /findings?risk_band=pending.
     pending_pill = re.search(
         r'<a[^>]*data-test="risk-band-pill-pending"[^>]*>',
         body,
         re.DOTALL,
     )
     assert pending_pill is not None
-    assert "risk_band=pending" in pending_pill.group(0)
+    pp_tag = pending_pill.group(0)
+    assert "/findings?risk_band=pending" in pp_tag, pp_tag
+    assert "hx-get=" not in pp_tag, pp_tag
 
 
 def test_dashboard_severity_strip_has_no_click_filter(db_app: Flask) -> None:
@@ -420,61 +265,6 @@ def test_dashboard_severity_strip_has_no_click_filter(db_app: Flask) -> None:
         re.DOTALL,
     )
     assert crit_block is None, "Severity-Strip darf kein Klick-Filter sein"
-
-
-# ---------------------------------------------------------------------------
-# Truncation-Notice
-# ---------------------------------------------------------------------------
-
-
-def test_dashboard_truncation_notice_when_total_exceeds_limit(db_app: Flask) -> None:
-    """250 Findings → `data-test="truncation-notice"` enthaelt `50 weitere`.
-
-    Hartes Limit ist 200 (siehe `_build_pane_context()`), Truncation-Block
-    rendert `findings_total - len(findings)` = 50.
-    """
-    create_admin_user(db_app)
-    sid = _create_server(db_app, name="bulk-srv")
-
-    factory = get_session_factory(db_app)
-    with db_app.app_context():
-        sess = factory()
-        try:
-            for i in range(250):
-                f = Finding(
-                    server_id=sid,
-                    finding_type=FindingType.VULNERABILITY,
-                    finding_class=FindingClass.OS_PKGS,
-                    identifier_key=f"CVE-2024-{i:05d}",
-                    package_name="openssl",
-                    installed_version="1.0",
-                    severity=Severity.MEDIUM,
-                    status=FindingStatus.OPEN,
-                    is_kev=False,
-                    attack_vector=AttackVector.UNKNOWN,
-                    first_seen_at=_now(),
-                    last_seen_at=_now(),
-                )
-                sess.add(f)
-            sess.commit()
-        finally:
-            sess.close()
-
-    client = db_app.test_client()
-    login(client)
-    body = client.get("/").get_data(as_text=True)
-
-    assert 'data-test="truncation-notice"' in body
-    # Text-Inhalt prueft Anzahl "50 weitere".
-    notice_match = re.search(
-        r'data-test="truncation-notice"[^>]*>(.*?)</div>',
-        body,
-        re.DOTALL,
-    )
-    assert notice_match is not None
-    assert "50 weitere" in notice_match.group(1)
-    # CSV-Truncation-Link existiert.
-    assert 'data-test="truncation-csv-link"' in body
 
 
 # ---------------------------------------------------------------------------
@@ -526,37 +316,6 @@ def test_dashboard_no_platzhalter(db_app: Flask) -> None:
     assert "border-dashed" not in pane_section, (
         "Dashed-Border-Platzhalter ist mit Block M (ADR-0020) entfallen"
     )
-
-
-# ---------------------------------------------------------------------------
-# HX-Partial-Swap-Marker / Sort-Header-Target
-# ---------------------------------------------------------------------------
-
-
-def test_dashboard_hx_partial_swap_findings_section_via_hx_select(
-    db_app: Flask,
-) -> None:
-    """Sort-Header `<th>`-Anker setzen `hx-target="#findings-section"` +
-    `hx-select="#findings-section"` — der Filter-/Sort-Klick swappt nur
-    das Sub-Tree, nicht den ganzen Pane (ADR-0020 Filter-Submit-Verhalten)."""
-    create_admin_user(db_app)
-    sid = _create_server(db_app, name="hx-srv")
-    _add_finding(db_app, server_id=sid, identifier_key="CVE-SORT-1")
-    client = db_app.test_client()
-    login(client)
-    body = client.get("/").get_data(as_text=True)
-
-    # Wir suchen den `sort-header-server`-Block und pruefen die HTMX-Attribute.
-    sort_block = re.search(
-        r'data-test="sort-header-server">.*?</th>',
-        body,
-        re.DOTALL,
-    )
-    assert sort_block is not None
-    block = sort_block.group(0)
-    assert 'hx-target="#findings-section"' in block
-    assert 'hx-select="#findings-section"' in block
-    assert 'hx-push-url="true"' in block
 
 
 # ---------------------------------------------------------------------------
@@ -650,11 +409,12 @@ def test_dashboard_bulk_ack_cross_server(db_app: Flask) -> None:
 
 
 def test_dashboard_pane_context_complete(db_app: Flask) -> None:
-    """`_build_pane_context()` liefert alle Block-M-Variablen.
+    """Dashboard-Pane (post-Block-Q) zeigt nur noch die KPI-Strip.
 
     Wir koennen den Context nicht direkt inspizieren, ohne den View aus-
     zufuehren — daher pruefen wir Markup-Marker, die genau dann existieren,
-    wenn die jeweilige Variable im Template gesetzt ist.
+    wenn die jeweilige Variable im Template gesetzt ist. ADR-0025: keine
+    Findings-Tabelle/Filter-Bar/Bulk-Ack-Modal mehr im Pane.
     """
     create_admin_user(db_app)
     sid = _create_server(db_app, name="ctx-srv")
@@ -663,46 +423,19 @@ def test_dashboard_pane_context_complete(db_app: Flask) -> None:
     login(client)
     body = client.get("/", headers={"HX-Request": "true"}).get_data(as_text=True)
 
-    # `view_filter` -> Sort-Header und Filter-Bar-Echo.
-    assert 'data-test="sort-header-server"' in body  # view_filter.sort/dir benutzt
-    assert 'data-test="findings-filter-bar"' in body  # view_filter im Filter-Echo
-    # `findings` -> Tabelle gerendert oder Empty-State.
-    assert "CVE-CTX-1" in body or 'data-test="findings-empty"' in body, body[:500]
-    # `findings_total` -> Truncation-Logik (kein Notice bei nur 1 Finding).
-    assert 'data-test="truncation-notice"' not in body
-    # `risk_kpis` -> Action-Required-Cards + Risk-Band-Pills (Block O).
+    # `risk_kpis` -> Action-Required-Cards + Risk-Band-Pills + Severity-Strip.
     assert 'data-test="action-required-card-yes"' in body
     assert 'data-test="action-required-card-no"' in body
     assert 'data-test="risk-band-pill-pending"' in body
     assert 'data-test="dashboard-severity-strip"' in body
-    # `bulk_form` + `csrf_form` -> Bulk-Ack-Modal-Marker.
-    assert 'data-test="bulk-ack-modal"' in body
-    # `attention` darf NICHT mehr da sein.
+
+    # ADR-0025 (Block Q): KEINE Findings-Tabelle/Filter-Bar/Bulk-Ack-Modal
+    # mehr im Dashboard.
+    assert 'data-test="dashboard-findings-section"' not in body
+    assert 'data-test="findings-filter-bar"' not in body
+    assert 'data-test="sort-header-server"' not in body
+    assert 'data-test="bulk-ack-modal"' not in body
+    assert 'data-test="truncation-notice"' not in body
+
+    # `attention` darf weiterhin NICHT da sein (ADR-0020).
     assert "Aufmerksamkeit noetig" not in body
-
-
-# ---------------------------------------------------------------------------
-# Filter-Persistenz / Reset-Link / Active-Badge
-# ---------------------------------------------------------------------------
-
-
-def test_dashboard_filter_is_active_marker_shown(db_app: Flask) -> None:
-    """`?q=openssh` aktiviert den `filter.is_active`-Badge."""
-    create_admin_user(db_app)
-    _create_server(db_app, name="active-srv")
-    client = db_app.test_client()
-    login(client)
-    body = client.get("/?q=openssh").get_data(as_text=True)
-    assert "gefiltert" in body
-    # Reset-Link in der Filter-Bar.
-    assert 'data-test="filter-reset"' in body
-
-
-def test_dashboard_empty_filter_no_filtered_badge(db_app: Flask) -> None:
-    create_admin_user(db_app)
-    _create_server(db_app, name="empty-flt-srv")
-    client = db_app.test_client()
-    login(client)
-    body = client.get("/").get_data(as_text=True)
-    assert "gefiltert" not in body
-    assert 'data-test="filter-reset"' not in body

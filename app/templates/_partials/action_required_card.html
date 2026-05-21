@@ -34,16 +34,13 @@
   {%- set _band_order = ['monitor','noise'] -%}
 {%- endif -%}
 {%- set _active_ring = 'ring-2 ring-base-content/40' if _is_active else '' -%}
-{%- set _href = url_for('dashboard.index') ~ '?action_required=' ~ _kind ~ '#findings-section' -%}
+{# ADR-0025: KPI-Card linkt auf die dedizierte Findings-Seite (Full-Page-
+   Nav, kein HTMX) — saubere Tab-/Page-Wechsel-Semantik. #}
+{%- set _href = url_for('findings.index') ~ '?action_required=' ~ _kind -%}
 <a href="{{ _href }}"
-   hx-get="{{ _href }}"
-   hx-target="#findings-section"
-   hx-select="#findings-section"
-   hx-swap="outerHTML"
-   hx-push-url="true"
    class="block rounded-box border {{ _tone_classes }} {{ _active_ring }} px-5 py-4 transition-colors min-w-[200px]"
    data-test="action-required-card-{{ _kind }}"
-   title="Filter Tabelle auf action_required={{ _kind }}">
+   title="Findings filtern auf action_required={{ _kind }}">
   <div class="flex items-start justify-between gap-3">
     <div class="min-w-0">
       <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">

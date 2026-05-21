@@ -1,9 +1,13 @@
-"""Dashboard-Findings-Group-Filter und Group-Spalte (Block P, Task #14).
+"""Findings-Group-Filter und Group-Spalte (Block P, Task #14 / Block Q, ADR-0025).
 
 DoD:
   - `?application_group=<id>` filtert die Findings-Tabelle.
   - Sort-Header "Group" sortiert alphabetisch nach Group.label asc/desc.
   - Findings ohne Group zeigen `—` in der Group-Spalte.
+
+Block Q (ADR-0025) hat den Cross-Server-Filter vom Dashboard `/` auf die
+dedizierte `/findings`-Seite verlagert — alle Tests hier laufen jetzt
+gegen `/findings`.
 """
 
 from __future__ import annotations
@@ -105,7 +109,7 @@ def test_dashboard_filter_by_application_group(db_app: Flask) -> None:
     client = db_app.test_client()
     login(client)
 
-    resp = client.get(f"/?application_group={ids['g_alpha']}&status=open")
+    resp = client.get(f"/findings?application_group={ids['g_alpha']}&status=open")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     # Findings aus alpha-Group muessen drin sein.
@@ -121,7 +125,11 @@ def test_dashboard_filter_by_application_group(db_app: Flask) -> None:
 def test_dashboard_filter_invalid_application_group_falls_back_to_none(
     db_app: Flask,
 ) -> None:
-    """Ungueltige `application_group`-Werte werden still ignoriert."""
+    """Ungueltige `application_group`-Werte werden still ignoriert.
+
+    Wir setzen zusaetzlich `?q=CVE-DASH` damit `is_filtered=True` und die
+    Findings-Tabelle gerendert wird — sonst zeigt /findings den Empty-State.
+    """
     create_admin_user(db_app)
     _seed(db_app)
     client = db_app.test_client()
@@ -129,25 +137,29 @@ def test_dashboard_filter_invalid_application_group_falls_back_to_none(
 
     # `0` ist nicht erlaubt (ge=1) und ein String erst recht nicht.
     for bad in ("0", "-1", "abc", "9999999"):
-        resp = client.get(f"/?application_group={bad}&status=open")
+        resp = client.get(f"/findings?application_group={bad}&status=open&q=CVE-DASH")
         assert resp.status_code == 200, resp.status_code
         body = resp.get_data(as_text=True)
-        # Bei "0/-1/abc" wird der Filter ignoriert -> alle 4 Findings da.
-        # Bei "9999999" wird der Filter aktiv (gueltige ID-Form), die
-        # Tabelle bleibt leer. Beide Verhalten sind ok — wir verlangen
-        # nur "kein 422-Crash".
+        # Bei "0/-1/abc" wird der application_group-Filter ignoriert -> alle
+        # 4 Findings (durch q=CVE-DASH gematcht) da.
+        # Bei "9999999" wird der Filter aktiv (gueltige ID-Form), die Tabelle
+        # bleibt leer. Beide Verhalten sind ok — wir verlangen nur "kein
+        # 422-Crash".
         if bad in ("0", "-1", "abc"):
             assert "CVE-DASH-1" in body, f"bad={bad}: Findings nicht gerendert"
 
 
 def test_dashboard_group_column_shows_label_or_dash(db_app: Flask) -> None:
-    """Findings mit Group zeigen Label, ohne Group zeigen Em-Dash."""
+    """Findings mit Group zeigen Label, ohne Group zeigen Em-Dash.
+
+    `?q=CVE-DASH` aktiviert die Tabelle (sonst Empty-State auf /findings).
+    """
     create_admin_user(db_app)
     _seed(db_app)
     client = db_app.test_client()
     login(client)
 
-    body = client.get("/?status=open").get_data(as_text=True)
+    body = client.get("/findings?q=CVE-DASH&status=open").get_data(as_text=True)
 
     # Group-Spalte ist im Markup vorhanden.
     assert 'data-test="finding-group-cell"' in body
@@ -171,14 +183,14 @@ def test_dashboard_sort_by_group_label(db_app: Flask) -> None:
     client = db_app.test_client()
     login(client)
 
-    body_asc = client.get("/?sort=group&dir=asc&status=open").get_data(as_text=True)
+    body_asc = client.get("/findings?sort=group&dir=asc&status=open").get_data(as_text=True)
     # Mindestens einer der alpha-Findings muss VOR dem zulu-Finding stehen.
     p_alpha = body_asc.find("CVE-DASH-1")
     p_zulu = body_asc.find("CVE-DASH-3")
     assert p_alpha != -1 and p_zulu != -1
     assert p_alpha < p_zulu, (p_alpha, p_zulu)
 
-    body_desc = client.get("/?sort=group&dir=desc&status=open").get_data(as_text=True)
+    body_desc = client.get("/findings?sort=group&dir=desc&status=open").get_data(as_text=True)
     p_alpha_d = body_desc.find("CVE-DASH-1")
     p_zulu_d = body_desc.find("CVE-DASH-3")
     assert p_zulu_d < p_alpha_d, (p_zulu_d, p_alpha_d)
@@ -192,7 +204,7 @@ def test_dashboard_group_filter_select_renders(db_app: Flask) -> None:
     client = db_app.test_client()
     login(client)
 
-    body = client.get("/").get_data(as_text=True)
+    body = client.get("/findings").get_data(as_text=True)
     assert 'data-test="filter-application-group"' in body
     assert 'name="application_group"' in body
     # Beide Group-Labels als Options.

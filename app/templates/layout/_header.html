@@ -1,8 +1,14 @@
-{# secscan-Header (ADR-0016 / Block-I-Refinement).
+{# secscan-Header (ADR-0016 / Block-I-Refinement / ADR-0025).
 
    Layout-Vertrag aus Mockup §66-180:
-     Links: Logo (`s`-Square) + Brand + Top-Level-Nav (Dashboard, Suche).
+     Links: Logo (`s`-Square) + Brand + Top-Level-Nav (Dashboard, Findings).
      Rechts: Theme-Toggle (sun/moon) + Profile-Avatar mit Dropdown.
+
+   ADR-0025: dedizierter Findings-Eintrag neben Dashboard. Active-Highlight
+   wird ueber `request.endpoint` getrennt — `dashboard.index` markiert nur
+   das Dashboard, `findings.index` nur die Findings-Seite. Path-basierter
+   Fallback ist explizit so geschnitten dass `/findings` NICHT als
+   Dashboard-Subroute zaehlt.
 
    Sicherheit:
      - Autoescape global aktiv; kein `|safe` auf Benutzer-Daten.
@@ -11,7 +17,13 @@
      - Dropdown-State lebt im Alpine-`x-data` (lokal, kein localStorage).
 #}
 {% set p = request.path or "/" %}
-{% set is_dashboard_active = (p == "/" or p.startswith("/dashboard")) %}
+{% set _endpoint = request.endpoint or '' %}
+{% set is_findings_active = _endpoint in ('findings.index',) or p.startswith("/findings") %}
+{% set is_dashboard_active = (not is_findings_active) and (
+     _endpoint == 'dashboard.index'
+     or p == "/"
+     or (p.startswith("/dashboard") and not p.startswith("/dashboard/findings"))
+   ) %}
 <header class="navbar bg-base-200 border-b border-base-300 px-4 min-h-14 shrink-0"
         role="banner">
   <div class="flex-1 flex items-center gap-2 min-w-0">
@@ -33,8 +45,16 @@
            class="btn btn-ghost btn-sm {% if is_dashboard_active %}btn-active{% endif %}">
           Dashboard
         </a>
+        {# ADR-0025: dedizierter Findings-Eintrag neben Dashboard.
+           Full-Page-Nav (kein hx-target), weil die Findings-Seite einen
+           anderen Pane-Container rendert und sauberer Tab-Wechsel
+           gewuenscht ist. #}
+        <a href="{{ url_for('findings.index') }}"
+           class="btn btn-ghost btn-sm {% if is_findings_active %}btn-active{% endif %}">
+          Findings
+        </a>
         {# ADR-0020: dedizierte Suche-Nav entfernt. Suche ist jetzt Teil der
-           Dashboard-Filter-Bar (Such-Feld `q`). #}
+           Findings-Filter-Bar (Such-Feld `q`). #}
       </nav>
     {% endif %}
   </div>

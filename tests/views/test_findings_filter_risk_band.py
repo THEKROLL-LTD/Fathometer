@@ -179,9 +179,14 @@ def test_list_findings_cross_server_sort_risk_asc_reverses(db_app: Flask) -> Non
         assert order == ["CVE-NOISE", "CVE-PENDING", "CVE-ESCALATE"]
 
 
-def test_dashboard_view_default_sort_risk_renders_escalate_first(db_app: Flask) -> None:
-    """Smoke-Test: Default-Sort auf dem View liefert escalate-Pill zuerst
-    in der Tabelle."""
+def test_findings_view_default_sort_risk_renders_escalate_first(db_app: Flask) -> None:
+    """Block Q (ADR-0025): Default-Sort auf der `/findings`-Tabelle.
+
+    Die Findings-Tabelle wurde mit ADR-0025 vom Dashboard auf die dedizierte
+    `/findings`-Seite verlagert. Hier ein expliziter Sort-Trigger (sort=risk),
+    damit `_explicit_sort()` rendert; CVE-ESCALATE muss vor CVE-NOISE
+    auftauchen.
+    """
     create_admin_user(db_app)
     _seed(
         db_app,
@@ -193,10 +198,9 @@ def test_dashboard_view_default_sort_risk_renders_escalate_first(db_app: Flask) 
     )
     client = db_app.test_client()
     login(client)
-    body = client.get("/").get_data(as_text=True)
-    # In der Tabelle sollte CVE-ESCALATE vor CVE-NOISE auftauchen.
-    section = body[body.find('data-test="dashboard-findings-section"') :]
+    body = client.get("/findings?sort=risk&dir=desc").get_data(as_text=True)
+    section = body[body.find('data-test="findings-table-section"') :]
     esc = section.find("CVE-ESCALATE")
     noise = section.find("CVE-NOISE")
-    assert esc > 0 and noise > 0
+    assert esc > 0 and noise > 0, f"section empty? esc={esc} noise={noise}"
     assert esc < noise, f"escalate({esc}) muss vor noise({noise}) erscheinen"

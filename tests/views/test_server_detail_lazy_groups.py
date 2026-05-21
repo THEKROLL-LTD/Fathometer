@@ -363,10 +363,16 @@ def test_group_findings_fragment_unknown_server_returns_404(db_app: Flask) -> No
 
 
 def test_group_findings_fragment_login_required(db_app: Flask) -> None:
-    """Aufruf ohne Login -> 302-Redirect auf die Login-Seite."""
-    # Server + Group anlegen, damit der Endpoint ohne Auth-Decorator
-    # eigentlich erfolgreich antworten koennte. Wir wollen aber, dass
-    # ``@login_required`` _vor_ jeder DB-Lookup-Logik greift.
+    """Aufruf ohne Login -> 302-Redirect auf die Login-Seite.
+
+    ``create_admin_user`` schliesst gleichzeitig den Setup-Wizard ab
+    (setzt ``setup_completed_at``), damit der Setup-Guard nicht
+    fruehzeitig auf ``/setup/`` redirected und der ``@login_required``-
+    Pfad tatsaechlich getestet wird. Pattern identisch zu
+    ``test_pending_findings_fragment_login_required``.
+    """
+    # Admin anlegen → Setup abgeschlossen. Wir loggen NICHT ein.
+    create_admin_user(db_app)
     sid = _create_server(db_app, name="srv-noauth")
     gid = _create_application_group(db_app, label="noauth-app")
     _add_finding(

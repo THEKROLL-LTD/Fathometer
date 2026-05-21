@@ -1,13 +1,13 @@
 {# Dashboard-Detail-Pane — die EINZIGE Quelle fuer den Dashboard-Inhalt
-   (ADR-0016 / ADR-0017 / ADR-0020).
+   (ADR-0016 / ADR-0017 / ADR-0020 / ADR-0025).
 
-   Block M (ADR-0020) hat den Pane komplett umgebaut:
-     - Quick-Stats werden zu KPI-Cards mit Sparklines (Block-K-`_kpi_card`-
-       Partial mit `link_url`-Parameter, Task #9a).
-     - Filter-Bar wandert in die Findings-Section (Hybrid-Auto-Submit).
-     - Aufmerksamkeits-Sektion und Platzhalter entfallen ersatzlos.
-     - Neue Cross-Server-Findings-Tabelle als Triage-Surface (ersetzt die
-       entfernte `/findings/search`-View).
+   ADR-0025 (Block Q E.5) hat die Cross-Server-Findings-Section vollstaendig
+   auf die dedizierte `/findings`-Seite ausgelagert. Was bleibt:
+     - KPI-Cards Tier 1 (Action needed / Safe).
+     - Risk-Band-Pills Tier 2.
+     - Severity-Strip Tier 3.
+   Was wegfaellt: Filter-Bar, Findings-Tabelle, CSV-Export, Bulk-Ack-
+   Toolbar, Truncation-Notice. KPI-Card-Links zeigen jetzt auf `/findings`.
 
    Wird von zwei Pfaden konsumiert (ADR-0017):
      1. `dashboard/index.html` (Full-Page-Render) inkludiert dieses Partial
@@ -15,32 +15,21 @@
      2. `app/views/dashboard.py` (HX-Pfad) rendert dieses Partial direkt
         via `render_template("dashboard/_detail_pane.html", **ctx)`.
 
-   Damit beide Pfade dasselbe Markup liefern, MUSS der Variablen-Vertrag
-   unten in beiden Faellen vollstaendig erfuellt sein.
-
    Variablen-Vertrag (gesetzt in `app/views/dashboard.py:_build_pane_context`):
      - `servers`         : list[ServerCardData] — fuer den Server-Count-Badge
                            im Header (Anzahl gefilterter Server).
-     - `filter`          : DashboardFilter — fuer `filter.is_active`-Badge.
+     - `filter`          : DashboardFilter — fuer `filter.is_active`-Badge
+                           und KPI-Card-Active-Highlight.
      - `quick_stats`     : QuickStats — Filter-unabhaengige OPEN-Counter
-                           fuer die KPI-Cards (Sparkline-Semantik ADR-0020).
+                           fuer die KPI-Cards.
+     - `risk_kpis`       : RiskKpiCounters — Action-/Risk-Band-/Severity-
+                           Strip-Aggregate.
      - `kpi_sparklines`  : dict[str, list[int]] — Keys total/kev/critical/high.
      - `stale_sparkline` : list[int] — 50 Daily-Stale-Server-Counts.
-     - `view_filter`     : DashboardFilter — alias fuer die Findings-Section.
-     - `findings`        : list[Finding] — gefiltert + limited (max 200).
-     - `findings_total`  : int — exakter Pre-Limit-Count fuer Truncation.
-     - `available_tags`  : list[Tag] — fuer die Filter-Bar.
-     - `severity_threshold` : Severity — Settings-Default fuer Filter-Echo.
-     - `bulk_form`       : BulkActionForm — CSRF-Halter fuer Bulk-Ack.
-     - `csrf_form`       : CSRFOnlyForm.
 
    Polling-Wrapper-Attribute sind PRIVAT fuer diesen Container.
-   `hx-disinherit="*"` verhindert dass innere `<a hx-get>`-Klicks
-   (KPI-Cards mit `hx-target="#detail-pane"`, Filter-Bar mit
-   `hx-target="#findings-section"`, etc.) das `hx-target="this"` und
-   `hx-swap="outerHTML"` erben — sonst wuerde der Klick `<div id="dashboard-
-   pane">` mit der Antwort der Sub-Route ueberschreiben und die KPI-Card-
-   Selektion ginge verloren (Block-L-Fix `c18352f`).
+   `hx-disinherit="*"` verhindert dass innere `<a hx-get>`-Klicks die
+   Polling-Attribute erben.
 
    Sicherheit: kein `|safe` auf Variablen — alles autoescaped.
 #}
@@ -65,6 +54,4 @@
   </header>
 
   {% include "dashboard/_kpi_cards.html" %}
-
-  {% include "dashboard/_findings_section.html" %}
 </div>

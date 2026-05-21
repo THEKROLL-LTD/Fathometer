@@ -81,7 +81,10 @@ def test_purl_ascii_xss_payload_renders_escaped(db_app: Flask) -> None:
 
     client = db_app.test_client()
     login(client)
-    body = client.get(f"/servers/{sid}").get_data(as_text=True)
+    # ADR-0025 §2/§3: Server-Detail rendert Findings default lazy
+    # (Application-Group-Cards collapsed). `?flat=1` erzwingt den flachen
+    # Tabellen-Pfad — sonst landet das `data-purl`-Attribut nicht im Initial-HTML.
+    body = client.get(f"/servers/{sid}?flat=1").get_data(as_text=True)
 
     # Rohes `<script>` mit Klammern darf NIE im Markup auftauchen — Jinja
     # escaped es zu `&lt;script&gt;`.

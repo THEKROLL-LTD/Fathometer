@@ -5,6 +5,13 @@ Drei DoD-Cases:
 * os-pkg (ubuntu) mit `vendor_ids` -> Vendor-IDs als Badges sichtbar.
 * Legacy-Finding mit `result_type=NULL` und `package_name@target` -> Fallback
   rendert den Suffix als Pfad.
+
+ADR-0025 §2/§3 (Block Q Phase B/C): der Server-Detail rendert Findings
+default lazy (Application-Group-Cards collapsed; Pending-Sektion lazy).
+Die Tests hier prueftn das flache Finding-Row-Markup
+(`data-test="finding-vendor-id"`, `data-purl`, Type-Badges, Pfad-Fallback)
+— dafuer brauchen wir den `?flat=1`-Power-User-Bypass, der die flache
+Tabelle (`_view_list.html`) erzwingt.
 """
 
 from __future__ import annotations
@@ -99,7 +106,8 @@ def test_lang_pkg_gobinary_renders_target_path(db_app: Flask) -> None:
     )
     client = db_app.test_client()
     login(client)
-    resp = client.get(f"/servers/{sid}")
+    # ADR-0025: `?flat=1` erzwingt flache Tabelle (Group-Cards default collapsed).
+    resp = client.get(f"/servers/{sid}?flat=1")
     assert resp.status_code == 200, resp.data[:300]
     body = resp.get_data(as_text=True)
     # Type-Label als Badge.
@@ -123,7 +131,8 @@ def test_os_pkg_ubuntu_renders_vendor_ids(db_app: Flask) -> None:
     )
     client = db_app.test_client()
     login(client)
-    resp = client.get(f"/servers/{sid}")
+    # ADR-0025: `?flat=1` erzwingt flache Tabelle (Group-Cards default collapsed).
+    resp = client.get(f"/servers/{sid}?flat=1")
     assert resp.status_code == 200, resp.data[:300]
     body = resp.get_data(as_text=True)
     assert "ubuntu" in body
@@ -168,7 +177,8 @@ def test_finding_with_purl_renders_data_purl_attribute(db_app: Flask) -> None:
 
     client = db_app.test_client()
     login(client)
-    body = client.get(f"/servers/{sid}").get_data(as_text=True)
+    # ADR-0025: `?flat=1` erzwingt flache Tabelle (Group-Cards default collapsed).
+    body = client.get(f"/servers/{sid}?flat=1").get_data(as_text=True)
     assert 'data-purl="pkg:deb/ubuntu/openssl@3.0.2"' in body
 
 
@@ -187,7 +197,8 @@ def test_vendor_ids_cap_three_pills_rendered(db_app: Flask) -> None:
     )
     client = db_app.test_client()
     login(client)
-    body = client.get(f"/servers/{sid}").get_data(as_text=True)
+    # ADR-0025: `?flat=1` erzwingt flache Tabelle (Group-Cards default collapsed).
+    body = client.get(f"/servers/{sid}?flat=1").get_data(as_text=True)
     # Erste drei sichtbar.
     assert "USN-1" in body
     assert "USN-2" in body
@@ -217,7 +228,8 @@ def test_legacy_finding_uses_package_name_at_suffix_fallback(db_app: Flask) -> N
     )
     client = db_app.test_client()
     login(client)
-    resp = client.get(f"/servers/{sid}")
+    # ADR-0025: `?flat=1` erzwingt flache Tabelle (Group-Cards default collapsed).
+    resp = client.get(f"/servers/{sid}?flat=1")
     assert resp.status_code == 200, resp.data[:300]
     body = resp.get_data(as_text=True)
     # Type-Label aus result_type.

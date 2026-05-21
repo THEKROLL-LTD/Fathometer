@@ -1,8 +1,12 @@
-"""Adversarial: `/?q=' OR 1=1--` (Block M, ADR-0020).
+"""Adversarial: `/findings?q=' OR 1=1--` (Block M / Block Q, ADR-0020/0025).
 
 ARCHITECTURE.md §10. Das `q`-Feld wird in `list_findings_cross_server` per
 `ilike(f"%{q}%")` gefiltert — SQLAlchemy bindet den Parameter, der String
-geht NIE direkt ins SQL. Diese Suite verifiziert:
+geht NIE direkt ins SQL.
+
+Block Q (ADR-0025) hat den `q`-Filter vom Dashboard auf die dedizierte
+`/findings`-Seite verlagert. Diese Suite verifiziert die SQLi-Sicherheit
+weiterhin — gegen den neuen Endpoint.
 
 - Klassische SQLi-Payloads liefern Status 200 ohne SQL-Error.
 - Der Treffer ist 0 (kein Wildcard-Match gegen alle Findings).
@@ -98,7 +102,7 @@ def test_q_sql_injection_does_not_match_or_crash(db_app: Flask, payload: str) ->
     client = db_app.test_client()
     login(client)
 
-    resp = client.get("/", query_string={"q": payload})
+    resp = client.get("/findings", query_string={"q": payload})
     assert resp.status_code == 200, (
         f"q={payload!r}: erwartet 200, got {resp.status_code}: "
         f"{resp.get_data(as_text=True)[:200]!r}"
@@ -109,15 +113,13 @@ def test_q_sql_injection_does_not_match_or_crash(db_app: Flask, payload: str) ->
         assert marker not in body_lower, f"q={payload!r}: SQL-Error-Marker '{marker}' im Body"
 
     # Pruefe: keine Findings sind durch Wildcard-Bypass durchgekommen.
-    # Findings-Section vorhanden, aber `findings-empty` Marker oder die Such-
-    # term-Treffer fehlen.
-    section_start = body.find('data-test="dashboard-findings-section"')
-    section = body[section_start:]
-    # Da die Payload kein gueltiger Substring der CVE-IDs/Pakete/Server-Namen
-    # ist, muessen wir den Empty-Marker sehen, NICHT die beiden Findings.
-    assert "CVE-SAFE-100" not in section, f"q={payload!r}: `OR 1=1`-Bypass — alle Findings sichtbar"
-    assert "CVE-SAFE-200" not in section
-    assert 'data-test="findings-empty"' in section
+    # Bei aktiver `q`-Filter (is_filtered=True) rendert /findings die Tabelle;
+    # da kein Treffer matcht erwarten wir den 0-Treffer-Hinweis.
+    assert "CVE-SAFE-100" not in body, f"q={payload!r}: `OR 1=1`-Bypass — Findings sichtbar"
+    assert "CVE-SAFE-200" not in body
+    assert "Kein Treffer fuer diesen Filter" in body, (
+        f"q={payload!r}: erwartet 0-Treffer-Hinweis im gefilterten Render"
+    )
 
 
 def test_q_sql_injection_db_unchanged(db_app: Flask) -> None:
@@ -128,7 +130,7 @@ def test_q_sql_injection_db_unchanged(db_app: Flask) -> None:
     _add_finding(db_app, server_id=sid, identifier_key="CVE-PRE-002")
     client = db_app.test_client()
     login(client)
-    resp = client.get("/", query_string={"q": "'; DROP TABLE findings;--"})
+    resp = client.get("/findings", query_string={"q": "'; DROP TABLE findings;--"})
     assert resp.status_code == 200
 
     factory = get_session_factory(db_app)

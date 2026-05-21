@@ -1,0 +1,430 @@
+{# Findings-Page (ADR-0025).
+
+   Dedizierte Cross-Server-Findings-Seite. Default-Render ohne Filter
+   liefert einen Empty-State (kein Tabellen-Render, kein Pager) — der
+   Filter-Submit ist explizit via `<form method="get">` + "Anwenden"-
+   Button (keine HTMX-Auto-Trigger auf den Filterfeldern).
+
+   Pagination: 50 Findings/Seite, `?page=N`.
+   CSV-Export: aktive Filter, alle Seiten (kein Pagination-Cut).
+
+   Variablen-Vertrag (View `findings.index`):
+     - `filt` / `view_filter` : DashboardFilter — sort/dir/q/status/...
+     - `findings` : list[Finding] — nur die Treffer der aktuellen Seite (<=50).
+     - `total` : int — Gesamt-Treffer-Count vor Pagination.
+     - `page` / `per_page` / `total_pages` : Pagination-Meta.
+     - `is_filtered` : bool — True wenn Filter aktiv ODER explizit
+                       `?sort=`/`?dir=` gesetzt.
+     - `total_findings` / `visible_servers` : Empty-State-Counter.
+     - `available_tags` / `available_application_groups` : Filter-Selects.
+     - `bulk_form` / `csrf_form` : Bulk-Ack-Forms.
+     - `sort` / `dir` : aktive Sort-Werte (auch als Hidden-Inputs).
+
+   Sicherheit: kein `|safe` auf Variablen — alles autoescaped.
+#}
+{% extends "base_app.html" %}
+{% from "_macros.html" import sort_header, severity_badge, kev_badge, epss_pill, cvss_pill, package_cell, status_badge, quick_copy, bulk_ack_modal %}
+
+{% block title %}Findings · secscan{% endblock %}
+
+{% block detail_pane %}
+<div id="findings-pane" class="max-w-[1600px] mx-auto px-6 py-6 space-y-6">
+  <header class="flex items-end justify-between gap-3 flex-wrap">
+    <div>
+      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">FINDINGS</div>
+      <h1 class="font-mono text-2xl lg:text-3xl mt-1">Findings</h1>
+    </div>
+    {% if is_filtered and total > 0 %}
+      <div class="text-xs opacity-65" data-test="findings-counter">
+        {{ total }} Treffer · Seite {{ page }} von {{ total_pages }}
+      </div>
+    {% endif %}
+  </header>
+
+  {# Filter-Bar als GET-Form ohne hx-trigger — expliziter Submit via
+     "Anwenden"-Button. Versteckte sort/dir-Inputs erhalten eine aktive
+     Sort-Wahl beim Filter-Submit. #}
+  <form method="get" action="{{ url_for('findings.index') }}"
+        class="card bg-base-200/40 border border-base-300 p-3"
+        data-test="findings-filter-form">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 items-end">
+      <label class="form-control">
+        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Suche</span>
+        <input type="search" name="q" value="{{ filt.q or '' }}"
+               placeholder="CVE / Paket / Server / Titel"
+               class="input input-sm input-bordered"
+               maxlength="128"
+               autocomplete="off"
+               data-test="filter-q">
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Tag</span>
+        <select name="tag" class="select select-sm select-bordered" data-test="filter-tag">
+          <option value="">alle Tags</option>
+          {% for t in available_tags %}
+            <option value="{{ t.name }}" {% if t.name in filt.tags %}selected{% endif %}>#{{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Risk-Band</span>
+        <select name="risk_band" class="select select-sm select-bordered" data-test="filter-risk-band">
+          <option value="">alle</option>
+          {% for b in ['escalate','act','mitigate','pending','unknown','monitor','noise'] %}
+            <option value="{{ b }}" {% if filt.risk_band == b %}selected{% endif %}>{{ b }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">App-Group</span>
+        <select name="application_group" class="select select-sm select-bordered" data-test="filter-application-group">
+          <option value="">alle Groups</option>
+          {% for g in available_application_groups %}
+            <option value="{{ g.id }}" {% if filt.application_group_id == g.id %}selected{% endif %}>{{ g.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Action</span>
+        <select name="action_required" class="select select-sm select-bordered" data-test="filter-action-required">
+          <option value="">alle</option>
+          <option value="yes" {% if filt.action_required == 'yes' %}selected{% endif %}>yes</option>
+          <option value="no"  {% if filt.action_required == 'no'  %}selected{% endif %}>no</option>
+        </select>
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Severity (min)</span>
+        <select name="severity" class="select select-sm select-bordered" data-test="filter-severity">
+          <option value="">alle</option>
+          {% for sev in ['critical','high','medium','low'] %}
+            <option value="{{ sev }}" {% if filt.severity and filt.severity.value == sev %}selected{% endif %}>{{ sev }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Status</span>
+        <select name="status" class="select select-sm select-bordered" data-test="filter-status">
+          {% for st in ['open','acknowledged','resolved','all'] %}
+            <option value="{{ st }}" {% if filt.status == st %}selected{% endif %}>{{ st }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="flex flex-col gap-1 text-xs">
+        <label class="cursor-pointer flex items-center gap-2">
+          <input type="checkbox" name="kev_only" value="1" {% if filt.kev_only %}checked{% endif %}
+                 class="checkbox checkbox-sm" data-test="filter-kev-only">
+          <span>nur KEV</span>
+        </label>
+        <label class="cursor-pointer flex items-center gap-2">
+          <input type="checkbox" name="stale_only" value="1" {% if filt.stale_only %}checked{% endif %}
+                 class="checkbox checkbox-sm" data-test="filter-stale-only">
+          <span>nur stale</span>
+        </label>
+      </div>
+    </div>
+
+    {# Versteckte sort/dir damit eine aktive Sort-Wahl beim Filter-Submit
+       erhalten bleibt. #}
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="dir" value="{{ dir }}">
+
+    <div class="mt-3 flex items-center justify-between gap-2 flex-wrap">
+      <div class="text-xs opacity-60">
+        {% if is_filtered and total == 0 %}
+          Kein Treffer fuer diesen Filter.
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-2">
+        {# CSV-Export-Link: aktiver Filter, alle Seiten. #}
+        <a href="{{ url_for('findings.export_csv') }}?{{ view_filter.to_query_string() }}"
+           class="btn btn-xs btn-ghost gap-1.5"
+           download
+           data-test="findings-csv-export">
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true">
+            <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+          </svg>
+          csv exportieren
+        </a>
+        <button type="submit" class="btn btn-sm btn-primary" data-test="findings-submit">
+          Anwenden
+        </button>
+      </div>
+    </div>
+  </form>
+
+  {% if not is_filtered %}
+    {# Empty-State: kein Render der Tabelle. #}
+    <div class="card bg-base-200/40 border border-base-300" data-test="findings-empty-state">
+      <div class="card-body items-center text-center py-12">
+        <p class="text-base">Filter setzen oder suchen — die Tabelle bleibt sonst leer.</p>
+        <p class="text-sm opacity-65">
+          Insgesamt <span class="font-mono font-semibold">{{ total_findings }}</span> Findings ueber
+          <span class="font-mono font-semibold">{{ visible_servers }}</span> Server.
+        </p>
+      </div>
+    </div>
+  {% elif total == 0 %}
+    <div class="card bg-base-200/40 border border-base-300">
+      <div class="card-body items-center text-center py-10">
+        <p class="opacity-60 italic">Kein Treffer fuer diesen Filter.</p>
+      </div>
+    </div>
+  {% else %}
+    {# Wrapper-`<section id="findings-section">` damit das sort_header()-
+       Macro seinen HTMX-Target findet (Macro nutzt fest `#findings-section`,
+       siehe `_macros.html`). Bei Full-Page-Navigation faellt das auf den
+       `href` zurueck. Selection-State bleibt `window.__dashboardSelected`,
+       damit Bulk-Ack-Toolbar-Komponente (`bulk_ack.js`) ohne JS-Duplikate
+       genutzt wird. #}
+    <section id="findings-section" data-test="findings-table-section">
+
+      <div class="flex items-center gap-2 flex-wrap mb-3">
+        {# Bulk-Ack-Button — sichtbar wenn Selection > 0. #}
+        <div x-data="bulkAckIds(() => (window.__dashboardSelected || []))" class="inline-flex">
+          <button type="button"
+                  class="btn btn-xs btn-primary gap-1"
+                  x-show="(window.__dashboardSelected || []).length > 0"
+                  x-cloak
+                  @click="openModal()"
+                  data-test="bulk-ack-toolbar">
+            auswahl ack
+            <span class="font-mono opacity-80"
+                  x-text="'·' + (window.__dashboardSelected || []).length"></span>
+          </button>
+          {{ bulk_ack_modal(id='bulk-ack-modal-findings',
+                            title='Ausgewaehlte Findings abhaken') }}
+        </div>
+      </div>
+
+      <div x-data="{
+             selected: [],
+             allIds() {
+               return Array.from(document.querySelectorAll('input[data-bulk-id-dashboard]'))
+                 .map(i => parseInt(i.value, 10));
+             },
+             toggleAll(checked) {
+               this.selected = checked ? this.allIds() : [];
+             },
+             get allSelected() {
+               const ids = this.allIds();
+               return ids.length > 0 && ids.every(id => this.selected.includes(id));
+             },
+             get someSelected() {
+               return this.selected.length > 0 && !this.allSelected;
+             }
+           }"
+           x-effect="window.__dashboardSelected = selected">
+
+        <div x-show="selected.length > 0"
+             x-cloak
+             x-transition.opacity
+             class="flex items-center gap-3 px-3 py-1.5 mb-2 text-xs bg-base-200/40 rounded-box"
+             role="region"
+             aria-label="Bulk-Auswahl-Zaehler"
+             data-test="findings-bulk-bar">
+          <span>
+            <span x-text="selected.length" class="font-semibold"></span> ausgewaehlt
+          </span>
+          <button type="button"
+                  class="btn btn-ghost btn-xs"
+                  @click="selected = []"
+                  data-test="findings-bulk-clear">
+            Auswahl leeren
+          </button>
+        </div>
+
+        <div class="overflow-x-auto rounded-box bg-base-200/40 border border-base-300">
+          <table class="table table-sm align-middle w-full">
+            <thead class="border-b border-base-300">
+              <tr>
+                <th class="w-10 pr-0">
+                  <input type="checkbox"
+                         class="checkbox checkbox-sm"
+                         aria-label="Alle in dieser Liste auswaehlen"
+                         :checked="allSelected"
+                         :indeterminate.prop="someSelected"
+                         @change="toggleAll($event.target.checked)"
+                         data-test="findings-bulk-select-all">
+                </th>
+                {{ sort_header('risk', 'Risk', view_filter.sort, view_filter.dir,
+                               view_filter=view_filter, route='findings.index') }}
+                {{ sort_header('group', 'Group', view_filter.sort, view_filter.dir,
+                               view_filter=view_filter, route='findings.index') }}
+                {{ sort_header('server', 'Server', view_filter.sort, view_filter.dir,
+                               view_filter=view_filter, route='findings.index') }}
+                {{ sort_header('cve', 'CVE / Titel', view_filter.sort, view_filter.dir,
+                               view_filter=view_filter, route='findings.index') }}
+                {{ sort_header('pkg', 'Paket', view_filter.sort, view_filter.dir,
+                               view_filter=view_filter, route='findings.index') }}
+                {{ sort_header('epss', 'EPSS', view_filter.sort, view_filter.dir,
+                               view_filter=view_filter, route='findings.index') }}
+                {{ sort_header('cvss', 'CVSS', view_filter.sort, view_filter.dir,
+                               view_filter=view_filter, route='findings.index') }}
+                {{ sort_header('status', 'Status', view_filter.sort, view_filter.dir,
+                               view_filter=view_filter, route='findings.index') }}
+                {{ sort_header('sev', 'Severity', view_filter.sort, view_filter.dir,
+                               view_filter=view_filter, route='findings.index') }}
+                {{ sort_header('first_seen', 'Erstmals', view_filter.sort, view_filter.dir,
+                               view_filter=view_filter, route='findings.index') }}
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in findings %}
+              <tr class="hover {% if f.is_kev %}bg-error/5{% endif %}"
+                  :class="{ 'bg-primary/10': selected.includes({{ f.id }}) }"
+                  data-finding-id="{{ f.id }}"
+                  data-server-id="{{ f.server.id }}">
+                <td class="pr-0" @click.stop>
+                  <input type="checkbox"
+                         class="checkbox checkbox-sm"
+                         data-bulk-id-dashboard="true"
+                         value="{{ f.id }}"
+                         aria-label="Finding {{ f.identifier_key }} fuer Bulk auswaehlen"
+                         :checked="selected.includes({{ f.id }})"
+                         @change="selected = $event.target.checked
+                                             ? [...selected, {{ f.id }}]
+                                             : selected.filter(id => id !== {{ f.id }})">
+                </td>
+
+                <td class="whitespace-nowrap">
+                  {% with band_value=(f.risk_band or 'pending'),
+                          as_link=false,
+                          compact=true,
+                          show_count=false %}
+                    {% include "_partials/risk_band_pill.html" %}
+                  {% endwith %}
+                </td>
+
+                <td class="whitespace-nowrap" data-test="finding-group-cell">
+                  {% if f.application_group_id and f.application_group %}
+                    <a href="{{ url_for('findings.index') }}?application_group={{ f.application_group_id }}"
+                       class="badge badge-ghost badge-sm font-mono opacity-80 hover:opacity-100"
+                       title="Nach Application-Group filtern"
+                       data-test="finding-group-link">
+                      {{ f.application_group.label }}
+                    </a>
+                  {% else %}
+                    <span class="opacity-40 font-mono"
+                          title="Noch keine Application-Group zugewiesen"
+                          data-test="finding-group-empty">—</span>
+                  {% endif %}
+                </td>
+
+                <td class="min-w-[12ch] max-w-[22ch]">
+                  <div class="flex flex-col gap-1 min-w-0">
+                    <a href="{{ url_for('server_detail.show', server_id=f.server.id) }}"
+                       hx-get="{{ url_for('server_detail.show', server_id=f.server.id) }}"
+                       hx-target="#detail-pane"
+                       hx-swap="outerHTML"
+                       hx-push-url="true"
+                       class="link link-hover font-mono text-xs font-semibold truncate"
+                       title="{{ f.server.name }}">
+                      {{ f.server.name }}
+                    </a>
+                    {% if f.server.tag_links %}
+                      <div class="flex flex-wrap gap-1">
+                        {% for link in f.server.tag_links %}
+                          <a href="{{ url_for('findings.index') }}?tag={{ link.tag.name | urlencode }}"
+                             @click.stop
+                             class="badge badge-outline badge-xs font-mono opacity-70 hover:opacity-100"
+                             style="border-color: {{ link.tag.color }}; color: {{ link.tag.color }};"
+                             title="Nach Tag filtern: {{ link.tag.name }}">
+                            #{{ link.tag.name }}
+                          </a>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                  </div>
+                </td>
+
+                <td>
+                  <div class="flex items-center gap-2 flex-wrap min-w-0">
+                    <span class="font-mono text-xs font-semibold">
+                      {{ f.identifier_key }}
+                    </span>
+                    {{ kev_badge(f.is_kev, size='xs') }}
+                    {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+                  </div>
+                  {% if f.title %}
+                    <div class="text-xs opacity-70 truncate max-w-[44ch] mt-0.5"
+                         title="{{ f.title }}">
+                      {{ f.title }}
+                    </div>
+                  {% endif %}
+                </td>
+
+                <td class="max-w-[28ch]">
+                  <div class="flex items-center gap-1 min-w-0">
+                    {{ package_cell(f.package_name, f.finding_class) }}
+                    {{ quick_copy(f.package_name, label='Paket-Name kopieren') }}
+                  </div>
+                  {% set cause = format_finding_cause(f) %}
+                  <div class="text-xs opacity-70 mt-0.5">
+                    {% if cause.kind == "lang" %}
+                      <span class="badge badge-ghost badge-xs uppercase tracking-wider">{{ cause.type_label }}</span>
+                      {% if cause.path %}
+                        <span class="font-mono">in /{{ cause.path | trim('/') }}</span>
+                      {% endif %}
+                    {% elif cause.kind == "os" %}
+                      <span class="badge badge-ghost badge-xs uppercase tracking-wider">{{ cause.type_label }}</span>
+                      {% if f.installed_version %}
+                        <span>{{ f.installed_version }}</span>
+                      {% endif %}
+                      {% for vid in cause.vendor_ids[:3] %}
+                        <span class="badge badge-outline badge-xs" data-test="finding-vendor-id">{{ vid }}</span>
+                      {% endfor %}
+                    {% endif %}
+                  </div>
+                  {% if cause.purl or cause.severity_source %}
+                    <div class="hidden" data-test="finding-row-tooltip-data"
+                         data-purl="{{ cause.purl or '' }}"
+                         data-severity-source="{{ cause.severity_source or '' }}"></div>
+                  {% endif %}
+                </td>
+
+                <td>{{ epss_pill(f.epss_score) }}</td>
+                <td>{{ cvss_pill(f.cvss_v3_score) }}</td>
+                <td>{{ status_badge(f.status) }}</td>
+                <td>{{ severity_badge(f.severity) }}</td>
+
+                <td class="text-xs whitespace-nowrap">
+                  <time datetime="{{ f.first_seen_at.isoformat() }}"
+                        title="{{ f.first_seen_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+                    {{ f.first_seen_at.strftime('%Y-%m-%d') }}
+                  </time>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    {# Pager — klassisch nummeriert. URL-Aufbau via `to_query_string()`
+       laesst sort/dir und Filter durch; `page` wird angehaengt. #}
+    {% if total > 0 %}
+      {%- set _qs = view_filter.to_query_string() -%}
+      {%- set _qs_sep = '&' if _qs else '' -%}
+      {%- set _prev_url = url_for('findings.index') ~ '?' ~ _qs ~ _qs_sep ~ 'page=' ~ (page - 1) -%}
+      {%- set _next_url = url_for('findings.index') ~ '?' ~ _qs ~ _qs_sep ~ 'page=' ~ (page + 1) -%}
+      <nav class="flex items-center justify-between gap-3 mt-3 font-mono text-xs"
+           aria-label="Pagination" data-test="findings-pager">
+        {% if page > 1 %}
+          <a href="{{ _prev_url }}" class="btn btn-xs btn-ghost" data-test="findings-pager-prev">« vorherige</a>
+        {% else %}
+          <span class="btn btn-xs btn-ghost btn-disabled" aria-disabled="true">« vorherige</span>
+        {% endif %}
+        <span class="opacity-65">Seite {{ page }} von {{ total_pages }}</span>
+        {% if page < total_pages %}
+          <a href="{{ _next_url }}" class="btn btn-xs btn-ghost" data-test="findings-pager-next">naechste »</a>
+        {% else %}
+          <span class="btn btn-xs btn-ghost btn-disabled" aria-disabled="true">naechste »</span>
+        {% endif %}
+      </nav>
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

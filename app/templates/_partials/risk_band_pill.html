@@ -47,13 +47,10 @@
 {%- set _size = 'badge-sm' if _compact else 'badge-md' -%}
 {%- set _active_ring = 'ring-2 ring-base-content/40' if _is_active else '' -%}
 {%- if _as_link -%}
-  {%- set _href = url_for('dashboard.index') ~ '?risk_band=' ~ _band ~ '#findings-section' -%}
+  {# ADR-0025: klickbare Pill linkt auf die dedizierte Findings-Seite
+     (Full-Page-Nav, kein HTMX). #}
+  {%- set _href = url_for('findings.index') ~ '?risk_band=' ~ _band -%}
   <a href="{{ _href }}"
-     hx-get="{{ _href }}"
-     hx-target="#findings-section"
-     hx-select="#findings-section"
-     hx-swap="outerHTML"
-     hx-push-url="true"
      class="badge {{ _size }} {{ _cls }} {{ _active_ring }} gap-1.5 font-mono cursor-pointer hover:opacity-100 opacity-90"
      title="Risk-Band {{ _label }} — {{ _count }} Findings"
      data-test="risk-band-pill-{{ _band }}">

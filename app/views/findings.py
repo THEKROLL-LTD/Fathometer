@@ -37,25 +37,177 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import selectinload
 from werkzeug.wrappers import Response as WerkzeugResponse
 
 from app.audit import log_event
 from app.db import get_session
-from app.forms import AcknowledgeForm, CSRFOnlyForm, GroupAcknowledgeForm, NoteForm, ReopenForm
-from app.models import Finding, FindingNote, FindingStatus
+from app.forms import (
+    AcknowledgeForm,
+    BulkActionForm,
+    CSRFOnlyForm,
+    GroupAcknowledgeForm,
+    NoteForm,
+    ReopenForm,
+)
+from app.models import (
+    ApplicationGroup,
+    Finding,
+    FindingNote,
+    FindingStatus,
+    Server,
+    Tag,
+)
 from app.schemas.dashboard_filter import DashboardFilter
 from app.schemas.findings_view_filter import FindingsViewFilter
 from app.services.csv_export import (
     stream_findings_csv,
     stream_findings_csv_cross_server,
 )
+from app.services.findings_query import list_findings_cross_server
 from app.settings_service import get_settings_row
 
 log = structlog.get_logger(__name__)
 
 findings_bp = Blueprint("findings", __name__, url_prefix="/findings")
+
+
+# ---------------------------------------------------------------------------
+# Index-Helper (Block Q, ADR-0025 §(5))
+# ---------------------------------------------------------------------------
+
+
+def _filter_is_active(filt: DashboardFilter) -> bool:
+    """ADR-0025 §(5): Filter-Aktiv-Definition fuer den `/findings`-Default-State.
+
+    Im Gegensatz zu `DashboardFilter.is_active` zaehlt hier `status != 'open'`
+    ebenfalls als aktiv (User-explizite Status-Wahl). Die Sortier-Felder
+    (`sort`, `dir`) sind hier NICHT enthalten — die werden separat ueber
+    `_explicit_sort()` ausgewertet (Sort-only-Bookmark zaehlt ebenfalls als
+    User-Intent, aber ueber die Roh-Args, nicht ueber den gefilterten
+    Filter).
+    """
+    return bool(
+        filt.q
+        or filt.tags
+        or filt.severity is not None
+        or filt.status != "open"
+        or filt.risk_band is not None
+        or filt.action_required is not None
+        or filt.application_group_id is not None
+        or filt.kev_only
+        or filt.stale_only
+    )
+
+
+def _explicit_sort(args: Any) -> bool:
+    """True wenn `?sort=` oder `?dir=` explizit in der URL-Query stand.
+
+    ADR-0025 §(5): expliziter Sort-Bookmark (`?sort=epss&dir=desc`) zaehlt
+    als User-Intent und triggert den Tabellen-Render auch ohne sonstige
+    Filter.
+    """
+    return ("sort" in args) or ("dir" in args)
+
+
+def _count_open_findings(sess: Any) -> int:
+    """Billiger Aggregat-Count fuer den Empty-State-Block."""
+    return int(
+        sess.execute(
+            select(func.count(Finding.id)).where(Finding.status == FindingStatus.OPEN)
+        ).scalar()
+        or 0
+    )
+
+
+def _count_active_servers(sess: Any) -> int:
+    """Billiger Aggregat-Count: aktive Server (nicht revoked, nicht retired)."""
+    return int(
+        sess.execute(
+            select(func.count(Server.id)).where(
+                Server.revoked_at.is_(None),
+                Server.retired_at.is_(None),
+            )
+        ).scalar()
+        or 0
+    )
+
+
+# ---------------------------------------------------------------------------
+# Index-Route — Cross-Server-Findings-Tabelle (Block Q, ADR-0025 §(5))
+# ---------------------------------------------------------------------------
+
+
+@findings_bp.get("", strict_slashes=False)
+@login_required
+def index() -> str:
+    """Cross-Server-Findings-Seite mit Filter-Bar und klassischer Pagination.
+
+    ADR-0025 §(5): Default-State leer (kein Filter, keine Tabelle, kein
+    Pager). Erst wenn der User explizit einen Filter oder Sort gewaehlt hat,
+    laedt diese View die Findings via `list_findings_cross_server()`. CSV-
+    Export-Scope ist alle gefilterten Treffer (separater Endpoint
+    `/findings/export.csv`, ohne Pagination).
+    """
+    sess = get_session()
+    filt = DashboardFilter.from_request(request.args)
+
+    try:
+        page_raw = int(request.args.get("page", "1"))
+    except ValueError:
+        page_raw = 1
+    page = max(1, page_raw)
+    per_page = 50
+
+    sort = filt.sort
+    dir_ = filt.dir
+
+    is_filtered = _filter_is_active(filt) or _explicit_sort(request.args)
+
+    findings: list[Finding] = []
+    total: int = 0
+    if is_filtered:
+        findings, total = list_findings_cross_server(
+            sess,
+            filt,
+            limit=per_page,
+            offset=(page - 1) * per_page,
+            sort=sort,
+            dir=dir_,
+        )
+
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 0
+
+    available_tags = list(sess.execute(select(Tag).order_by(Tag.name)).scalars().all())
+    available_application_groups = list(
+        sess.execute(select(ApplicationGroup).order_by(ApplicationGroup.label.asc()).limit(100))
+        .scalars()
+        .all()
+    )
+
+    total_findings = _count_open_findings(sess)
+    visible_servers = _count_active_servers(sess)
+
+    return render_template(
+        "findings/index.html",
+        filt=filt,
+        view_filter=filt,  # Alias fuer `sort_header()`-Macro (gemeinsamer Filter-Vertrag).
+        findings=findings,
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        is_filtered=is_filtered,
+        total_findings=total_findings,
+        visible_servers=visible_servers,
+        available_tags=available_tags,
+        available_application_groups=available_application_groups,
+        bulk_form=BulkActionForm(),
+        csrf_form=CSRFOnlyForm(),
+        sort=sort,
+        dir=dir_,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +593,13 @@ def export_csv() -> Response:
     `gruppiert`/`diff`) entfallen ersatzlos; der Export liefert immer die
     flache gefilterte Findings-Liste. Ein etwaiger `?mode=`-Param wird
     still ignoriert.
+
+    Block Q (ADR-0025 §(5)) — Pagination/Export-Trennung: der Export
+    ignoriert den `?page=N`-Param vollstaendig. Output entspricht immer dem
+    aktiven Filter ueber alle Seiten (kein `offset`, kein page-bezogenes
+    `limit`). `DashboardFilter.to_query_string()` emittiert `page` nicht,
+    Templates referenzieren den CSV-Link daher mit dem reinen Filter-Query-
+    String ohne `page`.
     """
     sess = get_session()
 

@@ -214,7 +214,14 @@ def test_sort_param_no_sql_injection_surface_via_findings_query(db_app: Flask) -
 
 
 def test_sort_and_dir_combined_payloads(db_app: Flask) -> None:
-    """`?sort=X&dir=Y` mit beiden ungueltig -> 200 + Default-Sort."""
+    """`?sort=X&dir=Y` mit beiden ungueltig -> 200 + Default-Sort.
+
+    ADR-0025 §2/§3: Findings werden default lazy in Group-Cards gerendert.
+    Damit die CVE-ID im Initial-HTML auftaucht, erzwingen wir mit `?flat=1`
+    die flache Tabelle (`_view_list.html`). Der eigentliche Injection-Test
+    ist davon unabhaengig — beide ungueltigen Strings fallen vor SQL-Render
+    auf den Default-Sort zurueck.
+    """
     create_admin_user(db_app)
     sid = _create_server(db_app, name="srv-combined")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-COMBI-001")
@@ -223,6 +230,7 @@ def test_sort_and_dir_combined_payloads(db_app: Flask) -> None:
     resp = client.get(
         f"/servers/{sid}",
         query_string={
+            "flat": "1",
             "sort": "'; DROP TABLE findings;--",
             "dir": "'; DROP TABLE users;--",
         },

@@ -30,10 +30,12 @@ from app.models import (
     FindingType,
     Severity,
 )
+from app.schemas.dashboard_filter import DashboardFilter
 from app.services.findings_query import (
     FindingsFilter,
     count_findings,
     list_findings,
+    list_findings_cross_server,
 )
 from tests._helpers import register_test_server
 
@@ -542,6 +544,55 @@ def test_count_findings_respects_class_filter(db_app: Flask) -> None:
         finally:
             sess.close()
     assert counts["total"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Block Q (ADR-0025 §(5)) — Cross-Server-Pagination
+# ---------------------------------------------------------------------------
+
+
+def test_cross_server_offset_pagination(db_app: Flask) -> None:
+    """DoD E.1: klassische Offset/Limit-Pagination in `list_findings_cross_server`.
+
+    75 OPEN-Findings ueber 3 Server. `limit=50, offset=0` -> 50 Treffer,
+    `limit=50, offset=50` -> 25 Treffer. `total_count` bleibt in beiden
+    Faellen bei 75 (gilt fuer den vollen gefilterten Satz, nicht fuer
+    die aktuelle Seite). Optional: pruefen dass die ersten 50 und die
+    letzten 25 disjunkt sind und zusammen alle 75 ergeben — Sort ist
+    deterministisch via `identifier_key.asc()`-Tiebreak.
+    """
+    sid_a, _ = register_test_server(db_app, name="page-srv-a")
+    sid_b, _ = register_test_server(db_app, name="page-srv-b")
+    sid_c, _ = register_test_server(db_app, name="page-srv-c")
+    server_ids = (sid_a, sid_b, sid_c)
+
+    findings = [
+        _make_finding(
+            server_id=server_ids[i % 3],
+            identifier_key=f"CVE-2024-{i + 1:04d}",  # CVE-2024-0001..0075
+            severity=Severity.MEDIUM,
+        )
+        for i in range(75)
+    ]
+    _persist(db_app, findings)
+
+    with db_app.app_context():
+        sess = _session(db_app)
+        try:
+            page1, total1 = list_findings_cross_server(sess, DashboardFilter(), limit=50, offset=0)
+            page2, total2 = list_findings_cross_server(sess, DashboardFilter(), limit=50, offset=50)
+        finally:
+            sess.close()
+
+    assert len(page1) == 50, f"Seite 1 sollte 50 Treffer haben, hat {len(page1)}"
+    assert len(page2) == 25, f"Seite 2 sollte 25 Treffer haben, hat {len(page2)}"
+    assert total1 == 75, f"total_count Seite 1 = {total1}, erwartet 75"
+    assert total2 == 75, f"total_count Seite 2 = {total2}, erwartet 75"
+
+    ids1 = {f.identifier_key for f in page1}
+    ids2 = {f.identifier_key for f in page2}
+    assert ids1.isdisjoint(ids2), "Seite 1 und Seite 2 duerfen keine Findings teilen"
+    assert len(ids1 | ids2) == 75, "Vereinigung beider Seiten muss alle 75 Findings sein"
 
 
 def test_persist_smoke(db_app: Flask) -> None:

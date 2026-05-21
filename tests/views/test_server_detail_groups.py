@@ -1,10 +1,14 @@
-"""Server-Detail-Findings-Section mit Application-Group-Cards (Block P).
+"""Server-Detail-Findings-Section mit Application-Group-Cards (Block P,
+Block-Q Phase B/C, ADR-0025 §2 + §3).
 
-DoD aus Block-P-Brief Task #13:
+DoD aus Block-P-Brief Task #13 (angepasst an ADR-0025):
   - Server mit 3 Groups (escalate/act/noise) -> 3 Cards in Sort-Order
     (escalate zuerst).
-  - escalate-Card default-expanded, noise-Card default-collapsed.
-  - Ungrouped-Findings -> "Pending grouping"-Sektion am Ende.
+  - ALLE Application-Group-Cards rendern default COLLAPSED (Block-Q
+    Phase B.3, ADR-0025 §2 — `_expanded_bands`-Auto-Open ist weg).
+  - Ungrouped-Findings -> "Pending grouping"-Sektion am Ende mit pro-Band
+    collapsed `<details>`-Buckets, Findings selbst lazy via HTMX
+    (Block-Q Phase C.3, ADR-0025 §3 — keine CVE-IDs im Initial-HTML).
   - Group ohne risk_band -> Evaluating-Card statt normale Card.
   - Bulk-Ack-Noise-Modal-Liste enthaelt noise-Findings aus allen Groups +
     ungrouped, keine non-noise.
@@ -155,8 +159,15 @@ def test_three_groups_in_risk_sort_order(db_app: Flask) -> None:
     assert pos_escalate < pos_act < pos_noise, (pos_escalate, pos_act, pos_noise)
 
 
-def test_escalate_open_default_noise_collapsed(db_app: Flask) -> None:
-    """escalate-Card hat `<details open>`, noise-Card collapsed."""
+def test_all_group_cards_default_collapsed(db_app: Flask) -> None:
+    """Block-Q Phase B.3 (ADR-0025 §2): ALLE Application-Group-Cards
+    rendern default COLLAPSED.
+
+    Die fruehere `_expanded_bands`-Logik (escalate/act/mitigate/pending/
+    unknown auto-open, monitor/noise collapsed) entfaellt ersatzlos.
+    Wir erzeugen eine escalate- UND eine noise-Card und verifizieren
+    beide haben KEIN `open`-Attribut.
+    """
     create_admin_user(db_app)
     sid = _seed(
         db_app,
@@ -180,17 +191,16 @@ def test_escalate_open_default_noise_collapsed(db_app: Flask) -> None:
 
     import re
 
-    # escalate-Group muss `<details ... open>` enthalten.
-    # Wir suchen den Substring "esc-grp" und extrahieren die folgenden 2000
-    # Chars als Card-Block.
+    # escalate-Card: das `<details>` der Group-Card darf KEIN 'open' tragen.
     esc_pos = body.index("esc-grp")
     esc_block = body[esc_pos : esc_pos + 3000]
     esc_details = re.search(r"<details\b([^>]*)>", esc_block)
     assert esc_details is not None
-    assert "open" in esc_details.group(1), (
-        f"escalate-details fehlt 'open'-Attribut: {esc_details.group(1)!r}"
+    assert "open" not in esc_details.group(1), (
+        f"escalate-details darf KEIN 'open'-Attribut haben (ADR-0025 §2): {esc_details.group(1)!r}"
     )
 
+    # noise-Card: weiterhin collapsed.
     noi_pos = body.index("noi-grp")
     noi_block = body[noi_pos : noi_pos + 3000]
     noi_details = re.search(r"<details\b([^>]*)>", noi_block)
@@ -201,7 +211,16 @@ def test_escalate_open_default_noise_collapsed(db_app: Flask) -> None:
 
 
 def test_ungrouped_findings_pending_grouping_section(db_app: Flask) -> None:
-    """Findings ohne `application_group_id` -> Pending-grouping-Sektion."""
+    """Findings ohne `application_group_id` -> Pending-grouping-Sektion.
+
+    Block-Q Phase C.3 (ADR-0025 §3): die Pending-Sektion rendert eigentlich
+    Lazy — pro Risk-Band ein collapsed `<details>`-Bucket mit
+    `data-test="pending-band-<band>"`, die Findings selbst kommen erst
+    nach HTMX-Aufklappen. CVE-IDs duerfen NICHT im Initial-HTML stehen.
+
+    Wir seeden 2 ungroupierte Findings (default-Band `pending` aus dem
+    `_seed`-Helper) und pruefen die Sektion-Struktur — keine CVE-Suche.
+    """
     create_admin_user(db_app)
     sid = _seed(
         db_app,
@@ -219,11 +238,27 @@ def test_ungrouped_findings_pending_grouping_section(db_app: Flask) -> None:
     login(client)
     body = client.get(f"/servers/{sid}").get_data(as_text=True)
 
+    # Pending-Grouping-Sektion ist im Initial-HTML sichtbar.
     assert 'data-test="pending-grouping-section"' in body
     assert "Pending grouping" in body
-    # Ungrouped-Findings haben ihre CVE-IDs im Markup.
-    assert "CVE-UNGROUPED-0" in body
-    assert "CVE-UNGROUPED-1" in body
+
+    # Pro Risk-Band mit count>0 ein `<details>`-Bucket. `_seed`-Helper setzt
+    # ungroupierte Findings auf risk_band="pending" — also muss zumindest
+    # der pending-Bucket erscheinen.
+    assert 'data-test="pending-band-pending"' in body, (
+        "Erwartet `pending-band-pending`-Bucket im Initial-HTML "
+        "(2 ungroupierte Findings mit risk_band='pending')."
+    )
+    # Lazy-Slot mit HTMX-Trigger auf den pending-Endpoint ist vorhanden.
+    assert 'data-test="pending-band-lazy-slot"' in body
+    assert f"/servers/{sid}/findings/pending" in body
+
+    # KEINE Finding-CVE-IDs im Initial-HTML — die werden lazy nachgeladen
+    # (ADR-0025 §3).
+    assert "CVE-UNGROUPED-0" not in body, (
+        "Ungroupierte CVE-IDs duerfen NICHT eager gerendert sein (Block-Q Phase C.3)."
+    )
+    assert "CVE-UNGROUPED-1" not in body
 
 
 def test_group_without_risk_band_renders_evaluating_card(db_app: Flask) -> None:

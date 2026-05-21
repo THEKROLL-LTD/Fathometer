@@ -47,14 +47,14 @@ def _create_server(app: Flask, name: str = "pane-srv-1") -> int:
 # Pane-Marker — beide Responses muessen sie enthalten.
 # ---------------------------------------------------------------------------
 
-# Marker, die nach ADR-0022 (Block O) zum Dashboard-Pane gehoeren. Bewusst
+# Marker, die nach ADR-0022/0025 zum Dashboard-Pane gehoeren. Bewusst
 # keine tiefen CSS-Klassen-Strings — die Marker sollen Layout-Refactors
-# ueberleben, aber Template-Austausch sofort erkennen. Block M hatte die
-# alte `Dashboard</h1>`-Headline auf `Alle Findings</h1>` umgestellt; Block O
-# (ADR-0022) hat die Block-M-KPI-Sparkline-Cards durch das neue Risk-zentrische
-# Layout ersetzt (Action-Required-Cards + Risk-Band-Pills + Severity-Strip).
+# ueberleben, aber Template-Austausch sofort erkennen. Block O (ADR-0022)
+# hat das Risk-zentrische KPI-Layout eingefuehrt; Block Q (ADR-0025) hat
+# die Findings-Tabelle aus dem Pane entfernt — der Findings-Section-Marker
+# ist daher hier nicht mehr enthalten.
 PANE_MARKERS = (
-    # Headline aus _detail_pane.html (Block M, unveraendert).
+    # Headline aus _detail_pane.html.
     "Alle Findings</h1>",
     # Server-Count-Indikator.
     "Server sichtbar",
@@ -63,8 +63,6 @@ PANE_MARKERS = (
     'data-test="action-required-card-yes"',
     'data-test="dashboard-risk-band-pills"',
     'data-test="dashboard-severity-strip"',
-    # Findings-Section-Container (Triage-Queue, Block-M-Marker bleibt).
-    'data-test="dashboard-findings-section"',
 )
 
 

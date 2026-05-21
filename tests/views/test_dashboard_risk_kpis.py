@@ -154,8 +154,11 @@ def test_dashboard_kpi_counter_three_servers_different_bands(db_app: Flask) -> N
     assert pending_pill.group(1) == "2"
 
 
-def test_dashboard_action_required_yes_filter_filters_table(db_app: Flask) -> None:
-    """`?action_required=yes` filtert die Tabelle auf yes-Bands."""
+def test_findings_action_required_yes_filter_filters_table(db_app: Flask) -> None:
+    """`/findings?action_required=yes` filtert die Tabelle auf yes-Bands.
+
+    Block Q (ADR-0025): Filter ist von `/` auf `/findings` umgezogen.
+    """
     create_admin_user(db_app)
     sid = _create_server(db_app, name="srv-filter")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-PENDING", risk_band="pending")
@@ -163,17 +166,18 @@ def test_dashboard_action_required_yes_filter_filters_table(db_app: Flask) -> No
     _add_finding(db_app, server_id=sid, identifier_key="CVE-MONITOR", risk_band="monitor")
     client = db_app.test_client()
     login(client)
-    body = client.get("/?action_required=yes").get_data(as_text=True)
+    body = client.get("/findings?action_required=yes").get_data(as_text=True)
 
-    section_start = body.find('data-test="dashboard-findings-section"')
+    section_start = body.find('data-test="findings-table-section"')
+    assert section_start >= 0, "Findings-Tabelle muss bei aktiv. Filter gerendert sein"
     section = body[section_start:]
     assert "CVE-PENDING" in section
     assert "CVE-NOISE" not in section
     assert "CVE-MONITOR" not in section
 
 
-def test_dashboard_action_required_no_filter_filters_table(db_app: Flask) -> None:
-    """`?action_required=no` filtert auf monitor/noise."""
+def test_findings_action_required_no_filter_filters_table(db_app: Flask) -> None:
+    """`/findings?action_required=no` filtert auf monitor/noise."""
     create_admin_user(db_app)
     sid = _create_server(db_app, name="srv-no-filter")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-PENDING", risk_band="pending")
@@ -181,15 +185,15 @@ def test_dashboard_action_required_no_filter_filters_table(db_app: Flask) -> Non
     _add_finding(db_app, server_id=sid, identifier_key="CVE-MONITOR", risk_band="monitor")
     client = db_app.test_client()
     login(client)
-    body = client.get("/?action_required=no").get_data(as_text=True)
-    section = body[body.find('data-test="dashboard-findings-section"') :]
+    body = client.get("/findings?action_required=no").get_data(as_text=True)
+    section = body[body.find('data-test="findings-table-section"') :]
     assert "CVE-NOISE" in section
     assert "CVE-MONITOR" in section
     assert "CVE-PENDING" not in section
 
 
-def test_dashboard_risk_band_filter_pending(db_app: Flask) -> None:
-    """`?risk_band=pending` filtert auf genau diesen Band."""
+def test_findings_risk_band_filter_pending(db_app: Flask) -> None:
+    """`/findings?risk_band=pending` filtert auf genau diesen Band."""
     create_admin_user(db_app)
     sid = _create_server(db_app, name="srv-rb-filter")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-PENDING", risk_band="pending")
@@ -197,8 +201,8 @@ def test_dashboard_risk_band_filter_pending(db_app: Flask) -> None:
     _add_finding(db_app, server_id=sid, identifier_key="CVE-NOISE", risk_band="noise")
     client = db_app.test_client()
     login(client)
-    body = client.get("/?risk_band=pending").get_data(as_text=True)
-    section = body[body.find('data-test="dashboard-findings-section"') :]
+    body = client.get("/findings?risk_band=pending").get_data(as_text=True)
+    section = body[body.find('data-test="findings-table-section"') :]
     assert "CVE-PENDING" in section
     assert "CVE-ESCALATE" not in section
     assert "CVE-NOISE" not in section

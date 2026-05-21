@@ -1,9 +1,13 @@
-"""Adversarial: `/?q=<script>…</script>` rendert escaped (Block M, ADR-0020).
+"""Adversarial: `/findings?q=<script>…</script>` rendert escaped (Block Q, ADR-0025).
 
-ARCHITECTURE.md §10 (Input-Validierung) + ADR-0020 (q-Field als XSS-Surface).
-Das `view_filter.q`-Echo im Filter-Bar-`value`-Attribut darf NIEMALS `|safe`
-verwenden — Jinja-Autoescape ist die einzige Verteidigung. Tabellen-Render
-des Findings-Treffers escapet ebenfalls jegliche User-Werte.
+ARCHITECTURE.md §10 (Input-Validierung) + ADR-0020/0025 (q-Field als XSS-
+Surface). Das `view_filter.q`-Echo im Filter-Bar-`value`-Attribut darf
+NIEMALS `|safe` verwenden — Jinja-Autoescape ist die einzige Verteidigung.
+Tabellen-Render des Findings-Treffers escapet ebenfalls jegliche User-Werte.
+
+Block Q (ADR-0025) hat die Filter-Bar vom Dashboard `/` auf die dedizierte
+`/findings`-Seite verlagert — diese Suite verifiziert die XSS-Sicherheit
+weiterhin, gegen den neuen Endpoint.
 
 Diese Suite verifiziert: bei einem `<script>`-Payload im `q`-Query-Param
 - Status 200,
@@ -53,7 +57,7 @@ def test_q_script_payload_rendered_escaped_in_filter_input(db_app: Flask) -> Non
     _create_server(db_app, name="q-xss-srv")
     client = db_app.test_client()
     login(client)
-    resp = client.get("/", query_string={"q": SCRIPT_PAYLOAD})
+    resp = client.get("/findings", query_string={"q": SCRIPT_PAYLOAD})
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
 
@@ -73,7 +77,7 @@ def test_q_attribute_breakout_payload_escaped(db_app: Flask) -> None:
     _create_server(db_app, name="q-attr-xss")
     client = db_app.test_client()
     login(client)
-    body = client.get("/", query_string={"q": ATTR_PAYLOAD}).get_data(as_text=True)
+    body = client.get("/findings", query_string={"q": ATTR_PAYLOAD}).get_data(as_text=True)
 
     # Roher unescaped Payload mit ungescaptem `"` darf NICHT als Attribut
     # auftauchen.
@@ -90,7 +94,7 @@ def test_q_img_onerror_payload_escaped(db_app: Flask) -> None:
     _create_server(db_app, name="q-img-xss")
     client = db_app.test_client()
     login(client)
-    body = client.get("/", query_string={"q": IMG_PAYLOAD}).get_data(as_text=True)
+    body = client.get("/findings", query_string={"q": IMG_PAYLOAD}).get_data(as_text=True)
 
     assert IMG_PAYLOAD not in body, "Raw <img onerror>-Payload im Body"
     # Escaped Form auf irgendeiner Form (`&lt;img` ist generisch genug).
@@ -105,7 +109,7 @@ def test_q_payload_appears_only_in_filter_input(db_app: Flask) -> None:
     _create_server(db_app, name="q-isolation")
     client = db_app.test_client()
     login(client)
-    body = client.get("/", query_string={"q": SCRIPT_PAYLOAD}).get_data(as_text=True)
+    body = client.get("/findings", query_string={"q": SCRIPT_PAYLOAD}).get_data(as_text=True)
 
     # Pruefe konkret das `value="…"`-Attribut der `filter-q`-Input.
     filter_q_match = re.search(

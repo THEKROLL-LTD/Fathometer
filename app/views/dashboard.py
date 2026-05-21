@@ -32,7 +32,6 @@ from sqlalchemy.orm import Session, selectinload
 from app.db import get_session
 from app.forms import BulkActionForm, CSRFOnlyForm
 from app.models import (
-    ApplicationGroup,
     Finding,
     FindingStatus,
     Server,
@@ -41,7 +40,6 @@ from app.models import (
     Tag,
 )
 from app.schemas.dashboard_filter import DashboardFilter
-from app.services.findings_query import list_findings_cross_server
 from app.services.risk_engine import RiskBand, yes_band_values
 from app.services.severity_history import daily_severity_counts_fleet
 from app.services.stale_detection import (
@@ -271,33 +269,16 @@ def _build_pane_context(
     # schreiben wir `quick_stats` und `filter_tags` hier explizit.
     quick_stats = get_quick_stats(sess, filter_tags=filt.tags or None, now=now)
 
-    # Block M (ADR-0020): Cross-Server-Findings-Tabelle, KPI-Sparklines,
-    # Stale-Sparkline. Findings-Limit hart auf 200 (Truncation-Hinweis im
-    # Template). KPI-Counter bleiben filter-unabhaengig OPEN — Sparklines
-    # auch flotten-weit (siehe ADR-0020 "Sparkline-Semantik").
-    findings_results, findings_total = list_findings_cross_server(
-        sess,
-        filt,
-        limit=200,
-        sort=filt.sort,
-        dir=filt.dir,
-        now=now,
-    )
+    # Block M (ADR-0020): KPI-Sparklines und Stale-Sparkline bleiben am
+    # Dashboard (Trend-Anzeige fuer KPI-Cards/Pills). Die Cross-Server-
+    # Findings-Tabelle ist seit Block Q (ADR-0025 §(5)) auf `/findings`
+    # umgezogen — kein `list_findings_cross_server`-Aufruf mehr hier.
     kpi_sparklines = daily_severity_counts_fleet(sess, days=50, now=now)
     stale_sparkline = daily_stale_server_counts(sess, days=50, now=now)
 
     # Block O (ADR-0022): Risk-KPI-Counter fuer Action-Required-Cards,
     # Risk-Band-Pills und Severity-Strip.
     risk_kpis = _load_risk_kpi_counters(sess)
-
-    # Block P (ADR-0023): Application-Group-Library fuer den Filter-Bar-
-    # Select. Alphabetisch, Cap auf 100 Eintraege — bei groesseren
-    # Libraries ist der URL-Filter ohnehin der bessere Pfad.
-    available_application_groups = list(
-        sess.execute(select(ApplicationGroup).order_by(ApplicationGroup.label.asc()).limit(100))
-        .scalars()
-        .all()
-    )
 
     return {
         "servers": visible,
@@ -308,17 +289,12 @@ def _build_pane_context(
         "db_stale_threshold_h": db_stale_h,
         "quick_stats": quick_stats,
         "filter_tags": filt.tags,
-        # Block M (ADR-0020).
-        "findings": findings_results,
-        "findings_total": findings_total,
         "kpi_sparklines": kpi_sparklines,
         "stale_sparkline": stale_sparkline,
         "bulk_form": BulkActionForm(),
         "csrf_form": CSRFOnlyForm(),
         # Block O (ADR-0022).
         "risk_kpis": risk_kpis,
-        # Block P (ADR-0023).
-        "available_application_groups": available_application_groups,
     }
 
 

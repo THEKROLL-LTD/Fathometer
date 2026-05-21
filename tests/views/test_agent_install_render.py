@@ -49,7 +49,7 @@ def test_install_sh_full_wizard_template(db_app: Flask) -> None:
     # Eingebackene Konstanten.
     assert 'RECOMMENDED_TRIVY_VERSION="0.70.2"' in body
     assert 'MIN_TRIVY_VERSION="0.70.0"' in body
-    assert 'CURRENT_AGENT_VERSION="0.2.0"' in body
+    assert 'CURRENT_AGENT_VERSION="0.3.1"' in body
 
     # SECSCAN_URL ist gesetzt (Fallback auf request.host_url in Tests).
     assert 'SECSCAN_URL="http' in body

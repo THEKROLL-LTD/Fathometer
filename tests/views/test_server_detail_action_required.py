@@ -205,7 +205,13 @@ def test_server_detail_host_snapshot_empty_state_without_snapshot(db_app: Flask)
 
 
 def test_server_detail_finding_row_shows_risk_band_reason(db_app: Flask) -> None:
-    """Finding mit `risk_band_reason` rendert das in Mono-Font unter der CVE-ID."""
+    """Finding mit `risk_band_reason` rendert das in Mono-Font unter der CVE-ID.
+
+    ADR-0025 §2/§3: Findings rendern default lazy in Group-Cards bzw.
+    Pending-Sektion. `?flat=1` erzwingt die flache Tabelle, in der die
+    Per-Finding-`risk_band_reason`-Sub-Zeile mit dem `data-test`-Marker
+    sichtbar ist.
+    """
     create_admin_user(db_app)
     sid = _create_server(db_app, name="srv-reason")
     _add_finding(
@@ -217,21 +223,27 @@ def test_server_detail_finding_row_shows_risk_band_reason(db_app: Flask) -> None
     )
     client = db_app.test_client()
     login(client)
-    body = client.get(f"/servers/{sid}").get_data(as_text=True)
+    body = client.get(f"/servers/{sid}?flat=1").get_data(as_text=True)
     assert 'data-test="finding-risk-reason"' in body
     assert "KEV listed" in body
     assert "pending LLM review" in body
 
 
 def test_server_detail_findings_grouped_by_band_with_section_headers(db_app: Flask) -> None:
-    """Findings sind nach `risk_band` gruppiert, eine tbody-Section pro Band."""
+    """Findings sind nach `risk_band` gruppiert, eine tbody-Section pro Band.
+
+    ADR-0025 §2/§3: die Band-Gruppierung lebt im flachen `_view_list.html`
+    (`findings-band-group-<band>` + `findings-band-toggle-<band>`); die
+    Default-Group-Card-Ansicht hat dieses Marker-Set nicht. `?flat=1`
+    erzwingt den flachen Pfad.
+    """
     create_admin_user(db_app)
     sid = _create_server(db_app, name="srv-grouped")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-P-1", risk_band="pending")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-N-1", risk_band="noise")
     client = db_app.test_client()
     login(client)
-    body = client.get(f"/servers/{sid}").get_data(as_text=True)
+    body = client.get(f"/servers/{sid}?flat=1").get_data(as_text=True)
     assert 'data-test="findings-band-group-pending"' in body
     assert 'data-test="findings-band-group-noise"' in body
     # Toggle-Buttons pro Band.

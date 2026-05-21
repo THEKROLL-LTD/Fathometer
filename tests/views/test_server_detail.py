@@ -411,13 +411,19 @@ def _setup_findings_server(app: Flask, name: str = "srv-findings") -> int:
 
 
 def test_show_default_renders_list_mode(db_app: Flask) -> None:
-    """Default-`mode=list` rendert eine Tabelle."""
+    """Default-`mode=list` rendert eine Tabelle.
+
+    ADR-0025 §2/§3 (Block Q Phase B/C): Server-Detail rendert Findings
+    default lazy (Application-Group-Cards collapsed). `?flat=1` erzwingt
+    den flachen Tabellen-Pfad fuer Markup-Tests, die direkt die Tabelle
+    und CVE-Row-Markup pruefen.
+    """
     create_admin_user(db_app)
     sid = _setup_findings_server(db_app, "srv-mode-list")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-2026-D001")
     client = db_app.test_client()
     login(client)
-    resp = client.get(f"/servers/{sid}")
+    resp = client.get(f"/servers/{sid}?flat=1")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert "<table" in body
@@ -572,14 +578,20 @@ def test_show_default_sort_renders_both_findings(db_app: Flask) -> None:
 
 
 def test_show_with_htmx_header_returns_partial_only(db_app: Flask) -> None:
-    """Bei `HX-Request: true` rendert der Endpoint nur das Findings-Fragment."""
+    """Bei `HX-Request: true` rendert der Endpoint nur das Findings-Fragment.
+
+    ADR-0025 §2/§3: ohne `?flat=1` waere das Initial-HTML die Group-Card-
+    Ansicht ohne Finding-Rows — `CVE-2026-D701` wuerde lazy ueber HTMX
+    nachgeladen. Hier prueftn wir, dass der Fragment-Pfad funktioniert UND
+    Markup mit Row-Inhalt liefert, also `?flat=1`.
+    """
     create_admin_user(db_app)
     sid = _setup_findings_server(db_app, "srv-htmx")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-2026-D701")
     client = db_app.test_client()
     login(client)
     resp = client.get(
-        f"/servers/{sid}",
+        f"/servers/{sid}?flat=1",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -629,13 +641,18 @@ def test_show_counts_header_sums_match_total(db_app: Flask) -> None:
 
 
 def test_show_invalid_mode_falls_back_to_list(db_app: Flask) -> None:
-    """Ein bogus `mode=xy` darf nicht 422 ergeben — wir fallen auf list zurueck."""
+    """Ein bogus `mode=xy` darf nicht 422 ergeben — wir fallen auf list zurueck.
+
+    ADR-0025 §2/§3: List-Modus default lazy in Group-Cards; `?flat=1`
+    erzwingt die flache Tabelle, deren `<table>`-Tag wir hier explizit
+    pruefen wollen.
+    """
     create_admin_user(db_app)
     sid = _setup_findings_server(db_app, "srv-mode-bad")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-2026-D901")
     client = db_app.test_client()
     login(client)
-    resp = client.get(f"/servers/{sid}?mode=xy")
+    resp = client.get(f"/servers/{sid}?mode=xy&flat=1")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     # list-Layout: Tabelle.
