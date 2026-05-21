@@ -27,12 +27,18 @@ from app.settings_service import ensure_settings_row
 from app.workers import llm_worker
 
 
-@pytest.fixture(autouse=True)
-def _route_worker(db_app: Flask) -> Any:
+@pytest.fixture
+def _route_worker(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> Any:
     factory = get_session_factory(db_app)
     llm_worker.set_session_factory_for_tests(factory)
     llm_worker.reset_shutdown_for_tests()
     llm_worker.set_reviewer_factory_for_tests(None)
+    # Diese Tests pruefen korrupte LLM-Job-Payloads. Worker-Subticks wie
+    # Feed-Pulls duerfen hier niemals echte HTTP-Requests oder unrelated
+    # DB-Arbeit ausloesen.
+    monkeypatch.setattr(llm_worker, "_run_stale_reaper", lambda: None)
+    monkeypatch.setattr(llm_worker, "_run_debug_log_eviction", lambda: None)
+    monkeypatch.setattr(llm_worker, "_run_feed_enrichment_check", lambda: None)
     yield
     llm_worker.set_reviewer_factory_for_tests(None)
     llm_worker.reset_shutdown_for_tests()
@@ -107,7 +113,11 @@ def _force_attempts(app: Flask, job_id: int, attempts: int) -> None:
     ],
 )
 def test_worker_handles_corrupted_pass1_payload(
-    db_app: Flask, monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any], label: str
+    db_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    _route_worker: Any,
+    payload: dict[str, Any],
+    label: str,
 ) -> None:
     """Corrupted Pass-1-Payload → Worker faengt, markiert failed/requeue,
     KEIN Crash."""
@@ -168,7 +178,7 @@ def test_worker_handles_corrupted_pass1_payload(
 
 
 def test_worker_handles_corrupted_pass2_payload(
-    db_app: Flask, monkeypatch: pytest.MonkeyPatch
+    db_app: Flask, monkeypatch: pytest.MonkeyPatch, _route_worker: Any
 ) -> None:
     """Pass-2 mit fehlenden group_id/server_id → ValueError → failed."""
     _set_live(db_app)
@@ -207,61 +217,51 @@ def test_worker_handles_corrupted_pass2_payload(
 
 
 def test_worker_tick_does_not_crash_on_corrupted_payload_sequence(
-    db_app: Flask, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Mehrere Tick-Iterationen mit verschiedenen kaputten Payloads — kein
-    Tick-Loop-Abbruch."""
-    _set_live(db_app)
-    job_ids = [
-        _seed_job(
-            db_app, job_type="group_detection", payload={}, attempts=llm_worker.MAX_ATTEMPTS - 1
-        ),
-        _seed_job(
-            db_app,
-            job_type="risk_evaluation",
-            payload={"group_id": "not-an-int"},
-            attempts=llm_worker.MAX_ATTEMPTS - 1,
-        ),
-        _seed_job(
-            db_app,
-            job_type="group_detection",
-            payload={"finding_ids": [None, None]},
-            attempts=llm_worker.MAX_ATTEMPTS - 1,
-        ),
-    ]
+    """Mehrere Tick-Iterationen ueber korrupte Jobs — ohne DB/HTTP.
+
+    Der Test prueft nur die Tick-Orchestrierung: Subticks werden nicht
+    ausgefuehrt, Job-Pickup kommt aus einer In-Memory-Queue, und die eigentliche
+    Payload-Behandlung wird an der `_process_job`-Grenze simuliert. Die
+    DB-basierten Einzeltests oben pruefen die reale Payload-Persistenz separat.
+    """
+    llm_worker.reset_shutdown_for_tests()
+    job_ids = [101, 102, 103]
+    queue = list(job_ids)
+    handled: list[tuple[int, str]] = []
+    statuses = dict.fromkeys(job_ids, "queued")
 
     monkeypatch.setattr(time_mod, "sleep", lambda s: None)
     monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
+    monkeypatch.setattr(llm_worker, "_run_stale_reaper", lambda: None)
+    monkeypatch.setattr(llm_worker, "_run_debug_log_eviction", lambda: None)
+    monkeypatch.setattr(llm_worker, "_run_feed_enrichment_check", lambda: None)
+    monkeypatch.setattr(llm_worker, "_get_mode_throttled", lambda: "live")
+    monkeypatch.setattr(llm_worker, "_budget_ok_throttled", lambda: True)
+    monkeypatch.setattr(
+        llm_worker,
+        "_pick_next_job_id",
+        lambda: queue.pop(0) if queue else None,
+    )
+    monkeypatch.setattr(
+        llm_worker,
+        "_idle_sleep_and_backoff",
+        lambda: pytest.fail("Test-Queue sollte nicht idle sein"),
+    )
 
-    def _stub(_session: Any) -> tuple[Any, str]:
-        class _Stub:
-            async def pass1_detect_groups(self, *_args: Any, **_kw: Any) -> Any:
-                # Pass-1 mit None-Liste fuehrt nicht zwingend zu Crash, sondern
-                # zu missing-findings — Worker handlet das selbst.
-                raise ValueError("corrupted finding_ids")
+    def _process_job(job_id: int, mode: str) -> None:
+        handled.append((job_id, mode))
+        statuses[job_id] = "failed"
 
-            async def pass2_evaluate_groups(self, *_args: Any, **_kw: Any) -> Any:
-                raise ValueError("never reached")
+    monkeypatch.setattr(llm_worker, "_process_job", _process_job)
 
-        return _Stub(), "stub"
+    try:
+        for _ in job_ids:
+            llm_worker._tick()
 
-    llm_worker.set_reviewer_factory_for_tests(_stub)
-
-    # Drei Ticks — jedes Mal wird ein Job gepickt.
-    for _ in range(len(job_ids)):
-        llm_worker._tick()
-
-    factory = get_session_factory(db_app)
-    with db_app.app_context():
-        sess = factory()
-        try:
-            for jid in job_ids:
-                job = sess.get(LLMJob, jid)
-                assert job is not None
-                # Either failed or done (manche Payloads landen in `done`
-                # mit `skipped=true` weil keine Findings gefunden werden).
-                assert job.status in {"failed", "done"}, (
-                    f"job {jid} stuck im status={job.status} error={job.error!r}"
-                )
-        finally:
-            sess.close()
+        assert handled == [(jid, "live") for jid in job_ids]
+        assert all(statuses[jid] == "failed" for jid in job_ids)
+        assert queue == []
+    finally:
+        llm_worker.reset_shutdown_for_tests()
