@@ -61,7 +61,8 @@ def backfill_epss(session: Session) -> int:
     )
     result = session.execute(stmt)
     session.commit()
-    updated = int(result.rowcount or 0)
+    rowcount = getattr(result, "rowcount", 0)
+    updated = int(rowcount or 0)
 
     duration_ms = int((datetime.now(UTC) - started_at).total_seconds() * 1000)
     log.info(
@@ -105,7 +106,8 @@ def backfill_kev(session: Session) -> int:
     )
     result = session.execute(stmt)
     session.commit()
-    updated = int(result.rowcount or 0)
+    rowcount = getattr(result, "rowcount", 0)
+    updated = int(rowcount or 0)
 
     duration_ms = int((datetime.now(UTC) - started_at).total_seconds() * 1000)
     log.info(

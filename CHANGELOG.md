@@ -56,6 +56,10 @@ Pfad pro Finding gelookupt. Trivy bleibt unveraendert als Scanner.
 
 ### Changed
 
+- Findings erben jetzt nach Pass-2-Erfolg und bei jedem Re-Ingest das
+  finale ``risk_band`` ihrer ``ApplicationGroup``. Dadurch zaehlt die
+  Server-Detail-Pill ``Action needed`` nur noch wirklich ungruppierte
+  Pending-/Unknown-Findings statt bereits bewertete Group-Member.
 - ``Settings``-Modell um sieben neue Felder erweitert:
   ``feed_pull_disabled``, ``feed_epss_url``, ``feed_kev_url``,
   ``feed_pull_interval_hours``, ``feed_jitter_max_min``,

@@ -48,6 +48,7 @@ from app.middleware.gzip import (
 from app.models import ApplicationGroup, Finding, FindingStatus, LLMJob, Server
 from app.schemas.scan_envelope import Envelope
 from app.services.agent_version import version_lt
+from app.services.finding_group_inheritance import inherit_group_risk_to_findings
 from app.services.findings_ingest import ingest_scan as run_ingest
 from app.services.findings_ingest import server_is_active
 from app.services.group_matcher import (
@@ -389,6 +390,7 @@ def ingest_scan() -> Response | tuple[Response, int]:
         # ueberlistet werden, wenn die ORM-Identity-Map die Findings noch
         # ohne Group hat).
         sess.flush()
+        inherited = inherit_group_risk_to_findings(sess, server_id=server.id)
 
         # 2) Pending Findings ohne Group → Pass-1-Job (Group-Detection).
         ungrouped = list(
@@ -495,6 +497,7 @@ def ingest_scan() -> Response | tuple[Response, int]:
                 "pass1_queued": pass1_batches_count,
                 "pass1_batch_size": batch_size if pass1_batches_count else None,
                 "pass2_queued": pass2_queued,
+                "findings_inherited": inherited,
                 "mode": settings_row.block_p_llm_mode,
             },
             actor=server.name,

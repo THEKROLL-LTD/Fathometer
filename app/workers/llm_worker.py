@@ -47,6 +47,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import load_settings
 from app.models import ApplicationGroup, Finding, LLMJob, Server
 from app.services import llm_budget, llm_debug_log
+from app.services.finding_group_inheritance import inherit_group_risk_to_findings
 from app.services.group_matcher import GroupMatcher, derive_group_kind
 from app.services.llm_cache import lookup, lru_evict_if_needed, record_hit, store
 from app.services.llm_client import LlmClient, build_client_from_settings
@@ -1037,12 +1038,14 @@ async def _do_pass2(job_id: int) -> None:
                 gf_fp=gf_fp,
                 action_type=cached.action_type,
             )
+            inherited = inherit_group_risk_to_findings(session, group_ids=[group_id])
             job.status = "done"
             job.completed_at = datetime.now(UTC)
             job.result = {
                 "cache_hit": True,
                 "risk_band": cached.risk_band,
                 "action_type": cached.action_type,
+                "findings_inherited": inherited,
             }
             _audit(
                 session,
@@ -1053,11 +1056,12 @@ async def _do_pass2(job_id: int) -> None:
             session.commit()
             log.info(
                 "llm_worker.pass2_cache_hit_applied job_id=%s group_id=%s "
-                "risk_band=%s action_type=%s",
+                "risk_band=%s action_type=%s findings_inherited=%s",
                 job_id,
                 group_id,
                 cached.risk_band,
                 cached.action_type,
+                inherited,
             )
             return
 
@@ -1179,6 +1183,7 @@ async def _do_pass2(job_id: int) -> None:
 
     with get_session() as session:
         group2 = session.get(ApplicationGroup, group_id)
+        inherited = 0
         if group2 is not None:
             _apply_pass2_to_group(
                 group2,
@@ -1188,6 +1193,7 @@ async def _do_pass2(job_id: int) -> None:
                 gf_fp=gf_fp,
                 action_type=evaluation.action_type,
             )
+            inherited = inherit_group_risk_to_findings(session, group_ids=[group_id])
         store(
             session,
             cache_key=cache_key,
@@ -1209,6 +1215,7 @@ async def _do_pass2(job_id: int) -> None:
                 "cache_hit": False,
                 "risk_band": evaluation.risk_band,
                 "action_type": evaluation.action_type,
+                "findings_inherited": inherited,
             }
         session.commit()
         lru_evict_if_needed(session)
@@ -1224,12 +1231,13 @@ async def _do_pass2(job_id: int) -> None:
     # v0.9.5: Persist-Done-Phase-Log nach Result+Cache+Budget-Commit.
     log.info(
         "llm_worker.pass2_persist_done job_id=%s group_id=%s risk_band=%s "
-        "action_type=%s worst_finding_id=%s",
+        "action_type=%s worst_finding_id=%s findings_inherited=%s",
         job_id,
         group_id,
         evaluation.risk_band,
         evaluation.action_type,
         evaluation.worst_finding_id,
+        inherited,
     )
 
 

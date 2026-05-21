@@ -49,6 +49,18 @@ parallel laufende Agent-Instanzen sich beim Auto-Update gegenseitig die
 ersetzten Stand statt des urspruenglichen. Empfehlung: Cron-Intervalle
 &ge;5 Min halten. Echter Fix via `flock` ist als TechDebt vorgemerkt.
 
+## Group-Risk-Backfill
+
+Nach dem Deploy des Group-Risk-Inheritance-Fixes einmalig ausfuehren:
+
+```bash
+python -m app.cli.inherit_group_risk_backfill
+```
+
+Der Befehl ist idempotent. Er kopiert finale ``ApplicationGroup.risk_band``-
+Verdicts auf alle zugeordneten Findings, damit bestehende UI-Counter und
+Filter ohne Re-Scan konsistent sind.
+
 ## Block-Q-Feed-Pull (ADR-0024)
 
 ### Health-Checks

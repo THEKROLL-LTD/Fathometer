@@ -336,6 +336,37 @@ def test_mode_observation_full_library_match_queues_only_pass2(db_app: Flask) ->
     assert events[0].event_metadata["pass2_queued"] == 1
 
 
+def test_re_ingest_inherits_existing_group_risk_after_match(db_app: Flask) -> None:
+    """Neue gematchte Findings uebernehmen sofort ein vorhandenes Group-Verdict."""
+    _set_mode(db_app, "observation")
+    _insert_group(
+        db_app,
+        label="openssh-server",
+        pkg_name_exact=["openssh-server"],
+        risk_band="act",
+    )
+    _sid, key = register_test_server(db_app, name="srv-p-inherit-on-ingest")
+    client = db_app.test_client()
+
+    resp = _post(
+        client,
+        _envelope(vulns=[_pending_vuln("CVE-2024-50032", pkg="openssh-server")]),
+        bearer=key,
+    )
+    assert resp.status_code == 202
+
+    findings = _findings(db_app, _sid)
+    assert len(findings) == 1
+    assert findings[0].application_group_id is not None
+    assert findings[0].risk_band == "act"
+    assert findings[0].risk_band_source == "llm"
+
+    events = _audit_events(db_app, "llm.jobs_queued")
+    assert len(events) == 1
+    assert events[0].event_metadata is not None
+    assert events[0].event_metadata["findings_inherited"] == 1
+
+
 def test_mode_observation_mix_queues_pass1_and_pass2_with_dep(db_app: Flask) -> None:
     """Mix: ein Finding matcht Library, ein anderes nicht → Pass-1 + Pass-2 mit depends_on."""
     _set_mode(db_app, "observation")

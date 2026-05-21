@@ -399,8 +399,10 @@ def test_live_pass1_persists_group_and_assigns_findings(
         with db_app.app_context():
             row = ensure_settings_row(sess)
             row.block_p_llm_mode = "live"
+            row.llm_token_budget_used_today = 0
             row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=2)
             sess.commit()
+            llm_worker.invalidate_throttle_caches_for_tests()
             server = _make_server(sess)
             f1 = _make_finding(sess, 1001, server.id, package_name="openssl")
             f2 = _make_finding(sess, 1002, server.id, package_name="openssl")
@@ -470,8 +472,10 @@ def test_live_pass2_writes_cache_and_group_band(
         with db_app.app_context():
             row = ensure_settings_row(sess)
             row.block_p_llm_mode = "live"
+            row.llm_token_budget_used_today = 0
             row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=2)
             sess.commit()
+            llm_worker.invalidate_throttle_caches_for_tests()
             server = _make_server(sess)
             grp = ApplicationGroup(
                 label="openssl",
@@ -533,6 +537,13 @@ def test_live_pass2_writes_cache_and_group_band(
             assert grp.risk_band_source == "llm"
             assert grp.risk_band_reason == "sshd active, patch available"
 
+            inherited_finding = sess.get(Finding, f1.id)
+            assert inherited_finding is not None
+            assert inherited_finding.risk_band == "act"
+            assert inherited_finding.risk_band_source == "llm"
+            assert inherited_finding.risk_band_reason == "sshd active, patch available"
+            assert (updated_job.result or {}).get("findings_inherited") == 1
+
             cache_rows = list(sess.execute(select(LLMRiskCache)).scalars().all())
             assert len(cache_rows) == 1
             assert cache_rows[0].risk_band == "act"
@@ -550,8 +561,10 @@ def test_live_pass2_cache_hit_skips_llm_call(
         with db_app.app_context():
             row = ensure_settings_row(sess)
             row.block_p_llm_mode = "live"
+            row.llm_token_budget_used_today = 0
             row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=2)
             sess.commit()
+            llm_worker.invalidate_throttle_caches_for_tests()
             server = _make_server(sess)
             grp = ApplicationGroup(
                 label="openssl",
@@ -617,7 +630,7 @@ def test_live_pass2_cache_hit_skips_llm_call(
             monkeypatch.setattr(time_mod, "sleep", lambda s: None)
             monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
-            llm_worker._tick()
+            asyncio.run(llm_worker._do_pass2(job_id))
 
             sess.expire_all()
             updated_job = sess.get(LLMJob, job_id)
@@ -627,6 +640,12 @@ def test_live_pass2_cache_hit_skips_llm_call(
             grp = sess.get(ApplicationGroup, grp.id)
             assert grp is not None
             assert grp.risk_band == "mitigate"
+            inherited_finding = sess.get(Finding, f1.id)
+            assert inherited_finding is not None
+            assert inherited_finding.risk_band == "mitigate"
+            assert inherited_finding.risk_band_source == "llm"
+            assert inherited_finding.risk_band_reason == "cached reason"
+            assert (updated_job.result or {}).get("findings_inherited") == 1
     finally:
         sess.close()
 
