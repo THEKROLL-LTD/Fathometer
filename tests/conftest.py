@@ -48,6 +48,10 @@ from flask.testing import FlaskClient
 #   Standard-Pytest schliesst sie aus (siehe ``pytest.ini`` ``addopts``).
 #   Run via ``pytest -m acceptance`` bei RC-Vorbereitung.
 #
+# - ``db_integration``: Acceptance-Tests, die als echte DB-/Integrationssuite
+#   erhalten bleiben sollen statt in Mock-Unit-Tests migriert zu werden.
+#   Run-Liste sehen via ``pytest -m db_integration --collect-only -q``.
+#
 # - ``todo_mock``: Tests die heute noch echte DB benutzen, aber langfristig
 #   zu Mocks refactored werden sollen (LOW/MED/HIGH-Kategorisierung in
 #   ADR-Anhang). Bleiben aktiv, sind nur zum Wiederfinden markiert.
@@ -64,6 +68,12 @@ _ACCEPTANCE_PATH_PREFIXES: tuple[str, ...] = (
     "tests/integration/test_block_p_e2e_live",
     "tests/integration/test_block_p_e2e_observation",
     "tests/integration/test_block_p_mode_switch",
+    "tests/integration/test_csv_export_cross_db",
+    "tests/integration/test_csv_export_db",
+    "tests/integration/test_feed_enrichment_db",
+    "tests/integration/test_findings_query_cross_db",
+    "tests/integration/test_findings_query_db",
+    "tests/integration/test_llm_debug_log_db",
 )
 
 # Files die in der LOW-Kategorie sind und schon zu Mocks refactored wurden.
@@ -81,6 +91,10 @@ _MOCKED_UNIT_FILES: frozenset[str] = frozenset(
         "tests/services/test_findings_ingest_feed_enrichment.py",
         "tests/services/test_findings_ingest_vendor_status.py",
         "tests/services/test_kev_events.py",
+        "tests/services/test_stale_detection.py",
+        "tests/services/test_csv_export.py",
+        "tests/services/test_feed_enrichment.py",
+        "tests/services/test_llm_debug_log.py",
     }
 )
 
@@ -92,6 +106,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
         if any(rel_path.startswith(p) for p in _ACCEPTANCE_PATH_PREFIXES):
             item.add_marker(pytest.mark.acceptance)
+            item.add_marker(pytest.mark.db_integration)
             continue
 
         if rel_path in _MOCKED_UNIT_FILES:

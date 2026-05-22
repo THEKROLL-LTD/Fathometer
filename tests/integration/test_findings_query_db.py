@@ -1,4 +1,14 @@
-"""Unit-Tests fuer den Findings-Query-Service (Block E).
+"""Integration-Smokes fuer `app/services/findings_query.py` gegen echte Postgres-DB.
+
+Diese Tests wurden aus `tests/services/test_findings_query.py` ausgelagert
+(TICKET-004, Slice 2). Sie pruefen bewusst Postgres-spezifische SQL-Semantik
+(NULLS LAST, CASE-basierte Severity-Rank-Expressions, ILIKE-Substring-Search,
+kombinierte ORDER-BY-Tiebreaker, Cross-Server-Offset-Pagination) und sind
+ohne echte DB nicht sinnvoll testbar — Mocks auf SQLAlchemy-Session-Internals
+sind explizit verboten (TICKET-004 Leitplanke 3).
+
+Sie laufen via Auto-Marker (`tests/conftest.py`) als `db_integration`-Suite
+und werden im Default-Pytest-Lauf deselektiert.
 
 Geprueft werden:
 - Default-Sortierung gemaess ARCHITECTURE.md §15:
@@ -8,9 +18,7 @@ Geprueft werden:
 - Status- / KEV- / Severity-Min- / Search-Filter.
 - `limit`-Cap.
 - `count_findings` ignoriert den Status-Filter.
-
-Findings werden direkt via ORM angelegt — kompakter als der Ingest-Pfad und
-deckt genau die Sort-/Filter-Semantik ab, die Block E garantiert.
+- Cross-Server-Offset-Pagination (Block Q, ADR-0025 §(5)).
 """
 
 from __future__ import annotations

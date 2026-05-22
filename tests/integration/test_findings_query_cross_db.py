@@ -1,6 +1,15 @@
-"""Unit-Tests fuer `list_findings_cross_server` (Block M, ADR-0020).
+"""Integration-Smokes fuer `list_findings_cross_server` gegen echte Postgres-DB.
 
-Geprueft werden:
+Diese Tests wurden aus `tests/services/test_findings_query_cross.py` ausgelagert
+(TICKET-004, Slice 2). Sie pruefen Cross-Server-Filter-/Sort-Semantik mit
+JOIN auf `Server.name`, ILIKE-Suche, stale-Server-Filter und Limit/Total-Count.
+Sie sind ohne echte DB nicht sinnvoll testbar — Mocks auf
+SQLAlchemy-Session-Internals sind explizit verboten (TICKET-004 Leitplanke 3).
+
+Sie laufen via Auto-Marker (`tests/conftest.py`) als `db_integration`-Suite
+und werden im Default-Pytest-Lauf deselektiert.
+
+Geprueft werden (Block M, ADR-0020):
 - Leerer Filter -> alle OPEN-Findings ueber alle Server, §15-Default-Sort.
 - `q` matcht exakte CVE-ID auf `identifier_key`.
 - `q` matcht Substring auf `package_name`.
@@ -9,9 +18,6 @@ Geprueft werden:
 - `stale_only=True` filtert auf Findings stale Server.
 - Truncation: 250 Findings x Limit 200 -> 200 Items + total_count = 250.
 - `sort="server", dir="asc"` liefert alphabetische Server-Reihenfolge.
-
-Findings werden direkt via ORM angelegt — schnell und deckt die
-Filter-/Sort-Semantik praezise ab.
 """
 
 from __future__ import annotations
@@ -341,7 +347,7 @@ def test_sort_server_asc_orders_alphabetically(db_app: Flask) -> None:
             results, _ = list_findings_cross_server(
                 sess, DashboardFilter(), sort="server", dir="asc"
             )
-            # Server-Namen ueber die Server-Relation auflösen.
+            # Server-Namen ueber die Server-Relation aufloesen.
             order = [f.server.name for f in results]
         finally:
             sess.close()
