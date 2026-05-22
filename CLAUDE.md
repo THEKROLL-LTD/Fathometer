@@ -45,6 +45,24 @@ alembic upgrade head && alembic downgrade -1 && alembic upgrade head
 docker compose up -d --build && curl -fsSL http://localhost:8000/healthz
 ```
 
+## Test-Konvention — Default vs. On-Demand
+
+**In der Entwicklung NICHT laufen lassen:**
+- `pytest -m db_integration` — Tests mit echter Postgres-DB-Semantik (~185 Tests).
+- `pytest -m acceptance` — Acceptance-/RC-Suite (deckungsgleich mit `db_integration`).
+- `pytest -m integration` — Docker-/E2E-Integration (Block N).
+- `RUN_E2E=1 pytest …` — Live-E2E gegen laufendes Compose-Stack.
+- `pytest -m bench` — Performance-Mini-Benches.
+
+Diese Suiten laufen ausschließlich auf **ausdrückliche User-Anweisung** (z. B. „RC-Smoke", „Integration prüfen", „Bench gegenmessen") oder explizit pro Slice/Feature wenn die Änderung sie berührt. **Niemals proaktiv durchlaufen lassen**, auch nicht nach einem fertigen Block oder vor einem Commit.
+
+Default-Lauf in der Entwicklung ist nur:
+```
+pytest                          # Default-Selektor exkludiert acceptance/integration/bench bereits
+pytest <ziel-pfade>             # fokussiert, nur die geänderten Tests
+pytest -m "not todo_mock"       # echte Pure-Unit-Submenge (TICKET-004-Ziel)
+```
+
 ## Out of Scope — wörtlich aus ARCHITECTURE §17
 
 - Notifications jeglicher Art (Email, Discord, Webhooks)

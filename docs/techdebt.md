@@ -211,6 +211,11 @@ alle MED+HIGH. Realistisch ein Quartals-Vorhaben.
 
 **Wann:** Inkrementell wenn ein Service ohnehin angefasst wird.
 
+Querverweis: TD-012 (View-Route-Architektur-Schuld) ist Vorarbeit fuer
+die HIGH-Bucket-Migration — ohne saubere Context-Builder bleiben die
+View-Tests notwendig db_app-gebunden. TD-011 ist die spezifische
+Auspraegung fuer drei API-Endpoints ohne Service-Layer.
+
 ---
 
 ## TD-006 — k8s-Probes zu aggressiv fuer langlaufende Sub-Ticks
@@ -461,6 +466,87 @@ arbeitet, ODER vor v1.0-Release.
 Hinweis: Verwandt mit TD-005 (das ist die Test-Migration-Schiene fuer
 Files die schon einen Service-Layer haben — TD-011 ist die Schiene fuer
 Files OHNE Service-Layer und braucht erst die Extraktion).
+
+---
+
+## TD-012 — View-Route-Handler enthalten noch inline Geschaeftslogik / SQL-Queries
+
+**Was:** Mehrere Route-Handler unter `app/views/` haben Geschaeftslogik
+direkt im Funktions-Body, statt sie konsequent in Modul-private Helper
+zu schieben. Sichtbar an drei Stellen:
+
+- `app/views/server_detail.py::show()` (Z. 415-501, 90 LOC): die meisten
+  Aggregations-Calls sind sauber extrahiert (`_render_findings_section`,
+  `_build_action_sections`, `compute_tendency`, `severity_snapshots_for_server`,
+  `_load_action_required_counts`, `_load_host_snapshot`, `_quick_counts_for_server`).
+  ABER zwei inline `select(Finding)`-Queries fuer `noise_findings`/
+  `noise_total` (Z. 451-474) haengen im Route-Body. Plus 18 Keyword-Args
+  an `render_template(...)` (Z. 480-501), die als zusammenhaengendes
+  Context-Dict klarer waeren.
+- `app/views/findings.py::index()` (Z. 144 ff., ~74 LOC): Mischung aus
+  Helper-Aufrufen und inline-Logik (`_filter_is_active`, `_explicit_sort`,
+  `_count_open_findings`, `_count_active_servers` sind extrahiert, aber
+  der Render-Pfad muss noch im Detail geprueft werden).
+- Weitere Kandidaten (nicht inspiziert): `app/views/audit_view.py`
+  (295 LOC), `app/views/settings.py` (684 LOC), `app/views/llm_settings.py`
+  (279 LOC). Vermutlich aehnlicher Mix.
+
+Positiv-Beispiel als Vorlage: `app/views/dashboard.py::index()` (21 LOC)
+delegiert komplett an `_load_risk_kpi_counters`, `_build_pane_context`,
+`_load_servers`, `_load_open_aggregates`, `_apply_filters`,
+`_card_tag_names`. Saubere Trennung Route-Handler vs.
+Daten-/Context-Aufbau.
+
+**Warum (Symptome):** Die Schuld ist unabhaengig vom Test-Refactor
+schaedlich:
+
+1. *Regression-Risiko beim Anfassen:* inline SQL- oder
+   Aggregations-Logik im Route-Body ist beim Refactor leicht uebersehen.
+   Block-Q hat z.B. `compute_diff` aus einem solchen Inline-Block
+   entfernt — wenn die Logik in einem benannten Helper gewesen waere,
+   waere das eine Loeschung der Helper-Funktion gewesen, statt mehrerer
+   versteckter Branch-Removals im Route-Body.
+2. *Lesbarkeit:* "Lies das ganze 90-LOC-`show()` um zu verstehen was
+   gerendert wird" vs. "Lies acht Helper-Namen + ein `render_template`-
+   Context-Dict".
+3. *Stille Drift zwischen Route und Template:* 18 einzelne
+   Keyword-Args an `render_template` werden bei Template-Aenderungen
+   leicht inkonsistent gepflegt (ein neuer Template-Block braucht einen
+   neuen Arg, aber der Route-Code merkt das nicht — Template rendert
+   stillschweigend leer).
+
+Diese Schuld ist **Voraussetzung fuer TD-005-HIGH** (View-Test-Migration
+zu Pure-Units), weil ohne saubere Context-Builder die Tests nicht
+DB-frei werden koennen. Aber sie hat auch ohne Test-Refactor Wert —
+deshalb eigenstaendig dokumentiert.
+
+**Loesung:** Pro View-Modul ein kleines Refactor in zwei Schritten:
+
+1. **Inline-Logik in Modul-private Helper extrahieren.** Beispiel
+   `server_detail.show()`: `_load_noise_findings(sess, server_id) ->
+   tuple[list[Finding], int]` erzeugt das `(noise_findings, noise_total)`-
+   Tupel, Route ruft nur diesen Helper.
+2. **Context-Dict-Pattern.** Statt `render_template("x.html", a=…, b=…, c=…)`
+   mit 18 Args → `context = _build_show_context(server, sess); return
+   render_template("x.html", **context)`. Der `_build_show_context`-Helper
+   ist dann pure-testbar mit einem Fake-Session-Argument.
+
+Beide Schritte sind Refactor ohne Verhalten-Aenderung — `render_template`
+sieht weiterhin denselben Context, nur die Code-Struktur ist explizit.
+
+**Aufwand:** ~1-2 Stunden pro View-Modul. Sieben Module total (`dashboard`
+ist sauber, `auth` ist klein, `agent_install`, `setup`, `_settings_shell`
+sind klein) — realistisch ~8-10 Stunden fuer die fuenf groesseren Files
+(`server_detail`, `findings`, `audit_view`, `settings`, `llm_settings`).
+
+**Wann:** Inkrementell wenn ein View-Modul ohnehin angefasst wird (z.B.
+neue Sektion einbauen, ADR-Spec-Aenderung). Nicht eigenstaendig
+priorisieren, ausser TD-005-HIGH (Test-Migration) wird aktiv angegangen
+— dann ist TD-012 die noetige Vorarbeit pro Modul.
+
+Querverweis: TD-005 (Test-Migrations-Schuld die TD-012 als Vorarbeit
+braucht), TD-011 (analoges API-Coverage-Problem mit Bulk-Migration als
+Kurzschluss).
 
 ---
 

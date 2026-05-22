@@ -4,6 +4,67 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
+**MVP + UI v2 + ADR-0016 bis ADR-0023 + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 + Worker-Stability v0.9.5 + Worker-Idle-Throttle v0.9.6 + Server-Detail/Findings-Slim-Down v0.10.0 + TICKET-004-Test-Suite-Entkopplung — v0.10.0 (2026-05-22).**
+
+**TICKET-004 abgeschlossen 2026-05-22 — Test-Suite schrittweise von DB-/HTTP-Abhaengigkeiten entkoppelt, 10 Slices, 545 Tests aus todo_mock entfernt.** Direkt auf `main` committet (kein Feature-Branch, weil reines Test-Refactoring ohne Produkt-Aenderung), keine Schema-Migration, keine Alembic-Datei. Tag `v0.10.0` bleibt — TICKET-004 ist Maintenance, kein Release-Trigger.
+
+**Was TICKET-004 geliefert hat (10 Slices in chronologischer Reihenfolge):**
+
+| Slice | Commit | Inhalt | todo_mock-Δ | db_integration-Δ |
+|---|---|---|---:|---:|
+| Pre-Work | `d5d355e` | `db_integration`-Marker registriert, `_ACCEPTANCE_PATH_PREFIXES`-/`_MOCKED_UNIT_FILES`-Auto-Marker-System in `tests/conftest.py`, `test_stale_detection.py` als erster DB-frei-Refactor | (Marker-Setup) | |
+| 1 | `94a6f02` | `test_csv_export.py` Pure-Split | 0 | +3 |
+| 2 | `b6db1a2` | `test_findings_query{,_cross}.py` Bulk-Migration (Postgres-SQL-Semantik) | −24 | +24 |
+| 3 | `2d34e3c` | 4 Aggregations-Services (`quick_stats`, `severity_history`, `stale_history`, `heartbeat_aggregation`) Pure-Split mit 3 module-private Pure-Function-Extraktionen | −32 | +16 |
+| 4 | `e0a1cc0` | 3 LLM-Services (`llm_cache`, `llm_debug_log`, `llm_provider_switch`) — gemischt Bulk + Pure-Split | −14 | +22 |
+| 5 | `ed08a8b` | `test_feed_enrichment.py` Pure-Split entlang vorhandener Block-Grenze | 0 | +17 |
+| 6 | `615b533` | 3 kleine Worker-Files (`error_classification`, `healthcheck`, `token_budget`) Pure-Split, `_is_alive`-Extraktion in `healthcheck.py` | −23 | +15 |
+| 7 | `04740fa` | `test_llm_worker.py` Bulk-Migration mit 6 Pure-Rest | −32 | +26 |
+| 8 | `3890aa7` | 9 API-Route-Files Bulk-Migration | −124 | +124 |
+| 9 | `a37bbaa` | 36 View-Test-Files Bulk-Migration | −293 | +293 |
+| 10 | `ad2a880` | `test_csv_export_cross.py` Catch-Up-Migration | −3 | +3 |
+| **Summe** | | | **−545** | **+543** |
+
+**Kennzahlen Endstand:**
+
+- `pytest --collect-only -q`: **1805** total (vorher 1782 — +23 Pure-Edge-Cases aus Slices 3+6).
+- Default-Selection (kein Marker excluded): **1159** (vorher 1674, −515).
+- `pytest -m todo_mock`: **240** (vorher 785, **−545 / −69 %**).
+- `pytest -m db_integration`: **646** (vorher 103, **+543 / +527 %**).
+- **Default-`pytest`-Laufzeit: 1150 passed, 5 skipped, 650 deselected in 29.89 s.** Vorher 5:01 → jetzt 0:30 = **10× schneller.**
+
+**Service-DI-Aenderungen waehrend TICKET-004:** drei verhalten-neutrale Pure-Function-Extraktionen (Wrapper-Delegation, kein Verhalten geaendert):
+
+- `app/services/severity_history.py`: `_compute_snapshots`, `_compute_daily_counts` (Slice 3).
+- `app/services/stale_history.py`: `_compute_stale_counts` (Slice 3).
+- `app/workers/healthcheck.py`: `_is_alive(heartbeat_at, now, max_age_sec)` (Slice 6, +12 LOC).
+
+Plus ein Doku-Kommentar in `app/services/heartbeat_aggregation.py`. Insgesamt unter 100 LOC Service-Diff. mypy gruen. `__all__` aller drei Services unveraendert — die neuen Pure-Helper bleiben module-private.
+
+**Folge-Tech-Debt** (in `docs/techdebt.md` dokumentiert):
+
+- **TD-005** (existierend): Test-Migration MED/HIGH zu Mocks — partial discharge durch Slices 1-9.
+- **TD-011** (neu, Slice 8): Default-Coverage-Luecke fuer `/api/register`, `/api/keys/rotate`, `/api/findings/acknowledge` — diese Endpoints haben keinen Service-Layer-Test, Bulk-Migration entfernt die einzige Coverage aus dem Default-Lauf. Aufwand ~4-6 h Service-Layer-Extraktion + Pure-Unit-Tests.
+- **TD-012** (neu, Slice 9): View-Route-Handler enthalten noch inline Geschaeftslogik / SQL-Queries — Voraussetzung fuer DB-frei-Refactor der View-Tests und eigenstaendig wertvoll fuer Lesbarkeit/Regression-Sicherheit. Aufwand ~8-10 h fuer fuenf groessere View-Module.
+
+**Rest-Menge 240 todo_mock-Tests, bewusst akzeptiert:**
+
+- **174 Adversarial-Route-Tests** (19 Files): XSS-, SQL-Inj-, CSV-Inj-, gzip-bomb-, sort-param-Tests. **Bewusst nicht migriert** — Sicherheits-Smokes sollen im Default-CI greifen. Marker `todo_mock` ist hier semantisch ein Misnomer; eine optionale Umetikettierung als `security_smoke` ist Folge-PR-Kandidat (~30 Min Doku + 5 LOC conftest-Aenderung).
+- **66 weitere todo_mock-Tests** (Adversarial-Pure-Call 26, Services 25, Auth+Setup 23) als Folge-Aufgabe unter TD-005 belassen; Aufwand ~5-7 h total mit klarem Coverage-Plan.
+
+**Neue Test-Konvention in `CLAUDE.md`** (Sektion „Test-Konvention — Default vs. On-Demand") niedergeschrieben: `db_integration`, `acceptance`, `integration`, `bench` und `RUN_E2E` laufen ausschliesslich auf ausdrueckliche User-Anweisung, nicht proaktiv. Default-Verifikation in der Entwicklung ist nur `pytest` (Default-Selektor) oder fokussierte `pytest <ziel-pfade>`-Laeufe.
+
+**Bewusst weggelassen / Re-Open-Trigger:**
+
+- Vollstaendige todo_mock-Eliminierung — als bewusste Rest-Menge dokumentiert.
+- Adversarial-Marker-Rename auf `security_smoke` — kosmetische Folge-PR.
+- TD-011-Service-Layer-Extraktion fuer register/keys_rotate/bulk_acknowledge — eigener Folge-Arbeitsblock, nicht TICKET-004-Scope.
+- TD-012-View-Route-Architektur-Aufraeumung — eigener Folge-Arbeitsblock.
+
+**Operator-Impact:** Default-`pytest` in der Entwicklung jetzt 10× schneller (30 s statt 5 min) — die laufende Iteration bei Code-Aenderungen wird spuerbar schneller. RC-Verifikation laeuft ueber `pytest -m db_integration` (~3-5 min mit echter Postgres) oder die volle Suite. Keine Aenderung am Produktverhalten, keine Schema-Migration, keine ADR-Aenderung.
+
+---
+
 **MVP + UI v2 + ADR-0016 + ADR-0017 + ADR-0018 + ADR-0019 + ADR-0020 + ADR-0021 + ADR-0022 + ADR-0023 + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 + Worker-Stability v0.9.5 + Worker-Idle-Throttle v0.9.6 + Server-Detail/Findings-Slim-Down v0.10.0 — v0.10.0 (2026-05-21).**
 
 **Block Q abgeschlossen 2026-05-21 — Server-Detail- und Dashboard-Entschlackung, dedizierte `/findings`-Seite.** Branch `feat/block-q-slim-down` mit sechs Sub-Commits (`4980b10` Spec-Foundation, `dc9d374` Phase A, `44b43f3` Phase B, `b14b5d2` Phase C, `64d003f` Phase D, `8a24549` Phase E inkl. F.5-Bookmark-Regressionen und Test-Cleanup). Keine Schema-Migration, keine Alembic-Datei berührt. ADR-0025 ist die Quelle der Wahrheit; ARCHITECTURE.md §7 ist auf die fünf Umbau-Punkte angeglichen.
