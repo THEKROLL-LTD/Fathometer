@@ -73,7 +73,11 @@ _ACCEPTANCE_PATH_PREFIXES: tuple[str, ...] = (
     "tests/integration/test_feed_enrichment_db",
     "tests/integration/test_findings_query_cross_db",
     "tests/integration/test_findings_query_db",
+    "tests/integration/test_heartbeat_aggregation_db",
     "tests/integration/test_llm_debug_log_db",
+    "tests/integration/test_quick_stats_db",
+    "tests/integration/test_severity_history_db",
+    "tests/integration/test_stale_history_db",
 )
 
 # Files die in der LOW-Kategorie sind und schon zu Mocks refactored wurden.
@@ -95,6 +99,9 @@ _MOCKED_UNIT_FILES: frozenset[str] = frozenset(
         "tests/services/test_csv_export.py",
         "tests/services/test_feed_enrichment.py",
         "tests/services/test_llm_debug_log.py",
+        "tests/services/test_heartbeat_aggregation.py",
+        "tests/services/test_severity_history.py",
+        "tests/services/test_stale_history.py",
     }
 )
 

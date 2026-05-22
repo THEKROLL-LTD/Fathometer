@@ -1,13 +1,14 @@
-"""Tests fuer den Quick-Stats-Service (Block I).
+"""Integration-Smokes fuer `app/services/quick_stats.py` gegen echte Postgres-DB.
 
-Deckt:
-  * Leere Flotte -> (0,0,0,0,0).
-  * Severity-/KEV-Counter aggregieren korrekt.
-  * Acknowledged/Resolved Findings zaehlen nicht in `total_open`.
-  * Tag-Filter (OR) zaehlt nur Findings auf passenden Servern.
-  * Tag-Filter mit unbekanntem Tag -> alles 0.
-  * Stale-Counter: Server mit veraltetem `last_scan_at`.
-  * Retired/Revoked Server zaehlen nicht in `stale_servers`.
+Diese Tests wurden aus `tests/services/test_quick_stats.py` ausgelagert
+(TICKET-004, Slice 3 — Aggregations-Familie). `get_quick_stats` ist eine
+SQL-Aggregation (`COUNT(*) FILTER (WHERE …)` + Tag-Join + Stale-Server-
+Iteration). Eine sinnvolle Pure-Unit-Sub-Logik ist nicht abspaltbar ohne
+Service-Verhalten zu aendern — wir migrieren die Datei daher vollstaendig
+als `db_integration`-Smoke.
+
+Auto-Markierung als `db_integration` (und damit `acceptance`) erfolgt
+ueber `tests/conftest.py::_ACCEPTANCE_PATH_PREFIXES`.
 """
 
 from __future__ import annotations

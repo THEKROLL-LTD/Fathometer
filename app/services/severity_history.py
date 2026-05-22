@@ -213,6 +213,35 @@ def _load_findings(
 # ---------------------------------------------------------------------------
 
 
+def _compute_snapshots(rows: list[_FindingRow], day_list: list[date]) -> dict[str, list[int]]:
+    """Pure-Aggregation fuer `severity_snapshots_for_server`.
+
+    Erwartet eine bereits aus der DB geladene Row-Liste plus die fertige
+    Tages-Liste (aelteste zuerst). Direkt aus Unit-Tests ohne Session
+    aufrufbar; siehe TICKET-004, Slice 3 (Pure-Unit-Split der Aggregations-
+    Service-Files).
+    """
+    days = len(day_list)
+    out: dict[str, list[int]] = {
+        "critical": [0] * days,
+        "high": [0] * days,
+        "medium": [0] * days,
+        "low": [0] * days,
+        "kev": [0] * days,
+    }
+
+    for idx, d in enumerate(day_list):
+        end = _end_of_day(d)
+        for row in rows:
+            if not _is_open_at(row.first_seen_at, row.acknowledged_at, row.resolved_at, end):
+                continue
+            if row.severity in _TRACKED_SEVERITIES:
+                out[row.severity.value][idx] += 1
+            if row.is_kev:
+                out["kev"][idx] += 1
+    return out
+
+
 def severity_snapshots_for_server(
     session: Session,
     server_id: int,
@@ -238,25 +267,7 @@ def severity_snapshots_for_server(
     day_list = _day_range(end_day, days)
 
     rows = _load_findings(session, server_id, window_start=window_start)
-
-    out: dict[str, list[int]] = {
-        "critical": [0] * days,
-        "high": [0] * days,
-        "medium": [0] * days,
-        "low": [0] * days,
-        "kev": [0] * days,
-    }
-
-    for idx, d in enumerate(day_list):
-        end = _end_of_day(d)
-        for row in rows:
-            if not _is_open_at(row.first_seen_at, row.acknowledged_at, row.resolved_at, end):
-                continue
-            if row.severity in _TRACKED_SEVERITIES:
-                out[row.severity.value][idx] += 1
-            if row.is_kev:
-                out["kev"][idx] += 1
-    return out
+    return _compute_snapshots(rows, day_list)
 
 
 # ---------------------------------------------------------------------------
@@ -264,26 +275,19 @@ def severity_snapshots_for_server(
 # ---------------------------------------------------------------------------
 
 
-def daily_severity_counts_for_server(
-    session: Session,
-    server_id: int,
-    *,
-    days: int = 50,
-    now: datetime | None = None,
+def _compute_daily_counts(
+    rows: list[_FindingRow], day_list: list[date]
 ) -> list[DailySeverityCount]:
-    """Pro Tag ein `DailySeverityCount`-Record (aelteste-zuerst).
+    """Pure-Aggregation fuer `daily_severity_counts_for_server`.
 
-    `kev` ist die Anzahl NEUER KEV-Ereignisse an dem Tag
-    (`kev_added_at::date == day`) — Event-Counter fuer das KEV-Dot-Overlay
-    im Stacked-Chart, NICHT der OPEN-KEV-Stand.
+    Identische Semantik wie der Public-Wrapper — operiert nur auf bereits
+    geladenen Rows plus Tages-Liste. Direkt aus Unit-Tests ohne Session
+    aufrufbar; siehe TICKET-004, Slice 3.
     """
-    current = _resolve_now(now)
-    end_day = current.date()
-    start_day = end_day - timedelta(days=days - 1)
-    window_start = _start_of_day(start_day)
-    day_list = _day_range(end_day, days)
-
-    rows = _load_findings(session, server_id, window_start=window_start)
+    if not day_list:
+        return []
+    start_day = day_list[0]
+    end_day = day_list[-1]
 
     # KEV-Events pro Tag vorrechnen — einfacher Dict-Lookup spart innere
     # O(F)-Schleife pro Tag.
@@ -323,6 +327,29 @@ def daily_severity_counts_for_server(
             )
         )
     return out
+
+
+def daily_severity_counts_for_server(
+    session: Session,
+    server_id: int,
+    *,
+    days: int = 50,
+    now: datetime | None = None,
+) -> list[DailySeverityCount]:
+    """Pro Tag ein `DailySeverityCount`-Record (aelteste-zuerst).
+
+    `kev` ist die Anzahl NEUER KEV-Ereignisse an dem Tag
+    (`kev_added_at::date == day`) — Event-Counter fuer das KEV-Dot-Overlay
+    im Stacked-Chart, NICHT der OPEN-KEV-Stand.
+    """
+    current = _resolve_now(now)
+    end_day = current.date()
+    start_day = end_day - timedelta(days=days - 1)
+    window_start = _start_of_day(start_day)
+    day_list = _day_range(end_day, days)
+
+    rows = _load_findings(session, server_id, window_start=window_start)
+    return _compute_daily_counts(rows, day_list)
 
 
 # ---------------------------------------------------------------------------
@@ -505,3 +532,8 @@ __all__ = [
     "daily_severity_counts_for_server",
     "severity_snapshots_for_server",
 ]
+
+# TICKET-004 Slice 3: pure Aggregations-Funktionen `_compute_snapshots` und
+# `_compute_daily_counts` werden in `tests/services/test_severity_history.py`
+# direkt importiert. Sie bleiben bewusst module-private (Underscore-Prefix),
+# aber gelten als stabile interne Schnittstelle.

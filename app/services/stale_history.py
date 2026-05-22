@@ -69,6 +69,40 @@ class _ServerRow:
     scans: list[datetime]  # sortiert ASC
 
 
+def _compute_stale_counts(server_rows: list[_ServerRow], day_list: list[date]) -> list[int]:
+    """Pure Walk ueber bereits geladene Server-Rows.
+
+    Eingabe: jede `_ServerRow` traegt ihre Scans (sortiert ASC). Die
+    Funktion entscheidet pro Tag im `day_list` (aelteste zuerst), wieviele
+    Server an dem Tag aktiv UND stale waren. Direkt aus Unit-Tests ohne
+    Session aufrufbar; siehe TICKET-004, Slice 3.
+    """
+    days = len(day_list)
+    out: list[int] = [0] * days
+    for idx, d in enumerate(day_list):
+        end = _end_of_day(d)
+        count = 0
+        for row in server_rows:
+            # Aktiv-am-Tag-T?
+            if row.created_at > end:
+                continue
+            if row.retired_at is not None and row.retired_at <= end:
+                continue
+            if row.revoked_at is not None and row.revoked_at <= end:
+                continue
+            # Stale-am-Tag-T?
+            pos = bisect.bisect_right(row.scans, end)
+            if pos == 0:
+                count += 1
+                continue
+            latest = row.scans[pos - 1]
+            threshold = timedelta(hours=row.interval_h * _STALE_FACTOR)
+            if (end - latest) > threshold:
+                count += 1
+        out[idx] = count
+    return out
+
+
 def daily_stale_server_counts(
     session: Session,
     *,
@@ -156,34 +190,13 @@ def daily_stale_server_counts(
     for row in server_rows:
         row.scans = scans_by_id.get(row.id, [])
 
-    # 3. Walk pro Tag.
-    out: list[int] = [0] * days
-    for idx, d in enumerate(day_list):
-        end = _end_of_day(d)
-        count = 0
-        for row in server_rows:
-            # Aktiv-am-Tag-T?
-            if row.created_at > end:
-                continue
-            if row.retired_at is not None and row.retired_at <= end:
-                continue
-            if row.revoked_at is not None and row.revoked_at <= end:
-                continue
-            # Stale-am-Tag-T?
-            # bisect_right gibt Insertion-Position fuer end+epsilon; -1 ist
-            # der Index des letzten Scans <= end. `key` brauchen wir nicht,
-            # weil `row.scans` schon datetime-objects sind.
-            pos = bisect.bisect_right(row.scans, end)
-            if pos == 0:
-                count += 1
-                continue
-            latest = row.scans[pos - 1]
-            threshold = timedelta(hours=row.interval_h * _STALE_FACTOR)
-            if (end - latest) > threshold:
-                count += 1
-        out[idx] = count
-
-    return out
+    # 3. Walk pro Tag — siehe `_compute_stale_counts`.
+    return _compute_stale_counts(server_rows, day_list)
 
 
 __all__ = ["daily_stale_server_counts"]
+
+# TICKET-004 Slice 3: pure Aggregations-Funktion `_compute_stale_counts` und
+# `_ServerRow` werden in `tests/services/test_stale_history.py` direkt
+# importiert. Sie bleiben bewusst module-private, gelten aber als stabile
+# interne Schnittstelle.

@@ -263,3 +263,10 @@ __all__ = [
     "heartbeat_for_server",
     "heartbeats_for_servers",
 ]
+
+# TICKET-004 Slice 3: pure Aggregations-Funktion `_aggregate_one_server` und
+# `_day_range` werden in `tests/services/test_heartbeat_aggregation.py` direkt
+# importiert. Sie bleiben bewusst module-private, gelten aber als stabile
+# interne Schnittstelle. Die Eingabe akzeptiert duck-typed Objekte mit den
+# Feldern `first_seen_at`, `resolved_at`, `severity`, `is_kev` — Tests koennen
+# unpersistierte ORM-Instanzen nutzen.
