@@ -181,8 +181,15 @@ def _pre_validate_envelope(body: bytes) -> tuple[str | None, str | None]:
     1. json.loads(body) — JSONDecodeError -> ("invalid_json", ...).
     2. Top-Level dict -> sonst "not_an_object".
     3. agent_version Key existiert und ist String von Laenge 1..32.
-    4. host Key ist dict mit hostname String von Laenge 1..128.
+    4. host Key existiert und ist dict.
     5. scan Key ist dict.
+
+    Hinweis: ``host.hostname`` ist KEIN Pflichtfeld — die Server-Identitaet
+    kommt aus dem Bearer-Token, nicht aus dem Body. Der Referenz-Agent
+    (``agent/secscan-agent.sh``) sendet das Feld nicht, und es darf nicht
+    zur Pre-Validate-Pflicht gemacht werden (war ein Block-R-Fehler, mit
+    v0.12.x korrigiert). Detail-Felder im ``host``-Block werden in der
+    Pydantic-Vollvalidierung im Worker geprueft.
     """
     try:
         doc = json.loads(body)
@@ -198,10 +205,7 @@ def _pre_validate_envelope(body: bytes) -> tuple[str | None, str | None]:
 
     host = doc.get("host")
     if not isinstance(host, dict):
-        return None, "missing_hostname"
-    hostname = host.get("hostname")
-    if not isinstance(hostname, str) or not (1 <= len(hostname) <= 128):
-        return None, "missing_hostname"
+        return None, "missing_host"
 
     scan = doc.get("scan")
     if not isinstance(scan, dict):

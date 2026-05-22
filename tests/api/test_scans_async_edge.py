@@ -109,10 +109,11 @@ def _ingest_jobs(app: Flask, server_id: int) -> list[ScanIngestJob]:
 
 
 @pytest.fixture
-def async_db_app(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> Flask:
-    """db_app mit aktiviertem async-Ingest-Flag."""
-    settings: Settings = db_app.config["SECSCAN_SETTINGS"]
-    monkeypatch.setattr(settings, "scan_ingest_async", True)
+def async_db_app(db_app: Flask) -> Flask:
+    """Alias auf ``db_app``. Seit v0.12.0 ist Async der einzige Pfad —
+    das frueher hier gesetzte `scan_ingest_async`-Flag existiert nicht mehr.
+    Wir behalten den Fixture-Namen aus Lesbarkeitsgruenden (Tests sagen
+    explizit „async-Pfad")."""
     return db_app
 
 
@@ -303,23 +304,33 @@ def test_idempotency_same_body_returns_same_job_id(async_db_app: Flask) -> None:
             ).encode(),
             "missing_agent_version",
         ),
-        # missing_hostname: host.hostname fehlt
+        # missing_host: host fehlt komplett
         (
             json.dumps(
                 {
                     "agent_version": "0.1.0",
-                    "host": {"no_hostname": True},
                     "scan": {},
                 }
             ).encode(),
-            "missing_hostname",
+            "missing_host",
+        ),
+        # missing_host: host ist kein dict
+        (
+            json.dumps(
+                {
+                    "agent_version": "0.1.0",
+                    "host": "not-a-dict",
+                    "scan": {},
+                }
+            ).encode(),
+            "missing_host",
         ),
         # missing_scan: scan ist kein dict
         (
             json.dumps(
                 {
                     "agent_version": "0.1.0",
-                    "host": {"hostname": "x"},
+                    "host": {"os_family": "ubuntu"},
                     "scan": "not-a-dict",
                 }
             ).encode(),
@@ -330,7 +341,8 @@ def test_idempotency_same_body_returns_same_job_id(async_db_app: Flask) -> None:
         "not_an_object",
         "missing_agent_version_absent",
         "missing_agent_version_too_long",
-        "missing_hostname",
+        "missing_host_absent",
+        "missing_host_not_dict",
         "missing_scan",
     ],
 )
