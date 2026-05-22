@@ -327,6 +327,8 @@ Neue Audit-Event-Typen:
 
 `risk.band_changed` wurde durch ADR-0027 ersatzlos entfernt (Noise-Reduktion 2026-05-22). Das Aggregat `risk.pretriage_evaluated` deckt den Audit-Bedarf fuer Band-Bewegungen ab.
 
+**Block-R-Anpassung (ADR-0026, 2026-05-22).** Mit aktivem `SECSCAN_SCAN_INGEST_ASYNC=true` emittiert die Pre-Triage-Schleife `risk.pretriage_evaluated` (und `host_state.snapshot_received`/`host_state.parse_failed`) nicht mehr aus dem Web-Container, sondern aus dem `secscan-llm-worker` als Teil des `scan_ingest_tick`. Audit-Body, Actor (`server.name`) und Reihenfolge bleiben semantisch identisch. Edge-Container emittiert nur noch `scan.queued` direkt; alle übrigen Scan-bezogenen Events kommen vom Worker.
+
 ## Begründung
 
 **Warum Risk-Band statt CVSS-Severity primär.** Die Operator-Bauchgefühl-Frage ist „muss ich was tun?", nicht „wie bewertet NVD?". CVSS-Severity ist eine bauteilunabhängige Skala; ein und derselbe CVSS-9.8-Bug ist auf einem Web-Server ohne Bluetooth-Stack faktisch nicht ausnutzbar.

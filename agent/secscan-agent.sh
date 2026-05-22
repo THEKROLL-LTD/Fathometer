@@ -53,16 +53,25 @@
 #
 # Run as root, typically via cron or a systemd timer.
 #
+# Block R (ADR-0026) — v0.4.0 changes:
+#   - `POST /api/scans` now returns 202 + job_id (async fast-path).
+#   - Polling-Loop: `GET /api/scans/jobs/<id>` every 2s, max 600s.
+#   - On `done`: exit 0, log counts.
+#   - On `failed`: exit 4 (new), log error.
+#   - On polling timeout: exit 5 (new).
+#
 # Exit codes:
-#   0  success
+#   0  success (scan ingested and processed)
 #   1  missing requirements or configuration
 #   2  trivy scan failed
-#   3  upload failed
+#   3  upload failed (HTTP-layer, before polling)
+#   4  scan processing failed (status='failed' from worker)
+#   5  polling timeout (10 min without done/failed)
 #
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.3.1"
+readonly AGENT_VERSION="0.4.0"
 readonly REQUIRED_LIB_HOST_STATE_VERSION="0.3.1"
 readonly TRIVY_BIN="${SECSCAN_TRIVY_PATH:-trivy}"
 readonly SCAN_PATH="${SECSCAN_SCAN_PATH:-/}"
@@ -316,7 +325,8 @@ log "Host: ${os_pretty} (kernel ${kernel_version}, ${arch}, trivy ${trivy_versio
 trivy_raw="$(mktemp -t secscan-trivy-raw.XXXXXX.json)"
 trivy_out="$(mktemp -t secscan-trivy.XXXXXX.json)"
 response_body="$(mktemp -t secscan-resp.XXXXXX)"
-trap 'rm -f "$trivy_raw" "$trivy_out" "$response_body"' EXIT
+status_json="$(mktemp -t secscan-status.XXXXXX)"
+trap 'rm -f "$trivy_raw" "$trivy_out" "$response_body" "$status_json"' EXIT
 
 log "Starting trivy scan on ${SCAN_PATH} ..."
 if ! "$TRIVY_BIN" rootfs "$SCAN_PATH" \
@@ -399,6 +409,7 @@ payload="$(jq -n \
 # ----- Upload (gzipped) --------------------------------------------------
 # Compresses typically 8-10x. Backend accepts Content-Encoding: gzip and
 # decompresses with a streaming limit (see ARCHITECTURE.md §9).
+# Block R (ADR-0026): POST now returns 202 + job_id (async fast-path).
 http_status="$(printf '%s' "$payload" | gzip -c | curl -sS \
   --max-time "$TIMEOUT_SEC" \
   --post301 --post302 --post303 -L \
@@ -409,11 +420,69 @@ http_status="$(printf '%s' "$payload" | gzip -c | curl -sS \
   -H "Content-Encoding: gzip" \
   --data-binary @- || echo "000")"
 
-if [[ "$http_status" != "200" && "$http_status" != "202" ]]; then
-  log "Error: upload failed (HTTP ${http_status})"
-  log "Server response:"
+case "$http_status" in
+  202) ;;
+  400|413|422|429)
+    log "Error: upload rejected (HTTP ${http_status})"
+    cat "$response_body" >&2 || true
+    exit 3
+    ;;
+  *)
+    log "Error: upload failed (HTTP ${http_status})"
+    cat "$response_body" >&2 || true
+    exit 3
+    ;;
+esac
+
+job_id="$(jq -r '.job_id' < "$response_body")"
+if [[ -z "$job_id" || "$job_id" = "null" ]]; then
+  log "Error: response missing job_id"
   cat "$response_body" >&2 || true
   exit 3
 fi
+log "Scan queued (job_id=${job_id}), waiting for processing..."
 
-log "Scan uploaded successfully (HTTP ${http_status})"
+# ----- Polling-Loop (Block R, ADR-0026) ----------------------------------
+# Poll GET /api/scans/jobs/<id> every 2s, max 600s (10 min).
+# SECSCAN_POLL_MAX_SEC can be overridden for testing.
+poll_start="$(date +%s)"
+poll_max_sec="${SECSCAN_POLL_MAX_SEC:-600}"
+poll_interval_sec=2
+while :; do
+  now="$(date +%s)"
+  elapsed="$((now - poll_start))"
+  if [[ "$elapsed" -ge "$poll_max_sec" ]]; then
+    log "Error: scan processing timed out after ${poll_max_sec}s (job_id=${job_id})"
+    exit 5
+  fi
+
+  if ! curl -fsS --max-time 10 \
+      -H "Authorization: Bearer ${SECSCAN_API_KEY}" \
+      -o "$status_json" \
+      "${SECSCAN_URL%/}/api/scans/jobs/${job_id}"; then
+    log "Warning: status poll failed, retrying (job_id=${job_id})"
+    sleep "$poll_interval_sec"
+    continue
+  fi
+
+  job_status="$(jq -r '.status' < "$status_json")"
+  case "$job_status" in
+    done)
+      log "Scan processed (job_id=${job_id})"
+      jq '.counts' < "$status_json" >&2 || true
+      exit 0
+      ;;
+    failed)
+      log "Error: scan processing failed (job_id=${job_id})"
+      jq '.error' < "$status_json" >&2 || true
+      exit 4
+      ;;
+    queued|in_progress)
+      sleep "$poll_interval_sec"
+      ;;
+    *)
+      log "Unknown status: ${job_status} (job_id=${job_id})"
+      sleep "$poll_interval_sec"
+      ;;
+  esac
+done

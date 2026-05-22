@@ -47,21 +47,70 @@ docker compose up -d --build && curl -fsSL http://localhost:8000/healthz
 
 ## Test-Konvention — Default vs. On-Demand
 
-**In der Entwicklung NICHT laufen lassen:**
-- `pytest -m db_integration` — Tests mit echter Postgres-DB-Semantik (~185 Tests).
-- `pytest -m acceptance` — Acceptance-/RC-Suite (deckungsgleich mit `db_integration`).
-- `pytest -m integration` — Docker-/E2E-Integration (Block N).
+**Verbindlich für Hauptsession UND alle Subagenten — keine Ausnahmen.**
+
+**Erlaubt** sind ausschließlich drei Quality-Gates:
+
+1. **Linter** — `ruff check`, `ruff format --check`, `shellcheck` (bash-Linting ist statische Analyse, kein Test).
+2. **Static Analyzer** — `mypy app/`.
+3. **Pure-Unit-Tests** — `pytest` Default-Selektion ohne `-m db_integration|acceptance|integration|bench`-Marker. Mocks/Stubs/Fakes wo nötig.
+
+**Verboten** sind alle anderen Test-Formen, auch wenn die Block-Spec sie historisch verlangt hat:
+
+- `pytest -m db_integration|acceptance|integration|bench` — alles was echte Postgres/Docker/HTTP-Server braucht.
+- `bats` / Bash-Test-Frameworks (`tests/agent/*.bats`, `tests/integration/installer/*.sh`).
+- `RUN_E2E=1 pytest …` Live-Compose-Stack.
+- Docker-Build-/Compose-Up-Smoke (`docker compose up`, `docker build`, `curl /healthz`).
+- Alembic-Roundtrip-Läufe gegen echte DB.
+- Browser-/Playwright-/Selenium-Tests.
+- Performance-Bench-Läufe.
+
+**Neu schreiben** ist nur für die drei erlaubten Gates zulässig. Wer einen Test mit einem verbotenen Marker oder eine `.bats`-/`.sh`-Test-Datei anlegen will, fragt den User explizit um Genehmigung **bevor** die Datei entsteht. Begründung in einem Satz mitliefern (warum die Logik nicht pure-unit-testbar ist).
+
+**Ausführen** ist ausschließlich für die Default-Selektion erlaubt:
+```
+pytest                          # Default-Selektor exkludiert acceptance/integration/bench/db_integration
+pytest <ziel-pfade>             # fokussiert, nur die geänderten Tests (ohne -m db_integration/etc.)
+pytest -m "not todo_mock"       # echte Pure-Unit-Submenge (TICKET-004-Ziel)
+```
+
+**NIEMALS proaktiv aufrufen** (egal ob direkt oder via Subagent):
+- `pytest -m db_integration` — Tests mit echter Postgres-DB-Semantik.
+- `pytest -m acceptance` — Acceptance-/RC-Suite.
+- `pytest -m integration` — Docker-/E2E-Integration.
 - `RUN_E2E=1 pytest …` — Live-E2E gegen laufendes Compose-Stack.
 - `pytest -m bench` — Performance-Mini-Benches.
 
-Diese Suiten laufen ausschließlich auf **ausdrückliche User-Anweisung** (z. B. „RC-Smoke", „Integration prüfen", „Bench gegenmessen") oder explizit pro Slice/Feature wenn die Änderung sie berührt. **Niemals proaktiv durchlaufen lassen**, auch nicht nach einem fertigen Block oder vor einem Commit.
+Diese Suiten laufen ausschließlich auf **ausdrückliche User-Anweisung pro Lauf** (z. B. „RC-Smoke", „Integration prüfen", „Bench gegenmessen", „lass die db_integration für X laufen"). Auch nach einem fertigen Block, vor einem Commit oder „nur zur Sicherheit" verboten. Wenn ein Implementer-Agent für die DoD eines Blocks zwingend Postgres-Reflection-Tests etc. braucht: explizite User-Genehmigung einholen, sonst Block-DoD-Item als „beim User anstehen lassen" markieren statt selbst durchlaufen.
 
-Default-Lauf in der Entwicklung ist nur:
+**Begründung:** Default-`pytest` (Pure-Unit) läuft in ~30 s. db_integration/acceptance ziehen die Iteration auf >5 min — die Entwicklungsgeschwindigkeit kippt. Massen-DB-/Integration-Tests verschleiern außerdem oft Logik-Bugs hinter Postgres-Semantik.
+
+**Subagent-Pflicht:** Jeder Implementer-/Test-Writer-/Reviewer-Prompt enthält diese Regel wörtlich („Erlaubte Quality-Gates: ruff, mypy, shellcheck (Linter), pytest Default-Selektion (Pure-Unit). Verboten: db_integration/acceptance/integration/bench/bats/RUN_E2E/Docker-Compose/Browser-Tests — keine proaktiven Aufrufe, keine neuen .bats-/.sh-Test-Dateien."). Verstöße werden vom Orchestrator zurückgewiesen.
+
+## pytest-Aufruf — Pflicht-Timeout
+
+Jeder `pytest`-Aufruf (Hauptsession **und** Subagenten) läuft mit **explizitem Timeout** der das Bash-Default-Limit (2 Minuten = 120000 ms) nicht überschreitet. Begründung: ein hängender Test (Postgres-Lock-Wait, Async-Deadlock, requests-mock-Race) muss zeitnah als Hänger erkannt werden, nicht erst nach 10 Minuten Bash-Hard-Cap.
+
+Konvention:
+- **Default-Lauf** (`pytest`, `pytest <pfad>`): Bash `timeout: 120000` (2 min). Wenn der Pure-Unit-Default länger braucht, ist etwas falsch — abbrechen und Root-Cause analysieren.
+- **Fokussierter Sub-Lauf** (`pytest tests/services/foo.py -v`): Bash `timeout: 60000` (1 min). Pure-Unit-Tests einer einzelnen Datei sind in Sekunden durch.
+- **Pytest-internes Hänger-Backstop:** zusätzlich `--timeout=30 --timeout-method=thread` als Flag wo das Plugin `pytest-timeout` installiert ist. Auf Modul-/Test-Ebene per `@pytest.mark.timeout(N)` wenn ein bestimmter Test länger braucht.
+- **Heavy-Suiten** (db_integration etc.): laufen nur nach User-Genehmigung — Timeout dann pro Lauf abgestimmt (typisch 300000 ms / 5 min).
+
+Verbotene Aufruf-Form:
 ```
-pytest                          # Default-Selektor exkludiert acceptance/integration/bench bereits
-pytest <ziel-pfade>             # fokussiert, nur die geänderten Tests
-pytest -m "not todo_mock"       # echte Pure-Unit-Submenge (TICKET-004-Ziel)
+pytest ...                          # ohne Bash-timeout → 2-min-Default ist OK, aber 0-Indikation des Erwartungswerts
+pytest --timeout=300 ...             # ohne Heavy-Suite-Begründung
+.venv/bin/pytest 2>&1 | tail -15    # ohne timeout im Bash-Wrapper
 ```
+
+Erlaubte Form:
+```
+.venv/bin/pytest tests/services/test_foo.py -v 2>&1 | tail -50   # Bash timeout: 60000
+.venv/bin/pytest 2>&1 | tail -30                                   # Bash timeout: 120000, Default-Suite
+```
+
+**Subagent-Pflicht:** Implementer-/Test-Writer-Prompts enthalten den Satz: „Jeder `pytest`-Bash-Aufruf hat ein `timeout`-Argument ≤ 120000 ms (Default-Suite) bzw. ≤ 60000 ms (fokussierter Sub-Lauf). Keine pytest-Aufrufe ohne Timeout."
 
 ## Out of Scope — wörtlich aus ARCHITECTURE §17
 

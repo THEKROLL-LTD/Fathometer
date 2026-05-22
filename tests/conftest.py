@@ -63,6 +63,7 @@ from flask.testing import FlaskClient
 # Files die als Acceptance gelten — hauptsaechlich Migration-Schema-Tests,
 # ORM-Round-Trip-Tests mit Postgres-spezifischen Constraints und Live-E2E.
 _ACCEPTANCE_PATH_PREFIXES: tuple[str, ...] = (
+    "tests/alembic/",
     "tests/migrations/",
     "tests/models/",
     "tests/integration/test_about_view_db",
@@ -129,6 +130,13 @@ _ACCEPTANCE_PATH_PREFIXES: tuple[str, ...] = (
     "tests/integration/test_sidebar_partial_db",
     "tests/integration/test_stale_history_db",
     "tests/integration/test_token_budget_db",
+    # Block R — Async-Ingest Edge-Handler-Tests (echte Postgres-Semantik
+    # fuer on_conflict_do_nothing Partial-Index-Match).
+    "tests/api/test_scans_async_edge.py",
+    # Block R — Payload-Lifecycle (atomares Clear, Stale-Reaper, Retention).
+    "tests/workers/test_scan_ingest_payload_lifecycle.py",
+    # Block R — End-to-End-Smoke (Edge-POST + Worker + Status-Endpoint).
+    "tests/workers/test_scan_ingest_e2e_flow.py",
 )
 
 # Files die in der LOW-Kategorie sind und schon zu Mocks refactored wurden.
@@ -370,6 +378,7 @@ def _truncate_all(engine: Any) -> None:
         conn.execute(
             text(
                 "TRUNCATE TABLE "
+                "scan_ingest_jobs, "
                 "feed_pull_log, epss_scores, cisa_kev_catalog, "
                 "llm_risk_cache, llm_jobs, application_groups, "
                 "llm_conversation_findings, llm_messages, llm_conversations, "

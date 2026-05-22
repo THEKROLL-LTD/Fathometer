@@ -213,6 +213,65 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- Block R (ADR-0026) — Async-Scan-Ingest Feature-Flag -----
+    # Flag wird in Block R Phase H fuer Cutover gezogen; Default off haelt Sync-Pfad aktiv.
+    scan_ingest_async: bool = Field(
+        default=False,
+        description=(
+            "Schaltet den asynchronen Scan-Ingest-Pfad ein. "
+            "Bei True antwortet POST /api/scans mit 202+job_id statt synchronem Ingest. "
+            "Default False (Sync-Pfad aktiv). Cutover-Plan: ADR-0026 §Konsequenzen."
+        ),
+    )
+    # ENV: SECSCAN_MAX_QUEUED_INGEST_JOBS (Prefix SECSCAN_ + Field-Name).
+    max_queued_ingest_jobs: int = Field(
+        default=50,
+        ge=1,
+        le=10_000,
+        description=(
+            "Soft-Cap fuer gleichzeitig queued+in_progress Ingest-Jobs pro Server. "
+            "Bei Ueberschreitung 429 Too Many Requests. "
+            "DoS-Schutz (ADR-0026 §Bedrohungsmodell). "
+            "Setzen via SECSCAN_MAX_QUEUED_INGEST_JOBS."
+        ),
+    )
+    # Block R Phase C (ADR-0026) — Worker-Parameter.
+    # Max-Versuche bevor ein Ingest-Job auf 'failed' gesetzt wird.
+    scan_ingest_max_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description=(
+            "Max. Pickup-Versuche fuer einen Ingest-Job bevor er auf 'failed' "
+            "gesetzt wird. Backoff: 30s * 2^(attempts-1). "
+            "Setzen via SECSCAN_SCAN_INGEST_MAX_ATTEMPTS."
+        ),
+    )
+    # Stale-Timeout fuer in_progress Ingest-Jobs. Nach Ablauf requeued der
+    # Stale-Reaper den Job oder setzt ihn auf 'failed' (bei max attempts).
+    scan_ingest_stale_timeout_min: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+        description=(
+            "Stale-Timeout fuer in_progress Ingest-Jobs in Minuten. "
+            "Ingest-Jobs sind reine DB-Arbeit ohne LLM-Calls — 5 Minuten "
+            "ist ein realistischer Upper-Bound. "
+            "Setzen via SECSCAN_SCAN_INGEST_STALE_TIMEOUT_MIN."
+        ),
+    )
+    # Cadence des Retention-Sweeps in Sekunden.
+    scan_ingest_retention_interval_sec: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description=(
+            "Cadence des Scan-Ingest-Retention-Sweeps in Sekunden (Default 1h). "
+            "Loescht payload_gzip bei done-Jobs nach 1h und failed-Zeilen nach 24h. "
+            "Setzen via SECSCAN_SCAN_INGEST_RETENTION_INTERVAL_SEC."
+        ),
+    )
+
     @property
     def max_body_bytes(self) -> int:
         """Body-Limit in Bytes fuer Flask `MAX_CONTENT_LENGTH`."""

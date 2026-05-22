@@ -31,6 +31,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -957,6 +958,78 @@ class LLMRiskCache(Base):
     )
 
 
+class ScanIngestJob(Base):
+    """Transit-Queue fuer asynchronen Scan-Ingest (ADR-0026).
+
+    `payload_gzip` ist reiner Durchlauf-Speicher: der Worker setzt die Spalte
+    atomar mit status='done' auf NULL. Bei status='failed' bleibt der Payload
+    max. 24h fuer Operator-Debugging erhalten, danach entfernt der Retention-
+    Sweep die gesamte Zeile. Langfristige Persistenz des Roh-JSON ist bewusst
+    ausgeschlossen (ADR-0005-Transit-Ausnahme, ADR-0026 §Bedrohungsmodell).
+    """
+
+    __tablename__ = "scan_ingest_jobs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    server_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Gzip-komprimierter Decompressed-Body. NULL nach status='done' (atomar
+    # gesetzt) oder nach Retention-Sweep. STORAGE EXTERNAL in der Migration.
+    payload_gzip: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    picked_up_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    picked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scan_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("scans.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    server: Mapped[Server] = relationship("Server")
+    scan: Mapped[Scan | None] = relationship("Scan")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued','in_progress','done','failed')",
+            name="ck_scan_ingest_jobs_status",
+        ),
+        CheckConstraint(
+            "attempts >= 0",
+            name="ck_scan_ingest_jobs_attempts",
+        ),
+        # Pickup-Index — Partial auf queued, deckt die heisseste Worker-Query.
+        Index(
+            "ix_scan_ingest_jobs_pickup",
+            "next_attempt_at",
+            "created_at",
+            postgresql_where="status = 'queued'",
+        ),
+        # Stale-Reaper-Index — Partial auf in_progress.
+        Index(
+            "ix_scan_ingest_jobs_stale",
+            "picked_up_at",
+            postgresql_where="status = 'in_progress'",
+        ),
+        # Server-Aufschluesselung fuer Status-Endpoint und Per-Server-Cap-Check.
+        Index("ix_scan_ingest_jobs_server", "server_id", "status"),
+    )
+
+
 class LLMDebugLog(Base):
     """Operator-Debugging-Log fuer LLM-Job-Request/Response-Bodies (v0.9.3).
 
@@ -1136,6 +1209,7 @@ __all__ = [
     "LlmMessage",
     "LlmMessageRole",
     "Scan",
+    "ScanIngestJob",
     "Server",
     "ServerKernelModule",
     "ServerListener",

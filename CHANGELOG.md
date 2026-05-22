@@ -4,6 +4,118 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block R: Asynchroner Scan-Ingest
+
+ADR-0026. Loest das Agent-Timeout-Problem bei grossen Scans: `POST /api/scans`
+antwortet im Async-Modus binnen <1s mit 202 + `job_id`, die volle
+Verarbeitung wandert in den `secscan-llm-worker`-Container als neuer
+Sub-Tick `scan_ingest_tick`. Default-Feature-Flag `SECSCAN_SCAN_INGEST_ASYNC=false`
+haelt den synchronen Pfad aktiv — Cutover ist Operator-gesteuert.
+
+### Added
+
+- **Neue Tabelle `scan_ingest_jobs`** (Migration 0010): Queue fuer den
+  Async-Pfad mit `payload_gzip BYTEA STORAGE EXTERNAL`, `payload_sha256
+  CHAR(64)` als Idempotency-Key, Lifecycle-Spalten (`status`, `attempts`,
+  `next_attempt_at`, `picked_up_by`, `picked_up_at`, `finished_at`,
+  `result` JSONB, `error`, `scan_id`). Vier Indizes: Pickup (partial
+  `status='queued'`), Stale (partial `status='in_progress'`), Server
+  `(server_id, status)`, partial-unique `payload_sha256` auf
+  `status IN ('queued','in_progress')` fuer Idempotenz.
+- **Async Fast-Path** in `app/api/scans.py` mit Feature-Flag
+  `SECSCAN_SCAN_INGEST_ASYNC`: schmale Pre-Validation (`_pre_validate_envelope`,
+  manuelles dict-Walking ohne Pydantic-Vollparse), SHA-256-Idempotency,
+  Per-Server-Soft-Cap (Default 50 queued/in_progress, ENV
+  `SECSCAN_MAX_QUEUED_INGEST_JOBS`), `on_conflict_do_nothing` auf dem
+  partial-unique-Index, 202 + `{job_id, status:"queued", status_url}`.
+- **Worker-Sub-Tick** `app/workers/scan_ingest_worker.py`: SELECT FOR
+  UPDATE SKIP LOCKED, zwei-Session-Pattern (Status-Update +
+  Verarbeitung), atomares UPDATE bei `done` (Status + Counts + scan_id +
+  `payload_gzip=NULL` im selben Statement — ADR-0005-Transit-Ausnahme),
+  Backoff (`30s * 2^(attempts-1)`), Max-Attempts 3.
+- **Service-Extraktion** `app/services/scan_processing.py`: ehemals-sync
+  Logik aus `app/api/scans.py` als reine Service-Funktion
+  `process_scan_envelope(session, server, payload_gzip) ->
+  ScanProcessingResult`, vom Edge-Sync-Branch und Worker-Pfad geteilt
+  konsumiert. Kein `session.commit()` im Service — Caller committet.
+- **Status-Endpoint** `GET /api/scans/jobs/<job_id>`: Bearer-Auth +
+  Server-Scoping (Cross-Server-Jobs liefern 404, nicht 403). Body je nach
+  Status mit `scan_id`/`counts` (bei `done`) oder `error` (bei `failed`).
+- **Stale-Reaper** im Worker fuer `scan_ingest_jobs`: Requeue nach 5 min
+  (`SCAN_INGEST_STALE_TIMEOUT_MIN=5`), Fail nach `attempts >= 3`.
+- **Retention-Sweep** stuendlich (`SCAN_INGEST_RETENTION_INTERVAL_SEC=3600`):
+  Done-Crash-Reste binnen <2h auf `payload_gzip=NULL`, Failed-Jobs nach
+  24h Operator-Debugging-Fenster komplett geloescht.
+- **Audit-Events** `scan.queued` (Edge, `{job_id, payload_sha256,
+  payload_bytes}`) und `scan.ingest_failed` (Worker, `{job_id,
+  error_class, error_truncated}`). Idempotente Re-Inserts emittieren
+  **kein** zweites `scan.queued`. Bestehende `scan.ingested`,
+  `host_state.*`, `risk.pretriage_evaluated`, `llm.jobs_queued` kommen
+  jetzt vom Worker (Body unveraendert).
+- **Agent 0.4.0** (`agent/secscan-agent.sh`): Polling-Loop nach 202-Response
+  auf `GET /api/scans/jobs/<id>` (2s-Intervall, max 600s, ENV
+  `SECSCAN_POLL_MAX_SEC` ueberschreibbar). Neue Exit-Codes 4 (Worker-Fail)
+  und 5 (Polling-Timeout). Auto-Update zieht 0.4.0 fuer alle Agents
+  `>=0.3.1` automatisch.
+- **Settings**: `scan_ingest_async`, `max_queued_ingest_jobs`,
+  `scan_ingest_max_attempts`, `scan_ingest_stale_timeout_min`,
+  `scan_ingest_retention_interval_sec` als Pydantic-Fields mit ENV-
+  Variablen.
+- **Pure-Unit-Tests** (47 Tests in 3 Files): `tests/services/test_scan_processing.py`
+  (Service-Boundary + Aufruf-Reihenfolge), `tests/services/test_scan_processing_result.py`
+  (Pydantic-Validation), `tests/workers/test_scan_ingest_worker_unit.py`
+  (Backoff, Truncate, Should-Fail, Result-Serialisierung),
+  `tests/api/test_scan_status_endpoint_unit.py` (Body-Serialisierung).
+
+### Changed
+
+- **ARCHITECTURE.md** §6 ergaenzt mit Block-R-Fast-Path-Beschreibung,
+  §9 ergaenzt mit Per-Server-Soft-Cap, §13 ergaenzt mit `scan.queued`/`scan.ingest_failed`
+  und der Edge-vs-Worker-Audit-Reihenfolge.
+- **ADR-0022** ergaenzt mit Hinweis dass Pre-Triage-Audit-Events
+  (`risk.pretriage_evaluated`, `host_state.*`) im Async-Modus vom Worker
+  emittiert werden.
+- **`app/api/scans.py`**: Sync-Inline-Logik (JSON-Parse bis llm_hook) durch
+  `process_scan_envelope`-Aufruf ersetzt; Verhalten unveraendert.
+- **`docker-compose.yml`**: `secscan-llm-worker` wartet jetzt auf
+  `app: service_healthy` (nicht nur `db: service_healthy`). Im Cold-Start-
+  Race-Window vor der Alembic-Migration hat der Worker sonst `relation
+  "scan_ingest_jobs" does not exist`-Fehler produziert (verifiziert im
+  Operator-Smoke: 58 Fehler → 0 Fehler nach dem Fix). App-Container haengt
+  weiterhin nur an `db: service_healthy`, damit die `alembic upgrade head`-
+  Phase im Entrypoint die Migration zuverlaessig durchlaufen kann bevor
+  der Worker pickt.
+
+### Fixed
+
+- **Worker UPDATE-Statement bei `done`** (`app/workers/scan_ingest_worker.py`):
+  `result = :result::jsonb` zu `result = CAST(:result AS jsonb)` korrigiert.
+  SQLAlchemy `text()` mit `:`-Binds interpretiert `::jsonb` als zweiten
+  Bind-Parameter, was zu `psycopg.errors.SyntaxError at or near ":"` fuehrte
+  und jeden ersten echten Worker-Pickup auf `queued`-Retry zwang. Fix
+  verifiziert in `tests/workers/test_scan_ingest_payload_lifecycle.py`.
+
+### Deferred (On-Demand-Verifikation, nicht im CI-Default)
+
+- Alembic-Roundtrip-Test fuer Migration 0010 (existiert als `tests/alembic/test_0010_scan_ingest_jobs.py`, db_integration-Marker).
+- `tests/api/test_scans_async_edge.py` (14 Edge-Handler-Tests, db_integration).
+- `SELECT FOR UPDATE SKIP LOCKED`-Concurrency-Smoke, atomares Payload-Clear-bei-done,
+  Stale-Reaper-Requeue, Retention-Sweep-Delete-bei-failed,
+  `on_conflict_do_nothing`-Partial-Index-Verhalten.
+- Bats-Suite fuer Agent-Polling-Loop (`tests/agent/test_secscan_agent_polling.bats`).
+- Docker-Compose-Up + `/healthz`-Smoke.
+
+Operator fuehrt diese auf Anweisung pro Lauf aus; im Default-CI laeuft
+nur Pure-Unit (ruff, mypy, shellcheck, pytest ohne db_integration-Marker).
+
+### Cutover
+
+`docs/operations.md` Abschnitt „Block-R-Async-Ingest" beschreibt den
+fuenf-Schritt-Cutover (Deploy mit Flag off → Sanity-Check → Flag on →
+Agent-Auto-Update → MIN_AGENT_VERSION-Bump).
+
+---
+
 ## [Unreleased] — Block Q: External EPSS/KEV Enrichment
 
 ADR-0024. Loest die Pass-2-Risk-Bewertungsluecke: Trivy 0.70 liefert

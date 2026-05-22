@@ -1,3 +1,5 @@
+# block_r_sync_to_async — Phase G migriert (siehe docs/blocks/R-async-ingest.md §Phase G).
+# LLM-Override-Schutz wandert in Worker-Sub-Tick bei Async-Cutover; Phase G passt an.
 """Adversarial: LLM-gesetzte Risk-Bands ueberleben Re-Ingest.
 
 Block O, ADR-0022 §Re-Evaluation:

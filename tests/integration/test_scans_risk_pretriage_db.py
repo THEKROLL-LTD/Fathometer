@@ -1,3 +1,6 @@
+# block_r_sync_to_async — Phase G migriert (siehe docs/blocks/R-async-ingest.md §Phase G).
+# Pre-Triage laeuft mit SECSCAN_SCAN_INGEST_ASYNC=false im Sync-Handler (Default gruen).
+# Bei Cutover wandert Pre-Triage in den Worker-Sub-Tick; Phase G passt die Tests an.
 """Block O Phase C Task #8 — Pre-Triage-Aufruf im Ingest.
 
 Cases:

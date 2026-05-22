@@ -1,3 +1,5 @@
+# block_r_sync_to_async — Phase G migriert (siehe docs/blocks/R-async-ingest.md §Phase G).
+# LLM-Job-Queueing wandert in den Worker-Sub-Tick bei Async-Cutover; Phase G passt an.
 """Block P Phase D Task #11 — LLM-Job-Queueing im Scan-Ingest.
 
 Diese Suite verifiziert dass der `/api/scans`-Endpoint nach erfolgreichem

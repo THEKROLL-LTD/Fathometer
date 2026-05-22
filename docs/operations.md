@@ -123,3 +123,77 @@ Nach dem ersten Deploy von Block Q:
 - **CISA-Schema-Drift**: Pydantic-Modelle haben ``extra="ignore"``,
   unbekannte Felder im JSON werden geschluckt. Hartes Schema-Break
   (z.B. ``cveID`` umbenannt) wuerde den Pull als ``failed`` markieren.
+
+## Block-R-Async-Ingest (ADR-0026)
+
+### Operator-Sicht
+
+`POST /api/scans` antwortet im Async-Modus binnen <1s mit 202 + Job-ID.
+Die volle Verarbeitung (Findings-UPSERT, Host-State-Persist, Pre-Triage,
+Group-Matching, LLM-Job-Queueing) laeuft im `secscan-llm-worker`-Container
+als neuer Sub-Tick `scan_ingest_tick` (vor LLM-Pickup priorisiert).
+
+### Feature-Flag-Cutover
+
+Verhalten wird via Env-Variable gesteuert:
+
+```
+SECSCAN_SCAN_INGEST_ASYNC=false   # Default: Sync-Pfad aktiv (Status-Quo)
+SECSCAN_SCAN_INGEST_ASYNC=true    # Async-Fast-Path aktiv
+```
+
+Empfohlener Cutover (analog ADR-0026 Block R Phase H):
+
+1. Deploy Backend mit Block-R-Code, Flag auf `false`. Schema-Migration
+   `0010_scan_ingest_jobs` lauft mit; Worker-Sub-Tick steht bereit aber
+   bekommt keine Jobs.
+2. Sanity-Check: manueller Job-Insert via `psql` plus `worker_logs |
+   grep scan_ingest` zeigt Pickup + Status-Wechsel.
+3. Flag auf `true`. Edge-Handler schaltet auf 202-Response um.
+4. Agent-Auto-Update zieht 0.4.0 sukzessive. Bis dahin akzeptieren alte
+   Agents (`<0.4.0`, ohne Polling-Loop) das 202-Body ohne Counts und
+   beenden mit Exit 0 (siehe `agent/secscan-agent.sh` v0.3.x).
+5. Nach 7 Tagen Beobachtung: `MIN_AGENT_VERSION` auf `0.4.0` (separate
+   ENV-Variable im Web-Container).
+
+### Queue-Inspect
+
+| Frage | SQL |
+|---|---|
+| Wie tief ist die Queue? | `SELECT status, COUNT(*) FROM scan_ingest_jobs GROUP BY status` |
+| Welche Jobs haengen? | `SELECT id, server_id, attempts, picked_up_at FROM scan_ingest_jobs WHERE status='in_progress' AND picked_up_at < now() - interval '5 min'` |
+| Manuelle Requeue eines stale Jobs | `UPDATE scan_ingest_jobs SET status='queued', picked_up_by=NULL, picked_up_at=NULL WHERE id=?` |
+| Failed-Jobs der letzten 24h | `SELECT id, server_id, error FROM scan_ingest_jobs WHERE status='failed' AND finished_at > now() - interval '24 hours'` |
+
+### Retention-Verhalten
+
+| Status | `payload_gzip` | Zeile |
+|---|---|---|
+| `queued`/`in_progress` | Original gzipped Body | bleibt bis Pickup-/Stale-Reaper |
+| `done` | NULL (atomar im Status-Wechsel-UPDATE) | bleibt unbegrenzt (Counts in `result` JSONB) |
+| `failed` | Original Body (24h-Debugging-Fenster) | DELETE per Retention-Sweep nach 24h |
+
+Retention-Sweep laeuft stuendlich im Worker (`SCAN_INGEST_RETENTION_INTERVAL_SEC=3600`).
+Done-Crash-Reste (`payload_gzip` nicht-NULL trotz `status='done'` aus
+einem hypothetischen Mid-Statement-Crash) werden binnen <2h auf NULL gesetzt.
+
+### Soft-Cap
+
+| Env-Var | Default | Wirkung |
+|---|---|---|
+| `SECSCAN_MAX_QUEUED_INGEST_JOBS` | `50` | Per-Server-Limit auf `(queued|in_progress)`-Jobs. `429 queue_full` beim Insert wenn ueberschritten. |
+| `SECSCAN_SCAN_INGEST_ASYNC` | `false` | Master-Switch fuer den Fast-Path. |
+
+Wenn ein Server wiederholt 429s sieht: Stale-Reaper-Lauf abwarten (5min)
+oder manuelle Queue-Bereinigung via SQL oben. Im Steady-State sollte die
+Queue-Tiefe pro Server bei <5 liegen — alles darueber deutet auf einen
+Worker-Backlog hin (siehe Multi-Worker-Re-Open-Trigger in ADR-0026).
+
+### Worker-Logs
+
+Phasen-Marker im `secscan-llm-worker`-Container:
+- `scan_ingest.job_picked_up` — `{job_id, server_id, attempts}` beim Pickup
+- `scan_ingest.job_done` — `{job_id, scan_id, duration_ms, counts}` bei Erfolg
+- `scan_ingest.job_failed` — `{job_id, error_class, attempts}` bei finalem Fail
+- `scan_ingest.retention_sweep_done` — `{cleared_payloads, deleted_failed}` stuendlich
+- `scan_ingest.stale_reaped` — `{requeued, failed}` bei Stale-Reaper-Pass

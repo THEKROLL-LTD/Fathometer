@@ -44,6 +44,9 @@ services:
       SECSCAN_GUNICORN_THREADS: ${SECSCAN_GUNICORN_THREADS:-8}
       SECSCAN_GUNICORN_TIMEOUT: ${SECSCAN_GUNICORN_TIMEOUT:-120}
       SECSCAN_LOG_LEVEL: ${SECSCAN_LOG_LEVEL:-INFO}
+      # Block R (ADR-0026) — Async-Ingest Feature-Flag + Per-Server-Soft-Cap.
+      SECSCAN_SCAN_INGEST_ASYNC: ${SECSCAN_SCAN_INGEST_ASYNC:-false}
+      SECSCAN_MAX_QUEUED_INGEST_JOBS: ${SECSCAN_MAX_QUEUED_INGEST_JOBS:-50}
     ports:
       - "8000:8000"
     healthcheck:
@@ -67,8 +70,16 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Block R (ADR-0026): Worker wartet auf `app: service_healthy` — die App
+    # laeuft `alembic upgrade head` im Entrypoint und schaltet erst danach
+    # auf healthy. Ohne diese Reihenfolge sieht der Worker beim Cold-Start
+    # `relation "scan_ingest_jobs" does not exist` (50+ Errors bis die App
+    # Migration angewendet hat). Mit `app: service_healthy` ist Migration
+    # garantiert vor dem ersten Worker-Tick.
     depends_on:
       db:
+        condition: service_healthy
+      app:
         condition: service_healthy
     entrypoint: ["python", "-m", "app.workers.llm_worker"]
     environment:
@@ -80,6 +91,10 @@ services:
       SECSCAN_LLM_CACHE_TTL_DAYS: ${SECSCAN_LLM_CACHE_TTL_DAYS:-30}
       SECSCAN_LLM_CACHE_MAX_ROWS: ${SECSCAN_LLM_CACHE_MAX_ROWS:-100000}
       SECSCAN_LOG_LEVEL: ${SECSCAN_LOG_LEVEL:-INFO}
+      # Block R (ADR-0026) — Async-Ingest Worker-Sub-Tick-Konstanten.
+      SECSCAN_SCAN_INGEST_MAX_ATTEMPTS: ${SECSCAN_SCAN_INGEST_MAX_ATTEMPTS:-3}
+      SECSCAN_SCAN_INGEST_STALE_TIMEOUT_MIN: ${SECSCAN_SCAN_INGEST_STALE_TIMEOUT_MIN:-5}
+      SECSCAN_SCAN_INGEST_RETENTION_INTERVAL_SEC: ${SECSCAN_SCAN_INGEST_RETENTION_INTERVAL_SEC:-3600}
     healthcheck:
       # timeout: 10s — Cold-Python-Process + DB-Connect liegt unter ARM64-RKE2
       # bei ~6s gemessen (v0.9.4-Befund). 5s waren zu knapp und produzierten

@@ -131,6 +131,9 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(name)
 
 
+# Block R (ADR-0026): Scan-Ingest-Retention-Sweep-Cadence (1 Stunde).
+SCAN_INGEST_RETENTION_SWEEP_INTERVAL_SEC: float = 3600.0
+
 # Modul-State (graceful Shutdown + Cadence-Tracking).
 _shutdown: bool = False
 # v0.9.5: ``_last_heartbeat_at`` ist Legacy — Heartbeat lebt jetzt im
@@ -141,6 +144,8 @@ _last_heartbeat_at: float = 0.0
 _last_reaper_at: float = 0.0
 _last_debug_log_eviction_at: float = 0.0
 _last_feed_pull_check_at: float = 0.0
+# Block R (ADR-0026): Letzter Lauf des Scan-Ingest-Retention-Sweeps.
+_last_retention_sweep_at: float = 0.0
 
 # v0.9.6: Mode-/Budget-Caching + Idle-Backoff. Reduziert die Idle-SQL-Last
 # (vorher ~120 Queries/Minute bei leerer Queue) drastisch.
@@ -229,12 +234,13 @@ def request_shutdown_for_tests() -> None:
 def reset_shutdown_for_tests() -> None:
     """Test-Hook — setzt das Shutdown-Flag zurueck (zwischen Tests)."""
     global _shutdown, _last_heartbeat_at, _last_reaper_at, _last_debug_log_eviction_at
-    global _last_feed_pull_check_at
+    global _last_feed_pull_check_at, _last_retention_sweep_at
     _shutdown = False
     _last_heartbeat_at = 0.0
     _last_reaper_at = 0.0
     _last_debug_log_eviction_at = 0.0
     _last_feed_pull_check_at = 0.0
+    _last_retention_sweep_at = 0.0
     # v0.9.5: Stop-Event clearen damit Test-Re-Runs den Heartbeat-Thread
     # nicht im Stop-State festhalten.
     _heartbeat_thread_stop.clear()
@@ -402,11 +408,16 @@ def _tick() -> None:
     Modul-Caches (siehe ``_get_mode_throttled`` und ``_budget_ok_throttled``).
     Bei leerer Queue klettert die Sleep-Dauer exponentiell bis 30s
     (``_idle_sleep_and_backoff``). Reduziert die Idle-SQL-Last drastisch.
+
+    Block R (ADR-0026): Scan-Ingest-Sub-Tick vor LLM-Pickup eingefuegt.
+    Ingest-Jobs werden priorisiert — LLM-Pickup nur wenn keine Ingest-Jobs
+    warten. Stale-Reaper kennt jetzt beide Tabellen. Retention-Sweep stündlich.
     """
     global _last_reaper_at, _last_debug_log_eviction_at, _last_feed_pull_check_at
+    global _last_retention_sweep_at
     now_mono = time.monotonic()
 
-    # Stale-Reaper alle 60s.
+    # Stale-Reaper alle 60s (beide Tabellen: llm_jobs + scan_ingest_jobs).
     if now_mono - _last_reaper_at > STALE_REAPER_INTERVAL_SEC:
         _run_stale_reaper()
         _last_reaper_at = now_mono
@@ -423,15 +434,48 @@ def _tick() -> None:
         _run_feed_enrichment_check()
         _last_feed_pull_check_at = now_mono
 
+    # Block R (ADR-0026): Scan-Ingest-Retention-Sweep stündlich.
+    if now_mono - _last_retention_sweep_at > SCAN_INGEST_RETENTION_SWEEP_INTERVAL_SEC:
+        _run_scan_ingest_retention_sweep_safe()
+        _last_retention_sweep_at = now_mono
+
     # Mode-Check (cached 30s).
     mode = _get_mode_throttled()
     if mode == "off":
+        # Block R: Scan-Ingest-Sub-Tick laeuft UNABHAENGIG vom LLM-Mode.
+        # Ingest-Jobs muessen auch verarbeitet werden wenn LLM-Mode='off'.
+        with get_session() as session:
+            scan_ingest_job_id = _pick_next_scan_ingest_job_id(session)
+            session.commit()
+        if scan_ingest_job_id is not None:
+            _process_scan_ingest_job_safe(scan_ingest_job_id)
+            _reset_idle_backoff()
+            return
         _idle_sleep_and_backoff()
         return
 
     # Budget-Check (cached 60s) — inkludiert maybe_reset_budget.
     if not _budget_ok_throttled():
+        # Block R: Scan-Ingest-Sub-Tick laeuft auch bei Budget-Erschoepfung.
+        with get_session() as session:
+            scan_ingest_job_id = _pick_next_scan_ingest_job_id(session)
+            session.commit()
+        if scan_ingest_job_id is not None:
+            _process_scan_ingest_job_safe(scan_ingest_job_id)
+            _reset_idle_backoff()
+            return
         _idle_sleep_and_backoff()
+        return
+
+    # Block R (ADR-0026): Scan-Ingest-Sub-Tick VOR LLM-Pickup.
+    # Ingest-Jobs werden priorisiert damit Agent-Polling-Timeouts (600s)
+    # selten greifen. Ein Job pro Tick gleichberechtigt mit LLM-Pickup.
+    with get_session() as session:
+        scan_ingest_job_id = _pick_next_scan_ingest_job_id(session)
+        session.commit()
+    if scan_ingest_job_id is not None:
+        _process_scan_ingest_job_safe(scan_ingest_job_id)
+        _reset_idle_backoff()
         return
 
     job_id = _pick_next_job_id()
@@ -1463,6 +1507,49 @@ def _run_feed_enrichment_check() -> None:
         log.exception("llm_worker.feed_enrichment_check_failed")
 
 
+# ---------------------------------------------------------------------------
+# Block R — Scan-Ingest-Sub-Tick-Wrapper
+# ---------------------------------------------------------------------------
+
+
+def _pick_next_scan_ingest_job_id(session: Session) -> int | None:
+    """Wrapper: delegiert an scan_ingest_worker._pick_next_scan_ingest_job_id."""
+    from app.workers.scan_ingest_worker import (
+        _pick_next_scan_ingest_job_id as _siw_pick,
+    )
+
+    return _siw_pick(session)
+
+
+def _process_scan_ingest_job_safe(job_id: int) -> None:
+    """Verarbeitet einen Scan-Ingest-Job. Defensiv try/except fuer den Tick-Loop.
+
+    Exception im Worker darf den gesamten llm_worker._tick() nicht killen.
+    """
+    from app.workers.scan_ingest_worker import (
+        _process_scan_ingest_job as _siw_process,
+    )
+
+    try:
+        _siw_process(job_id, _get_session_factory(), WORKER_ID)
+    except Exception:  # pragma: no cover — Sicherheitsnetz fuer den Tick-Loop
+        log.exception("llm_worker.scan_ingest_job_failed job_id=%s", job_id)
+
+
+def _run_scan_ingest_retention_sweep_safe() -> None:
+    """Fuehrt den Scan-Ingest-Retention-Sweep aus. Defensiv try/except."""
+    from app.workers.scan_ingest_worker import (
+        _run_scan_ingest_retention_sweep as _siw_retention,
+    )
+
+    try:
+        with get_session() as session:
+            _siw_retention(session)
+            session.commit()
+    except Exception:  # pragma: no cover — DB-Hickup
+        log.exception("llm_worker.scan_ingest_retention_sweep_failed")
+
+
 def _run_stale_reaper() -> None:
     """Reset't ``in_progress``-Jobs deren ``picked_up_at`` zu alt ist.
 
@@ -1527,6 +1614,18 @@ def _run_stale_reaper() -> None:
                 },
             )
             session.commit()
+
+    # Block R (ADR-0026): Scan-Ingest-Stale-Reaper (zweite Tabelle).
+    try:
+        from app.workers.scan_ingest_worker import (
+            _run_scan_ingest_stale_reaper as _siw_reaper,
+        )
+
+        with get_session() as session:
+            _siw_reaper(session)
+            session.commit()
+    except Exception:  # pragma: no cover — DB-Hickup
+        log.exception("llm_worker.scan_ingest_stale_reaper_failed")
 
 
 # ---------------------------------------------------------------------------

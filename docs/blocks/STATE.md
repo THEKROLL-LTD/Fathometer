@@ -460,9 +460,11 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 
 ## Aktueller Block
 
-(keiner — v0.9.3-Patch abgeschlossen 2026-05-20, nächster Block oder Patch per User-Entscheidung)
+(keiner — Block R abgeschlossen 2026-05-22, Branch `feat/block-r-async-ingest` lokal mit ungetrackten Änderungen; Commit + Merge auf User-Anweisung; nächster Block oder Patch per User-Entscheidung)
 
 ## Completed
+
+- **R — Asynchroner Scan-Ingest (ADR-0026)** · abgeschlossen 2026-05-22 · Branch `feat/block-r-async-ingest` · Default-Gates **grün** (ruff/format/mypy/shellcheck/pytest Default-Selektion 1206 passed, 5 E2E-skipped, 685 deselected). Alle acht Phasen (A–H) implementiert: Migration `0010_scan_ingest_jobs` (15-Spalten-Tabelle + 4 Indizes inkl. partial-unique `payload_sha256`, `STORAGE EXTERNAL` auf `payload_gzip`), Edge-Fast-Path hinter `SECSCAN_SCAN_INGEST_ASYNC` (Default off — Sync-Pfad bleibt aktiv) mit `_pre_validate_envelope` und `app/services/scan_ingest_queue.enqueue_or_resolve` (Idempotency + Soft-Cap), Service-Extraktion `app/services/scan_processing.process_scan_envelope` (ehemals inline-Sync-Logik), Worker-Sub-Tick `app/workers/scan_ingest_worker.py` (SELECT FOR UPDATE SKIP LOCKED, atomares Payload-Clear bei `done`, Backoff `30s*2^(attempts-1)`), Stale-Reaper (5min, max 3 attempts), stündlicher Retention-Sweep (Done-Crash-Reste auf NULL, Failed-Zeilen nach 24h DELETE), Status-Endpoint `GET /api/scans/jobs/<id>` mit Server-Scoping (404 statt 403 für Cross-Server), Agent 0.4.0 mit Polling-Loop (2s × 600s, neue Exit-Codes 4/5, `SECSCAN_POLL_MAX_SEC`-Override). 47 Pure-Unit-Tests in 4 Files (`test_scan_processing.py`, `test_scan_processing_result.py`, `test_scan_ingest_worker_unit.py`, `test_scan_status_endpoint_unit.py`). ARCHITECTURE.md §6 (Async-Fast-Path), §9 (Soft-Cap), §13 (`scan.queued`/`scan.ingest_failed`) ergänzt; ADR-0022 mit Worker-Audit-Hinweis ergänzt; CHANGELOG-v0.11.0-Eintrag; `docs/operations.md` Sektion „Block-R-Async-Ingest" mit Cutover-Plan, Queue-Inspect-SQL und Retention-Tabelle. **Bewusste Spec-Abweichung 2026-05-22:** Test-Strategie wurde mid-Block verschärft auf „nur Pure-Unit + Linter + Static-Analyzer", deshalb sind 21 db_integration-Reflection-Tests (`tests/alembic/test_0010_scan_ingest_jobs.py`) und 14 db_integration-Edge-Tests (`tests/api/test_scans_async_edge.py`) zwar im Repo abgelegt aber laufen nur On-Demand; bats-Suite (`tests/agent/test_secscan_agent_polling.bats`) ist **nicht** angelegt; Docker-Compose-Up/healthz-Smoke ausgespart. Block-Spec-DoD-Items A(2), B(4), C(7), D(2), E(2)/(3) sind dadurch als On-Demand-Operator-Verifikation deferred; Default-Verifikation in der Entwicklung ist `pytest` (Pure-Unit) + ruff/mypy/shellcheck — alles grün. Branch ist lokal mit ungetrackten Änderungen, Commit + Merge auf User-Anweisung. **Tag `v0.11.0` zu setzen nach Merge auf main.**
 
 - **v0.9.6-Patch — Worker-Idle-CPU-Throttle + CI-Build-Speedup** · abgeschlossen 2026-05-20 · direkt auf main (`acb162d` CI-Workflow, `2784a86` Worker-Throttle), Tag `v0.9.6` zeigt auf `2784a86`. Mode-/Budget-Cache + Idle-Backoff im Worker reduzieren die Idle-SQL-Last von ~126 Queries/Minute auf ~2; CI-Build-Workflow arm64-only und mit `scope=release` GHA-Cache. 1609 Tests grün (+6 v0.9.6), Coverage 91 %. ruff/format/mypy/shellcheck PASS. Detail siehe Status-Sektion oben. **Tag `v0.9.6` gesetzt.**
 
@@ -518,6 +520,7 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 | N | [N-agent-installer.md](N-agent-installer.md) | completed 2026-05-18 — **v0.7.0** (ADR-0021 Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding) |
 | O | [O-risk-engine.md](O-risk-engine.md) | completed 2026-05-18 — **v0.8.0** (ADR-0022 Pre-Triage-Risk-Engine + Host-Snapshot + Vendor-Severity + Risk-zentrisches UI) |
 | P | [P-llm-risk-reviewer.md](P-llm-risk-reviewer.md) | completed 2026-05-19 — **v0.9.0** (ADR-0023 LLM-Risk-Reviewer + Application-Grouping + async Worker) |
+| R | [R-async-ingest.md](R-async-ingest.md) | completed 2026-05-22 — **v0.11.0** (ADR-0026 Asynchroner Scan-Ingest + Worker-Sub-Tick + Status-Endpoint + Agent 0.4.0 Polling-Loop) |
 
 ## Aktive Blocker
 

@@ -1,4 +1,5 @@
 """`POST /api/scans` — Scan-Ingest mit Auth-vor-Body-Parse.
+`GET /api/scans/jobs/<job_id>` — Async-Job-Status-Endpoint (Block R Phase D).
 
 Strikte Reihenfolge — niemals vertauschen (ARCHITECTURE.md §9):
 
@@ -7,30 +8,51 @@ Strikte Reihenfolge — niemals vertauschen (ARCHITECTURE.md §9):
 2. SHA-256(token) gegen `servers.api_key_hash` mit `hmac.compare_digest`.
 3. Server-Status: weder `revoked_at` noch `retired_at` -> 403 sonst.
 4. Erst JETZT: gzip-Decompress (mit Bound) und JSON-Parse.
-5. Pydantic-Envelope-Validation -> 422 bei Fehlern.
-6. Findings-Ingest via `findings_ingest.ingest_scan`.
-7. Audit-Event `scan.ingested` mit Counts.
-8. 202 Accepted + JSON-Body.
+
+Async-Pfad (SECSCAN_SCAN_INGEST_ASYNC=true, Block R Phase B):
+5a. Schmal-Validierung (`_pre_validate_envelope`) — nur Top-Level-Felder.
+6a. Agent-Version-Gate.
+7a. Soft-Cap + INSERT in `scan_ingest_jobs` (Idempotency via Partial-Unique).
+8a. Audit `scan.queued`.
+9a. 202 + `{job_id, status, status_url}`.
+
+Sync-Pfad (Default, Block R Phase H deaktiviert diesen Pfad):
+5b. Pydantic-Envelope-Validation -> 422 bei Fehlern.
+6b. Findings-Ingest via `findings_ingest.ingest_scan`.
+7b. Audit-Event `scan.ingested` mit Counts.
+8b. 202 Accepted + JSON-Body (mit Counts).
 
 DoS-Schutz:
 - 401 erfolgt VOR jedem Body-Read; ein 10-MB-Body mit ungueltigem Bearer
   schluerft keine CPU am Parser.
 - gzip-Decompress streamend mit hartem 100-MB-Bound (`SECSCAN_MAX_DECOMPRESSED_MB`).
 - JSON-Parse-Tiefe auf 32 begrenzt (§10 "JSON-Parser-Tiefenlimit").
+
+# Block-R Phase D — On-Demand-Verification:
+# Folgende Tests sind als db_integration-Marker markiert und nur auf
+# explizite Anweisung ausfuehren (kein Default-pytest-Lauf):
+#
+# 1. Cross-Server-404: Job existiert auf Server A, Request mit Server-B-Token
+#    -> 404 job_not_found (Server-Scoping, kein 403 um Job-IDs nicht zu leaken).
+# 2. Auth-Fail-401: GET /api/scans/jobs/1 ohne Bearer -> 401 unauthorized.
+# 3. Server-Inactive-403: GET /api/scans/jobs/1 mit revoked-Server-Token -> 403.
+# 4. Polling-Burst: 50 Calls in einer Minute auf den Status-Endpoint innerhalb
+#    des Rate-Limit-Buckets (gleicher Bucket wie POST /api/scans, 60/hour Default).
+# 5. Alle vier Status-Werte (queued, in_progress, done, failed) via echten DB-Rows.
+#    Verifikation dass counts/scan_id bei done, error bei failed im Response stehen.
 """
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
-from collections import Counter
+from datetime import datetime
 from typing import Any, cast
 
 import structlog
-from flask import current_app, request
-from pydantic import ValidationError
+from flask import current_app, jsonify, request
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.wrappers import Response
 
 from app import csrf, limiter
@@ -45,21 +67,9 @@ from app.middleware.gzip import (
     DecompressLimitError,
     read_decompressed_body,
 )
-from app.models import ApplicationGroup, Finding, FindingStatus, LLMJob, Server
-from app.schemas.scan_envelope import Envelope
+from app.models import ScanIngestJob, Server
 from app.services.agent_version import version_lt
-from app.services.finding_group_inheritance import inherit_group_risk_to_findings
-from app.services.findings_ingest import ingest_scan as run_ingest
 from app.services.findings_ingest import server_is_active
-from app.services.group_matcher import (
-    GroupMatcher,
-    affinity_sort_for_pass1,
-    apply_matches_for_server,
-)
-from app.services.host_state_ingest import persist_host_state
-from app.services.llm_fingerprints import group_findings_fingerprint
-from app.services.risk_engine import RiskBand, pretriage
-from app.settings_service import get_settings_row
 
 log = structlog.get_logger(__name__)
 
@@ -157,6 +167,158 @@ def _check_depth(obj: Any, *, depth: int) -> None:
             _check_depth(v, depth=depth + 1)
 
 
+def _pre_validate_envelope(body: bytes) -> tuple[str | None, str | None]:
+    """Schmale Validierung: Top-Level-Objekt, agent_version, host.hostname, scan.
+
+    Returnt (agent_version, error). Bei Erfolg (agent_version, None).
+    Bei Fehler (None, error_string). KEIN Pydantic — manuelles dict-Walking
+    fuer <5ms Latenz im Edge.
+
+    Checks in Reihenfolge (bei erstem Failure abbrechen):
+    1. json.loads(body) — JSONDecodeError -> ("invalid_json", ...).
+    2. Top-Level dict -> sonst "not_an_object".
+    3. agent_version Key existiert und ist String von Laenge 1..32.
+    4. host Key ist dict mit hostname String von Laenge 1..128.
+    5. scan Key ist dict.
+    """
+    try:
+        doc = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None, "invalid_json"
+
+    if not isinstance(doc, dict):
+        return None, "not_an_object"
+
+    agent_version = doc.get("agent_version")
+    if not isinstance(agent_version, str) or not (1 <= len(agent_version) <= 32):
+        return None, "missing_agent_version"
+
+    host = doc.get("host")
+    if not isinstance(host, dict):
+        return None, "missing_hostname"
+    hostname = host.get("hostname")
+    if not isinstance(hostname, str) or not (1 <= len(hostname) <= 128):
+        return None, "missing_hostname"
+
+    scan = doc.get("scan")
+    if not isinstance(scan, dict):
+        return None, "missing_scan"
+
+    return agent_version, None
+
+
+def _handle_async_ingest(
+    session: Any,
+    server: Server,
+    decompressed_body: bytes,
+    gzipped_body: bytes,
+) -> Response | tuple[Response, int]:
+    """Asynchroner Fast-Path fuer POST /api/scans (Block R Phase B, ADR-0026).
+
+    Laeuft nur wenn `SECSCAN_SCAN_INGEST_ASYNC=true`. Fuehrt Schmal-Validierung,
+    Agent-Version-Gate, Soft-Cap-Check, Job-Insert und Audit-Event durch;
+    antwortet mit 202 + job_id binnen <1s.
+
+    Schritte (ADR-0026 §Entscheidung Fast-Path):
+    1. Schmal-Validierung.
+    2. Agent-Version-Gate.
+    3. Soft-Cap + Idempotency-UPSERT.
+    4. Audit `scan.queued` (nur bei Neu-Insert).
+    5. 202 Response.
+    """
+    from app.services.scan_ingest_queue import QueueFullError, enqueue_or_resolve
+
+    settings = cast(Settings, current_app.config["SECSCAN_SETTINGS"])
+
+    # --- 1. Schmal-Validierung ---
+    agent_version, pre_err = _pre_validate_envelope(decompressed_body)
+    if pre_err is not None:
+        # Flat error-Format fuer Fast-Path-Responses (ADR-0026 §Entscheidung).
+        resp_err = cast(Response, jsonify({"error": pre_err}))
+        resp_err.status_code = 400
+        return resp_err
+
+    # Mypy-Hint: nach pre_err == None ist agent_version garantiert str.
+    assert agent_version is not None
+
+    # --- 2. Agent-Version-Gate ---
+    if version_lt(agent_version, Settings.MIN_AGENT_VERSION):
+        log_event(
+            "agent.rejected_outdated",
+            target_type="server",
+            target_id=server.id,
+            metadata={
+                "agent_version": agent_version,
+                "min_agent_version": Settings.MIN_AGENT_VERSION,
+            },
+            actor=server.name,
+            session=session,
+        )
+        session.commit()
+        resp_outdated = cast(Response, jsonify({"error": "agent_outdated"}))
+        resp_outdated.status_code = 400
+        return resp_outdated
+
+    # --- 3. Soft-Cap + Idempotency-UPSERT ---
+    # gzipped_body ist der vom Caller re-komprimierte Body (compress_payload
+    # wurde bereits im Endpoint aufgerufen).
+    try:
+        job, was_existing = enqueue_or_resolve(
+            session,
+            server,
+            payload_bytes=decompressed_body,
+            payload_gzip=gzipped_body,
+            max_queued=settings.max_queued_ingest_jobs,
+        )
+    except QueueFullError as exc:
+        return (
+            cast(
+                Response,
+                jsonify({"error": "queue_full", "queued": exc.current_count}),
+            ),
+            429,
+        )
+
+    # --- 4. Audit `scan.queued` (nur bei echtem Neu-Insert) ---
+    if not was_existing:
+        payload_sha256 = hashlib.sha256(decompressed_body).hexdigest()
+        log_event(
+            "scan.queued",
+            target_type="server",
+            target_id=server.id,
+            metadata={
+                "job_id": job.id,
+                "payload_sha256": payload_sha256,
+                "payload_bytes": len(decompressed_body),
+            },
+            actor=server.name,
+            session=session,
+        )
+
+    session.commit()
+
+    log.info(
+        "api.scans.async_queued",
+        server_id=server.id,
+        job_id=job.id,
+        was_existing=was_existing,
+    )
+
+    # --- 5. 202 Response ---
+    resp = cast(
+        Response,
+        jsonify(
+            {
+                "job_id": job.id,
+                "status": "queued",
+                "status_url": f"/api/scans/jobs/{job.id}",
+            }
+        ),
+    )
+    resp.status_code = 202
+    return resp
+
+
 def _decompress_limit_bytes() -> int:
     s = cast(Settings, current_app.config["SECSCAN_SETTINGS"])
     return s.max_decompressed_mb * 1024 * 1024
@@ -232,321 +394,225 @@ def ingest_scan() -> Response | tuple[Response, int]:
         log.info("api.scans.decompress_failed", server_id=server.id, error=str(exc))
         return json_error(400, "bad_encoding", str(exc))
 
-    # ---- 3. JSON-Parse mit Tiefen-Bound --------------------------------
-    try:
-        raw_doc = _json_loads_bounded(decompressed)
-    except ValueError as exc:
-        log.info("api.scans.json_parse_failed", server_id=server.id, error=str(exc))
-        return json_error(400, "bad_json", str(exc))
+    # ---- 2b. Feature-Flag: Async-Fast-Path (Block R Phase B, ADR-0026) -
+    # Laeuft NACH Decompress, VOR Pydantic-Vollparse. Der async-Branch macht
+    # seine eigene Schmal-Validierung und antwortet mit 202+job_id.
+    # Default off — Sync-Pfad bleibt aktiv bis Phase H den Cutover zieht.
+    _settings = cast(Settings, current_app.config["SECSCAN_SETTINGS"])
+    if _settings.scan_ingest_async:
+        # Stream ist nach `read_decompressed_body` verbraucht; wir re-komprimieren
+        # den dekomprimierten Body fuer Storage in `payload_gzip` (BYTEA).
+        from app.services.scan_ingest_queue import compress_payload as _compress
 
-    if not isinstance(raw_doc, dict):
-        return json_error(400, "bad_json", "Top-Level muss ein JSON-Objekt sein")
+        _gzipped = _compress(decompressed)
+        return _handle_async_ingest(get_session(), server, decompressed, _gzipped)
 
-    # ---- 4. Pydantic-Envelope-Parse ------------------------------------
+    # ---- 3+4+5. Vollstaendige Scan-Verarbeitung via Service-Funktion --------
+    # Extraktion nach app/services/scan_processing.process_scan_envelope
+    # (Block R Phase C, ADR-0026). Der gzip-komprimierte Body wird intern
+    # dekomprimiert; der Service-Aufruf macht alles was vorher inline passierte
+    # (JSON-Parse, Pydantic-Envelope, Findings-Ingest, Host-Snapshot,
+    # Pre-Triage, Group-Matcher, LLM-Jobs, Audit). KEIN commit im Service —
+    # wir committen hier.
+    from app.services.scan_processing import process_scan_envelope
+
+    sess = get_session()
+
+    # Agent-Version-Gate laeuft hier weiterhin fuer den Sync-Pfad, weil der
+    # Service nicht das Envelope-Pre-Validate macht (das ist Async-Fast-Path).
+    # Wir muessen erst den Body parsen um die Version zu lesen — daher
+    # ein kurzer JSON-Pre-Check bevor wir an den Service delegieren.
     try:
-        envelope = Envelope.model_validate(raw_doc)
-    except ValidationError as exc:
+        import json as _json
+
+        _pre_doc = _json.loads(decompressed.decode("utf-8", errors="replace"))
+        if isinstance(_pre_doc, dict):
+            _av = _pre_doc.get("agent_version")
+            if isinstance(_av, str) and version_lt(_av, Settings.MIN_AGENT_VERSION):
+                log_event(
+                    "agent.rejected_outdated",
+                    target_type="server",
+                    target_id=server.id,
+                    metadata={
+                        "agent_version": _av,
+                        "min_agent_version": Settings.MIN_AGENT_VERSION,
+                    },
+                    actor=server.name,
+                    session=sess,
+                )
+                sess.commit()
+                return json_error(
+                    400,
+                    "agent_outdated",
+                    (
+                        f"agent version {_av} is below minimum "
+                        f"{Settings.MIN_AGENT_VERSION}, please update"
+                    ),
+                )
+    except (ValueError, UnicodeDecodeError):
+        pass  # Vollparse-Fehler wird im Service als ValidationError behandelt
+
+    # Gzip-Body fuer Service-Aufruf aufbauen (Service erwartet gzip-Bytes).
+    from app.services.scan_ingest_queue import compress_payload as _compress_for_service
+
+    gzipped_for_service = _compress_for_service(decompressed)
+
+    try:
+        from pydantic import ValidationError as _ValidationError
+
+        proc_result = process_scan_envelope(sess, server, gzipped_for_service)
+    except _ValidationError as exc:
         return json_error(
             422,
             "validation_error",
             "Envelope-Validierung fehlgeschlagen",
             details=format_pydantic_errors(exc),
         )
-
-    # ---- 4b. Agent-Version-Gate (ADR-0021) ----------------------------
-    # Reihenfolge: Auth (Schritt 1) hat Vorrang vor Body-Parse (Schritt 4);
-    # die Version-Pruefung kann erst nach erfolgreichem Parse erfolgen,
-    # weil `agent_version` aus dem Envelope kommt. Bei "veraltet" → 400.
-    if version_lt(envelope.agent_version, Settings.MIN_AGENT_VERSION):
-        sess = get_session()
-        log_event(
-            "agent.rejected_outdated",
-            target_type="server",
-            target_id=server.id,
-            metadata={
-                "agent_version": envelope.agent_version,
-                "min_agent_version": Settings.MIN_AGENT_VERSION,
-            },
-            actor=server.name,
-            session=sess,
-        )
-        sess.commit()
-        return json_error(
-            400,
-            "agent_outdated",
-            (
-                f"agent version {envelope.agent_version} is below minimum "
-                f"{Settings.MIN_AGENT_VERSION}, please update"
-            ),
-        )
-
-    # ---- 5. Findings-Ingest -------------------------------------------
-    sess = get_session()
-    result = run_ingest(server, envelope, session=sess)
-
-    # ---- 6. Host-Snapshot persistieren (Block O Phase C Task #7) -------
-    # Reihenfolge: erst nach erfolgreichem Findings-UPSERT. Bei Schema-Fehlern
-    # oder DB-Constraint-Verletzungen wird der Snapshot verworfen und der
-    # Pre-Triage-Lauf faellt auf `snapshot_available=False` zurueck — Findings
-    # bleiben aber ingested, der Operator sieht den Versionsstand.
-    snapshot_available = False
-    if envelope.host_state is not None:
-        try:
-            persist_host_state(sess, server, envelope.host_state)
-            snapshot_available = True
-            log_event(
-                "host_state.snapshot_received",
-                target_type="server",
-                target_id=server.id,
-                metadata={
-                    "tools_available": list(envelope.host_state.tools_available),
-                    "gaps": list(envelope.host_state.gaps),
-                    "listener_count": len(envelope.host_state.listeners),
-                    "process_count": len(envelope.host_state.processes),
-                },
-                actor=server.name,
-                session=sess,
-            )
-        except (SQLAlchemyError, ValueError) as exc:
-            log.warning(
-                "api.scans.host_state_persist_failed",
-                server_id=server.id,
-                error=type(exc).__name__,
-            )
-            log_event(
-                "host_state.parse_failed",
-                target_type="server",
-                target_id=server.id,
-                metadata={"error": str(exc)[:256]},
-                actor=server.name,
-                session=sess,
-            )
-            snapshot_available = False
-
-    # ---- 7. Pre-Triage-Schleife (Block O Phase C Task #8) --------------
-    # Iteriert ueber alle aktuell offenen Findings des Servers. LLM-gesetzte
-    # Bands (`risk_band_source == "llm"`) werden nicht ueberschrieben — diese
-    # Logik lebt hier im Caller, nicht in `pretriage()` selbst
-    # (Single-Responsibility, ADR-0022 §Re-Evaluation).
-    band_counters: Counter[str] = Counter()
-    open_findings = (
-        sess.query(Finding)
-        .filter(Finding.server_id == server.id, Finding.status == FindingStatus.OPEN)
-        .all()
-    )
-    for finding in open_findings:
-        if finding.risk_band_source == "llm":
-            band_counters[finding.risk_band or "unset"] += 1
-            continue
-
-        evaluation = pretriage(finding, server, snapshot_available)
-        new_band = evaluation.band.value
-
-        finding.risk_band = new_band
-        finding.risk_band_reason = evaluation.reason
-        finding.risk_band_source = "engine"
-        finding.risk_band_computed_at = evaluation.computed_at
-        band_counters[new_band] += 1
-
-    log_event(
-        "risk.pretriage_evaluated",
-        target_type="server",
-        target_id=server.id,
-        metadata={"counters": dict(band_counters)},
-        actor=server.name,
-        session=sess,
-    )
-
-    # ---- 7b. Block-P LLM-Job-Queueing (ADR-0023) ----------------------
-    # Mode-Flag steuert das komplette Block-P-System: `off` ueberspringt
-    # Pattern-Match UND Job-Queueing. `observation` und `live` queuen Jobs;
-    # der Worker entscheidet wie er sie verarbeitet (Stub vs. Live-LLM).
-    settings_row = get_settings_row(sess)
-    if settings_row.block_p_llm_mode != "off":
-        # 1) Library-Reload + Pattern-Match. `reload()` muss bei jedem
-        # Scan laufen — der Web-Container weiss nichts von Pass-1-Inserts
-        # im Worker-Container ohne expliziten Refresh. `apply_matches_for_server`
-        # laeuft erst NACH dem Findings-UPSERT (Block O), sonst sind frisch
-        # eingefuegte Findings noch ungrouped.
-        GroupMatcher.get().reload(sess)
-        apply_matches_for_server(sess, server.id)
-        # Flush, damit die nachfolgenden SELECTs die neu gesetzten
-        # `application_group_id`-Werte sehen (autoflush koennte sonst
-        # ueberlistet werden, wenn die ORM-Identity-Map die Findings noch
-        # ohne Group hat).
-        sess.flush()
-        inherited = inherit_group_risk_to_findings(sess, server_id=server.id)
-
-        # 2) Pending Findings ohne Group → Pass-1-Job (Group-Detection).
-        ungrouped = list(
-            sess.execute(
-                select(Finding).where(
-                    Finding.server_id == server.id,
-                    Finding.application_group_id.is_(None),
-                    Finding.status == FindingStatus.OPEN,
-                    Finding.risk_band == RiskBand.PENDING.value,
-                )
-            )
-            .scalars()
-            .all()
-        )
-        pass1_job_id: int | None = None
-        pass1_batches_count = 0
-        cfg = cast(Settings, current_app.config["SECSCAN_SETTINGS"])
-        batch_size = cfg.llm_pass1_findings_per_batch
-        if ungrouped:
-            # v0.9.4: Affinity-Sort + Batch-Split. Ein einziger Pass-1-Job
-            # mit allen ungrouped Findings konnte das 131k-Context-Window
-            # von gpt-oss-120b sprengen (231k Input-Tokens beobachtet).
-            # Sort gruppiert Findings derselben Owner-Application benachbart,
-            # damit der Batch-Split keinen Bundle-Kontext zerreisst.
-            sorted_findings = affinity_sort_for_pass1(ungrouped)
-            sorted_ids = [f.id for f in sorted_findings]
-            batches = [
-                sorted_ids[i : i + batch_size] for i in range(0, len(sorted_ids), batch_size)
-            ]
-            last_job: LLMJob | None = None
-            for batch_ids in batches:
-                job = LLMJob(
-                    job_type="group_detection",
-                    server_id=server.id,
-                    payload={"finding_ids": batch_ids},
-                )
-                sess.add(job)
-                sess.flush()  # job.id verfuegbar — Pass-2 haengt am letzten
-                last_job = job
-            pass1_job_id = last_job.id if last_job is not None else None
-            pass1_batches_count = len(batches)
-
-        # 3) Fuer jede betroffene Group ein Pass-2-Job, sofern Fingerprint
-        # sich geaendert hat oder noch keine Bewertung existiert.
-        # Re-Eval bei `cve_data_fingerprint`-Drift wird hier NICHT
-        # zusaetzlich getriggert; der Worker erkennt den Drift via
-        # Cache-Miss (cve_data_fingerprint ist Teil des Cache-Keys),
-        # solange ein Pass-2-Job gequeued ist. MVP-Kompromiss
-        # (siehe ADR-0023 §"Cache-Invalidation"): wir queuen Pass-2
-        # genau dann, wenn das Group-Findings-Set sich aendert oder die
-        # Group noch unbewertet ist.
-        affected_groups = list(
-            sess.execute(
-                select(ApplicationGroup)
-                .join(Finding, Finding.application_group_id == ApplicationGroup.id)
-                .where(
-                    Finding.server_id == server.id,
-                    Finding.status == FindingStatus.OPEN,
-                )
-                .distinct()
-            )
-            .scalars()
-            .all()
-        )
-
-        pass2_queued = 0
-        for grp in affected_groups:
-            findings_in_group = list(
-                sess.execute(
-                    select(Finding).where(
-                        Finding.server_id == server.id,
-                        Finding.application_group_id == grp.id,
-                        Finding.status == FindingStatus.OPEN,
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            if not findings_in_group:
-                continue
-
-            new_fp = group_findings_fingerprint(findings_in_group)
-            # Idempotenz: gleicher Fingerprint + bereits bewertet → skip.
-            if grp.group_findings_fingerprint == new_fp and grp.risk_band is not None:
-                continue
-
-            pass2_job = LLMJob(
-                job_type="risk_evaluation",
-                server_id=server.id,
-                payload={"group_id": grp.id, "server_id": server.id},
-                depends_on=pass1_job_id,  # darf None sein
-            )
-            sess.add(pass2_job)
-            pass2_queued += 1
-
-        log_event(
-            "llm.jobs_queued",
-            target_type="server",
-            target_id=server.id,
-            metadata={
-                # v0.9.4: ehemals 0/1, jetzt N (Batch-Count). Bestandstests
-                # die gegen 0/1 geprueft haben wurden auf den konkreten
-                # Batch-Count angepasst.
-                "pass1_queued": pass1_batches_count,
-                "pass1_batch_size": batch_size if pass1_batches_count else None,
-                "pass2_queued": pass2_queued,
-                "findings_inherited": inherited,
-                "mode": settings_row.block_p_llm_mode,
-            },
-            actor=server.name,
-            session=sess,
-        )
-
-    log_event(
-        "scan.ingested",
-        target_type="server",
-        target_id=server.id,
-        metadata={
-            "scan_id": result.scan_id,
-            "findings_total": result.findings_total,
-            "findings_inserted": result.findings_inserted,
-            "findings_updated": result.findings_updated,
-            "findings_resolved": result.findings_resolved,
-            "class_os_pkgs": result.findings_class_os_pkgs,
-            "class_lang_pkgs": result.findings_class_lang_pkgs,
-            "class_other": result.findings_class_other,
-        },
-        actor=server.name,
-        session=sess,
-    )
-
-    # LLM-Update-Hook (Block G): aktive Conversations bekommen eine
-    # System-Message angehaengt, wenn dieser Scan Delta brachte. Wir
-    # nehmen `findings_inserted` als Proxy fuer "neue" und
-    # `findings_resolved` direkt. `changed_count` ist im MVP immer 0
-    # (Block-E-Limitation).
-    from app.services.llm_update_hook import notify_conversations_for_scan
-
-    try:
-        notify_conversations_for_scan(
-            sess,
-            server.id,
-            new_count=result.findings_inserted,
-            resolved_count=result.findings_resolved,
-            changed_count=0,
-        )
-    except Exception as exc:  # pragma: no cover — Hook darf Ingest nicht killen
-        log.warning("api.scans.llm_hook_failed", error=type(exc).__name__)
+    except ValueError as exc:
+        log.info("api.scans.json_parse_failed", server_id=server.id, error=str(exc))
+        return json_error(400, "bad_json", str(exc))
 
     sess.commit()
 
     log.info(
         "api.scans.ingested",
         server_id=server.id,
-        scan_id=result.scan_id,
-        findings_total=result.findings_total,
+        scan_id=proc_result.scan_id,
+        findings_total=proc_result.findings_total,
     )
 
     from flask import jsonify
 
     body: dict[str, Any] = {
-        "scan_id": result.scan_id,
-        "ingested_at": result.received_at.isoformat(),
-        "findings_total": result.findings_total,
-        "findings_inserted": result.findings_inserted,
-        "findings_updated": result.findings_updated,
-        "findings_resolved": result.findings_resolved,
+        "scan_id": proc_result.scan_id,
+        "findings_total": proc_result.findings_total,
+        "findings_inserted": proc_result.findings_inserted,
+        "findings_updated": proc_result.findings_updated,
+        "findings_resolved": proc_result.findings_resolved,
     }
     resp = cast(Response, jsonify(body))
     resp.status_code = 202
     return resp
 
 
-__all__ = ["ingest_scan"]
+# ---------------------------------------------------------------------------
+# Job-Status-Endpoint (Block R Phase D)
+# ---------------------------------------------------------------------------
+
+_MAX_ERROR_LEN = 4096
+"""Maximale Laenge des error-Strings im Status-Response (Schutz gegen riesige
+Pydantic-Stacktraces die als `error` persistiert wurden). Der Worker truncated
+bereits — hier nochmals als Defense-in-Depth."""
+
+
+def _serialize_job_status(job: ScanIngestJob) -> dict[str, Any]:
+    """Serialisiert einen `ScanIngestJob` in den API-Response-Body.
+
+    Reines Python, kein Flask-Context benoetigt — testbar ohne DB.
+
+    Format (ADR-0026 §Status-Endpoint):
+    - Basis: job_id, status, created_at (ISO), picked_up_at (ISO|null),
+             finished_at (ISO|null), attempts.
+    - bei status='done': zusaetzlich scan_id und counts-Dict aus result-JSONB.
+    - bei status='failed': zusaetzlich error (max 4096 Chars).
+
+    Counts-Felder kommen 1:1 aus `job.result` (JSONB). Fehlt ein Feld im
+    JSONB (z.B. aeltere Worker-Version), wird es mit 0 befuellt — kein
+    KeyError im Client.
+    """
+
+    def _iso(dt: datetime | None) -> str | None:
+        if dt is None:
+            return None
+        return dt.isoformat()
+
+    body: dict[str, Any] = {
+        "job_id": job.id,
+        "status": job.status,
+        "created_at": _iso(job.created_at),
+        "picked_up_at": _iso(job.picked_up_at),
+        "finished_at": _iso(job.finished_at),
+        "attempts": job.attempts,
+    }
+
+    if job.status == "done":
+        result: dict[str, Any] = job.result or {}
+        body["scan_id"] = job.scan_id
+        body["counts"] = {
+            "findings_total": result.get("findings_total", 0),
+            "findings_inserted": result.get("findings_inserted", 0),
+            "findings_updated": result.get("findings_updated", 0),
+            "findings_resolved": result.get("findings_resolved", 0),
+            "class_os_pkgs": result.get("class_os_pkgs", 0),
+            "class_lang_pkgs": result.get("class_lang_pkgs", 0),
+            "class_other": result.get("class_other", 0),
+        }
+    elif job.status == "failed":
+        raw_error = job.error or ""
+        body["error"] = raw_error[:_MAX_ERROR_LEN]
+
+    return body
+
+
+@api_bp.get("/scans/jobs/<int:job_id>")
+@csrf.exempt
+@limiter.limit(lambda: _scans_auth_rate_limit())
+def scan_job_status(job_id: int) -> Response | tuple[Response, int]:
+    """GET /api/scans/jobs/<job_id> — Async-Ingest-Job-Status (ADR-0026 Phase D).
+
+    Authentifizierung via Bearer-Token wie bei POST /api/scans. Der Job wird
+    server-scoped ausgelesen: nur Jobs des authentifizierten Servers sind
+    sichtbar. Ein Job eines anderen Servers gibt 404 zurueck (kein 403) —
+    Job-IDs werden nicht zwischen Servern geleakt.
+
+    Rate-Limit: gleicher Per-Server-Bucket wie POST /api/scans
+    (ADR-0026 §Status-Endpoint).
+    """
+    # ---- 1. Auth: Bearer-Header lesen ------------------------------------
+    token = _parse_bearer(request.headers.get("Authorization"))
+    if token is None:
+        return json_error(401, "unauthorized", "Bearer-Token fehlt oder ist ungueltig")
+
+    server = _find_server_by_token(token)
+    if server is None:
+        sess = get_session()
+        log_event(
+            "auth.failed",
+            target_type="server",
+            target_id=None,
+            metadata={"ip": request.remote_addr or "unknown", "endpoint": "/api/scans/jobs"},
+            actor="unknown",
+            session=sess,
+        )
+        sess.commit()
+        return json_error(401, "unauthorized", "Bearer-Token unbekannt")
+
+    if not server_is_active(server):
+        return json_error(403, "server_inactive", "Server ist revoked oder retired")
+
+    # ---- 2. Job-Lookup mit Server-Scoping --------------------------------
+    sess = get_session()
+    job = sess.execute(
+        select(ScanIngestJob).where(
+            ScanIngestJob.id == job_id,
+            ScanIngestJob.server_id == server.id,
+        )
+    ).scalar_one_or_none()
+
+    if job is None:
+        return json_error(404, "job_not_found", f"Job {job_id} nicht gefunden")
+
+    # ---- 3. Response aufbauen --------------------------------------------
+    log.debug(
+        "api.scans.job_status",
+        server_id=server.id,
+        job_id=job_id,
+        status=job.status,
+    )
+
+    resp = cast(Response, jsonify(_serialize_job_status(job)))
+    resp.status_code = 200
+    return resp
+
+
+__all__ = ["ingest_scan", "scan_job_status"]

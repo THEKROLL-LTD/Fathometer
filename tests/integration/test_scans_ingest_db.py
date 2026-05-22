@@ -8,6 +8,11 @@ Decken die DoD-Punkte ab:
 - Idempotenz: zweimal -> kein Duplikat, 2 Scan-Rows.
 - Resolve: Subset-Scan -> entfernte CVE wird RESOLVED.
 - 422 bei manipuliertem Envelope, ohne Echo der User-Inputs.
+
+# block_r_sync_to_async — Phase G migriert (siehe docs/blocks/R-async-ingest.md §Phase G).
+# Sync-Pfad laeuft mit SECSCAN_SCAN_INGEST_ASYNC=false (Default) — Tests bleiben gruen.
+# Bei Cutover (Phase H) wuerde SECSCAN_SCAN_INGEST_ASYNC=true diesen Pfad deaktivieren
+# und die Tests wuerden fehlschlagen. Phase G migriert sie auf den neuen Edge+Worker-Pfad.
 """
 
 from __future__ import annotations
