@@ -406,6 +406,64 @@ deprecated werden.
 
 ---
 
+## TD-011 — Default-Coverage-Luecke fuer register/keys_rotate/bulk_acknowledge nach Phase-3.2-Bulk-Migration
+
+**Was:** Im Zuge von TICKET-004 Phase 3.2 wandern alle 9 API-Test-Files
+(`tests/api/test_*.py`) als Bulk-Migration nach
+`tests/integration/test_*_db.py`. Damit verschwinden sie aus dem
+Default-`pytest`-Lauf. Fuer fuenf Endpoints ist das harmlos, weil die
+Geschaeftslogik in Service-Modulen liegt die separat unit-getestet sind
+(`findings_ingest`, `host_state_ingest`, `risk_engine`, `llm_client`,
+`llm_sanitize`, `llm_prompts`). Fuer drei Endpoints fehlt dieser
+Service-Layer **komplett** — die Route-Handler SIND die Geschaeftslogik:
+
+- `POST /api/register` (`app/api/register.py`, 138 LOC, kein Service-Modul)
+- `POST /api/keys/rotate` (`app/api/keys.py`, 142 LOC, kein Service-Modul)
+- `POST /api/findings/acknowledge` (`app/api/bulk.py`, 357 LOC, nur zwei
+  kleine Pure-Helper `_build_match_query`/`_build_ids_query`)
+
+Plus eine partielle Luecke fuer `POST /api/llm/chat` (Chat-Orchestrierung,
+SSE-Streaming, Konversations-Lifecycle — die LLM-Calls selbst sind ueber
+`llm_client`/`llm_sanitize`/`llm_prompts` abgedeckt).
+
+**Warum (Symptom):** Nach dem Slice-8-Commit ist der Default-`pytest`-Lauf
+fuer diese Endpoints **0 % abgedeckt**. Body-Validation, Rate-Limit-
+Keying, Audit-Event-Logik, Master-Key-Pruefung, Bulk-Match-Query-Bau
+laufen nur noch im `pytest -m db_integration`-Lauf. Regressions an einer
+dieser Routes wuerden im Default-Lauf nicht mehr auffallen.
+
+**Loesung:** Pro Endpoint kleine Service-Layer-Extraktion plus dazu-
+gehoerige Pure-Unit-Tests:
+
+- `register.py`: `validate_register_request(payload) -> RegisterRequest`
+  als pure Funktion mit Pydantic-Schema; `_register_rate_limit()`
+  pure-testbar. Plus eine `_register_server(sess, request) -> Server`-
+  Service-Funktion, die der Route-Handler aufruft.
+- `keys.py`: analog `validate_rotate_request` + `_rotate_key(sess, server)`.
+- `bulk.py`: `_build_match_query` und `_build_ids_query` mit Fake-Filter-
+  Objekten unit-testen; `validate_bulk_ack_request` als Pydantic-Pure-
+  Layer.
+- `llm_chat.py`: `_sse_payload`, `_collect_history`, `_json_error` als
+  Pure-Helper-Tests.
+
+Test-Erwartung: ~30-50 neue Pure-Unit-Tests in `tests/services/` oder
+`tests/api/unit/`.
+
+**Aufwand:** ~4-6 Stunden Refactor + Tests. Etwas weniger als TD-005-HIGH
+weil hier nur die drei kritischen Endpoints + Pure-Helper-Layer von
+llm_chat angefasst werden, nicht die kompletten View-Tests.
+
+**Wann:** Vor Phase-3.2-Abschluss in TICKET-004 NICHT erzwungen — Phase
+3.2 schliesst bewusst mit dieser dokumentierten Luecke ab. Folge-Aufgabe
+sobald jemand ohnehin an register/keys_rotate/bulk_acknowledge-Route
+arbeitet, ODER vor v1.0-Release.
+
+Hinweis: Verwandt mit TD-005 (das ist die Test-Migration-Schiene fuer
+Files die schon einen Service-Layer haben — TD-011 ist die Schiene fuer
+Files OHNE Service-Layer und braucht erst die Extraktion).
+
+---
+
 ## Konventionen fuer neue Eintraege
 
 - ID: `TD-NNN`, fortlaufend.
