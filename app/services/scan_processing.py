@@ -26,7 +26,14 @@ from sqlalchemy.orm import Session
 
 from app.audit import log_event
 from app.config import Settings, load_settings
-from app.models import ApplicationGroup, Finding, FindingStatus, LLMJob, Server
+from app.models import (
+    ApplicationGroup,
+    ApplicationGroupEvaluation,
+    Finding,
+    FindingStatus,
+    LLMJob,
+    Server,
+)
 from app.schemas.scan_envelope import Envelope
 from app.services.finding_group_inheritance import inherit_group_risk_to_findings
 from app.services.findings_ingest import ingest_scan as run_ingest
@@ -283,6 +290,11 @@ def process_scan_envelope(
             pass1_batches_count = len(batches)
 
         # Betroffene Groups → Pass-2-Jobs (Fingerprint-Check)
+        # Block T (ADR-0028): Junction-Lookup pro (group, server). Heutige
+        # Skip-Logik ``grp.group_findings_fingerprint == new_fp and
+        # grp.risk_band is not None`` ist nicht mehr direkt anwendbar — Eval
+        # liegt jetzt in ``application_group_evaluations``. Batch-SELECT
+        # vermeidet N+1.
         affected_groups = list(
             session.execute(
                 select(ApplicationGroup)
@@ -296,6 +308,22 @@ def process_scan_envelope(
             .scalars()
             .all()
         )
+
+        # Junction-Rows fuer alle affected_groups dieses Servers vorab laden.
+        evaluations_by_group_id: dict[int, ApplicationGroupEvaluation] = {}
+        if affected_groups:
+            affected_ids = [grp.id for grp in affected_groups]
+            evaluations_by_group_id = {
+                ev.group_id: ev
+                for ev in session.execute(
+                    select(ApplicationGroupEvaluation).where(
+                        ApplicationGroupEvaluation.server_id == server.id,
+                        ApplicationGroupEvaluation.group_id.in_(affected_ids),
+                    )
+                )
+                .scalars()
+                .all()
+            }
 
         pass2_queued = 0
         for grp in affected_groups:
@@ -313,7 +341,9 @@ def process_scan_envelope(
             if not findings_in_group:
                 continue
             new_fp = group_findings_fingerprint(findings_in_group)
-            if grp.group_findings_fingerprint == new_fp and grp.risk_band is not None:
+            existing_eval = evaluations_by_group_id.get(grp.id)
+            if existing_eval is not None and existing_eval.group_findings_fingerprint == new_fp:
+                # Junction-Row existiert und Fingerprint stimmt — kein Pass-2 noetig.
                 continue
             pass2_job = LLMJob(
                 job_type="risk_evaluation",

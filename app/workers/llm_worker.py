@@ -42,10 +42,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import create_engine, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import load_settings
-from app.models import ApplicationGroup, Finding, LLMJob, Server
+from app.models import (
+    ApplicationGroup,
+    ApplicationGroupEvaluation,
+    Finding,
+    LLMJob,
+    Server,
+)
 from app.services import llm_budget, llm_debug_log
 from app.services.finding_group_inheritance import inherit_group_risk_to_findings
 from app.services.group_matcher import GroupMatcher, derive_group_kind
@@ -1074,15 +1081,19 @@ async def _do_pass2(job_id: int) -> None:
         )
         if cached is not None:
             record_hit(session, cached)
-            _apply_pass2_to_group(
-                group,
+            _upsert_evaluation(
+                session,
+                group_id=group_id,
+                server_id=server_id,
                 risk_band=cached.risk_band,
                 reason=cached.reason,
                 worst_finding_id=cached.worst_finding_id,
                 gf_fp=gf_fp,
                 action_type=cached.action_type,
             )
-            inherited = inherit_group_risk_to_findings(session, group_ids=[group_id])
+            inherited = inherit_group_risk_to_findings(
+                session, group_ids=[group_id], server_id=server_id
+            )
             job.status = "done"
             job.completed_at = datetime.now(UTC)
             job.result = {
@@ -1229,15 +1240,19 @@ async def _do_pass2(job_id: int) -> None:
         group2 = session.get(ApplicationGroup, group_id)
         inherited = 0
         if group2 is not None:
-            _apply_pass2_to_group(
-                group2,
+            _upsert_evaluation(
+                session,
+                group_id=group_id,
+                server_id=server_id,
                 risk_band=evaluation.risk_band,
                 reason=evaluation.reason,
                 worst_finding_id=evaluation.worst_finding_id,
                 gf_fp=gf_fp,
                 action_type=evaluation.action_type,
             )
-            inherited = inherit_group_risk_to_findings(session, group_ids=[group_id])
+            inherited = inherit_group_risk_to_findings(
+                session, group_ids=[group_id], server_id=server_id
+            )
         store(
             session,
             cache_key=cache_key,
@@ -1371,30 +1386,52 @@ def _pick_evaluation(result: Pass2Result, group_label: str) -> Pass2Evaluation |
     return None
 
 
-def _apply_pass2_to_group(
-    group: ApplicationGroup,
+def _upsert_evaluation(
+    session: Any,
     *,
+    group_id: int,
+    server_id: int,
     risk_band: str,
-    reason: str,
+    reason: str | None,
     worst_finding_id: int | None,
     gf_fp: str,
     action_type: str | None = None,
 ) -> None:
-    """Setzt die Bewertungs-Felder auf der ApplicationGroup-Row.
+    """UPSERT in ``application_group_evaluations`` (ADR-0028, Block T).
 
-    ``action_type`` ist v0.9.3-Output von Pass 2. Bei Cache-Hits aus Pre-
-    v0.9.3-Eintraegen (ohne ``action_type``) bleibt das Feld auf seinem
-    Voherwert — wir ueberschreiben es nur wenn ein non-None Wert kommt,
-    damit ein alter Cache eine neue LLM-Bewertung nicht zurueck-`None`'d.
+    Ersetzt das frühere ``_apply_pass2_to_group``: statt die Eval-Felder
+    direkt auf der ``ApplicationGroup``-Row zu setzen (last-write-wins-
+    Bug zwischen Servern), wird die ``(group_id, server_id)``-Junction-Row
+    per ``pg_insert().on_conflict_do_update()`` atomar geschrieben.
+
+    Bei Cache-Hits aus Pre-v0.9.3-Eintraegen ohne ``action_type`` bleibt
+    der Wert ``None`` — die UI ``NULL → 'investigate'``-Abbildung greift
+    ohnehin.
     """
-    group.risk_band = risk_band
-    group.risk_band_reason = reason
-    group.risk_band_source = "llm"
-    group.risk_band_computed_at = datetime.now(UTC)
-    group.worst_finding_id = worst_finding_id
-    group.group_findings_fingerprint = gf_fp
-    if action_type is not None:
-        group.action_type = action_type
+    stmt = pg_insert(ApplicationGroupEvaluation).values(
+        group_id=group_id,
+        server_id=server_id,
+        risk_band=risk_band,
+        risk_band_reason=reason,
+        risk_band_source="llm",
+        risk_band_computed_at=datetime.now(UTC),
+        worst_finding_id=worst_finding_id,
+        group_findings_fingerprint=gf_fp,
+        action_type=action_type,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["group_id", "server_id"],
+        set_={
+            "risk_band": stmt.excluded.risk_band,
+            "risk_band_reason": stmt.excluded.risk_band_reason,
+            "risk_band_source": stmt.excluded.risk_band_source,
+            "risk_band_computed_at": stmt.excluded.risk_band_computed_at,
+            "worst_finding_id": stmt.excluded.worst_finding_id,
+            "group_findings_fingerprint": stmt.excluded.group_findings_fingerprint,
+            "action_type": stmt.excluded.action_type,
+        },
+    )
+    session.execute(stmt)
 
 
 def _hydrate_server_snapshot(session: Session, server: Server) -> None:

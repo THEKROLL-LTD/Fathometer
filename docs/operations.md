@@ -197,3 +197,61 @@ Phasen-Marker im `secscan-llm-worker`-Container:
 - `scan_ingest.job_failed` — `{job_id, error_class, attempts}` bei finalem Fail
 - `scan_ingest.retention_sweep_done` — `{cleared_payloads, deleted_failed}` stuendlich
 - `scan_ingest.stale_reaped` — `{requeued, failed}` bei Stale-Reaper-Pass
+
+## Block-T-Application-Group-Evaluations (ADR-0028)
+
+### Operator-Sicht
+
+`application_groups` traegt seit Block T keine Eval-Spalten mehr — die
+sieben server-abhaengigen Felder (`risk_band`, `risk_band_reason`,
+`risk_band_source`, `risk_band_computed_at`, `worst_finding_id`,
+`group_findings_fingerprint`, `action_type`) leben in der neuen
+Junction-Tabelle `application_group_evaluations` mit Composite-PK
+`(group_id, server_id)`. Pass-2 schreibt per UPSERT, Findings erben
+ihren Band aus der fuer ihren Server zustaendigen Junction-Row — der
+Cross-Server-Leak aus ADR-0023 ist behoben.
+
+### Erwartete UI-Luecke nach Deploy
+
+**Nach dem Cutover:** Migration `0011_app_group_evals` legt die
+Junction-Tabelle **leer** an und droppt die alten Eval-Spalten auf
+`application_groups`. Bestehende Bewertungen werden **nicht** migriert
+(ADR-0028 §Migration — Drop & Rebuild begruendet).
+
+Konsequenz: auf jeder Server-Detail-Seite zeigen alle Application-Group-
+Cards die **„Nicht bewertet"-Pille** mit Spinner, bis der jeweilige
+Server seinen naechsten regulaeren Scan abliefert. Der Block-P-Hook im
+Worker-Pfad (`app/services/scan_processing.py`) prueft pro Scan ob eine
+Junction-Row fuer `(group, server)` existiert und triggert Pass-2 wenn
+nicht — der Re-Build der Junction passiert also organisch ueber das
+natuerliche Scan-Intervall des Agents (typisch 24h, oft 1-6h).
+
+Cache-Hit-Rate aus `llm_risk_cache` macht den Re-Eval-Lauf nahezu
+kostenlos: die _Bewertung_ pro `(group, group_findings_fp, cve_data_fp,
+server_context_fp)` ist schon im Cache. Pass-2 muss nur die Junction-Row
+schreiben — kein LLM-Token-Verbrauch (~95% Cache-Hits erwartet).
+
+### Manueller Re-Eval (optional)
+
+Operator kann pro Server einen Force-Scan triggern statt zu warten:
+
+```bash
+# Direkt am Agent-Host:
+secscan-agent  # Cron-Script, sofort ausfuehren
+
+# Oder Backend-seitig fuer einen einzelnen Server-Key:
+curl -X POST https://<secscan>/api/scans \
+  -H "Authorization: Bearer <SERVER_KEY>" \
+  -H "Content-Encoding: gzip" \
+  -H "Content-Type: application/json" \
+  --data-binary @scan.json.gz
+```
+
+### Junction-Inspect (SQL)
+
+| Frage | SQL |
+|---|---|
+| Wie viele Bewertungen liegen vor? | `SELECT count(*) FROM application_group_evaluations` |
+| Welche Server haben noch keine Bewertung? | `SELECT s.id, s.name FROM servers s LEFT JOIN application_group_evaluations e ON e.server_id = s.id WHERE e.group_id IS NULL` |
+| Bewertungs-Verteilung pro Server | `SELECT server_id, risk_band, count(*) FROM application_group_evaluations GROUP BY server_id, risk_band ORDER BY server_id` |
+| Stale-Bewertungen (>30 Tage) | `SELECT group_id, server_id, risk_band_computed_at FROM application_group_evaluations WHERE risk_band_computed_at < now() - interval '30 days'` |

@@ -96,8 +96,8 @@
                     {% endif %}
                   </td>
                   <td class="text-xs opacity-70">
-                    {% if entry.group.risk_band_reason %}
-                      {{ entry.group.risk_band_reason }}
+                    {% if entry.evaluation and entry.evaluation.risk_band_reason %}
+                      {{ entry.evaluation.risk_band_reason }}
                     {% else %}
                       <span class="opacity-50">—</span>
                     {% endif %}

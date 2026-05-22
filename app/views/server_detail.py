@@ -43,6 +43,7 @@ from app.forms import (
 )
 from app.models import (
     ApplicationGroup,
+    ApplicationGroupEvaluation,
     Finding,
     FindingStatus,
     Server,
@@ -119,25 +120,28 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
 
     Block Q (ADR-0025 §2): der Loader rendert nur noch das Card-Inventar.
     Die Findings-Tabellen pro Group werden vom Browser via HTMX-Lazy-Load
-    nachgefordert (`group_findings_fragment`-Endpoint). Damit fallen die
-    frueheren Per-Group-Findings-Queries weg; statt N+1 fuehren wir exakt
-    drei aggregierte Queries aus:
+    nachgefordert (`group_findings_fragment`-Endpoint). Block T (ADR-0028)
+    ergaenzt einen vierten Batch-SELECT fuer die Junction-Bewertungen — statt
+    N+1 fuehren wir exakt vier aggregierte Queries aus:
 
       1. Count-Aggregat: pro Group die Anzahl OPEN-Findings auf diesem
          Server. Liefert gleichzeitig die Liste relevanter Group-IDs.
       2. Group-Metadaten: ein `IN (...)`-Batch der `ApplicationGroup`-Zeilen
          fuer die im Count-Aggregat ermittelten IDs.
-      3. Worst-Finding-Batch: ein `IN (...)`-Batch der Worst-Finding-
+      3. Junction-Batch (Block T): ein `WHERE server_id=? AND group_id IN
+         (...)`-Lookup der per-(group, server)-Eval-Rows. Fehlende Rows
+         bedeuten "Nicht bewertet" — Group-Card rendert in dem Fall die
+         entsprechende Pille (siehe ADR-0028 §UI-bei-Eval-Lücke).
+      4. Worst-Finding-Batch: ein `IN (...)`-Batch der Worst-Finding-
          Objekte (server-gefiltert, damit Cross-Server-Drift unsichtbar
-         bleibt).
+         bleibt). `worst_finding_id` kommt jetzt aus der Junction-Row.
 
     Sortierung der Groups: DESC nach `RISK_BAND_SORT_RANK` — escalate first,
-    NULL-Band-Groups (Worker arbeitet noch) als `pending`-Rank-40 einsortiert.
+    Groups ohne Junction-Row als `pending`-Rank-40 einsortiert (UI-Pille
+    "Nicht bewertet").
 
-    Rueckgabe-Format: list[dict] mit Keys `group`, `count`, `worst_finding`.
-    Das ist absichtlich keine Dataclass, weil Templates direkt dict-Access
-    nutzen und keine Typ-Stabilitaet brauchen. Block-Q hat `findings`
-    bewusst aus dem Vertrag entfernt — siehe ADR-0025 §2.
+    Rueckgabe-Format: list[dict] mit Keys `group`, `count`, `evaluation`,
+    `worst_finding`. `evaluation` ist die Junction-Row oder `None`.
     """
     # (1) Count-Aggregat: liefert sowohl die Group-IDs (mindestens 1 OPEN-
     # Finding auf diesem Server) als auch den Counter-Wert pro Group fuer
@@ -167,10 +171,26 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     groups_stmt = select(ApplicationGroup).where(ApplicationGroup.id.in_(group_ids))
     groups = list(sess.execute(groups_stmt).scalars().all())
 
-    # (3) Worst-Finding-Batch: `worst_finding_id` ist kein FK, darum manuell
+    # (3) Junction-Batch (Block T, ADR-0028): per-(group, server)-Eval-Rows
+    # in einem Sprung laden. Fehlende Rows -> "Nicht bewertet".
+    evaluations_by_id: dict[int, ApplicationGroupEvaluation] = {
+        ev.group_id: ev
+        for ev in sess.execute(
+            select(ApplicationGroupEvaluation).where(
+                ApplicationGroupEvaluation.server_id == server_id,
+                ApplicationGroupEvaluation.group_id.in_(group_ids),
+            )
+        )
+        .scalars()
+        .all()
+    }
+
+    # (4) Worst-Finding-Batch: `worst_finding_id` ist kein FK, darum manuell
     # aufloesen. Filter auf Server, damit ein veralteter Cross-Server-Verweis
-    # nicht stillschweigend angezeigt wird.
-    wf_ids = [g.worst_finding_id for g in groups if g.worst_finding_id is not None]
+    # nicht stillschweigend angezeigt wird. Quelle ist jetzt die Junction.
+    wf_ids = [
+        ev.worst_finding_id for ev in evaluations_by_id.values() if ev.worst_finding_id is not None
+    ]
     worst_by_id: dict[int, Finding] = {}
     if wf_ids:
         worst_stmt = select(Finding).where(Finding.id.in_(wf_ids), Finding.server_id == server_id)
@@ -179,28 +199,29 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
 
     result: list[dict[str, Any]] = []
     for grp in groups:
+        ev = evaluations_by_id.get(grp.id)
         result.append(
             {
                 "group": grp,
+                "evaluation": ev,
                 "count": counts_by_id.get(grp.id, 0),
                 "worst_finding": (
-                    worst_by_id.get(grp.worst_finding_id)
-                    if grp.worst_finding_id is not None
+                    worst_by_id.get(ev.worst_finding_id)
+                    if ev is not None and ev.worst_finding_id is not None
                     else None
                 ),
             }
         )
 
-    # Sortierung: DESC nach RISK_BAND_SORT_RANK. NULL-Band ranked als
-    # PENDING (40) ein — Operator soll evaluating-Groups oben sehen, nicht
-    # versteckt am Ende.
+    # Sortierung: DESC nach RISK_BAND_SORT_RANK. Groups ohne Junction-Row
+    # ranked als PENDING (40) ein — Operator soll "Nicht bewertet"-Cards oben
+    # sehen, nicht versteckt am Ende.
     def _rank(entry: dict[str, Any]) -> int:
-        band = entry["group"].risk_band
-        if band is None:
+        ev = entry["evaluation"]
+        if ev is None:
             return RISK_BAND_SORT_RANK[RiskBand.PENDING]
-        # Map String -> Enum -> Rank. Fallback 0 bei unbekanntem Wert.
         try:
-            return RISK_BAND_SORT_RANK[RiskBand(band)]
+            return RISK_BAND_SORT_RANK[RiskBand(ev.risk_band)]
         except (KeyError, ValueError):
             return 0
 
@@ -278,9 +299,14 @@ def _build_action_sections(
         matches: list[dict[str, Any]] = []
         for entry in application_groups:
             grp = entry["group"]
-            if grp.risk_band != spec["risk_band"]:
+            ev = entry.get("evaluation")
+            if ev is None:
+                # Block T: ohne Junction-Row gibt es weder Band noch
+                # Action-Type — Group wird in keiner Card aufgefuehrt.
                 continue
-            if grp.action_type != spec["action_type"]:
+            if ev.risk_band != spec["risk_band"]:
+                continue
+            if ev.action_type != spec["action_type"]:
                 continue
             if spec["group_kind"] is not None and grp.group_kind != spec["group_kind"]:
                 continue

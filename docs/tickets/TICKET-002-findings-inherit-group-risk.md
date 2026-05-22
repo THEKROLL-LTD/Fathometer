@@ -1,6 +1,6 @@
 # TICKET-002 — Findings erben Risk-Band von ApplicationGroup
 
-**Status:** Offen
+**Status:** Erledigt durch Block T (ADR-0028, 2026-05-22). Inheritance-Service liegt in `app/services/finding_group_inheritance.py`; jointet seit Block T auf `application_group_evaluations` mit Composite-Match `(group_id, server_id)` — kein Cross-Server-Leak mehr. Inhaltliches Ziel (Findings tragen den von Pass-2 ermittelten Band) ist erreicht; das urspruenglich skizzierte Schema (Direkt-Set auf `ApplicationGroup.risk_band`) wurde durch die Junction abgeloest.
 **Komponenten:** ``app/services/llm_risk_reviewer.py``, ``app/services/findings_ingest.py``, ``app/services/group_matcher.py``, ggf. ``app/workers/llm_worker.py``
 **Umfang:** Daten-Vererbung + Re-Ingest-Pfad
 

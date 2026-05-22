@@ -756,13 +756,15 @@ class ServerService(Base):
 class ApplicationGroup(Base):
     """Owner-Application-Group fuer Findings (k3s, openssh-server, ...).
 
-    Match-Patterns persistieren die Pass-1-LLM-Lernerfahrung. Bewertungs-
-    Felder werden in Pass 2 gesetzt und auf alle enthaltenen Findings
-    vererbt (Worst-Case-Band).
+    Match-Patterns persistieren die Pass-1-LLM-Lernerfahrung. **Bewertung
+    wandert ab Block T (ADR-0028) in die Junction-Tabelle
+    `application_group_evaluations` mit Composite-PK (group_id, server_id).**
+    Diese Klasse haelt nur noch fleet-weite Identitaet + Pattern-Library.
 
-    `worst_finding_id` ist bewusst KEIN ForeignKey — die Group ueberlebt
-    Finding-Deletes, und ein stale Verweis ist akzeptabel (UI fallback'd
-    auf "Worst-Finding nicht mehr vorhanden").
+    Pass-2 schreibt seit Block T per UPSERT in die Junction, nicht mehr
+    direkt auf diese Zeile. Findings erben ihren Band aus der fuer ihren
+    Server zustaendigen Junction-Row (TICKET-002, Composite-Match in
+    :mod:`app.services.finding_group_inheritance`).
     """
 
     __tablename__ = "application_groups"
@@ -784,21 +786,11 @@ class ApplicationGroup(Base):
         ARRAY(String(512)), nullable=False, default=list
     )
 
-    # Bewertung — von Pass 2 (LLM) oder manuellem Override gesetzt.
-    risk_band: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    risk_band_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    risk_band_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    risk_band_computed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    worst_finding_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    group_findings_fingerprint: Mapped[str | None] = mapped_column(String(16), nullable=True)
-
-    # v0.9.3 (ADR-0023 §Update v0.9.3): strukturiertes ``action_type`` und
-    # deterministisches ``group_kind``. ``action_type`` setzt das LLM in
-    # Pass 2, ``group_kind`` wird beim Group-Insert aus den ``match_rules``
-    # abgeleitet (siehe :func:`app.services.group_matcher.derive_group_kind`).
-    action_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # v0.9.3 (ADR-0023 §Update v0.9.3): deterministisches ``group_kind``,
+    # wird beim Group-Insert aus den ``match_rules`` abgeleitet (siehe
+    # :func:`app.services.group_matcher.derive_group_kind`). Trennt
+    # OS-Pakete (``apt``/``dnf upgrade`` reicht) von Application-Bundles
+    # (Vendor-Update noetig).
     group_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Lifecycle / Audit.
@@ -809,25 +801,17 @@ class ApplicationGroup(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     findings: Mapped[list[Finding]] = relationship("Finding", back_populates="application_group")
+    evaluations: Mapped[list[ApplicationGroupEvaluation]] = relationship(
+        "ApplicationGroupEvaluation",
+        back_populates="group",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
-        # Wichtig: nur die finalen LLM-Bands. `pending`/`unknown` sind reine
-        # Pre-Triage-Werte aus Block O und duerfen hier nicht erscheinen.
-        CheckConstraint(
-            "risk_band IS NULL OR risk_band IN ('escalate','act','mitigate','monitor','noise')",
-            name="ck_application_groups_band",
-        ),
         CheckConstraint(
             "source IN ('llm','manual')",
             name="ck_application_groups_source",
-        ),
-        # v0.9.3: action_type (LLM-Output, Pflicht ab Pass 2). ``investigate``
-        # ist Pre-Triage-only (Group hat dann ``action_type IS NULL`` bis das
-        # LLM das Feld setzt; UI bildet NULL → ``investigate`` ab).
-        CheckConstraint(
-            "action_type IS NULL OR action_type IN "
-            "('patch','mitigate','watch','none','investigate')",
-            name="ck_application_groups_action_type",
         ),
         # v0.9.3: group_kind (deterministisch im Backend aus ``match_rules``
         # abgeleitet). Trennt OS-Pakete (``apt``/``dnf upgrade`` reicht) von
@@ -835,6 +819,83 @@ class ApplicationGroup(Base):
         CheckConstraint(
             "group_kind IS NULL OR group_kind IN ('application_bundle','os_package')",
             name="ck_application_groups_group_kind",
+        ),
+    )
+
+
+class ApplicationGroupEvaluation(Base):
+    """Per-(group, server) LLM-Bewertung — Junction-Tabelle (ADR-0028, Block T).
+
+    Loest den last-write-wins-Bug aus ADR-0023: dieselbe Pattern-Group hat
+    auf zwei unterschiedlichen Servern unterschiedliche Bewertungen
+    (Listener-Profil, Host-Snapshot, Process-Inventar). Composite-PK
+    (group_id, server_id) trennt die Bewertungen physisch.
+
+    Pass-2 schreibt hier per UPSERT (``pg_insert().on_conflict_do_update``)
+    statt direkt auf ``ApplicationGroup`` zu setzen. Findings erben ihren
+    Band aus der fuer ihren Server zustaendigen Junction-Row (Composite-
+    Match in :mod:`app.services.finding_group_inheritance`).
+
+    ``worst_finding_id`` ist bewusst KEIN ForeignKey — die Junction-Row
+    ueberlebt Finding-Deletes mit stale-Pointer, UI fallback'd auf
+    "Worst-Finding nicht mehr vorhanden" (analog der frueheren Logik auf
+    ``ApplicationGroup``).
+    """
+
+    __tablename__ = "application_group_evaluations"
+
+    group_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("application_groups.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    )
+    server_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    )
+
+    # Bewertung. ``risk_band`` ist NOT NULL — "Nicht bewertet" wird durch
+    # das Fehlen der Zeile ausgedrueckt, nicht durch NULL.
+    risk_band: Mapped[str] = mapped_column(String(16), nullable=False)
+    risk_band_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    risk_band_source: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'llm'")
+    )
+    risk_band_computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    worst_finding_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    group_findings_fingerprint: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    action_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    group: Mapped[ApplicationGroup] = relationship("ApplicationGroup", back_populates="evaluations")
+
+    __table_args__ = (
+        CheckConstraint(
+            "risk_band IN ('escalate','act','mitigate','monitor','noise')",
+            name="ck_app_group_evals_band",
+        ),
+        CheckConstraint(
+            "risk_band_source IN ('llm','manual')",
+            name="ck_app_group_evals_source",
+        ),
+        CheckConstraint(
+            "action_type IS NULL OR action_type IN "
+            "('patch','mitigate','watch','none','investigate')",
+            name="ck_app_group_evals_action_type",
+        ),
+        Index(
+            "ix_app_group_evals_server",
+            "server_id",
+            "risk_band",
+        ),
+        Index(
+            "ix_app_group_evals_worst_finding",
+            "worst_finding_id",
+            postgresql_where=text("worst_finding_id IS NOT NULL"),
         ),
     )
 
@@ -1189,6 +1250,7 @@ __all__ = [
     "LLM_MESSAGE_ROLE_ENUM_NAME",
     "SEVERITY_ENUM_NAME",
     "ApplicationGroup",
+    "ApplicationGroupEvaluation",
     "AttackVector",
     "AuditEvent",
     "Base",

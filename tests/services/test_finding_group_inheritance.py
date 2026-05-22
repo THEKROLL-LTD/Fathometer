@@ -1,4 +1,10 @@
-"""Tests fuer Group-Risk-Vererbung auf Findings."""
+"""Tests fuer Group-Risk-Vererbung auf Findings (Block T, ADR-0028).
+
+Composite-Match (Block T): ``Finding.application_group_id ==
+ApplicationGroupEvaluation.group_id AND Finding.server_id ==
+ApplicationGroupEvaluation.server_id``. Verhindert Cross-Server-Leak
+(Server-A's Findings erben nur aus ``(group, A)``-Junction).
+"""
 
 from __future__ import annotations
 
@@ -27,7 +33,7 @@ def _compiled_sql(session: MagicMock) -> str:
     )
 
 
-def test_inherits_group_band_reason_and_llm_source_without_action_type() -> None:
+def test_inherits_junction_band_reason_and_llm_source_without_action_type() -> None:
     session = _session_with_rowcount(5)
 
     updated = inherit_group_risk_to_findings(session)
@@ -35,9 +41,9 @@ def test_inherits_group_band_reason_and_llm_source_without_action_type() -> None
     assert updated == 5
     sql = _compiled_sql(session)
     assert "UPDATE findings" in sql
-    assert "FROM application_groups" in sql
-    assert "risk_band=application_groups.risk_band" in sql
-    assert "risk_band_reason=application_groups.risk_band_reason" in sql
+    assert "FROM application_group_evaluations" in sql
+    assert "risk_band=application_group_evaluations.risk_band" in sql
+    assert "risk_band_reason=application_group_evaluations.risk_band_reason" in sql
     assert "risk_band_source='llm'" in sql
     assert "risk_band_computed_at=now()" in sql
     assert "action_type" not in sql
@@ -45,22 +51,17 @@ def test_inherits_group_band_reason_and_llm_source_without_action_type() -> None
     session.commit.assert_not_called()
 
 
-def test_skips_groups_without_final_risk_band_in_sql_shape() -> None:
+def test_composite_match_joins_group_id_and_server_id() -> None:
+    """Block T: Finding erbt nur aus der Junction-Row die seinen Server matched."""
     session = _session_with_rowcount()
 
     inherit_group_risk_to_findings(session)
 
     sql = _compiled_sql(session)
-    assert "application_groups.risk_band IS NOT NULL" in sql
-
-
-def test_only_grouped_findings_are_joined_to_application_group() -> None:
-    session = _session_with_rowcount()
-
-    inherit_group_risk_to_findings(session)
-
-    sql = _compiled_sql(session)
-    assert "findings.application_group_id = application_groups.id" in sql
+    # Beide Bedingungen muessen im WHERE-Clause stehen — sonst ist es
+    # last-write-wins-Cross-Server-Leak.
+    assert "findings.application_group_id = application_group_evaluations.group_id" in sql
+    assert "findings.server_id = application_group_evaluations.server_id" in sql
 
 
 def test_idempotency_filter_checks_band_source_and_reason() -> None:
@@ -69,9 +70,12 @@ def test_idempotency_filter_checks_band_source_and_reason() -> None:
     inherit_group_risk_to_findings(session)
 
     sql = _compiled_sql(session)
-    assert "findings.risk_band IS DISTINCT FROM application_groups.risk_band" in sql
+    assert "findings.risk_band IS DISTINCT FROM application_group_evaluations.risk_band" in sql
     assert "findings.risk_band_source IS DISTINCT FROM 'llm'" in sql
-    assert "findings.risk_band_reason IS DISTINCT FROM application_groups.risk_band_reason" in sql
+    assert (
+        "findings.risk_band_reason IS DISTINCT FROM "
+        "application_group_evaluations.risk_band_reason" in sql
+    )
 
 
 def test_group_ids_filter_limits_update_to_given_groups() -> None:
@@ -80,7 +84,7 @@ def test_group_ids_filter_limits_update_to_given_groups() -> None:
     inherit_group_risk_to_findings(session, group_ids=[10, 20])
 
     sql = _compiled_sql(session)
-    assert "application_groups.id IN (10, 20)" in sql
+    assert "application_group_evaluations.group_id IN (10, 20)" in sql
 
 
 def test_server_id_filter_limits_update_to_server() -> None:
@@ -98,7 +102,7 @@ def test_group_and_server_filters_can_be_combined() -> None:
     inherit_group_risk_to_findings(session, group_ids=[7], server_id=42)
 
     sql = _compiled_sql(session)
-    assert "application_groups.id IN (7)" in sql
+    assert "application_group_evaluations.group_id IN (7)" in sql
     assert "findings.server_id = 42" in sql
 
 

@@ -1,8 +1,14 @@
-"""Vererbung von ApplicationGroup-Risk-Bands auf Findings.
+"""Vererbung von Per-(group, server)-Eval-Bands auf Findings.
 
-Block P bewertet Risk final auf Group-Ebene. Dieser Service denormalisiert das
-Verdict auf ``findings.risk_band``, damit bestehende Queries/Filter ohne Join
-korrekte Werte sehen.
+Pass-2 bewertet Risk pro ``(ApplicationGroup, Server)`` — die Junction-Tabelle
+``application_group_evaluations`` haelt diese Bewertungen (ADR-0028, Block T).
+Dieser Service denormalisiert das Verdict auf ``findings.risk_band``, damit
+bestehende Queries/Filter ohne Join korrekte Werte sehen.
+
+**Composite-Match (Block T):** Ein Finding erbt aus der Junction-Row die
+seinen ``server_id`` UND seinen ``application_group_id`` matched — kein
+Cross-Server-Leak mehr (im Gegensatz zur frueheren Logik, die nur auf
+``group_id`` jointe und damit den last-write-wins-Bug vererbte).
 """
 
 from __future__ import annotations
@@ -12,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, update
 
-from app.models import ApplicationGroup, Finding
+from app.models import ApplicationGroupEvaluation, Finding
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -24,7 +30,11 @@ def inherit_group_risk_to_findings(
     group_ids: Sequence[int] | None = None,
     server_id: int | None = None,
 ) -> int:
-    """Setzt Finding-Risk-Bands auf das Verdict der zugeordneten Group.
+    """Setzt Finding-Risk-Bands auf das Verdict der zugeordneten Junction-Row.
+
+    Composite-Match ``(Finding.application_group_id == Junction.group_id
+    AND Finding.server_id == Junction.server_id)`` — Server-A's Findings
+    erben aus ``(group, A)``-Junction, B's Findings aus ``(group, B)``.
 
     Der Service ist idempotent und transaktionsneutral: er fuehrt keinen
     Commit aus. Caller behalten ihre bestehende Transaktionsgrenze.
@@ -32,23 +42,27 @@ def inherit_group_risk_to_findings(
     session.flush()
     stmt = (
         update(Finding)
-        .where(Finding.application_group_id == ApplicationGroup.id)
-        .where(ApplicationGroup.risk_band.is_not(None))
+        .where(Finding.application_group_id == ApplicationGroupEvaluation.group_id)
+        .where(Finding.server_id == ApplicationGroupEvaluation.server_id)
         .where(
-            (Finding.risk_band.is_distinct_from(ApplicationGroup.risk_band))
+            (Finding.risk_band.is_distinct_from(ApplicationGroupEvaluation.risk_band))
             | (Finding.risk_band_source.is_distinct_from("llm"))
-            | (Finding.risk_band_reason.is_distinct_from(ApplicationGroup.risk_band_reason))
+            | (
+                Finding.risk_band_reason.is_distinct_from(
+                    ApplicationGroupEvaluation.risk_band_reason
+                )
+            )
         )
         .values(
-            risk_band=ApplicationGroup.risk_band,
-            risk_band_reason=ApplicationGroup.risk_band_reason,
+            risk_band=ApplicationGroupEvaluation.risk_band,
+            risk_band_reason=ApplicationGroupEvaluation.risk_band_reason,
             risk_band_source="llm",
             risk_band_computed_at=func.now(),
         )
         .execution_options(synchronize_session=False)
     )
     if group_ids is not None:
-        stmt = stmt.where(ApplicationGroup.id.in_(list(group_ids)))
+        stmt = stmt.where(ApplicationGroupEvaluation.group_id.in_(list(group_ids)))
     if server_id is not None:
         stmt = stmt.where(Finding.server_id == server_id)
 

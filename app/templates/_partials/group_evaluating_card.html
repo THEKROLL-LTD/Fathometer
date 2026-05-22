@@ -1,8 +1,12 @@
-{# Application-Group-Card im `evaluating`-State (Block P, ADR-0023; ADR-0025 §2).
+{# Application-Group-Card im `evaluating`-/`Nicht bewertet`-State
+   (Block P, ADR-0023; ADR-0025 §2; ADR-0028 §UI-bei-Eval-Lücke).
 
-   Wird gerendert wenn `group.risk_band IS NULL` — also Pass 1 ist durch
-   (Group existiert mit Label), aber Pass 2 hat noch keinen Risk-Band
-   geschrieben. Block-L-Polling fueltert die UI nach.
+   Wird gerendert wenn fuer diese `(group, server)`-Kombination keine
+   Junction-Row in `application_group_evaluations` existiert — also Pass 1
+   ist durch (Group existiert mit Label), aber Pass 2 hat fuer diesen
+   Server noch nichts persistiert. Beim naechsten regulaeren Scan triggert
+   der Block-P-Hook Pass-2 (siehe `app/services/scan_processing.py`).
+   Block-L-Polling fueltert die UI nach sobald die Junction-Row erscheint.
 
    Render-Vertrag:
      - `group` : ApplicationGroup (mit `id`, `label`, `explanation?`).

@@ -1,14 +1,20 @@
-{# Application-Group-Card (Block P, ADR-0023 §UI-Konsequenzen; ADR-0025 §2).
+{# Application-Group-Card (Block P, ADR-0023 §UI-Konsequenzen; ADR-0025 §2;
+   ADR-0028 §UI-bei-Eval-Lücke).
 
    Render-Vertrag:
      - `group`         : ApplicationGroup — mit `id`, `label`, `explanation`,
-                         `risk_band`, `risk_band_reason`, `worst_finding_id`.
+                         `group_kind`. Eval-Felder liegen NICHT mehr hier
+                         (Block T, ADR-0028).
+     - `evaluation`    : ApplicationGroupEvaluation | None — per-(group,
+                         server)-Junction-Row mit `risk_band`,
+                         `risk_band_reason`, `worst_finding_id`, `action_type`.
+                         `None` -> "Nicht bewertet" (kein Pass-2-Lauf bisher).
      - `count`         : int — Anzahl OPEN-Findings dieser Group (aus dem
                          Aggregat-Loader, Block-Q Phase B). Findings selbst
                          werden NICHT mehr eager mitgegeben.
      - `worst_finding` : Finding | None — bereits aufgeloest aus
-                         `group.worst_finding_id` (kann None sein, wenn der
-                         Eintrag inzwischen geloescht wurde).
+                         `evaluation.worst_finding_id` (kann None sein, wenn
+                         der Eintrag inzwischen geloescht wurde).
      - `server`        : Server — wird fuer den HTMX-`url_for` benoetigt
                          (`server.id` als Pfad-Parameter).
 
@@ -27,7 +33,7 @@
        wird in einer `<pre class="font-mono">`-Box gerendert — strict-escape
        reicht, keine Markdown-Pipeline.
 #}
-{%- set _band = group.risk_band or 'pending' -%}
+{%- set _band = evaluation.risk_band if evaluation else 'pending' -%}
 <div class="card bg-base-200/40 rounded-box p-4 mb-3"
      data-test="group-card-{{ group.id }}">
   <div class="flex items-start justify-between gap-3 flex-wrap">
@@ -54,14 +60,14 @@
     </div>
   </div>
 
-  {% if group.risk_band_reason %}
+  {% if evaluation and evaluation.risk_band_reason %}
     <div class="bg-base-300/40 rounded p-2 mt-3 font-mono text-xs whitespace-pre-wrap break-words"
          data-test="group-risk-reason">
-      {{ group.risk_band_reason }}
+      {{ evaluation.risk_band_reason }}
     </div>
   {% endif %}
 
-  {% if group.worst_finding_id and worst_finding %}
+  {% if evaluation and evaluation.worst_finding_id and worst_finding %}
     <div class="mt-3 border-l-4 border-error pl-3"
          data-test="group-worst-finding">
       <div class="text-[10px] uppercase tracking-wider opacity-65">WORST FINDING</div>

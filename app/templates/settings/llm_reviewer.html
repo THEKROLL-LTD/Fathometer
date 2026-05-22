@@ -141,12 +141,18 @@
         {% if groups_total == 1 %}Group{% else %}Groups{% endif %}.
       </p>
       {% if top_groups %}
+        {# Block T (ADR-0028): Risk-Band ist jetzt per-(group, server) und
+           lebt in `application_group_evaluations`. Die Library-Sicht hier
+           zeigt nur fleet-weite Pattern-Identitaet; eine Aggregat-Pille
+           "Bewertung fleet-wide" ist explizit out-of-MVP (siehe ADR-0028
+           §Re-Open-Trigger Variante D). Operator sieht die per-Server-
+           Bewertungen auf der jeweiligen Server-Detail-Seite. #}
         <div class="overflow-x-auto mt-2">
           <table class="table table-sm">
             <thead>
               <tr>
                 <th class="text-[10px] uppercase tracking-wider opacity-65">Label</th>
-                <th class="text-[10px] uppercase tracking-wider opacity-65">Risk-Band</th>
+                <th class="text-[10px] uppercase tracking-wider opacity-65">Group-Kind</th>
                 <th class="text-[10px] uppercase tracking-wider opacity-65">Zuletzt benutzt</th>
               </tr>
             </thead>
@@ -154,13 +160,11 @@
               {% for grp in top_groups %}
                 <tr data-test="top-group-row">
                   <td class="font-mono">{{ grp.label }}</td>
-                  <td>
-                    {% if grp.risk_band %}
-                      {% with band_value=grp.risk_band, as_link=false, compact=true, show_count=false %}
-                        {% include "_partials/risk_band_pill.html" %}
-                      {% endwith %}
+                  <td class="text-xs opacity-70">
+                    {% if grp.group_kind %}
+                      {{ grp.group_kind }}
                     {% else %}
-                      <span class="opacity-50 text-xs italic">evaluating</span>
+                      <span class="opacity-50">—</span>
                     {% endif %}
                   </td>
                   <td class="text-xs opacity-70">

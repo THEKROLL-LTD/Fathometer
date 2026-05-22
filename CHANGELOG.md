@@ -4,6 +4,92 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block T: Application-Group-Evaluations als Junction
+
+ADR-0028. Behebt den last-write-wins-Bug zwischen Servern: dieselbe Pattern-
+Group hatte auf zwei unterschiedlichen Servern unterschiedliche Bewertungen
+(Listener-Profil, Host-Snapshot), das frueher direkte Field-Set auf
+`ApplicationGroup` ueberschrieb beim zweiten Scan die Bewertung des ersten.
+Sieben Eval-Spalten wandern in eine neue Junction-Tabelle
+`application_group_evaluations` mit Composite-PK `(group_id, server_id)`.
+
+### Added
+
+- **Neue Tabelle `application_group_evaluations`** (Migration 0011): pro
+  `(group_id, server_id)` eine Junction-Row mit `risk_band` (NOT NULL,
+  CHECK in `('escalate','act','mitigate','monitor','noise')`),
+  `risk_band_reason`, `risk_band_source` (CHECK in `('llm','manual')`),
+  `risk_band_computed_at`, `worst_finding_id` (kein FK — Junction-Row
+  ueberlebt Finding-Deletes), `group_findings_fingerprint`, `action_type`.
+  Drei Indizes: Composite-PK, `(server_id, risk_band)` fuer Server-Detail-
+  Lookups, partial auf `worst_finding_id WHERE NOT NULL` fuer den UI-Render.
+- **Pass-2-UPSERT** auf Junction (`pg_insert().on_conflict_do_update()`)
+  ersetzt den frueheren `_apply_pass2_to_group(group, ...)`-Helper. Neuer
+  Helper: `_upsert_evaluation(session, group_id, server_id, ...)`.
+  Cache-Hit-Pfad und Live-LLM-Pfad in `app/workers/llm_worker.py` umgestellt.
+- **Pass-2-Trigger-Adaption** in `app/services/scan_processing.py`: heutige
+  Skip-Logik (`grp.group_findings_fingerprint == new_fp and grp.risk_band
+  is not None`) durch Batch-SELECT auf `application_group_evaluations`
+  ersetzt. Vermeidet N+1 (ein SELECT laedt alle Junction-Rows fuer das
+  affected_groups-Set vorab).
+- **Composite-Match in `inherit_group_risk_to_findings`**
+  (`app/services/finding_group_inheritance.py`): UPDATE-FROM jointet jetzt
+  auf `(Finding.application_group_id == Junction.group_id AND
+  Finding.server_id == Junction.server_id)`. Server-A's Findings erben
+  nur aus `(group, A)`-Junction — kein Cross-Server-Leak mehr.
+- **Vierter Batch-SELECT** in
+  `app/views/server_detail.py::_load_application_groups_for_server`:
+  Junction-Rows fuer `(server_id=?, group_id IN ...)`. Group-Cards
+  rendern jetzt mit `evaluation`-Variable (Junction-Row oder `None`).
+  Fehlende Junction-Row → „Nicht bewertet"-Pille via
+  `group_evaluating_card.html`.
+
+### Changed
+
+- **`ApplicationGroup`-Model** verliert sieben Spalten und zwei
+  CheckConstraints. Bleibt: fleet-weite Identitaet + Pattern-Library
+  (`label`, `explanation`, `path_prefixes`, `pkg_name_*`,
+  `pkg_purl_pattern`, `group_kind`, `source`, `detected_at`,
+  `last_used_at`).
+- **Templates** auf `evaluation`-Variable umgestellt:
+  `application_group_card.html`, `_view_groups.html`,
+  `_action_needed_section.html`. `settings/llm_reviewer.html`
+  Top-Groups-Tabelle Risk-Band-Spalte durch Group-Kind ersetzt (fleet-
+  weite Eval-Sicht out-of-MVP, siehe ADR-0028 §Re-Open-Trigger).
+- **ARCHITECTURE.md §5** ergaenzt mit Junction-Beschreibung.
+- **ADR-0023** Header ergaenzt mit Hinweis-Block, dass die Persistenz-
+  Schicht durch ADR-0028 aktualisiert ist.
+- **TICKET-002** geschlossen — "Erledigt durch Block T".
+
+### Migration ist Drop & Rebuild — kein Daten-Backfill
+
+Bestehende Eval-Werte auf `application_groups` werden **nicht** in die
+Junction migriert (ADR-0028 §Migration). Begruendung: die Werte sind
+semantisch falsch (last-write-wins), eine Replikation pro Server wuerde
+den Fehler vervielfaeltigen. Pass-2 fuellt die Junction beim naechsten
+Scan jedes Servers automatisch neu — Cache-Hits in `llm_risk_cache`
+machen den Re-Eval nahezu kostenlos (~95% Hit-Rate erwartet).
+
+### Operator-UI-Luecke nach Deploy
+
+Bis zum ersten Scan jedes Servers nach Deploy zeigt jede Group-Card auf
+der Server-Detail-Seite die **„Nicht bewertet"-Pille**. Der Block-P-Hook
+im Scan-Ingest-Pfad triggert Pass-2 organisch beim naechsten Scan.
+`docs/operations.md` Sektion „Block-T-Application-Group-Evaluations"
+beschreibt den Force-Scan-Recipe falls Operator nicht warten will.
+
+### Tests
+
+- **Pure-Unit (Default-CI):** `tests/services/test_finding_group_inheritance.py`
+  auf Junction-Composite-Match umgestellt (8 Tests, gruen).
+  Gesamt-Suite 1205 passed, 5 E2E-skipped, 697 deselected.
+- **On-Demand db_integration** (im Repo abgelegt, ausstehend bis User-OK):
+  Schema-Reflection 0011, Pass-2-UPSERT-Pfade (Cache-Hit/Live-LLM/
+  Idempotenz/Race), Trigger-Logik, Server-Detail-Render mit Cross-Server-
+  Isolation.
+
+---
+
 ## [Unreleased] — Block R: Asynchroner Scan-Ingest
 
 ADR-0026. Loest das Agent-Timeout-Problem bei grossen Scans: `POST /api/scans`

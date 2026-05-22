@@ -4,6 +4,8 @@
    Variablen-Vertrag (durchgereicht von `_findings_section.html`):
      - `application_groups` : list[dict] — jede dict-Entry hat:
                               `group` (ApplicationGroup),
+                              `evaluation` (ApplicationGroupEvaluation|None,
+                                            Block T / ADR-0028),
                               `count` (int, OPEN-Findings dieser Group),
                               `worst_finding` (Finding|None).
                               Reihenfolge bereits nach RISK_BAND_SORT_RANK
@@ -28,9 +30,11 @@
        Findings werden per HTMX nachgeladen, wenn der Operator die innere
        "Show all N findings"-Section oeffnet.
 
-   Wenn eine Group keinen `risk_band` hat (Pass 2 nicht durch), rendern wir
-   `group_evaluating_card.html` statt `application_group_card.html`. Block-L-
-   Polling fueltert die UI auf, sobald der Worker fertig ist.
+   Wenn fuer eine Group keine Junction-Row (`evaluation`) auf diesem Server
+   existiert (Pass 2 nicht durch — typischer Fall direkt nach Block-T-Cutover
+   bis zum naechsten Scan), rendern wir `group_evaluating_card.html` statt
+   `application_group_card.html`. Block-L-Polling fueltert die UI auf, sobald
+   der Worker die Junction-Row schreibt.
 
    Ungrouped-Findings werden in einer eigenen "Pending grouping"-Sektion am
    Ende dargestellt. Pro Risk-Band-Bucket wird ein collapsed `<details>`-
@@ -55,14 +59,16 @@
     <div class="space-y-3" data-test="application-groups-section">
       {% for entry in application_groups %}
         {%- set _grp = entry.group -%}
+        {%- set _ev = entry.evaluation -%}
         {%- set _count = entry.count -%}
         {%- set _wf = entry.worst_finding -%}
-        {% if _grp.risk_band is none %}
+        {% if _ev is none %}
           {% with group=_grp, count=_count %}
             {% include "_partials/group_evaluating_card.html" %}
           {% endwith %}
         {% else %}
           {% with group=_grp,
+                  evaluation=_ev,
                   count=_count,
                   worst_finding=_wf,
                   server=server %}
