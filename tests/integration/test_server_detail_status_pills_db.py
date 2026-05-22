@@ -26,7 +26,7 @@ from sqlalchemy import select
 from app.db import get_session_factory
 from app.models import Server
 from tests._helpers import create_admin_user, login
-from tests.views.test_server_detail_redesign import _create_server
+from tests.integration.test_server_detail_redesign_db import _create_server
 
 
 def _mark_revoked(app: Flask, server_id: int) -> None:
