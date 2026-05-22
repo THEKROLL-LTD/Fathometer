@@ -7,12 +7,11 @@ Reine Logik-Tests — beruehrt die DB nur fuer den Settings-Default-Pfad.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from types import SimpleNamespace
 
 import pytest
-from flask import Flask
 
-from app.models import Server, Setting
+from app.models import Server
 from app.services.stale_detection import (
     get_db_stale_threshold_h,
     get_server_stale_default_h,
@@ -197,83 +196,70 @@ def test_is_db_stale_returns_true_for_revoked_server_with_old_db() -> None:
 
 
 def test_is_db_stale_uses_settings_default_when_no_override(
-    db_app: Flask,
-    db_session: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ohne Override muss der Wert aus `Setting.stale_trivy_db_threshold_h`
-    kommen. Wir setzen ihn explizit und pruefen den Helper unter einem
-    Test-Request-Context, damit `get_session()` sauber abgeraeumt wird."""
-    from app.db import close_session
-    from app.settings_service import ensure_settings_row
+    kommen. Die DB-Anbindung selbst ist Aufgabe von `settings_service`;
+    dieser Service-Test braucht nur einen Settings-Provider-Fake."""
+    import app.services.stale_detection as stale_detection
 
-    # Erst die Settings-Row anlegen/aendern (separate Session).
-    row = ensure_settings_row(db_session)
-    row.stale_trivy_db_threshold_h = 5
-    db_session.commit()
+    monkeypatch.setattr(
+        stale_detection,
+        "get_settings_row",
+        lambda: SimpleNamespace(stale_trivy_db_threshold_h=5),
+    )
 
-    # `is_db_stale` ohne Override muss einen App-Context haben fuer
-    # `get_session()` — Request-Context sorgt fuer sauberen `g.db_session`
-    # Teardown.
-    with db_app.test_request_context("/"):
-        try:
-            # DB 4h alt → noch frisch (Schwelle 5h).
-            srv_fresh = _make_server(trivy_db_updated_at=NOW - timedelta(hours=4))
-            assert is_db_stale(srv_fresh, now=NOW) is False
+    # DB 4h alt → noch frisch (Schwelle 5h).
+    srv_fresh = _make_server(trivy_db_updated_at=NOW - timedelta(hours=4))
+    assert is_db_stale(srv_fresh, now=NOW) is False
 
-            # DB 10h alt → stale.
-            srv_stale = _make_server(trivy_db_updated_at=NOW - timedelta(hours=10))
-            assert is_db_stale(srv_stale, now=NOW) is True
-        finally:
-            close_session(None)
+    # DB 10h alt → stale.
+    srv_stale = _make_server(trivy_db_updated_at=NOW - timedelta(hours=10))
+    assert is_db_stale(srv_stale, now=NOW) is True
 
 
 def test_get_db_stale_threshold_h_reads_settings(
-    db_app: Flask,
-    db_session: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.db import close_session
-    from app.settings_service import ensure_settings_row
+    import app.services.stale_detection as stale_detection
 
-    row = ensure_settings_row(db_session)
-    row.stale_trivy_db_threshold_h = 42
-    db_session.commit()
+    monkeypatch.setattr(
+        stale_detection,
+        "get_settings_row",
+        lambda: SimpleNamespace(stale_trivy_db_threshold_h=42),
+    )
 
-    with db_app.test_request_context("/"):
-        try:
-            assert get_db_stale_threshold_h() == 42
-        finally:
-            close_session(None)
+    assert get_db_stale_threshold_h() == 42
 
 
 def test_get_server_stale_default_h_reads_settings(
-    db_app: Flask,
-    db_session: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.db import close_session
-    from app.settings_service import ensure_settings_row
+    import app.services.stale_detection as stale_detection
 
-    row = ensure_settings_row(db_session)
-    row.stale_threshold_h = 17
-    db_session.commit()
+    monkeypatch.setattr(
+        stale_detection,
+        "get_settings_row",
+        lambda: SimpleNamespace(stale_threshold_h=17),
+    )
 
-    with db_app.test_request_context("/"):
-        try:
-            assert get_server_stale_default_h() == 17
-        finally:
-            close_session(None)
+    assert get_server_stale_default_h() == 17
 
 
 def test_settings_defaults_match_architecture(
-    db_app: Flask,
-    db_session: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Frische DB → Settings-Row hat die §14-Defaults (48h/30h)."""
-    from app.settings_service import ensure_settings_row
+    """Settings-Provider-Defaults entsprechen ARCHITECTURE §14."""
+    import app.services.stale_detection as stale_detection
 
-    row: Setting = ensure_settings_row(db_session)
-    # Defaults aus Migration / ARCHITECTURE §14.
-    assert row.stale_threshold_h == 48
-    assert row.stale_trivy_db_threshold_h == 30
+    monkeypatch.setattr(
+        stale_detection,
+        "get_settings_row",
+        lambda: SimpleNamespace(stale_threshold_h=48, stale_trivy_db_threshold_h=30),
+    )
+
+    assert get_server_stale_default_h() == 48
+    assert get_db_stale_threshold_h() == 30
 
 
 # ---------------------------------------------------------------------------
