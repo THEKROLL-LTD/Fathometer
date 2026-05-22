@@ -1,14 +1,28 @@
-"""View-Tests fuer den Provider-Wechsel-Hook in `app.views.llm_settings`.
+"""Integration-Smokes fuer den Provider-Wechsel-Hook in `app.views.llm_settings`.
+
+Diese Tests wurden aus `tests/services/test_llm_provider_switch.py` ausgelagert
+(TICKET-004, Slice 4). Sie testen das Verhalten der View-Route
+``POST /settings/llm/`` ueber Flask-Testclient + Login + DB-Persistenz und
+sind damit Heavy-Integration; eine Mock-Variante wuerde breite Mocks auf
+SQLAlchemy-Internals erfordern, was laut Leitplanken verboten ist.
 
 Verifiziert ARCHITECTURE.md §12 und ADR-0006:
-- Aenderung von `base_url` ODER `model` archiviert alle aktiven Conversations.
-- Aenderung nur von `daily_token_cap` (oder `provider_name`) archiviert NICHT.
-- Audit-Event `llm.provider_changed` mit `metadata.archived_conversations`.
-- Audit-Event `settings.updated` wird IMMER geschrieben.
-- Mehrere aktive Conversations (auf verschiedenen Servern) -> alle archiviert.
 
-CSRF ist im `db_app` deaktiviert (siehe conftest). Login wird via Helper
-gemacht.
+* Aenderung von ``base_url`` ODER ``model`` archiviert alle aktiven
+  Conversations.
+* Aenderung nur von ``daily_token_cap`` (oder ``provider_name``)
+  archiviert NICHT.
+* Audit-Event ``llm.provider_changed`` mit
+  ``metadata.archived_conversations``.
+* Audit-Event ``settings.updated`` wird IMMER geschrieben.
+* Mehrere aktive Conversations (auf verschiedenen Servern) → alle
+  archiviert.
+
+CSRF ist im ``db_app`` deaktiviert (siehe conftest). Login wird via
+Helper gemacht.
+
+Auto-Markierung als ``db_integration`` (und damit ``acceptance``) erfolgt
+ueber `tests/conftest.py::_ACCEPTANCE_PATH_PREFIXES`.
 """
 
 from __future__ import annotations

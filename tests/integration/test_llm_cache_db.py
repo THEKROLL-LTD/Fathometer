@@ -1,4 +1,14 @@
-"""Tests fuer `app.services.llm_cache` — Block P (ADR-0023) Pass-2-Cache.
+"""Integration-Smokes fuer `app/services/llm_cache.py` gegen echte Postgres-DB.
+
+Diese Tests wurden aus `tests/services/test_llm_cache.py` ausgelagert
+(TICKET-004, Slice 4). Der Service ist ein reiner ORM-Wrapper auf der
+``llm_risk_cache``-Tabelle (lookup-Query, store-Insert, record_hit-Update,
+lru_evict-Delete); die Tests pruefen genau diese SQL-Operationen mit echter
+Postgres-Persistenz. Eine Mock-Variante waere ohne breite Session-Mocks
+nicht sinnvoll abbildbar.
+
+Auto-Markierung als ``db_integration`` (und damit ``acceptance``) erfolgt
+ueber `tests/conftest.py::_ACCEPTANCE_PATH_PREFIXES`.
 
 Sechs Faelle:
 
