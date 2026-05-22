@@ -213,17 +213,11 @@ class Settings(BaseSettings):
         ),
     )
 
-    # ----- Block R (ADR-0026) — Async-Scan-Ingest Feature-Flag -----
-    # Flag wird in Block R Phase H fuer Cutover gezogen; Default off haelt Sync-Pfad aktiv.
-    scan_ingest_async: bool = Field(
-        default=False,
-        description=(
-            "Schaltet den asynchronen Scan-Ingest-Pfad ein. "
-            "Bei True antwortet POST /api/scans mit 202+job_id statt synchronem Ingest. "
-            "Default False (Sync-Pfad aktiv). Cutover-Plan: ADR-0026 §Konsequenzen."
-        ),
-    )
+    # ----- Block R (ADR-0026) — Async-Scan-Ingest -----
     # ENV: SECSCAN_MAX_QUEUED_INGEST_JOBS (Prefix SECSCAN_ + Field-Name).
+    # Das urspruengliche Feature-Flag `SCAN_INGEST_ASYNC` ist seit v0.12.0
+    # ersatzlos entfernt — Async ist der einzige Pfad (siehe ADR-0026
+    # §Cutover-Abschluss).
     max_queued_ingest_jobs: int = Field(
         default=50,
         ge=1,

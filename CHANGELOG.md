@@ -4,6 +4,71 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — v0.12.0: Scan-Ingest immer Async (Cutover-Abschluss Block R)
+
+Das in ADR-0026 / Block R Phase H als Cutover-Schutz eingefuehrte
+Feature-Flag `SECSCAN_SCAN_INGEST_ASYNC` ist ersatzlos entfernt. Async
+ist seit v0.12.0 der einzige Pfad — der Sync-Branch in
+`app/api/scans.py` ist ersatzlos geloescht. Operator-Setups ohne
+laufenden `secscan-llm-worker`-Container sind nicht mehr unterstuetzt.
+
+Auslöser: Agent v0.4.0 erwartet `job_id` im 202-Body und schlaegt mit
+Exit 3 fehl wenn das Backend Sync-Body antwortet — der Operator musste
+den Flag manuell setzen. Single-Operator-Single-Agent-Setups brauchen
+das Cutover-Sicherheitsnetz nicht; das Flag war damit dauerhafte
+Bedienfalle.
+
+### Removed
+
+- **`SECSCAN_SCAN_INGEST_ASYNC`-Setting** in `app/config.py` und
+  `docker-compose.yml`.
+- **Sync-Branch in `app/api/scans.py::ingest_scan`** (inkl. JSON-Pre-Parse
+  fuer Agent-Version-Gate und `process_scan_envelope`-Direktaufruf vom
+  Edge-Handler). Der Service `app/services/scan_processing.process_scan_envelope`
+  bleibt unveraendert — er wird jetzt nur noch vom Worker-Sub-Tick
+  aufgerufen.
+- **Drei db_integration-Test-Files**: `tests/integration/test_scans_ingest_db.py`,
+  `tests/integration/test_scans_risk_pretriage_db.py`,
+  `tests/integration/test_scans_block_p_job_queueing_db.py`. Diese
+  testeten primaer HTTP→Service-Wiring im Sync-Pfad. Die Logik ist via
+  `tests/services/test_scan_processing.py`,
+  `tests/workers/test_scan_ingest_worker_unit.py`,
+  `tests/api/test_scans_async_edge.py` und
+  `tests/services/test_finding_group_inheritance.py` weiter abgedeckt.
+
+### Changed
+
+- **Adversarial-Tests** (`test_host_state_xss.py`,
+  `test_pretriage_no_llm_override.py`, `test_outdated_agent_rejected.py`)
+  auf den neuen `tests/_helpers.py::run_scan_synchronously`-Helper
+  umgestellt (POST + Worker-Sync-Trigger in einem Aufruf).
+  `hostname`-Pflichtfeld in den Envelopes ergaenzt (Pre-Validation).
+  Error-Response-Format ist jetzt flat `{"error": "agent_outdated"}`
+  statt nested `{"error": {"code": "...", "message": "..."}}`.
+- **`tests/integration/test_scans_envelope_trivy_version_db.py`**,
+  **`tests/integration/test_scans_host_state_db.py`**: `_post()`-Helper
+  triggert Worker synchron nach POST (Test-Vorbedingung: DB-State
+  unmittelbar nach POST sichtbar).
+- **`docs/operations.md`** Block-R-Sektion: Feature-Flag-Cutover-Plan
+  durch „Async-only seit v0.12.0"-Hinweis ersetzt.
+- **ADR-0026** Header-Status: „Cutover abgeschlossen mit v0.12.0".
+- **ARCHITECTURE.md §6** umgeschrieben: Async ist der einzige Pfad
+  (kein Verweis auf Sync-Default mehr).
+
+### Migration
+
+Operator muss vor dem Deploy von v0.12.0 sicherstellen, dass der
+`secscan-llm-worker`-Container laeuft (depends_on `db: healthy` plus
+seit Block R `app: healthy` damit Alembic durch ist). Andernfalls
+landen Scans queued aber werden nie verarbeitet — Agent-Polling laeuft
+in den 600s-Timeout (Exit 5).
+
+`SECSCAN_SCAN_INGEST_ASYNC=...`-Eintraege in Operator-`.env`-Files
+oder Helm-Values koennen ersatzlos entfernt werden; sie sind funktional
+inert.
+
+---
+
 ## [Unreleased] — Block T: Application-Group-Evaluations als Junction
 
 ADR-0028. Behebt den last-write-wins-Bug zwischen Servern: dieselbe Pattern-

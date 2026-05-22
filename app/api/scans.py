@@ -1,4 +1,4 @@
-"""`POST /api/scans` — Scan-Ingest mit Auth-vor-Body-Parse.
+"""`POST /api/scans` — Async-Scan-Ingest mit Auth-vor-Body-Parse.
 `GET /api/scans/jobs/<job_id>` — Async-Job-Status-Endpoint (Block R Phase D).
 
 Strikte Reihenfolge — niemals vertauschen (ARCHITECTURE.md §9):
@@ -7,20 +7,23 @@ Strikte Reihenfolge — niemals vertauschen (ARCHITECTURE.md §9):
    Body-Lesen.
 2. SHA-256(token) gegen `servers.api_key_hash` mit `hmac.compare_digest`.
 3. Server-Status: weder `revoked_at` noch `retired_at` -> 403 sonst.
-4. Erst JETZT: gzip-Decompress (mit Bound) und JSON-Parse.
+4. Erst JETZT: gzip-Decompress (mit Bound).
+5. Schmal-Validierung (`_pre_validate_envelope`) — nur Top-Level-Felder.
+6. Agent-Version-Gate.
+7. Soft-Cap + INSERT in `scan_ingest_jobs` (Idempotency via Partial-Unique).
+8. Audit `scan.queued`.
+9. 202 + `{job_id, status, status_url}`.
 
-Async-Pfad (SECSCAN_SCAN_INGEST_ASYNC=true, Block R Phase B):
-5a. Schmal-Validierung (`_pre_validate_envelope`) — nur Top-Level-Felder.
-6a. Agent-Version-Gate.
-7a. Soft-Cap + INSERT in `scan_ingest_jobs` (Idempotency via Partial-Unique).
-8a. Audit `scan.queued`.
-9a. 202 + `{job_id, status, status_url}`.
+Die Verarbeitung (Findings-UPSERT, Host-State, Pre-Triage, Group-Matcher,
+LLM-Job-Queueing, Audit `scan.ingested`) laeuft asynchron im
+`secscan-llm-worker` (`app/workers/scan_ingest_worker.py`). Agent pollt
+`GET /api/scans/jobs/<id>` bis `done`/`failed`.
 
-Sync-Pfad (Default, Block R Phase H deaktiviert diesen Pfad):
-5b. Pydantic-Envelope-Validation -> 422 bei Fehlern.
-6b. Findings-Ingest via `findings_ingest.ingest_scan`.
-7b. Audit-Event `scan.ingested` mit Counts.
-8b. 202 Accepted + JSON-Body (mit Counts).
+Historischer Hinweis: das urspruenglich in ADR-0026 / Block R Phase H als
+Cutover-Schutz eingefuehrte Feature-Flag `SCAN_INGEST_ASYNC` ist seit
+v0.12.0 ersatzlos entfernt — Async ist der einzige Pfad. Die ehemalige
+Sync-Logik lebt in `app/services/scan_processing.process_scan_envelope`
+unveraendert weiter und wird vom Worker aufgerufen.
 
 DoS-Schutz:
 - 401 erfolgt VOR jedem Body-Read; ein 10-MB-Body mit ungueltigem Bearer
@@ -57,7 +60,7 @@ from werkzeug.wrappers import Response
 
 from app import csrf, limiter
 from app.api import api_bp
-from app.api._common import format_pydantic_errors, json_error
+from app.api._common import json_error
 from app.audit import log_event
 from app.auth import hash_server_key
 from app.config import Settings
@@ -394,105 +397,15 @@ def ingest_scan() -> Response | tuple[Response, int]:
         log.info("api.scans.decompress_failed", server_id=server.id, error=str(exc))
         return json_error(400, "bad_encoding", str(exc))
 
-    # ---- 2b. Feature-Flag: Async-Fast-Path (Block R Phase B, ADR-0026) -
-    # Laeuft NACH Decompress, VOR Pydantic-Vollparse. Der async-Branch macht
-    # seine eigene Schmal-Validierung und antwortet mit 202+job_id.
-    # Default off — Sync-Pfad bleibt aktiv bis Phase H den Cutover zieht.
-    _settings = cast(Settings, current_app.config["SECSCAN_SETTINGS"])
-    if _settings.scan_ingest_async:
-        # Stream ist nach `read_decompressed_body` verbraucht; wir re-komprimieren
-        # den dekomprimierten Body fuer Storage in `payload_gzip` (BYTEA).
-        from app.services.scan_ingest_queue import compress_payload as _compress
+    # ---- 3. Async-Fast-Path (ADR-0026, ueberall einziger Pfad seit v0.12.0) -
+    # Schmal-Validierung -> Agent-Version-Gate -> Soft-Cap + Idempotency-Insert
+    # in scan_ingest_jobs -> 202 + job_id. Worker-Sub-Tick verarbeitet asynchron.
+    # Das urspruengliche Feature-Flag `SCAN_INGEST_ASYNC` aus dem Block-R-
+    # Cutover ist ersatzlos entfernt (siehe ADR-0026 §Cutover-Abschluss).
+    from app.services.scan_ingest_queue import compress_payload as _compress
 
-        _gzipped = _compress(decompressed)
-        return _handle_async_ingest(get_session(), server, decompressed, _gzipped)
-
-    # ---- 3+4+5. Vollstaendige Scan-Verarbeitung via Service-Funktion --------
-    # Extraktion nach app/services/scan_processing.process_scan_envelope
-    # (Block R Phase C, ADR-0026). Der gzip-komprimierte Body wird intern
-    # dekomprimiert; der Service-Aufruf macht alles was vorher inline passierte
-    # (JSON-Parse, Pydantic-Envelope, Findings-Ingest, Host-Snapshot,
-    # Pre-Triage, Group-Matcher, LLM-Jobs, Audit). KEIN commit im Service —
-    # wir committen hier.
-    from app.services.scan_processing import process_scan_envelope
-
-    sess = get_session()
-
-    # Agent-Version-Gate laeuft hier weiterhin fuer den Sync-Pfad, weil der
-    # Service nicht das Envelope-Pre-Validate macht (das ist Async-Fast-Path).
-    # Wir muessen erst den Body parsen um die Version zu lesen — daher
-    # ein kurzer JSON-Pre-Check bevor wir an den Service delegieren.
-    try:
-        import json as _json
-
-        _pre_doc = _json.loads(decompressed.decode("utf-8", errors="replace"))
-        if isinstance(_pre_doc, dict):
-            _av = _pre_doc.get("agent_version")
-            if isinstance(_av, str) and version_lt(_av, Settings.MIN_AGENT_VERSION):
-                log_event(
-                    "agent.rejected_outdated",
-                    target_type="server",
-                    target_id=server.id,
-                    metadata={
-                        "agent_version": _av,
-                        "min_agent_version": Settings.MIN_AGENT_VERSION,
-                    },
-                    actor=server.name,
-                    session=sess,
-                )
-                sess.commit()
-                return json_error(
-                    400,
-                    "agent_outdated",
-                    (
-                        f"agent version {_av} is below minimum "
-                        f"{Settings.MIN_AGENT_VERSION}, please update"
-                    ),
-                )
-    except (ValueError, UnicodeDecodeError):
-        pass  # Vollparse-Fehler wird im Service als ValidationError behandelt
-
-    # Gzip-Body fuer Service-Aufruf aufbauen (Service erwartet gzip-Bytes).
-    from app.services.scan_ingest_queue import compress_payload as _compress_for_service
-
-    gzipped_for_service = _compress_for_service(decompressed)
-
-    try:
-        from pydantic import ValidationError as _ValidationError
-
-        proc_result = process_scan_envelope(sess, server, gzipped_for_service)
-    except _ValidationError as exc:
-        return json_error(
-            422,
-            "validation_error",
-            "Envelope-Validierung fehlgeschlagen",
-            details=format_pydantic_errors(exc),
-        )
-    except ValueError as exc:
-        log.info("api.scans.json_parse_failed", server_id=server.id, error=str(exc))
-        return json_error(400, "bad_json", str(exc))
-
-    sess.commit()
-
-    log.info(
-        "api.scans.ingested",
-        server_id=server.id,
-        scan_id=proc_result.scan_id,
-        findings_total=proc_result.findings_total,
-    )
-
-    from flask import jsonify
-
-    body: dict[str, Any] = {
-        "scan_id": proc_result.scan_id,
-        "findings_total": proc_result.findings_total,
-        "findings_inserted": proc_result.findings_inserted,
-        "findings_updated": proc_result.findings_updated,
-        "findings_resolved": proc_result.findings_resolved,
-    }
-    resp = cast(Response, jsonify(body))
-    resp.status_code = 202
-    return resp
+    _gzipped = _compress(decompressed)
+    return _handle_async_ingest(get_session(), server, decompressed, _gzipped)
 
 
 # ---------------------------------------------------------------------------

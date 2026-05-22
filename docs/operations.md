@@ -128,33 +128,23 @@ Nach dem ersten Deploy von Block Q:
 
 ### Operator-Sicht
 
-`POST /api/scans` antwortet im Async-Modus binnen <1s mit 202 + Job-ID.
+`POST /api/scans` antwortet seit v0.11.0 binnen <1s mit 202 + Job-ID.
 Die volle Verarbeitung (Findings-UPSERT, Host-State-Persist, Pre-Triage,
 Group-Matching, LLM-Job-Queueing) laeuft im `secscan-llm-worker`-Container
-als neuer Sub-Tick `scan_ingest_tick` (vor LLM-Pickup priorisiert).
+als Sub-Tick `scan_ingest_tick` (vor LLM-Pickup priorisiert).
 
-### Feature-Flag-Cutover
+### Async-only seit v0.12.0
 
-Verhalten wird via Env-Variable gesteuert:
+Das urspruengliche Feature-Flag `SECSCAN_SCAN_INGEST_ASYNC` (Cutover-Schutz
+aus Block R Phase H) ist mit v0.12.0 ersatzlos entfernt — Async ist der
+einzige Pfad. Voraussetzung im Deployment: der `secscan-llm-worker`-Container
+muss laufen, sonst stehen die `scan_ingest_jobs`-Rows fuer immer queued.
+Der Operator-Login + Setup-Wizard bleibt unabhaengig vom Worker erreichbar
+(Web-Container und Worker sind getrennt).
 
-```
-SECSCAN_SCAN_INGEST_ASYNC=false   # Default: Sync-Pfad aktiv (Status-Quo)
-SECSCAN_SCAN_INGEST_ASYNC=true    # Async-Fast-Path aktiv
-```
-
-Empfohlener Cutover (analog ADR-0026 Block R Phase H):
-
-1. Deploy Backend mit Block-R-Code, Flag auf `false`. Schema-Migration
-   `0010_scan_ingest_jobs` lauft mit; Worker-Sub-Tick steht bereit aber
-   bekommt keine Jobs.
-2. Sanity-Check: manueller Job-Insert via `psql` plus `worker_logs |
-   grep scan_ingest` zeigt Pickup + Status-Wechsel.
-3. Flag auf `true`. Edge-Handler schaltet auf 202-Response um.
-4. Agent-Auto-Update zieht 0.4.0 sukzessive. Bis dahin akzeptieren alte
-   Agents (`<0.4.0`, ohne Polling-Loop) das 202-Body ohne Counts und
-   beenden mit Exit 0 (siehe `agent/secscan-agent.sh` v0.3.x).
-5. Nach 7 Tagen Beobachtung: `MIN_AGENT_VERSION` auf `0.4.0` (separate
-   ENV-Variable im Web-Container).
+Agent ab v0.4.0 erwartet das 202+`job_id`-Response und pollt
+`GET /api/scans/jobs/<id>` bis `done`/`failed` (oder Polling-Timeout
+nach 600s).
 
 ### Queue-Inspect
 
@@ -182,7 +172,6 @@ einem hypothetischen Mid-Statement-Crash) werden binnen <2h auf NULL gesetzt.
 | Env-Var | Default | Wirkung |
 |---|---|---|
 | `SECSCAN_MAX_QUEUED_INGEST_JOBS` | `50` | Per-Server-Limit auf `(queued|in_progress)`-Jobs. `429 queue_full` beim Insert wenn ueberschritten. |
-| `SECSCAN_SCAN_INGEST_ASYNC` | `false` | Master-Switch fuer den Fast-Path. |
 
 Wenn ein Server wiederholt 429s sieht: Stale-Reaper-Lauf abwarten (5min)
 oder manuelle Queue-Bereinigung via SQL oben. Im Steady-State sollte die

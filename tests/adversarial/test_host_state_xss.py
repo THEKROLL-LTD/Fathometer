@@ -27,7 +27,7 @@ from typing import Any
 
 from flask import Flask
 
-from tests._helpers import create_admin_user, login, register_test_server
+from tests._helpers import create_admin_user, login, register_test_server, run_scan_synchronously
 
 SCRIPT_PAYLOAD = "<script>alert(1)</script>"
 SVG_PAYLOAD = "evil<svg onload=alert(1)>"
@@ -52,6 +52,7 @@ def _envelope_with_snapshot(
     return {
         "agent_version": "0.3.0",
         "host": {
+            "hostname": "xss-test-host",
             "os_family": "ubuntu",
             "os_version": "22.04",
             "os_pretty_name": "Ubuntu 22.04",
@@ -135,8 +136,9 @@ def test_process_args_with_script_payload_renders_escaped(db_app: Flask) -> None
         listeners=[{"proto": "tcp", "addr": "0.0.0.0", "port": 22, "process": "sshd", "pid": 4711}],
         processes=[{"pid": 4711, "user": "root", "comm": "sshd", "args": SCRIPT_PAYLOAD}],
     )
-    resp_ingest = _post_ingest(client, payload, bearer=key)
-    assert resp_ingest.status_code == 202, resp_ingest.get_data(as_text=True)[:300]
+    resp_ingest = run_scan_synchronously(db_app, client, key, payload)
+    assert resp_ingest["status_code"] == 202, resp_ingest.get("response_body", "")[:300]
+    assert resp_ingest["job_status"] == "done", f"Worker hat nicht done erreicht: {resp_ingest}"
 
     login(client)
     resp = client.get(f"/servers/{sid}")
@@ -192,8 +194,9 @@ def test_listener_process_with_svg_onload_payload_renders_escaped(db_app: Flask)
         ],
         processes=[],
     )
-    resp_ingest = _post_ingest(client, payload, bearer=key)
-    assert resp_ingest.status_code == 202, resp_ingest.get_data(as_text=True)[:300]
+    resp_ingest = run_scan_synchronously(db_app, client, key, payload)
+    assert resp_ingest["status_code"] == 202, resp_ingest.get("response_body", "")[:300]
+    assert resp_ingest["job_status"] == "done", f"Worker hat nicht done erreicht: {resp_ingest}"
 
     login(client)
     resp = client.get(f"/servers/{sid}")
@@ -223,8 +226,9 @@ def test_service_name_with_script_payload_renders_escaped(db_app: Flask) -> None
     client = db_app.test_client()
 
     payload = _envelope_with_snapshot(services=[SCRIPT_PAYLOAD, "sshd.service"])
-    resp_ingest = _post_ingest(client, payload, bearer=key)
-    assert resp_ingest.status_code == 202, resp_ingest.get_data(as_text=True)[:300]
+    resp_ingest = run_scan_synchronously(db_app, client, key, payload)
+    assert resp_ingest["status_code"] == 202, resp_ingest.get("response_body", "")[:300]
+    assert resp_ingest["job_status"] == "done", f"Worker hat nicht done erreicht: {resp_ingest}"
 
     login(client)
     resp = client.get(f"/servers/{sid}")

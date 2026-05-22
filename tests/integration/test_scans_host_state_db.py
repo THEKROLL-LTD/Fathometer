@@ -78,6 +78,7 @@ def _envelope(
     env: dict[str, Any] = {
         "agent_version": agent_version,
         "host": {
+            "hostname": "host-state-test",
             "os_family": "ubuntu",
             "os_version": "22.04",
             "os_pretty_name": "Ubuntu 22.04",
@@ -111,7 +112,11 @@ def _envelope(
 
 
 def _post(client: Any, payload: dict[str, Any], *, bearer: str) -> Any:
-    return client.post(
+    """Wrapper: sendet POST und triggert den Worker synchron (seit v0.12.0
+    ist Async der einzige Pfad — der Test braucht den DB-State nach dem
+    Verarbeiten, nicht nach dem Edge-Insert).
+    """
+    resp = client.post(
         "/api/scans",
         data=gzip.compress(json.dumps(payload).encode("utf-8")),
         headers={
@@ -120,6 +125,16 @@ def _post(client: Any, payload: dict[str, Any], *, bearer: str) -> Any:
             "Authorization": f"Bearer {bearer}",
         },
     )
+    if resp.status_code == 202:
+        body = resp.get_json() or {}
+        job_id = body.get("job_id")
+        if isinstance(job_id, int):
+            from app.db import get_session_factory
+            from app.workers.scan_ingest_worker import _process_scan_ingest_job
+
+            factory = get_session_factory(client.application)
+            _process_scan_ingest_job(job_id, factory, worker_id="test-sync")
+    return resp
 
 
 def _server(app: Flask, sid: int) -> Server:
@@ -340,7 +355,9 @@ def test_snapshot_persist_error_path_findings_still_ingested(
     def _boom(*args: Any, **kwargs: Any) -> None:
         raise SQLAlchemyError("synthetic persist failure")
 
-    monkeypatch.setattr("app.api.scans.persist_host_state", _boom)
+    # Seit v0.12.0 (Async-only) lebt persist_host_state im Worker-Service-Pfad,
+    # nicht mehr inline im Edge-Handler.
+    monkeypatch.setattr("app.services.scan_processing.persist_host_state", _boom)
 
     resp = _post(client, _envelope(host_state=_full_host_state()), bearer=key)
     assert resp.status_code == 202, resp.get_data(as_text=True)[:300]

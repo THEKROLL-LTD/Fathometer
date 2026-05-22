@@ -7,7 +7,7 @@ App-APIs (kein direktes Patching von Implementer-Details).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from flask import Flask
@@ -169,6 +169,104 @@ def register_test_server(
             sess.close()
 
 
+def run_scan_synchronously(
+    app: Flask,
+    client: Any,
+    bearer: str,
+    envelope: dict[str, Any] | bytes,
+) -> dict[str, Any]:
+    """Async-Scan-Ingest deterministisch in einem Aufruf durchziehen.
+
+    Seit v0.12.0 ist Async der einzige Pfad: ``POST /api/scans`` antwortet
+    202 + ``job_id``, die Verarbeitung laeuft im Worker-Sub-Tick. Tests die
+    UI-Render oder Folge-State (Pre-Triage, Inheritance, Findings-DB)
+    asserten brauchen einen synchronen Sweep — diese Helper-Funktion
+    laesst genau das laufen:
+
+      1. POST /api/scans (gzipped) → 202 mit job_id.
+      2. ``_process_scan_ingest_job`` direkt im Test-Thread aufrufen.
+      3. Job-State aus ``scan_ingest_jobs`` zurueckgeben (status, scan_id,
+         result-JSONB, error).
+
+    Args:
+        app: Flask-App (typisch ``db_app``).
+        client: Flask-Test-Client.
+        bearer: Plain-Text-API-Key des Servers.
+        envelope: Entweder ein dict (wird intern gzip-komprimiert) oder
+                  rohe Bytes (werden 1:1 gesendet — Test-Edge-Cases).
+
+    Returns:
+        Dict mit Keys ``status_code`` (HTTP), ``job_id``, ``job_status``,
+        ``job_result``, ``job_error``, ``scan_id`` (falls done),
+        ``response_body`` (raw 202-JSON).
+
+    Raises:
+        AssertionError: wenn POST nicht 202 zurueckgibt.
+    """
+    import gzip
+    import json
+
+    from app.db import get_session_factory
+    from app.models import ScanIngestJob
+    from app.workers.scan_ingest_worker import _process_scan_ingest_job
+
+    if isinstance(envelope, bytes):
+        body = envelope
+    else:
+        body = gzip.compress(json.dumps(envelope).encode("utf-8"))
+
+    resp = client.post(
+        "/api/scans",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {bearer}",
+            "Content-Type": "application/json",
+            "Content-Encoding": "gzip",
+        },
+    )
+    if resp.status_code != 202:
+        return {
+            "status_code": resp.status_code,
+            "response_body": resp.get_data(as_text=True),
+            "job_id": None,
+            "job_status": None,
+            "job_result": None,
+            "job_error": None,
+            "scan_id": None,
+        }
+
+    payload = resp.get_json() or {}
+    job_id = int(payload["job_id"])
+
+    factory = get_session_factory(app)
+    _process_scan_ingest_job(job_id, factory, worker_id="test-sync")
+
+    verify_sess = factory()
+    try:
+        job = verify_sess.get(ScanIngestJob, job_id)
+        if job is None:
+            return {
+                "status_code": 202,
+                "response_body": resp.get_data(as_text=True),
+                "job_id": job_id,
+                "job_status": None,
+                "job_result": None,
+                "job_error": "job vanished after pickup",
+                "scan_id": None,
+            }
+        return {
+            "status_code": 202,
+            "response_body": resp.get_data(as_text=True),
+            "job_id": job_id,
+            "job_status": job.status,
+            "job_result": dict(job.result) if job.result else None,
+            "job_error": job.error,
+            "scan_id": job.scan_id,
+        }
+    finally:
+        verify_sess.close()
+
+
 __all__ = [
     "ADMIN_PASSWORD",
     "ADMIN_USERNAME",
@@ -177,5 +275,6 @@ __all__ = [
     "create_admin_user",
     "login",
     "register_test_server",
+    "run_scan_synchronously",
     "set_master_key",
 ]

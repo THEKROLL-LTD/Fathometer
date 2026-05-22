@@ -32,7 +32,7 @@ from sqlalchemy import select
 
 from app.db import get_session_factory
 from app.models import Finding
-from tests._helpers import register_test_server
+from tests._helpers import register_test_server, run_scan_synchronously
 
 # ---------------------------------------------------------------------------
 # Envelope-Builder (analog `tests/api/test_scans_risk_pretriage.py`).
@@ -55,6 +55,7 @@ def _envelope(vulns: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "agent_version": "0.3.0",
         "host": {
+            "hostname": "pretriage-test-host",
             "os_family": "ubuntu",
             "os_version": "22.04",
             "os_pretty_name": "Ubuntu 22.04",
@@ -158,8 +159,9 @@ def test_llm_act_band_not_overwritten_on_reingest(db_app: Flask) -> None:
     ]
 
     # Initialer Ingest setzt das Finding auf `noise` (engine).
-    r1 = _post(client, _envelope(vulns), bearer=key)
-    assert r1.status_code == 202, r1.get_data(as_text=True)[:200]
+    r1 = run_scan_synchronously(db_app, client, key, _envelope(vulns))
+    assert r1["status_code"] == 202, r1.get("response_body", "")[:200]
+    assert r1["job_status"] == "done", f"Worker hat nicht done erreicht: {r1}"
 
     fixed_ts = datetime(2026, 5, 18, 3, 14, 22, tzinfo=UTC)
     fid = _set_llm_band(
@@ -172,8 +174,9 @@ def test_llm_act_band_not_overwritten_on_reingest(db_app: Flask) -> None:
     )
 
     # Re-Ingest mit identischen Daten — LLM-Band muss stehen bleiben.
-    r2 = _post(client, _envelope(vulns), bearer=key)
-    assert r2.status_code == 202, r2.get_data(as_text=True)[:200]
+    r2 = run_scan_synchronously(db_app, client, key, _envelope(vulns))
+    assert r2["status_code"] == 202, r2.get("response_body", "")[:200]
+    assert r2["job_status"] == "done", f"Worker hat nicht done erreicht: {r2}"
 
     findings = _findings(db_app, sid)
     assert len(findings) == 1, "Re-Ingest darf keine Duplikate erzeugen."
@@ -223,8 +226,9 @@ def test_mixed_engine_and_llm_only_engine_reevaluated(db_app: Flask) -> None:
         },
     ]
 
-    r1 = _post(client, _envelope(vulns_initial), bearer=key)
-    assert r1.status_code == 202, r1.get_data(as_text=True)[:200]
+    r1 = run_scan_synchronously(db_app, client, key, _envelope(vulns_initial))
+    assert r1["status_code"] == 202, r1.get("response_body", "")[:200]
+    assert r1["job_status"] == "done", f"Worker hat nicht done erreicht: {r1}"
 
     # `CVE-2024-60002` zur LLM-Entscheidung promovieren.
     fixed_ts = datetime(2026, 5, 18, 3, 14, 22, tzinfo=UTC)
@@ -254,8 +258,9 @@ def test_mixed_engine_and_llm_only_engine_reevaluated(db_app: Flask) -> None:
             "Severity": "LOW",
         },
     ]
-    r2 = _post(client, _envelope(vulns_reingest), bearer=key)
-    assert r2.status_code == 202, r2.get_data(as_text=True)[:200]
+    r2 = run_scan_synchronously(db_app, client, key, _envelope(vulns_reingest))
+    assert r2["status_code"] == 202, r2.get("response_body", "")[:200]
+    assert r2["job_status"] == "done", f"Worker hat nicht done erreicht: {r2}"
 
     findings_post = {f.identifier_key: f for f in _findings(db_app, sid)}
     assert len(findings_post) == 2

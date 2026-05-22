@@ -23,6 +23,7 @@ def _envelope(agent_version: str) -> dict[str, Any]:
     return {
         "agent_version": agent_version,
         "host": {
+            "hostname": "outdated-agent-host",
             "os_family": "ubuntu",
             "os_version": "22.04",
             "os_pretty_name": "Ubuntu 22.04",
@@ -51,10 +52,10 @@ def test_outdated_agent_version_rejected_with_400(db_app: Flask) -> None:
     )
     assert resp.status_code == 400, resp.get_data(as_text=True)[:300]
     body = resp.get_json()
-    assert body["error"]["code"] == "agent_outdated"
-    msg = body["error"]["message"]
-    assert "0.0.1" in msg
-    assert "update" in msg.lower()
+    # Async-Fast-Path (seit v0.12.0 einziger Pfad) liefert flat error-Format:
+    # {"error": "agent_outdated"}. Vor v0.12.0 war der Sync-Pfad mit nested
+    # {"error": {"code": ..., "message": ...}} aktiv — der ist entfernt.
+    assert body == {"error": "agent_outdated"}, body
 
     # Audit-Event geschrieben — mit `server_id` und Metadata.
     factory = get_session_factory(db_app)

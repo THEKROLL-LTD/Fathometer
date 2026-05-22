@@ -33,6 +33,7 @@ def _envelope(
     trivy_version: str | None = "0.70.2",
 ) -> dict[str, Any]:
     host: dict[str, Any] = {
+        "hostname": "trivy-version-test",
         "os_family": "ubuntu",
         "os_version": "22.04",
         "os_pretty_name": "Ubuntu 22.04",
@@ -67,17 +68,32 @@ def _envelope(
 
 
 def _post(client: Any, payload: dict[str, Any], *, bearer: str | None) -> Any:
+    """Wrapper: sendet POST und triggert den Worker synchron (seit v0.12.0
+    ist Async der einzige Pfad — der Test braucht den DB-State nach dem
+    Verarbeiten, nicht nach dem Edge-Insert).
+    """
     headers: dict[str, str] = {
         "Content-Type": "application/json",
         "Content-Encoding": "gzip",
     }
     if bearer is not None:
         headers["Authorization"] = f"Bearer {bearer}"
-    return client.post(
+    resp = client.post(
         "/api/scans",
         data=gzip.compress(json.dumps(payload).encode("utf-8")),
         headers=headers,
     )
+    # Bei 202 + job_id: Worker-Pickup synchron ausfuehren.
+    if resp.status_code == 202:
+        body = resp.get_json() or {}
+        job_id = body.get("job_id")
+        if isinstance(job_id, int):
+            from app.db import get_session_factory
+            from app.workers.scan_ingest_worker import _process_scan_ingest_job
+
+            factory = get_session_factory(client.application)
+            _process_scan_ingest_job(job_id, factory, worker_id="test-sync")
+    return resp
 
 
 def _server(app: Flask, sid: int) -> Server:
@@ -146,8 +162,9 @@ def test_envelope_below_min_agent_version_rejected_400(db_app: Flask) -> None:
     resp = _post(client, _envelope(agent_version="0.0.5"), bearer=key)
     assert resp.status_code == 400, resp.get_data(as_text=True)[:300]
     body = resp.get_json()
-    assert body["error"]["code"] == "agent_outdated"
-    assert "0.0.5" in body["error"]["message"]
+    # Async-Pfad (seit v0.12.0 einzig) liefert flat error: {"error": "agent_outdated"}.
+    # Die Detail-Message (Version-Echo) wandert ins Audit-Event-Metadata.
+    assert body == {"error": "agent_outdated"}, body
 
     # Audit-Event geschrieben.
     events = _audit_events(db_app, action="agent.rejected_outdated")
