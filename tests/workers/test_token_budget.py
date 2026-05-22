@@ -1,164 +1,91 @@
-"""Tests fuer `app.services.llm_budget` — Block P (ADR-0023) Token-Budget.
+"""Pure-Unit-Tests fuer ``app.services.llm_budget`` (TICKET-004 Slice 6).
 
-Sieben Faelle:
+Die ORM-/Singleton-Settings-Operationen (``budget_check``,
+``budget_consume``, ``maybe_reset_budget``, ``mark_exhausted_audit_once``)
+brauchen echte DB-Persistenz und liegen daher in
+``tests/integration/test_token_budget_db.py``.
 
-* ``budget_check`` true wenn ``used < daily``.
-* ``budget_consume`` erhoeht den Wert und gibt den neuen Wert zurueck.
-* ``budget_consume`` mit negativen Tokens kappt auf 0.
-* Wenn ``used >= daily``: ``budget_check`` false.
-* ``maybe_reset_budget`` setzt used auf 0 wenn ``now() >= reset_at``.
-* ``maybe_reset_budget`` setzt ``reset_at`` auf naechste 00:00 UTC.
-* ``mark_exhausted_audit_once`` ist idempotent pro Reset-Zyklus.
-* ``estimate_tokens`` fuer Pass1/Pass2/unbekannt.
+Hier verbleiben die rein funktionalen Helfer:
+
+* ``_next_utc_midnight`` — Berechnung des naechsten Reset-Zeitpunkts.
+* ``estimate_tokens`` — Token-Heuristik pro Job-Typ.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, time
 
-import pytest
-from flask import Flask
-from sqlalchemy import select
+from app.models import LLMJob
+from app.services.llm_budget import _next_utc_midnight, estimate_tokens
 
-from app.db import get_session_factory
-from app.models import AuditEvent, LLMJob
-from app.services.llm_budget import (
-    budget_check,
-    budget_consume,
-    estimate_tokens,
-    mark_exhausted_audit_once,
-    maybe_reset_budget,
-)
-from app.settings_service import ensure_settings_row
+# ---------------------------------------------------------------------------
+# _next_utc_midnight
+# ---------------------------------------------------------------------------
 
 
-def _open_session(app: Flask) -> object:
-    return get_session_factory(app)()
+def test_next_utc_midnight_returns_following_day_at_zero() -> None:
+    """Mittag UTC → naechster Tag 00:00 UTC."""
+    now = datetime(2026, 5, 22, 12, 34, 56, tzinfo=UTC)
+    expected = datetime(2026, 5, 23, 0, 0, 0, tzinfo=UTC)
+    assert _next_utc_midnight(now) == expected
 
 
-def test_budget_check_true_when_under_limit(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SECSCAN_LLM_TOKEN_BUDGET_DAILY", "10000")
-    sess = _open_session(db_app)
-    try:
-        with db_app.app_context():
-            row = ensure_settings_row(sess)
-            row.llm_token_budget_used_today = 100
-            sess.commit()
-            assert budget_check(sess) is True
-    finally:
-        sess.close()
+def test_next_utc_midnight_at_midnight_returns_next_day() -> None:
+    """Genau 00:00 UTC → 24 Stunden spaeter (nicht jetzt)."""
+    now = datetime(2026, 5, 22, 0, 0, 0, tzinfo=UTC)
+    expected = datetime(2026, 5, 23, 0, 0, 0, tzinfo=UTC)
+    assert _next_utc_midnight(now) == expected
 
 
-def test_budget_check_false_at_or_above_limit(
-    db_app: Flask, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("SECSCAN_LLM_TOKEN_BUDGET_DAILY", "5000")
-    sess = _open_session(db_app)
-    try:
-        with db_app.app_context():
-            row = ensure_settings_row(sess)
-            row.llm_token_budget_used_today = 5000
-            sess.commit()
-            assert budget_check(sess) is False
-            row.llm_token_budget_used_today = 7777
-            sess.commit()
-            assert budget_check(sess) is False
-    finally:
-        sess.close()
+def test_next_utc_midnight_naive_input_treated_as_utc() -> None:
+    """Defensive: tz-naive Eingaben werden als UTC angenommen."""
+    now_naive = datetime(2026, 5, 22, 23, 59, 59)
+    result = _next_utc_midnight(now_naive)
+    assert result.tzinfo is UTC
+    assert result.time() == time(0, 0, 0)
+    assert result.date().isoformat() == "2026-05-23"
 
 
-def test_budget_consume_increments(db_app: Flask) -> None:
-    sess = _open_session(db_app)
-    try:
-        with db_app.app_context():
-            row = ensure_settings_row(sess)
-            row.llm_token_budget_used_today = 100
-            sess.commit()
-            new = budget_consume(sess, 250)
-            assert new == 350
-            row = ensure_settings_row(sess)
-            assert row.llm_token_budget_used_today == 350
-    finally:
-        sess.close()
+def test_next_utc_midnight_returns_aware_utc() -> None:
+    """Ergebnis ist immer tz-aware UTC und liegt um 00:00:00."""
+    now = datetime(2026, 12, 31, 23, 59, 59, tzinfo=UTC)
+    result = _next_utc_midnight(now)
+    assert result.tzinfo is UTC
+    assert result.time() == time(0, 0, 0)
+    # Jahreswechsel.
+    assert result == datetime(2027, 1, 1, 0, 0, 0, tzinfo=UTC)
 
 
-def test_budget_consume_negative_caps_to_zero(db_app: Flask) -> None:
-    sess = _open_session(db_app)
-    try:
-        with db_app.app_context():
-            row = ensure_settings_row(sess)
-            row.llm_token_budget_used_today = 50
-            sess.commit()
-            new = budget_consume(sess, -999)
-            assert new == 50  # unveraendert
-    finally:
-        sess.close()
+# ---------------------------------------------------------------------------
+# estimate_tokens
+# ---------------------------------------------------------------------------
 
 
-def test_maybe_reset_budget_resets_when_due(db_app: Flask) -> None:
-    sess = _open_session(db_app)
-    try:
-        with db_app.app_context():
-            row = ensure_settings_row(sess)
-            row.llm_token_budget_used_today = 999
-            # Reset-Zeitpunkt in der Vergangenheit.
-            row.llm_token_budget_reset_at = datetime.now(UTC) - timedelta(hours=1)
-            sess.commit()
-            assert maybe_reset_budget(sess) is True
-            row = ensure_settings_row(sess)
-            assert row.llm_token_budget_used_today == 0
-            # reset_at muss in der Zukunft sein und um 00:00 UTC liegen.
-            assert row.llm_token_budget_reset_at > datetime.now(UTC)
-            assert row.llm_token_budget_reset_at.astimezone(UTC).time() == time(0, 0, 0)
-    finally:
-        sess.close()
+def test_estimate_tokens_pass1_scales_with_findings() -> None:
+    """``group_detection``: 50 Tokens pro Finding, min 50."""
+    job = LLMJob(job_type="group_detection", payload={"finding_ids": [1, 2, 3, 4, 5]})
+    assert estimate_tokens(job) == 250
 
 
-def test_maybe_reset_budget_noop_when_not_due(db_app: Flask) -> None:
-    sess = _open_session(db_app)
-    try:
-        with db_app.app_context():
-            row = ensure_settings_row(sess)
-            row.llm_token_budget_used_today = 42
-            row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=5)
-            sess.commit()
-            assert maybe_reset_budget(sess) is False
-            row = ensure_settings_row(sess)
-            assert row.llm_token_budget_used_today == 42
-    finally:
-        sess.close()
+def test_estimate_tokens_pass1_empty_uses_minimum() -> None:
+    """``group_detection`` mit leerer Liste → min-Cap 50."""
+    job = LLMJob(job_type="group_detection", payload={"finding_ids": []})
+    assert estimate_tokens(job) == 50
 
 
-def test_mark_exhausted_audit_once(db_app: Flask) -> None:
-    sess = _open_session(db_app)
-    try:
-        with db_app.app_context():
-            row = ensure_settings_row(sess)
-            # Reset-Zyklus startet in 6h.
-            row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=6)
-            sess.commit()
-            assert mark_exhausted_audit_once(sess) is True
-            # Zweiter Aufruf: kein neuer Audit.
-            assert mark_exhausted_audit_once(sess) is False
-            audits = (
-                sess.execute(select(AuditEvent).where(AuditEvent.action == "llm.budget_exhausted"))
-                .scalars()
-                .all()
-            )
-            assert len(audits) == 1
-    finally:
-        sess.close()
+def test_estimate_tokens_pass2_constant() -> None:
+    """``risk_evaluation``: konstant 2000."""
+    job = LLMJob(job_type="risk_evaluation", payload={"group_id": 1, "server_id": 1})
+    assert estimate_tokens(job) == 2000
 
 
-def test_estimate_tokens() -> None:
-    pass1_job = LLMJob(
-        job_type="group_detection",
-        payload={"finding_ids": [1, 2, 3, 4, 5]},
-    )
-    assert estimate_tokens(pass1_job) == 250
-    pass1_empty = LLMJob(job_type="group_detection", payload={"finding_ids": []})
-    assert estimate_tokens(pass1_empty) == 50  # min
-    pass2_job = LLMJob(job_type="risk_evaluation", payload={"group_id": 1, "server_id": 1})
-    assert estimate_tokens(pass2_job) == 2000
-    unknown_job = LLMJob(job_type="other", payload={})
-    assert estimate_tokens(unknown_job) == 1000
+def test_estimate_tokens_unknown_job_type_fallback() -> None:
+    """Unbekannter ``job_type`` → defensiver Fallback 1000."""
+    job = LLMJob(job_type="other", payload={})
+    assert estimate_tokens(job) == 1000
+
+
+def test_estimate_tokens_pass1_with_missing_payload_key() -> None:
+    """``group_detection`` ohne ``finding_ids``-Key → min-Cap 50."""
+    job = LLMJob(job_type="group_detection", payload={})
+    assert estimate_tokens(job) == 50

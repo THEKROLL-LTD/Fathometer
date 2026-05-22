@@ -1,136 +1,68 @@
-"""Tests fuer ``app.workers.healthcheck`` — Block P (ADR-0023) Phase F.
+"""Pure-Unit-Tests fuer ``app.workers.healthcheck``.
 
-Das Healthcheck-Skript wird vom docker-compose-Healthcheck-Eintrag des
-``secscan-llm-worker``-Containers sowie von den k8s-Liveness/Readiness-
-Probes aufgerufen. Es liest die Singleton-``settings``-Zeile, prueft das
-Alter von ``llm_worker_heartbeat_at`` und exit'et 0 (healthy) oder
-1 (unhealthy).
+Die Heartbeat-Alter-Entscheidung wurde als ``_is_alive(heartbeat_at, now,
+max_age_sec)`` aus dem Skript-``main()`` herausgeschnitten (Block-P /
+ADR-0023 Phase F; TICKET-004 Slice 6). Diese Datei testet die pure
+Entscheidung plus die Import-Footprint-Garantie aus v0.9.1.
 
-Hier verifizieren wir vier funktionale Pfade plus eine Import-Footprint-
-Garantie (v0.9.1):
-
-1. Frischer Heartbeat → exit 0.
-2. ``llm_worker_heartbeat_at IS NULL`` → exit 1.
-3. Alter Heartbeat (> 30s) → exit 1.
-4. DB-Exception → exit 1.
-5. **Import-Footprint** — ``app.workers.healthcheck`` darf das fette
-   ``app.workers.llm_worker``-Modul nicht laden (sonst zieht der Probe-
-   Cold-Start die komplette LLM-Service-Lage mit und ueberschreitet
-   ``timeoutSeconds: 5`` auf RKE2-Realbedingungen).
+DB-backed Smokes (Singleton-``settings``-Roundtrip durch ``main()`` und
+das Raw-SQL-SELECT) liegen in
+``tests/integration/test_healthcheck_db.py``.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
-from unittest.mock import patch
 
-from flask import Flask
-from sqlalchemy.orm import Session
+from app.workers.healthcheck import HEARTBEAT_MAX_AGE_SEC, _is_alive
 
-from app.db import get_engine
-from app.settings_service import ensure_settings_row
-from app.workers import healthcheck
+# ---------------------------------------------------------------------------
+# Pure Heartbeat-Alter-Entscheidung
+# ---------------------------------------------------------------------------
 
 
-def _ensure_settings_row(db_app: Flask) -> None:
-    """Sorgt fuer eine Singleton-``settings``-Zeile in der Test-DB.
-
-    Der ``db_app``-Fixture truncated vor jedem Test alle Tabellen — also
-    auch ``settings``. Wir legen die Zeile per ``ensure_settings_row``
-    wieder an, damit die UPDATEs unten Wirkung haben.
-    """
-    engine = get_engine(db_app)
-    with Session(bind=engine) as sess:
-        ensure_settings_row(sess)
-        sess.commit()
+def test_is_alive_fresh_heartbeat_returns_true() -> None:
+    """Heartbeat juenger als ``max_age_sec`` → alive."""
+    now = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
+    hb = now - timedelta(seconds=5)
+    assert _is_alive(hb, now, HEARTBEAT_MAX_AGE_SEC) is True
 
 
-def _route_healthcheck_connection(db_app: Flask) -> Any:
-    """Routet ``healthcheck._open_connection`` auf die Test-DB-Engine.
-
-    Die Helper liefert einen ``contextlib.closing``-faehigen Wrapper auf
-    die Test-Connection, damit das Skript ``conn.close()`` aufrufen darf,
-    ohne die Test-Engine zu zerstoeren.
-    """
-    engine = get_engine(db_app)
-    return patch.object(healthcheck, "_open_connection", side_effect=engine.connect)
+def test_is_alive_none_heartbeat_returns_false() -> None:
+    """``heartbeat_at IS NULL`` → unhealthy."""
+    now = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
+    assert _is_alive(None, now, HEARTBEAT_MAX_AGE_SEC) is False
 
 
-def test_healthcheck_fresh_heartbeat_returns_zero(db_app: Flask) -> None:
-    """Heartbeat juenger als 30s → exit 0."""
-    _ensure_settings_row(db_app)
-    engine = get_engine(db_app)
-    with engine.begin() as conn:
-        from sqlalchemy import text
-
-        conn.execute(
-            text("UPDATE settings SET llm_worker_heartbeat_at = :ts WHERE id = 1"),
-            {"ts": datetime.now(tz=UTC)},
-        )
-
-    with _route_healthcheck_connection(db_app):
-        assert healthcheck.main() == 0
+def test_is_alive_stale_heartbeat_returns_false() -> None:
+    """Heartbeat aelter als ``max_age_sec`` → unhealthy."""
+    now = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
+    hb = now - timedelta(seconds=HEARTBEAT_MAX_AGE_SEC + 1)
+    assert _is_alive(hb, now, HEARTBEAT_MAX_AGE_SEC) is False
 
 
-def test_healthcheck_no_heartbeat_returns_one(db_app: Flask) -> None:
-    """``llm_worker_heartbeat_at IS NULL`` → exit 1."""
-    _ensure_settings_row(db_app)
-    engine = get_engine(db_app)
-    with engine.begin() as conn:
-        from sqlalchemy import text
-
-        conn.execute(text("UPDATE settings SET llm_worker_heartbeat_at = NULL WHERE id = 1"))
-
-    with _route_healthcheck_connection(db_app):
-        assert healthcheck.main() == 1
-
-
-def test_healthcheck_stale_heartbeat_returns_one(db_app: Flask) -> None:
-    """Heartbeat aelter als 30s → exit 1."""
-    _ensure_settings_row(db_app)
-    engine = get_engine(db_app)
-    with engine.begin() as conn:
-        from sqlalchemy import text
-
-        conn.execute(
-            text("UPDATE settings SET llm_worker_heartbeat_at = :ts WHERE id = 1"),
-            {"ts": datetime.now(tz=UTC) - timedelta(seconds=120)},
-        )
-
-    with _route_healthcheck_connection(db_app):
-        assert healthcheck.main() == 1
-
-
-def test_healthcheck_db_exception_returns_one(db_app: Flask) -> None:
-    """DB-Exception beim Connection-Aufbau → exit 1, kein Traceback nach STDOUT."""
-
-    def _explode() -> Any:
-        raise RuntimeError("simulated db outage")
-
-    with patch.object(healthcheck, "_open_connection", side_effect=_explode):
-        assert healthcheck.main() == 1
-
-
-def test_healthcheck_naive_timestamp_is_treated_as_utc(db_app: Flask) -> None:
-    """Defensive: ein tz-naiver Heartbeat wird als UTC interpretiert.
+def test_is_alive_naive_timestamp_is_treated_as_utc() -> None:
+    """Defensive: tz-naive Heartbeat-Werte werden als UTC interpretiert.
 
     Migration und ORM-Spalte sind ``DateTime(timezone=True)``, aber falls
     je ein Backfill oder Test-Setup einen naiven Wert in die Zeile setzt,
     soll der Healthcheck nicht mit ``TypeError`` crashen.
     """
-    _ensure_settings_row(db_app)
-    engine = get_engine(db_app)
-    with engine.begin() as conn:
-        from sqlalchemy import text
+    now = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
+    hb_naive = (now - timedelta(seconds=5)).replace(tzinfo=None)
+    assert _is_alive(hb_naive, now, HEARTBEAT_MAX_AGE_SEC) is True
 
-        conn.execute(
-            text("UPDATE settings SET llm_worker_heartbeat_at = :ts WHERE id = 1"),
-            {"ts": datetime.now(tz=UTC).replace(tzinfo=None)},
-        )
 
-    with _route_healthcheck_connection(db_app):
-        assert healthcheck.main() == 0
+def test_is_alive_exactly_at_boundary_is_true() -> None:
+    """Genau am Grenzwert (== max_age_sec) → noch alive (``<=``)."""
+    now = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
+    hb = now - timedelta(seconds=HEARTBEAT_MAX_AGE_SEC)
+    assert _is_alive(hb, now, HEARTBEAT_MAX_AGE_SEC) is True
+
+
+# ---------------------------------------------------------------------------
+# Import-Footprint
+# ---------------------------------------------------------------------------
 
 
 def test_healthcheck_does_not_import_llm_worker_module() -> None:

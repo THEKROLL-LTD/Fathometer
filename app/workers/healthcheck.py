@@ -31,6 +31,22 @@ from app.config import load_settings
 HEARTBEAT_MAX_AGE_SEC: int = 30
 
 
+def _is_alive(heartbeat_at: datetime | None, now: datetime, max_age_sec: int) -> bool:
+    """Reine Heartbeat-Alter-Entscheidung.
+
+    Returns ``True`` wenn ``heartbeat_at`` nicht ``None`` ist und nicht
+    aelter als ``max_age_sec`` Sekunden gegenueber ``now``. Tz-naive
+    Heartbeats werden defensiv als UTC interpretiert (Migration/Backfill-
+    Edge-Case).
+    """
+    if heartbeat_at is None:
+        return False
+    if heartbeat_at.tzinfo is None:
+        heartbeat_at = heartbeat_at.replace(tzinfo=UTC)
+    age = now - heartbeat_at
+    return age <= timedelta(seconds=max_age_sec)
+
+
 def _open_connection() -> Connection:
     """Baut eine kurzlebige DB-Connection.
 
@@ -67,13 +83,12 @@ def main() -> int:
         print("healthcheck: no_heartbeat_yet", file=sys.stderr)
         return 1
 
-    # Tz-naive Werte koennen aus aelteren Migrationen kommen — defensiv
-    # auf UTC anheben, damit der subtract nicht crasht.
-    if hb.tzinfo is None:
-        hb = hb.replace(tzinfo=UTC)
-
-    age = datetime.now(tz=UTC) - hb
-    if age > timedelta(seconds=HEARTBEAT_MAX_AGE_SEC):
+    now = datetime.now(tz=UTC)
+    if not _is_alive(hb, now, HEARTBEAT_MAX_AGE_SEC):
+        # Defensiv auf UTC anheben fuer das Log-Format — _is_alive selbst
+        # ist tz-tolerant.
+        hb_aware = hb if hb.tzinfo is not None else hb.replace(tzinfo=UTC)
+        age = now - hb_aware
         print(
             f"healthcheck: heartbeat_stale age_sec={age.total_seconds():.0f}",
             file=sys.stderr,
