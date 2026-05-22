@@ -79,6 +79,7 @@ _ACCEPTANCE_PATH_PREFIXES: tuple[str, ...] = (
     "tests/integration/test_llm_cache_db",
     "tests/integration/test_llm_debug_log_db",
     "tests/integration/test_llm_provider_switch_db",
+    "tests/integration/test_llm_worker_db",
     "tests/integration/test_quick_stats_db",
     "tests/integration/test_severity_history_db",
     "tests/integration/test_stale_history_db",
@@ -109,6 +110,7 @@ _MOCKED_UNIT_FILES: frozenset[str] = frozenset(
         "tests/services/test_stale_history.py",
         "tests/workers/test_error_classification.py",
         "tests/workers/test_healthcheck.py",
+        "tests/workers/test_llm_worker.py",
         "tests/workers/test_token_budget.py",
     }
 )
