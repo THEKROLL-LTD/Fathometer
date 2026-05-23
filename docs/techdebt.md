@@ -625,6 +625,41 @@ fest.
 
 ---
 
+## TD-014 — Sidebar-Polling-Endpoints ohne expliziten Rate-Limit
+
+**Was:** Beide Sidebar-Polling-Endpoints (`GET /_partials/sidebar`,
+`POST /_partials/sidebar/batch`) haben keinen `@limiter.limit(...)`-
+Decorator. `flask-limiter` ist initialisiert (siehe `app/__init__.py`),
+aber ohne `default_limits`-Konfiguration greift es nur, wenn Endpoints
+explizit gelimitet werden.
+
+**Warum:** Single-User-MVP plus `@login_required` mildert den Impact —
+es gibt keinen offen erreichbaren Endpoint. Aber ein kompromittierter
+Session-Cookie oder ein bug-getriebenes Client-Polling im Loop kann den
+Endpoint frei spammen und unnoetige DB-Roundtrips verursachen
+(`heartbeats_for_servers` + `escalate_act_counts_by_server` +
+`group_counts` pro Batch). Bei N=200 sichtbaren Servern und 60-s-
+Polling-Cadence ist die normale Last <2 RPS — ein Bug mit setInterval(0)
+wuerde das auf 100+ RPS hochziehen.
+
+**Loesung:** `@limiter.limit("120/minute")` auf beide Endpoints in
+`app/views/_sidebar_context.py`. Die `120/min`-Schranke gibt ~2 RPS
+Headroom (Default-Polling ist 1 Batch pro 60 s, plus Scroll-Trigger).
+Test in `tests/views/test_sidebar_batch.py` ergaenzen der bei 121 POSTs
+einen 429 erwartet.
+
+**Aufwand:** ~30 Min. Decorator-Add + ein Pure-Unit-Test mit
+`@override_settings(RATELIMIT_ENABLED=True)` (oder via
+`flask-limiter`-Test-Hook).
+
+**Wann:** Im naechsten Block-Uebergang (W+1 oder Folge-PR). Kein
+akuter Blocker. security-auditor hat das in Phase C als GELB-1
+gemeldet — kein Phase-C-Block weil konsistent mit dem GET-Pendant.
+
+Querverweis: Block W Phase C Security-Audit.
+
+---
+
 ## Konventionen fuer neue Eintraege
 
 - ID: `TD-NNN`, fortlaufend.

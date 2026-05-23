@@ -170,6 +170,45 @@ class User(Base):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# server_groups — 1:N-Group fuer Sidebar-Sektionen (ADR-0034, Migration 0014).
+# ---------------------------------------------------------------------------
+
+
+class ServerGroup(Base):
+    """Operator-pflegbare Sidebar-Gruppe fuer Server (1:N).
+
+    Ein Server gehoert zu hoechstens einer Gruppe (`Server.group_id` nullable).
+    Kein Default-Seed — Tabelle ist nach der Migration leer. CRUD-UI kommt
+    in einem spaeteren Block. `position` ist die Sidebar-Sortier-Reihenfolge
+    (kleinster Wert zuerst, Ties alphabetisch nach `name`).
+    """
+
+    __tablename__ = "server_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    servers: Mapped[list[Server]] = relationship("Server", back_populates="group")
+
+    __table_args__ = (
+        CheckConstraint(
+            "length(trim(name)) > 0 AND length(name) <= 64",
+            name="ck_server_groups_name_length",
+        ),
+        CheckConstraint(
+            "name ~ '^[A-Za-z0-9 _.-]+$'",
+            name="ck_server_groups_name_charset",
+        ),
+    )
+
+
 class Server(Base):
     __tablename__ = "servers"
 
@@ -208,6 +247,15 @@ class Server(Base):
     trivy_db_version: Mapped[str | None] = mapped_column(String(64))
     trivy_db_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Block W (ADR-0034): optionale 1:N-Gruppen-Zuordnung. NULL = ungrouped.
+    # ON DELETE SET NULL: Gruppe loeschen setzt dieses Feld zurueck ohne
+    # den Server zu loeschen.
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("server_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     scans: Mapped[list[Scan]] = relationship(
         "Scan", back_populates="server", cascade="all, delete-orphan"
     )
@@ -216,6 +264,11 @@ class Server(Base):
     )
     tag_links: Mapped[list[ServerTag]] = relationship(
         "ServerTag", back_populates="server", cascade="all, delete-orphan"
+    )
+    # lazy="selectin" damit Sidebar-Context-Abfragen die Gruppe in einer
+    # separaten IN-Query laden statt per JOIN — konsistent mit tag_links.
+    group: Mapped[ServerGroup | None] = relationship(
+        "ServerGroup", back_populates="servers", lazy="selectin"
     )
 
 
@@ -1291,6 +1344,7 @@ __all__ = [
     "Scan",
     "ScanIngestJob",
     "Server",
+    "ServerGroup",
     "ServerKernelModule",
     "ServerListener",
     "ServerProcess",

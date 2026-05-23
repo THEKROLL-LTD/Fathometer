@@ -1,48 +1,29 @@
-{# Sidebar-Server-Liste — HTMX-Polling-Container (ADR-0019, Phase C ADR-0030).
-
-   Wird aus zwei Pfaden konsumiert:
-     1. `base_app.html` inkludiert dieses Partial direkt im Full-Page-Render.
-     2. `GET /_partials/sidebar` (`sidebar_partials_bp.sidebar_partial`)
-        rendert es als HTMX-Antwort fuer den Polling-Trigger.
-
-   Pflicht: `id="server-list"` bleibt nach jedem Swap erhalten — sonst
-   frisst HTMX den Polling-Trigger und der Re-Bind-Handler in `sidebar.js`
-   (Heartbeat-Tooltips, Filter-Re-Apply) findet die Wurzel nicht mehr.
+{# Sidebar-Server-Liste — HTMX-Polling-Container (Phase C, Block W — Redesign).
+   Plain-CSS-Klassen. ADR-0034 §Sidebar-Verhalten: Groups oben, Ungrouped flach darunter.
 
    Variablen-Vertrag:
      Initialer Page-Render (Context-Processor-Pfad — billige Keys):
-       - `sidebar_servers`      : list[Server]  (mit eager-loaded tag_links)
-       - `filter_tags`          : list[str]
-       - `active_server_id`     : int | None
-     Polling-Endpoint-Pfad (teure Keys, alle optional mit Skeleton-Fallback):
+       - `sidebar_servers`          : list[Server] (mit eager-loaded tag_links)
+       - `sidebar_groups`           : list[ServerGroup] | []  (neue Phase-C-Keys)
+       - `server_group_aggregates`  : dict[int | None, dict]  (neu)
+       - `filter_tags`              : list[str]
+       - `active_server_id`         : int | None
+     Polling-Endpoint-Pfad (teure Keys, optional mit Skeleton-Fallback):
        - `sidebar_heartbeats`   : dict[int, list[DailyStatus]]  | Undefined
        - `sidebar_risk_counts`  : dict[int, dict[str, int]]     | Undefined
        - `hosts_total`          : int | Undefined
        - `alarm_count`          : int | Undefined
 
-   HTMX-Trigger (Phase C, ADR-0030 §Konsequenzen):
-     `every 60s` am `<ul>`  — Polling-Cadence 10 s -> 60 s erhoeht.
-     Separates Hidden-Trigger-Element davor mit `load` fuer den
-     initialen Lazy-Load direkt nach Page-Render. Grund: `load` am
-     `<ul>` selbst kombiniert mit `hx-swap="outerHTML"` erzeugt eine
-     Endlosschleife (HTMX feuert `load` jedes Mal wenn das `<ul>`
-     durch outerHTML-Swap "neu im DOM" landet — Re-Trigger-Loop).
-     Der Hidden-Trigger ist nicht das Swap-Target, sein `load`-Event
-     feuert daher nur einmal pro Page-Render.
+   HTMX-Trigger: Separates Hidden-Element für initialen Lazy-Load (load),
+   danach 60-s-Polling am <div#server-list> (ADR-0030-Pattern bleibt erhalten).
 
-   Sicherheit: kein `|safe` — Server-/Tag-Namen sind server-seitig
-   validiert und werden autoescaped gerendert.
+   Sicherheit: kein |safe — Autoescape schützt Server-/Gruppen-Namen.
 #}
-{# Hidden-Trigger-Element fuer den initialen Lazy-Load (`load`-Event).
-   Bewusst KEIN Teil des `<ul#server-list>`-Swap-Targets.
 
-   Wird AUSSCHLIESSLICH beim initialen Full-Page-Render gerendert
-   (`lazy_load_trigger` ist im Default-Kontext implizit truthy). Der
-   Polling-Endpoint `sidebar_partial` setzt `lazy_load_trigger=False`,
-   damit beim outerHTML-Swap des `<ul>` NICHT zusaetzlich ein zweiter
-   Trigger ins DOM gelangt (sonst Re-Trigger-Loop). #}
+{# Hidden-Trigger für initialen Lazy-Load (nur beim Full-Page-Render).
+   Polling-Endpoint setzt lazy_load_trigger=False damit kein Re-Trigger-Loop entsteht. #}
 {% if lazy_load_trigger | default(true) %}
-<span class="hidden"
+<span class="sr-only"
       data-test="sidebar-lazy-load-trigger"
       hx-get="{{ url_for('sidebar_partials.sidebar_partial') }}{% if filter_tags %}?{% for t in filter_tags %}tag={{ t | urlencode }}{% if not loop.last %}&{% endif %}{% endfor %}{% endif %}"
       hx-trigger="load"
@@ -50,48 +31,85 @@
       hx-swap="outerHTML"
       aria-hidden="true"></span>
 {% endif %}
-{# Polling-Attribute sind PRIVAT fuer diesen Container. Ohne
-   `hx-disinherit="*"` erben alle `<a hx-get>`-Klicks in den `<li>`-Zeilen
-   das `hx-target="this"` und `hx-swap="outerHTML"` der `<ul>` — der
-   Klick-Response wuerde dann nicht in `#detail-pane` landen, sondern
-   `<main id="detail-pane">` komplett ersetzen und damit den Scroll-
-   Container (`overflow-y-auto`) zerstoeren. #}
-<ul id="server-list"
-    role="list"
-    class="divide-y divide-base-300 flex-1"
-    hx-get="{{ url_for('sidebar_partials.sidebar_partial') }}{% if filter_tags %}?{% for t in filter_tags %}tag={{ t | urlencode }}{% if not loop.last %}&{% endif %}{% endfor %}{% endif %}"
-    hx-trigger="every 60s [document.visibilityState === 'visible']"
-    hx-target="this"
-    hx-swap="outerHTML"
-    hx-disinherit="*">
 
-  {# Header: HOSTS · ALARM — HOSTS initial echt aus Context-Processor, ALARM
-     Skeleton wenn alarm_count noch nicht vom Polling-Endpoint geliefert wurde. #}
-  <li class="px-3 py-1.5 text-xs font-mono opacity-60 select-none"
-      data-test="sidebar-host-summary"
-      aria-hidden="true">
-    <span data-test="sidebar-hosts-total">{{ hosts_total | default(sidebar_servers | length) }}</span>
-    hosts
-    ·
-    {% if alarm_count is defined and alarm_count is not none %}
-      <span data-test="sidebar-alarm-count"
-            class="{% if alarm_count > 0 %}text-error{% endif %}">{{ alarm_count }}</span>
+<div id="server-list"
+     class="sidebar__list"
+     hx-get="{{ url_for('sidebar_partials.sidebar_partial') }}{% if filter_tags %}?{% for t in filter_tags %}tag={{ t | urlencode }}{% if not loop.last %}&{% endif %}{% endfor %}{% endif %}"
+     hx-trigger="every 60s [document.visibilityState === 'visible']"
+     hx-target="this"
+     hx-swap="outerHTML"
+     hx-disinherit="*">
+
+  {# Meta-Header: N hosts · N alarm #}
+  <div class="sidebar__meta"
+       data-test="sidebar-host-summary"
+       aria-hidden="true">
+    <span>
+      <b data-test="sidebar-hosts-total">{{ hosts_total | default(sidebar_servers | length) }}</b>
+      hosts
+      ·
+      {% if alarm_count is defined and alarm_count is not none %}
+        {% if alarm_count > 0 %}
+          <span class="sidebar__meta--alarm" data-test="sidebar-alarm-count">{{ alarm_count }} alarm</span>
+        {% else %}
+          <span data-test="sidebar-alarm-count">all quiet</span>
+        {% endif %}
+      {% else %}
+        <span class="stat-skel stat-skel--left" aria-label="alarm count loading" data-test="sidebar-alarm-count-skeleton">
+          <span class="stat-skel__dash" style="width: 32px;"></span>
+        </span>
+      {% endif %}
+    </span>
+  </div>
+
+  {# Spalten-Header #}
+  <div class="sidebar__colhead" aria-hidden="true">
+    <span></span>
+    <span>host</span>
+    <span>escalate</span>
+    <span>act</span>
+  </div>
+
+  {% if sidebar_servers %}
+    {% set has_groups = sidebar_groups is defined and sidebar_groups | length > 0 %}
+
+    {% if has_groups %}
+      {# Gruppen oben (eingeklappt), Ungrouped flach darunter (ADR-0034). #}
+
+      {# Gruppierte Server pro Group-ID vorsortieren #}
+      {% for group in sidebar_groups %}
+        {% set group_servers = sidebar_servers | selectattr('group_id', 'equalto', group.id) | list %}
+        {% if group_servers %}
+          {% with %}
+            {% include "sidebar/_group_section.html" %}
+          {% endwith %}
+        {% endif %}
+      {% endfor %}
+
+      {# Ungrouped-Server: group_id is None — flach ohne Section-Header #}
+      {% set ungrouped = sidebar_servers | selectattr('group_id', 'none') | list %}
+      {% for srv in ungrouped %}
+        {% with server=srv,
+                cells=(sidebar_heartbeats or {}).get(srv.id, []),
+                risk=(sidebar_risk_counts or {}).get(srv.id, {}),
+                is_active=(active_server_id == srv.id) %}
+          {% include "sidebar/_server_row.html" %}
+        {% endwith %}
+      {% endfor %}
+
     {% else %}
-      <span class="inline-block w-4 h-3 bg-base-300 animate-pulse rounded-sm align-middle"
-            data-test="sidebar-alarm-count-skeleton"
-            aria-label="alarm count loading"></span>
+      {# Keine Groups → flache Liste aller Server (ADR-0034 §Sidebar-Verhalten) #}
+      {% for srv in sidebar_servers %}
+        {% with server=srv,
+                cells=(sidebar_heartbeats or {}).get(srv.id, []),
+                risk=(sidebar_risk_counts or {}).get(srv.id, {}),
+                is_active=(active_server_id == srv.id) %}
+          {% include "sidebar/_server_row.html" %}
+        {% endwith %}
+      {% endfor %}
     {% endif %}
-    alarm
-  </li>
 
-  {% for srv in (sidebar_servers or []) %}
-    {% with server=srv,
-            cells=(sidebar_heartbeats or {}).get(srv.id, []),
-            risk=(sidebar_risk_counts or {}).get(srv.id, {}),
-            is_active=(active_server_id == srv.id) %}
-      {% include "sidebar/_server_row.html" %}
-    {% endwith %}
   {% else %}
     {% include "_empty/no_servers.html" %}
-  {% endfor %}
-</ul>
+  {% endif %}
+</div>

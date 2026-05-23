@@ -4,6 +4,8 @@ Variablen-Vertrag — initialer Page-Render (Context-Processor-Pfad):
   - sidebar_servers    : list[Server]  (mit eager-loaded tag_links/tag)
   - filter_tags        : list[str]
   - active_server_id   : int | None  (vom View gesetzt)
+  - sidebar_groups     : list[ServerGroup]  (sortiert nach position, name)
+  - server_group_aggregates : dict[int | None, GroupCounts]
 
 Teure Aggregate (Heartbeats, Risk-Counts, Header-Counter) werden NICHT
 mehr im Context-Processor gebaut. Sie erscheinen ausschliesslich im
@@ -17,8 +19,9 @@ Das Template `sidebar/_server_list.html` rendert beim initialen Page-Load
 ein Skeleton fuer die teuren Felder. Der Polling-Endpoint ersetzt das
 Skeleton via HTMX `outerHTML`-Swap mit den echten Werten.
 
-Dieses Modul stellt ausserdem den HTMX-Polling-Endpoint
-`GET /_partials/sidebar` bereit (ADR-0019).
+Dieses Modul stellt ausserdem zwei HTMX-Endpoints bereit:
+  - `GET /_partials/sidebar`       — Polling-Endpoint (ADR-0019)
+  - `POST /_partials/sidebar/batch` — Viewport-Batch-Endpoint (ADR-0035)
 """
 
 from __future__ import annotations
@@ -26,14 +29,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from flask import Blueprint, render_template, request
+from flask import Blueprint, abort, render_template, request
 from flask_login import login_required
+from pydantic import ValidationError
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_session
-from app.models import Server, ServerTag
+from app.models import Server, ServerGroup, ServerTag
 from app.services.heartbeat_aggregation import heartbeats_for_servers
+from app.services.sidebar_group_aggregates import group_counts
 from app.services.sidebar_risk_counts import escalate_act_counts_by_server
 
 
@@ -42,10 +47,15 @@ def build_sidebar_context(
 ) -> dict[str, Any]:
     """Sammelt die **billigen** Variablen die `base_app.html` fuer die Sidebar braucht.
 
-    Liefert nur die Server-Liste (Namen, Tags, Lifecycle-Status) — keine
-    Heartbeats, keine Risk-Counts und keine globalen Tag-Select-Daten.
+    Liefert die Server-Liste (Namen, Tags, Lifecycle-Status) plus die
+    Group-Struktur fuer die Section-Header — keine Heartbeats, keine
+    Risk-Counts und keine globalen Tag-Select-Daten.
     Diese teuren Aggregate kommen ausschliesslich vom Polling-Endpoint
     `/_partials/sidebar` (ADR-0030 Phase C).
+
+    Block W (ADR-0034) ergaenzt:
+      - `sidebar_groups`            : sortierte Group-Liste
+      - `server_group_aggregates`   : GroupCounts pro group_id (inkl. None)
 
     Argumente:
       `filter_tags` — aktive Tag-Filter (OR), optional.
@@ -63,10 +73,19 @@ def build_sidebar_context(
     )
     servers = list(sess.execute(server_stmt).scalars().unique().all())
 
+    # Block W (ADR-0034): sortierte Group-Liste fuer Section-Header.
+    groups_stmt = select(ServerGroup).order_by(ServerGroup.position, ServerGroup.name)
+    sidebar_groups = list(sess.execute(groups_stmt).scalars().all())
+
+    # Block W (ADR-0034): GROUP-BY-Aggregation fuer Header-Counts.
+    aggregates = group_counts(sess)
+
     return {
         "sidebar_servers": servers,
         "filter_tags": tags,
         "active_server_id": None,
+        "sidebar_groups": sidebar_groups,
+        "server_group_aggregates": aggregates,
     }
 
 
@@ -77,6 +96,26 @@ def is_hx_request(request: Any) -> bool:
     in Tests mit Mock-Requests genutzt werden kann.
     """
     return bool(request.headers.get("HX-Request") == "true")
+
+
+def _filter_visible_server_ids(
+    sess: Session,
+    raw_ids: list[int],
+    filter_tags: list[str] | None = None,
+) -> list[int]:
+    """Filtert rohe Server-IDs gegen die DB — nur tatsaechlich existierende IDs.
+
+    Security: kein User-Input-Wert wird direkt als Template-Variable
+    genutzt. Erst DB-Whitelist, dann Response.
+
+    `filter_tags` wird noch nicht implementiert (Block-W-Scope: kein
+    Group-Filter via URL). Der Parameter ist fuer spaetere Erweiterung
+    vorbereitet (ADR-0034 §"Filter mit Tag").
+    """
+    if not raw_ids:
+        return []
+    stmt = select(Server.id).where(Server.id.in_(raw_ids))
+    return list(sess.execute(stmt).scalars().all())
 
 
 sidebar_partials_bp = Blueprint("sidebar_partials", __name__)
@@ -114,7 +153,7 @@ def sidebar_partial() -> Any:
     server_ids = [srv.id for srv in ctx["sidebar_servers"]]
 
     now = datetime.now(tz=UTC)
-    ctx["sidebar_heartbeats"] = heartbeats_for_servers(sess, server_ids, now=now)
+    ctx["sidebar_heartbeats"] = heartbeats_for_servers(sess, server_ids, now=now, days=30)
 
     risk_counts = escalate_act_counts_by_server(sess, server_ids)
     ctx["sidebar_risk_counts"] = risk_counts
@@ -131,4 +170,73 @@ def sidebar_partial() -> Any:
     return render_template("sidebar/_server_list.html", **ctx)
 
 
-__all__ = ["build_sidebar_context", "is_hx_request", "sidebar_partials_bp"]
+@sidebar_partials_bp.post("/_partials/sidebar/batch")
+@login_required
+def sidebar_batch() -> Any:
+    """Viewport-Batch-Endpoint fuer Sidebar-Heartbeat-OOB-Swaps (ADR-0035).
+
+    Client schickt JSON `{"server_ids": [1, 2, 3]}` mit den aktuell
+    sichtbaren Server-IDs (IntersectionObserver-Viewport-Pattern). Der
+    Endpoint antwortet mit einem HTMX-OOB-Fragment-Body pro Server
+    (Heartbeat-Bar + escalate/act-Counts).
+
+    Sicherheits-Haertungen (security-auditor-pflichtig):
+      - CSRF-Token: Flask-WTF `csrf.protect` ist App-weit aktiv auf allen
+        POST-Requests (inkl. diesem Blueprint). HTMX schickt `X-CSRFToken`-
+        Header aus dem Meta-Tag.
+      - Pydantic `extra="forbid"`: unbekannte Felder -> 400.
+      - max_length=200 Cap: mehr als 200 IDs -> 400.
+      - @login_required: unauthentifizierte Requests -> Redirect/401.
+      - DB-Whitelist: rohe IDs werden gegen `servers.id` gefiltert, bevor
+        irgendwas an Templates geht. Kein User-Input direkt im Template-Pfad.
+
+    Response: HTMX-OOB-Fragment-Body (mehrere Top-Level-Elemente) fuer
+    den `hx-swap="outerHTML"` Pattern pro Server-Row.
+    """
+    from app.schemas.sidebar_batch import SidebarBatchRequest
+
+    # Body-Parse + Pydantic-Validation.
+    raw_body = request.get_json(silent=True)
+    if raw_body is None:
+        abort(400)
+
+    try:
+        payload = SidebarBatchRequest.model_validate(raw_body)
+    except ValidationError:
+        abort(400)
+
+    sess = get_session()
+
+    # DB-Whitelist: nur tatsaechlich existierende Server-IDs.
+    visible_ids = _filter_visible_server_ids(sess, payload.server_ids)
+
+    if not visible_ids:
+        # Kein Server sichtbar oder alle IDs ungueltig -> leere OOB-Response.
+        return render_template(
+            "_partials/sidebar_batch_oob.html",
+            batch_servers=[],
+            batch_heartbeats={},
+            batch_risk_counts={},
+        )
+
+    now = datetime.now(tz=UTC)
+    batch_heartbeats = heartbeats_for_servers(sess, visible_ids, days=30, now=now)
+    batch_risk_counts = escalate_act_counts_by_server(sess, visible_ids)
+
+    # Server-Objekte fuer das Template (Namen, IDs, OS-Info).
+    servers_stmt = select(Server).where(Server.id.in_(visible_ids))
+    batch_servers = list(sess.execute(servers_stmt).scalars().all())
+
+    return render_template(
+        "_partials/sidebar_batch_oob.html",
+        batch_servers=batch_servers,
+        batch_heartbeats=batch_heartbeats,
+        batch_risk_counts=batch_risk_counts,
+    )
+
+
+__all__ = [
+    "build_sidebar_context",
+    "is_hx_request",
+    "sidebar_partials_bp",
+]

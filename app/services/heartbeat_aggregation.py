@@ -55,6 +55,10 @@ from sqlalchemy.orm import Session
 
 from app.models import Finding, FindingStatus, Scan, Severity
 
+# RiskBand ist in der DB als String(16) gespeichert (kein nativer PG-Enum).
+# Wir definieren hier einen lokalen Typ-Alias fuer die statische Analyse.
+RiskBand = str
+
 
 @runtime_checkable
 class _FindingLike(Protocol):
@@ -69,13 +73,17 @@ class _FindingLike(Protocol):
     resolved_at: datetime | None
     severity: Severity
     is_kev: bool
+    risk_band: RiskBand | None
 
 
 class _FindingRow(NamedTuple):
     """Schmale Projektion aus der Findings-Tabelle fuer die Heartbeat-Aggregation.
 
-    Enthaelt nur die 7 Spalten die `_aggregate_one_server` benoetigt —
-    kein vollstaendiges ORM-Objekt, kein JSONB-`data`-Hydrate.
+    Enthaelt 8 Spalten (die 7 bisherigen plus `risk_band` aus Block W ADR-0035).
+    Kein vollstaendiges ORM-Objekt, kein JSONB-`data`-Hydrate.
+
+    `risk_band` hat Default `None` fuer Backwards-Compat mit bestehenden Tests
+    die `_FindingRow` ohne dieses Feld konstruieren.
     """
 
     server_id: int
@@ -85,6 +93,7 @@ class _FindingRow(NamedTuple):
     resolved_at: datetime | None
     is_kev: bool
     kev_added_at: datetime | None
+    risk_band: RiskBand | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -99,24 +108,48 @@ _SEVERITY_RANK: dict[Severity, int] = {
     Severity.UNKNOWN: 0,
 }
 
+# ---------------------------------------------------------------------------
+# Risk-Band-Rank — Severity-Ordnung fuer `dominant_risk_band` (ADR-0035).
+# escalate > act > mitigate > pending > monitor > noise > unknown
+# ---------------------------------------------------------------------------
+
+_RISK_BAND_RANK: dict[str, int] = {
+    "escalate": 7,
+    "act": 6,
+    "mitigate": 5,
+    "pending": 4,
+    "monitor": 3,
+    "noise": 2,
+    "unknown": 1,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class DailyStatus:
     """Ein Heartbeat-Cell-Datensatz fuer einen Server an einem Tag.
 
     Felder:
-      - `day`           — Datum (UTC).
-      - `max_severity`  — hoechste Severity offener Findings am Tagesende,
-                          `None` wenn keine offenen Findings existierten.
-      - `kev_count`     — Anzahl OPEN+KEV Findings am Tagesende.
-      - `had_scan`      — `True` wenn an diesem Tag mindestens ein Scan
-                          eingegangen ist.
+      - `day`                — Datum (UTC).
+      - `max_severity`       — hoechste Severity offener Findings am Tagesende,
+                               `None` wenn keine offenen Findings existierten.
+                               Bleibt fuer Backwards-Compat (Server-Detail-
+                               Heatmap konsumiert dieses Feld, Phase 2).
+      - `kev_count`          — Anzahl OPEN+KEV Findings am Tagesende.
+                               Bleibt fuer Backwards-Compat.
+      - `had_scan`           — `True` wenn an diesem Tag mindestens ein Scan
+                               eingegangen ist.
+      - `dominant_risk_band` — hoechster Risk-Band offener Findings am
+                               Tagesende gemaess ADR-0035-Severity-Ordnung
+                               (escalate > act > mitigate > pending > monitor >
+                               noise > unknown). `None` wenn keine Findings.
+                               Wird fuer den neuen Sidebar-Heartbeat-Bar genutzt.
     """
 
     day: date
     max_severity: Severity | None
     kev_count: int
     had_scan: bool
+    dominant_risk_band: RiskBand | None = None
 
 
 def _resolve_now(now: datetime | None) -> datetime:
@@ -167,6 +200,8 @@ def _aggregate_one_server(
         max_rank: int = -1
         max_sev: Severity | None = None
         kev_count = 0
+        dom_risk_rank: int = -1
+        dom_risk_band: RiskBand | None = None
         for f in findings:
             first_seen = f.first_seen_at
             if first_seen.tzinfo is None:
@@ -190,12 +225,21 @@ def _aggregate_one_server(
                 max_sev = f.severity
             if f.is_kev:
                 kev_count += 1
+            # Block W (ADR-0035): dominant_risk_band — hoechster Risk-Band
+            # gemaess _RISK_BAND_RANK-Ordnung. None-risk_band wird uebersprungen.
+            rb = f.risk_band
+            if rb is not None:
+                rb_rank = _RISK_BAND_RANK.get(rb, 0)
+                if rb_rank > dom_risk_rank:
+                    dom_risk_rank = rb_rank
+                    dom_risk_band = rb
         result.append(
             DailyStatus(
                 day=d,
                 max_severity=max_sev,
                 kev_count=kev_count,
                 had_scan=d in scan_days,
+                dominant_risk_band=dom_risk_band,
             )
         )
     return result
@@ -244,7 +288,7 @@ def heartbeat_for_server(
 def heartbeats_for_servers(
     session: Session,
     server_ids: list[int],
-    days: int = 50,
+    days: int = 30,
     now: datetime | None = None,
 ) -> dict[int, list[DailyStatus]]:
     """Batch-Variante fuer die Sidebar — eine Query je fuer Findings/Scans.
@@ -262,8 +306,9 @@ def heartbeats_for_servers(
     start_dt = datetime.combine(start_day, time.min, tzinfo=UTC)
     day_list = _day_range(end_day, days)
 
-    # Findings: schmale Projektion — nur die 7 Spalten die die Aggregation
-    # benoetigt. Kein select(Finding) mehr, kein JSONB-data-Hydrate.
+    # Findings: schmale Projektion — 8 Spalten (die 7 bisherigen plus
+    # `risk_band` fuer dominant_risk_band-Reduce, ADR-0035).
+    # Kein select(Finding) mehr, kein JSONB-data-Hydrate.
     f_stmt = select(
         Finding.server_id,
         Finding.severity,
@@ -272,6 +317,7 @@ def heartbeats_for_servers(
         Finding.resolved_at,
         Finding.is_kev,
         Finding.kev_added_at,
+        Finding.risk_band,
     ).where(
         Finding.server_id.in_(server_ids),
         (Finding.resolved_at.is_(None)) | (Finding.resolved_at >= start_dt),
@@ -287,6 +333,7 @@ def heartbeats_for_servers(
                 resolved_at=row.resolved_at,
                 is_kev=row.is_kev,
                 kev_added_at=row.kev_added_at,
+                risk_band=row.risk_band,
             )
         )
 

@@ -1,0 +1,73 @@
+{# Sidebar Batch-OOB-Response (Phase C, Block W — ADR-0035).
+   Wird von `POST /_partials/sidebar/batch` gerendert.
+
+   Variablen:
+     - `batch_servers`     : list[Server]    — Whitelisted Server-Objekte
+     - `batch_heartbeats`  : dict[int, list[DailyStatus]]  — 30 Tage
+     - `batch_risk_counts` : dict[int, dict[str, int]]     — escalate/act
+
+   Jeder Server erzeugt zwei OOB-Fragments:
+     1. `hx-swap-oob="outerHTML:#sidebar-host-<id>-heartbeat"` — Heartbeat-Bar
+     2. `hx-swap-oob="outerHTML:#sidebar-host-<id>-counts"` — escalate/act-Counts
+
+   Die korrespondierenden IDs muessen im Sidebar-Markup existieren damit
+   HTMX den Swap durchfuehrt. Der JS-Viewport-Observer (sidebar_viewport.js)
+   ist fuer das Polling-Trigger zustaendig.
+
+   Sicherheit: kein |safe — Autoescape schuetzt alle Server-Felder.
+   Server-IDs sind DB-whitelisted (View-Schicht).
+#}
+{% for server in batch_servers %}
+  {% set cells = batch_heartbeats.get(server.id, []) %}
+  {% set risk  = batch_risk_counts.get(server.id, {}) %}
+
+  {# OOB-Fragment 1: Heartbeat-Bar (30 Cells, ADR-0035 §Frontend-Mapping) #}
+  <span id="sidebar-host-{{ server.id }}-heartbeat"
+        class="host__beat"
+        hx-swap-oob="outerHTML:#sidebar-host-{{ server.id }}-heartbeat"
+        role="img"
+        aria-label="Heartbeat last {{ cells | length }} days">
+    {% if cells %}
+      {% for cell in cells %}
+        {# dominant_risk_band-Mapping gemaess ADR-0035 §Frontend-Mapping #}
+        {% set rb = cell.dominant_risk_band %}
+        {% if rb == 'escalate' %}
+          {% set beat_cls = 'host__beat__cell host__beat__cell--alarm' %}
+        {% elif rb in ('act', 'mitigate') %}
+          {% set beat_cls = 'host__beat__cell host__beat__cell--warn' %}
+        {% elif rb in ('pending', 'monitor', 'noise') or (rb is none and cell.had_scan) %}
+          {% set beat_cls = 'host__beat__cell host__beat__cell--ok' %}
+        {% elif rb == 'unknown' %}
+          {% set beat_cls = 'host__beat__cell host__beat__cell--unknown' %}
+        {% else %}
+          {# rb is None, kein Scan #}
+          {% set beat_cls = 'host__beat__cell host__beat__cell--ok' %}
+        {% endif %}
+        <span class="{{ beat_cls }}"
+              data-day="{{ cell.day.isoformat() }}"
+              data-risk-band="{{ rb or '' }}"
+              data-had-scan="{{ '1' if cell.had_scan else '0' }}"
+              aria-label="{{ cell.day.isoformat() }}{% if rb %} {{ rb }}{% endif %}"></span>
+      {% endfor %}
+    {% else %}
+      {# Skeleton-Pfad: 30 Pulse-Cells (sollte nicht vorkommen bei Batch-Response) #}
+      {% for _ in range(30) %}
+        <span class="host__beat__cell host__beat__cell--skel"></span>
+      {% endfor %}
+    {% endif %}
+  </span>
+
+  {# OOB-Fragment 2: escalate/act-Counts #}
+  <span id="sidebar-host-{{ server.id }}-counts"
+        class="host__counts"
+        hx-swap-oob="outerHTML:#sidebar-host-{{ server.id }}-counts">
+    <span class="host__count host__count--escalate{% if risk.get('escalate', 0) > 0 %} host__count--crit{% endif %}"
+          data-test="sidebar-row-escalate-{{ server.id }}">
+      {{ risk.get('escalate', 0) if risk.get('escalate', 0) > 0 else '—' }}
+    </span>
+    <span class="host__count host__count--act{% if risk.get('act', 0) > 0 %} host__count--warn{% endif %}"
+          data-test="sidebar-row-act-{{ server.id }}">
+      {{ risk.get('act', 0) if risk.get('act', 0) > 0 else '—' }}
+    </span>
+  </span>
+{% endfor %}

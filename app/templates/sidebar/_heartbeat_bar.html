@@ -1,71 +1,63 @@
-{# Sidebar Heartbeat-Bar Partial (Block I, §7a Aufgabe 3; Phase C ADR-0030).
+{# Sidebar Heartbeat-Bar (Phase C, Block W — Redesign).
+   Mapping: dominant_risk_band → CSS-Klasse (ADR-0035 §Frontend-Mapping).
+   Genau 30 Cells. Skeleton-Pfad mit host__beat__probe-Scan-Animation.
 
-   Erwartete Variablen:
-     - `cells` : list[DailyStatus] — aelteste zuerst (Index 0) bis heute
-                 (letzter Index). Jedes Element hat:
-                   - day          : date
-                   - max_severity : Severity | None
-                   - kev_count    : int
-                   - had_scan     : bool
-                 Leer beim initialen Page-Render — Skeleton-Pfad wird gerendert.
+   Erwartete Variable:
+     - `cells` : list[DailyStatus] — älteste zuerst.
+                 Jedes Element hat:
+                   - day                : date
+                   - dominant_risk_band : RiskBand | None (NEU, ADR-0035)
+                   - max_severity       : Severity | None  (bleibt für Compat.)
+                   - had_scan           : bool
+                 Leer beim initialen Page-Render → Skeleton-Pfad.
 
-   Severity-Farb-Mapping (Tailwind/DaisyUI-Klassen, §7a):
-     - critical            -> bg-error
-     - high                -> bg-warning
-     - medium              -> bg-accent
-     - low                 -> bg-info
-     - unknown             -> bg-base-content/40 (sehr gedaempft)
-     - None + had_scan     -> bg-success/40 (scan, keine offenen Findings)
-     - None + !had_scan    -> bg-base-300 (grau, kein Scan)
-   `kev_count > 0` -> zusaetzlicher roter Ring + volle Opacity.
+   Color-Reduction-Rule (ADR-0033 §3, ADR-0035 §2):
+     escalate           → beat--alarm    (cyan)
+     act, mitigate      → beat--warn     (grau, 0.7 Opacity)
+     pending, monitor,
+     noise              → beat--ok       (border-visible grau)
+     unknown            → beat--unknown  (text-ghost, 0.35 Opacity)
+     None (kein Finding)→ beat--ok       (nominal = clean, kein Signal)
 
-   Skeleton-Pfad (Phase C, ADR-0030 Befund 8):
-     Wenn `cells` leer ist (Initial-Render), werden 50 Skeleton-Cells mit
-     `animate-pulse` gerendert. Identische Abmessungen (w-1 h-5) wie die
-     Live-Cells — Layout-Reflow beim Swap wird so vermieden.
-
-   Tooltip via Alpine: hover startet 300ms-Delay-Timer, zeigt dann
-   absoluten Tooltip rechts/oberhalb der Pille mit Datum, Severity, KEV
-   und Scan-Status. Implementiert in `static/js/sidebar.js` via
-   delegierten Listenern auf `#server-list`.
+   Sicherheit: kein |safe — alle Werte sind Enum-Strings aus dem Backend.
 #}
 {% if cells %}
-  <span class="heartbeat-bar inline-flex gap-px items-end"
-        role="img"
-        aria-label="Heartbeat letzte {{ cells | length }} Tage">
+  <div class="host__beat"
+       role="img"
+       aria-label="30-day heartbeat">
     {% for cell in cells %}
-      {% set sev = cell.max_severity.value if cell.max_severity else '' %}
-      {% set kev = cell.kev_count %}
-      {% set scan = '1' if cell.had_scan else '0' %}
-      {% set cls = 'bg-base-300' %}
-      {% if sev == 'critical' %}{% set cls = 'bg-error' %}
-      {% elif sev == 'high' %}{% set cls = 'bg-warning' %}
-      {% elif sev == 'medium' %}{% set cls = 'bg-accent' %}
-      {% elif sev == 'low' %}{% set cls = 'bg-info' %}
-      {% elif sev == 'unknown' %}{% set cls = 'bg-base-content/40' %}
-      {% elif cell.had_scan %}{% set cls = 'bg-success/40' %}
+      {# dominant_risk_band auf CSS-Klasse mappen #}
+      {% set band = cell.dominant_risk_band.value if cell.dominant_risk_band else None %}
+      {% if band == 'escalate' %}
+        {% set tick_cls = 'beat--alarm' %}
+      {% elif band in ('act', 'mitigate') %}
+        {% set tick_cls = 'beat--warn' %}
+      {% elif band in ('pending', 'monitor', 'noise') %}
+        {% set tick_cls = 'beat--ok' %}
+      {% elif band == 'unknown' %}
+        {% set tick_cls = 'beat--unknown' %}
+      {% else %}
+        {% set tick_cls = 'beat--ok' %}
       {% endif %}
-      <span class="heartbeat-cell inline-block w-1 h-5 rounded-sm transition-opacity
-                   {{ cls }}
-                   {% if kev > 0 %}ring-1 ring-error{% endif %}
-                   {% if not cell.had_scan and not sev %}opacity-50{% endif %}"
-            data-day="{{ cell.day.isoformat() }}"
-            data-severity="{{ sev }}"
-            data-kev="{{ kev }}"
-            data-had-scan="{{ scan }}"
-            tabindex="0"
-            aria-label="{{ cell.day.isoformat() }}{% if sev %} max {{ sev }}{% endif %}{% if kev %} {{ kev }} KEV{% endif %}{% if not cell.had_scan %} kein Scan{% endif %}"></span>
+      <div class="host__beat-tick {{ tick_cls }}"
+           data-day="{{ cell.day.isoformat() }}"
+           data-band="{{ band or 'none' }}"
+           title="{{ cell.day.isoformat() }}{% if band %} · {{ band }}{% endif %}{% if not cell.had_scan %} · no scan{% endif %}"
+           tabindex="-1"
+           aria-hidden="true"></div>
     {% endfor %}
-  </span>
+  </div>
 {% else %}
-  {# Skeleton-Pfad: 50 pulsierende Cells — identische Abmessungen wie Live-Cells
-     damit der Polling-Swap kein Layout-Reflow ausloest (Phase C, ADR-0030). #}
-  <span class="heartbeat-bar inline-flex gap-px items-end"
-        role="img"
-        aria-label="Heartbeat letzte 50 Tage (laedt)"
-        data-test="heartbeat-skeleton">
-    {% for _ in range(50) %}
-      <span class="inline-block w-1 h-5 bg-base-300 animate-pulse rounded-sm"></span>
+  {# Skeleton-Pfad: 30 dim Ticks + Scan-Probe-Beam (ADR-0035 §4, DS §1).
+     Genau 30 Cells — identische Abmessungen wie Live-Cells (kein Layout-Reflow). #}
+  <div class="host__beat host__beat--skel"
+       role="presentation"
+       aria-busy="true"
+       aria-label="loading heartbeat"
+       data-test="heartbeat-skeleton">
+    {% for _ in range(30) %}
+      <div class="host__beat-tick host__beat-tick--skel"></div>
     {% endfor %}
-  </span>
+    <div class="host__beat__probe"></div>
+  </div>
 {% endif %}

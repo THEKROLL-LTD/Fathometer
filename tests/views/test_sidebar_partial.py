@@ -141,23 +141,26 @@ def test_header_alarm_skeleton_when_not_set(app: Flask) -> None:
     """Wenn alarm_count nicht im Context, wird Skeleton-Span gerendert."""
     html = _render_server_list(app, [_make_server()])
     assert 'data-test="sidebar-alarm-count-skeleton"' in html
-    assert "animate-pulse" in html
+    # Phase-C-Redesign: Skeleton nutzt stat-skel statt animate-pulse (plain-CSS)
+    assert "stat-skel" in html
 
 
 def test_header_alarm_count_live_when_zero(app: Flask) -> None:
-    """alarm_count=0 zeigt Live-Zahl (kein Skeleton), kein text-error."""
+    """alarm_count=0 zeigt Live-Zahl (kein Skeleton), kein Alarm-Klasse."""
     html = _render_server_list(app, [_make_server()], alarm_count=0)
     assert 'data-test="sidebar-alarm-count"' in html
     assert 'data-test="sidebar-alarm-count-skeleton"' not in html
-    # 0 -> kein text-error
-    assert "text-error" not in html.split('data-test="sidebar-alarm-count"')[1].split(">0<")[0]
+    # Phase-C-Redesign: 0 Alarms -> kein sidebar__meta--alarm
+    after_marker = html.split('data-test="sidebar-alarm-count"')[1]
+    assert "sidebar__meta--alarm" not in after_marker.split("all quiet")[0]
 
 
 def test_header_alarm_count_live_with_error_class(app: Flask) -> None:
-    """alarm_count > 0 zeigt Live-Zahl mit text-error-Klasse."""
+    """alarm_count > 0 zeigt Live-Zahl mit sidebar__meta--alarm-Klasse."""
     html = _render_server_list(app, [_make_server()], alarm_count=3)
     assert 'data-test="sidebar-alarm-count"' in html
-    assert "text-error" in html
+    # Phase-C-Redesign: Alarm-Klasse ist sidebar__meta--alarm statt text-error
+    assert "sidebar__meta--alarm" in html
 
 
 # ---------------------------------------------------------------------------
@@ -194,17 +197,22 @@ def test_escalate_live_count_rendered_when_nonzero(app: Flask) -> None:
     assert 'data-test="sidebar-row-escalate-7"' in html
     # Kein Skeleton
     assert 'aria-label="escalate count loading"' not in html
-    # Echte Zahl mit text-error
-    assert "text-error" in html
+    # Phase-C-Redesign: Alarm-Klasse ist host__count--crit statt text-error
+    assert "host__count--crit" in html
 
 
 def test_escalate_dash_rendered_when_zero(app: Flask) -> None:
-    """escalate=0 zeigt Dash-Marker (opacity-30), kein text-error."""
+    """escalate=0 zeigt Dash-Marker (host__count--zero), kein text-error."""
     srv = _make_server(8)
     risk = {8: {"escalate": 0, "act": 0}}
     html = _render_server_list(app, [srv], sidebar_risk_counts=risk)
+    # Phase-C-Redesign: Zero-State nutzt host__count--zero-Klasse statt opacity-30
     escalate_section = html.split('data-test="sidebar-row-escalate-8"')[1]
-    assert "opacity-30" in escalate_section.split("</span>")[0]
+    first_close = escalate_section.find("</span>")
+    segment = escalate_section[:first_close] if first_close != -1 else escalate_section[:200]
+    assert "host__count--zero" in segment or "—" in escalate_section[:200], (
+        f"Zero-Escalate-State: Erwartet host__count--zero oder Dash-Marker: {segment!r}"
+    )
 
 
 def test_act_live_count_rendered_when_nonzero(app: Flask) -> None:
@@ -214,7 +222,10 @@ def test_act_live_count_rendered_when_nonzero(app: Flask) -> None:
     html = _render_server_list(app, [srv], sidebar_risk_counts=risk)
     assert 'data-test="sidebar-row-act-9"' in html
     assert 'aria-label="act count loading"' not in html
-    assert "text-warning" in html
+    # Phase-C-Redesign: ACT-Klasse ist leer/default (kein text-warning mehr);
+    # wesentlich ist, dass kein Skeleton vorhanden ist und die Zahl erscheint.
+    act_section = html.split('data-test="sidebar-row-act-9"')[1]
+    assert "3" in act_section[:100], f"ACT-Zahl '3' soll im Markup stehen: {act_section[:200]!r}"
 
 
 def test_server_not_in_risk_counts_shows_skeleton(app: Flask) -> None:
@@ -236,27 +247,25 @@ def test_heartbeat_skeleton_present_on_initial_render(app: Flask) -> None:
     srv = _make_server(1)
     html = _render_server_list(app, [srv])
     assert 'data-test="heartbeat-skeleton"' in html
-    assert "animate-pulse" in html
+    # Phase-C-Redesign: Skeleton nutzt host__beat--skel statt animate-pulse (plain-CSS)
+    assert "host__beat--skel" in html
 
 
 def test_heartbeat_live_cells_rendered_when_data_present(app: Flask) -> None:
-    """Mit sidebar_heartbeats zeigt die Bar echte heartbeat-cell-Spans."""
+    """Mit sidebar_heartbeats zeigt die Bar echte host__beat-tick-Spans."""
     srv = _make_server(1)
     cells = [_make_daily_status(date(2026, 5, i + 1)) for i in range(5)]
     heartbeats = {1: cells}
     html = _render_server_list(app, [srv], sidebar_heartbeats=heartbeats)
-    assert "heartbeat-cell" in html
+    # Phase-C-Redesign: Live-Cells nutzen host__beat-tick statt heartbeat-cell
+    assert "host__beat-tick" in html
     assert 'data-test="heartbeat-skeleton"' not in html
 
 
-def test_heartbeat_skeleton_has_50_cells(app: Flask) -> None:
-    """Skeleton-Pfad rendert genau 50 Skeleton-Cells."""
+def test_heartbeat_skeleton_has_30_cells(app: Flask) -> None:
+    """Skeleton-Pfad rendert genau 30 Skeleton-Cells (ADR-0035: 30 Ticks statt 50)."""
     srv = _make_server(1)
     html = _render_server_list(app, [srv])
-    # Zaehle wie viele Male "animate-pulse rounded-sm" vorkommt
-    # (jede Skeleton-Cell hat diese Kombination)
-    count = html.count("animate-pulse rounded-sm")
-    # 50 Heartbeat-Skeleton-Cells + 2 ESCALATE/ACT-Skeleton-Spans pro Server
-    # + optionaler alarm-count-Skeleton im Header
-    # Mindestens 50 muss von Heartbeat kommen
-    assert count >= 50
+    # Phase-C-Redesign: 30 Ticks (ADR-0035), plain-CSS-Klasse host__beat-tick--skel
+    count = html.count("host__beat-tick--skel")
+    assert count == 30, f"Erwartet 30 Skeleton-Cells (ADR-0035: 30 Ticks), got {count}"

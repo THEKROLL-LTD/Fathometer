@@ -4,7 +4,7 @@
  */
 
 import * as esbuild from "esbuild";
-import { transform, Features } from "lightningcss";
+import { bundleAsync, Features } from "lightningcss";
 import { createHash } from "node:crypto";
 import {
   readFileSync,
@@ -68,11 +68,12 @@ function cleanHashedFiles(dir, ext) {
 async function buildCSS() {
   cleanHashedFiles(DIST_CSS, "css");
 
-  const inputCode = readFileSync(SRC_CSS);
-
-  let { code } = transform({
+  // bundleAsync() loest @import-Direktiven aus app.css rekursiv auf
+  // (tokens.css + components/*.css inlinen). transform() ohne bundle
+  // wuerde die @import-Direktiven nur weiterreichen, was im Browser bei
+  // hashed Output-Pfaden zu 404 fuehrt.
+  let { code } = await bundleAsync({
     filename: SRC_CSS,
-    code: inputCode,
     minify: true,
     sourceMap: false,
     drafts: { nesting: true },

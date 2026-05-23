@@ -1,0 +1,53 @@
+{# Sidebar Group-Section (Phase C, Block W — Redesign).
+   Rendert eine collapsible Gruppe mit Group-Header + Host-Liste.
+
+   Erwartete Variablen (per {% with %} aus _server_list.html):
+     - `group`                  : ServerGroup — ORM-Objekt (.id, .name, .position)
+     - `group_servers`          : list[Server] — Server in dieser Gruppe
+     - `server_group_aggregates`: dict[int | None, dict] — {escalate, act, hosts}
+     - `sidebar_heartbeats`     : dict[int, list[DailyStatus]] | {}
+     - `sidebar_risk_counts`    : dict[int, dict[str, int]] | {}
+     - `active_server_id`       : int | None
+
+   Default: <details> ohne open-Attribut = eingeklappt (ADR-0034 §Sidebar-Verhalten).
+   Auto-Expand bei Filter-Suche wird via Alpine / sidebar.js gesteuert.
+#}
+{% set agg = server_group_aggregates.get(group.id, {}) %}
+{% set escalate_count = agg.get('escalate', 0) %}
+{% set act_count = agg.get('act', 0) %}
+{% set host_count = group_servers | length %}
+
+<details class="hostgroup" id="hostgroup-{{ group.id }}">
+  <summary class="hostgroup__header"
+           aria-expanded="false">
+    <span class="hostgroup__chevron" aria-hidden="true">
+      <svg viewBox="0 0 12 12" width="10" height="10"
+           fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="square"
+           aria-hidden="true">
+        <polyline points="4 2 8 6 4 10" />
+      </svg>
+    </span>
+    <span class="hostgroup__title">
+      <span class="hostgroup__name">{{ group.name }}</span>
+      <span class="hostgroup__count">{{ host_count }}</span>
+    </span>
+    <span class="{{ 'hostgroup__stat hostgroup__stat--crit' if escalate_count > 0 else 'hostgroup__stat hostgroup__stat--zero' }}">
+      {{ escalate_count if escalate_count > 0 else '—' }}
+    </span>
+    <span class="{{ 'hostgroup__stat' if act_count > 0 else 'hostgroup__stat hostgroup__stat--zero' }}">
+      {{ act_count if act_count > 0 else '—' }}
+    </span>
+  </summary>
+
+  <div class="hostgroup__body" id="hostgroup-body-{{ group.id }}">
+    {% for srv in group_servers %}
+      {% with server=srv,
+              cells=(sidebar_heartbeats or {}).get(srv.id, []),
+              risk=(sidebar_risk_counts or {}).get(srv.id, {}),
+              is_active=(active_server_id == srv.id) %}
+        {% include "sidebar/_server_row.html" %}
+      {% endwith %}
+    {% endfor %}
+  </div>
+</details>

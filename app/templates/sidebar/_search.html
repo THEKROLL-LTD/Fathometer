@@ -1,32 +1,19 @@
-{# Sidebar Sticky-Search-Input (Block I, §7a, Aufgabe 6; ADR-0020 update).
-
-   Verhalten (siehe `static/js/sidebar.js`, Alpine-Component `sidebarSearch`,
-   gehostet auf `#sidebar-root` als Wrapper):
-     - Tippen filtert die Server-Zeilen live (Substring auf Server-Name +
-       Tag-Namen, case-insensitive).
-     - `/`-Shortcut global fokussiert dieses Input (falls kein Input/Textarea
-       gerade fokussiert ist).
-     - `Esc` leert das Feld und entfokussiert.
-     - `Enter` mit nicht-leerem Wert navigiert zum Dashboard mit aktivem
-       `?q=`-Filter (ADR-0020 — Dashboard hat die Cross-Server-Findings-
-       Tabelle uebernommen). Phase B/Task #16 stellt das JS final um.
-
-   Wir verlassen sticky-Top am Sidebar-Scroll-Container — `position: sticky`
-   plus `top-0` rastert oben ein wenn die Sidebar gescrollt wird.
+{# Sidebar Filter-Input (Phase C, Block W — Redesign).
+   Plain-CSS-Klassen (kein Tailwind/DaisyUI).
+   Keybinding: `/` fokussiert dieses Input (sidebar_viewport.js).
+   Esc leert + entfokussiert (Alpine).
 #}
-<div class="sticky top-0 z-10 bg-base-200/95 backdrop-blur px-3 py-2 border-b border-base-300 shrink-0"
-     id="sidebar-search">
-  <label class="sr-only" for="sidebar-search-input">Server filtern</label>
+<div class="sidebar__filter" id="sidebar-search">
+  <label class="sr-only" for="sidebar-search-input">filter hosts</label>
   <input id="sidebar-search-input"
          type="search"
          name="q"
-         class="input input-sm input-bordered w-full font-mono"
-         placeholder="Server filtern…  ( / )"
-         aria-label="Server filtern"
+         class="sidebar__input"
+         placeholder="filter hosts                                       ( / )"
+         aria-label="filter hosts"
          autocomplete="off"
          x-ref="searchInput"
          x-model="query"
          @input="onInput()"
-         @keydown.escape.prevent="clear()"
-         @keydown.enter.prevent="submit()" />
+         @keydown.escape.prevent="clear()" />
 </div>
