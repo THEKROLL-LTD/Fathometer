@@ -18,6 +18,21 @@
    Parameter:
      class — CSS-Klasse auf dem <svg>-Element (Default: "topbar__logo").
              Ermoeglicht Wiederverwendung in Login-Topbar oder anderen Kontexten. #}
+{# scan_chars(text)
+   ──────────────────────────────────────────────────────────
+   Splitet `text` in einzelne <span class="scan-flash">-Elemente.
+   Der useScanFlashSync-JS-Hook setzt pro Span einen individuellen
+   animation-delay (Sonar-Return-Visual-Language, ADR-0036).
+
+   aria-hidden="true" auf den Spans + visually-hidden-Span mit dem
+   Volltext damit Screenreader nicht jeden Char einzeln vorliest.
+   {{ text|string }} damit auch Integers funktionieren (scan_chars(42)).
+#}
+{% macro scan_chars(text) -%}
+<span class="scan-chars">{%- for ch in text|string -%}<span class="scan-flash" aria-hidden="true">{{ ' ' if ch == ' ' else ch }}</span>{%- endfor -%}<span class="visually-hidden">{{ text }}</span></span>
+{%- endmacro %}
+
+
 {% macro fathometer_logo(class="topbar__logo") %}
   <svg viewBox="0 0 64 64" class="{{ class }}" role="img" aria-label="Fathometer">
     {# Aussen-Halbkreis-Dial (Sweep-Range) #}

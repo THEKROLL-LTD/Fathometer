@@ -1,31 +1,26 @@
 {# Dashboard-Detail-Pane — die EINZIGE Quelle fuer den Dashboard-Inhalt
-   (ADR-0016 / ADR-0017 / ADR-0020 / ADR-0025).
+   (ADR-0016 / ADR-0017 / ADR-0036).
 
-   ADR-0025 (Block Q E.5) hat die Cross-Server-Findings-Section vollstaendig
-   auf die dedizierte `/findings`-Seite ausgelagert. Was bleibt:
-     - KPI-Cards Tier 1 (Action needed / Safe).
-     - Risk-Band-Pills Tier 2.
-     - Severity-Strip Tier 3.
-   Was wegfaellt: Filter-Bar, Findings-Tabelle, CSV-Export, Bulk-Ack-
-   Toolbar, Truncation-Notice. KPI-Card-Links zeigen jetzt auf `/findings`.
+   Block W Phase D (ADR-0036): KPI-Cards (Tier 1+2+3 aus Block O) ersetzt
+   durch Action-Needed-Card + Nominal-Card.
+
+   Triage-Row, Severity-Strip und Sysline kommen Phase E + F hinzu.
+   Polling-Cadence wird in Phase F auf 60 s + hx-swap="none" umgestellt
+   (ADR-0036). Der bestehende outerHTML-Polling-Wrapper aus Block V
+   bleibt unveraendert bis Phase F.
 
    Wird von zwei Pfaden konsumiert (ADR-0017):
      1. `dashboard/index.html` (Full-Page-Render) inkludiert dieses Partial
         im `{% block detail_pane %}`.
-     2. `app/views/dashboard.py` (HX-Pfad) rendert dieses Partial direkt
-        via `render_template("dashboard/_detail_pane.html", **ctx)`.
+     2. `app/views/dashboard.py` (HX-Pfad) rendert dieses Partial direkt.
 
-   Variablen-Vertrag (gesetzt in `app/views/dashboard.py:_build_pane_context`):
-     - `servers`         : list[ServerCardData] — fuer den Server-Count-Badge
-                           im Header (Anzahl gefilterter Server).
-     - `filter`          : DashboardFilter — fuer `filter.is_active`-Badge
-                           und KPI-Card-Active-Highlight.
-     - `risk_kpis`       : RiskKpiCounters — Action-/Risk-Band-/Severity-
-                           Strip-Aggregate.
-
-   Polling-Wrapper-Attribute sind PRIVAT fuer diesen Container.
-   `hx-disinherit="*"` verhindert dass innere `<a hx-get>`-Klicks die
-   Polling-Attribute erben.
+   Variablen-Vertrag (gesetzt in `app/views/dashboard.py::_build_pane_context`):
+     - `servers`                : list[ServerCardData] — fuer Server-Count-Badge.
+     - `filter`                 : DashboardFilter.
+     - `action_needed_card_data`: dict — server_count, hosts_total, escalate,
+                                  act, pending.
+     - `nominal_card_data`      : dict — monitor_count, hosts_total, monitor,
+                                  noise, unknown.
 
    Sicherheit: kein `|safe` auf Variablen — alles autoescaped.
 #}
@@ -38,16 +33,18 @@
      hx-headers='{"HX-Request": "true"}'
      hx-disinherit="*">
 
-  <header class="flex items-end justify-between gap-3 flex-wrap">
-    <div>
-      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">DASHBOARD</div>
-      <h1 class="font-mono text-2xl lg:text-3xl mt-1">Alle Findings</h1>
-    </div>
-    <div class="text-xs opacity-60" data-test="dashboard-server-count">
-      {{ servers | length }} Server sichtbar
-      {% if filter.is_active %}<span class="badge badge-ghost badge-sm ml-1" data-test="dashboard-filter-active-badge">gefiltert</span>{% endif %}
-    </div>
-  </header>
+  <section class="dashboard__eyebrow" id="dashboard-eyebrow">
+    Last refresh <span id="dashboard-last-refresh" data-test="dashboard-last-refresh">--:-- UTC</span>
+  </section>
 
-  {% include "dashboard/_kpi_cards.html" %}
+  <section class="stats">
+    {% include "dashboard/_action_needed_card.html" %}
+    {% include "dashboard/_nominal_card.html" %}
+  </section>
+
+  {# Platzhalter-IDs fuer Phase E (Triage-Row) + Phase F (Severity-Strip, Sysline). #}
+  <div id="triage-row"></div>
+  <div id="severity-strip"></div>
+  <div id="sysline"></div>
+
 </div>

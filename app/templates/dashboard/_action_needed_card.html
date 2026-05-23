@@ -1,0 +1,41 @@
+{# Action-Needed KPI-Card (stat--alarm).
+   Portiert aus docs/design/app.jsx::ActionNeededCard (Block W / ADR-0036).
+
+   Animations-Foundation fuer Phase F:
+     - Der Wrapper (#action-needed-card) wird in Phase F mit hx-preserve="true"
+       versehen, damit der Scan-Beam-::before/.stat--alarm beim OOB-Swap
+       nicht neugestartet wird.
+     - Innere Werte (Zahl, Hosts-Total, Sub-Counter) sind separate IDs
+       (action-needed-num, action-needed-hosts-total, action-needed-sub)
+       fuer den OOB-Endpoint (/_partials/dashboard/kpis) in Phase F.
+     - dashboard_scan_sync.js (Phase D) setzt per .scan-flash-Span den
+       animation-delay via getBoundingClientRect (Sonar-Return-Sync).
+
+   Variablen-Vertrag (gesetzt in app/views/dashboard.py::_build_pane_context):
+     action_needed_card_data.server_count  -- Anzahl Alarm-Server (int)
+     action_needed_card_data.hosts_total   -- Gesamt-Host-Anzahl (int)
+     action_needed_card_data.escalate      -- escalate-Findings-Count (int)
+     action_needed_card_data.act           -- act-Findings-Count (int)
+     action_needed_card_data.pending       -- pending-Findings-Count (int)
+
+   Sicherheit: kein |safe — alle Werte sind serverseitig autoescaped.
+#}
+{% from "_macros.html" import scan_chars %}
+<div class="stat stat--alarm" id="action-needed-card">
+  <p class="stat__label">
+    <span class="bracket scan-flash" aria-hidden="true">[</span>{{ scan_chars("action needed") }}<span class="bracket scan-flash" aria-hidden="true">]</span>
+  </p>
+  <div class="stat__figure">
+    <span class="stat__num" id="action-needed-num">{{ scan_chars(action_needed_card_data.server_count) }}</span>
+    <span class="stat__unit">/ <span id="action-needed-hosts-total">{{ action_needed_card_data.hosts_total }}</span> hosts</span>
+  </div>
+  <p class="stat__sub" id="action-needed-sub">
+    <b>{{ action_needed_card_data.escalate }}</b> escalate &nbsp;·&nbsp;
+    <b>{{ action_needed_card_data.act }}</b> act &nbsp;·&nbsp;
+    <b>{{ action_needed_card_data.pending }}</b> pending
+  </p>
+  <a class="stat__cta" href="{{ url_for('findings.index', risk_band='escalate') }}">
+    <span class="stat__cta-text">{{ scan_chars("triage now") }}</span>
+    <span class="stat__cta-arrow scan-flash" aria-hidden="true">→</span>
+  </a>
+</div>

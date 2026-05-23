@@ -1,0 +1,241 @@
+/* ── Stat blocks (Action-Needed / Nominal) ────────────────────
+   Portiert aus docs/design/styles.css.
+   Color-Reduction-Rule (ADR-0033 §3): nur „escalate" (stat--alarm)
+   traegt cyan. stat--safe bleibt in Grau-Stufen.
+   ─────────────────────────────────────────────────────────── */
+
+.stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 80px;
+  margin: 80px 0 96px;
+  align-items: start;
+}
+
+/* ── Base stat layout ─────────────────────────────────────── */
+
+.stat {
+  position: relative;
+  padding-left: 28px;
+}
+
+/* ── Alarm variant: Scan-Beam-Pseudo-Elemente ─────────────── */
+
+.stat--alarm {
+  border-left: 3px solid var(--accent);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Vertikaler Cyan-Gradient-Sweep (Scan-Beam). mix-blend-mode:screen
+   haelt den Beam lokal (isolation: isolate auf dem Wrapper). */
+.stat--alarm::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  background: linear-gradient(
+    to right,
+    rgba(0, 229, 255, 0)       0%,
+    rgba(0, 229, 255, 0)      32%,
+    rgba(0, 229, 255, 0.18)   44%,
+    rgba(217, 250, 255, 0.95) 50%,
+    rgba(0, 229, 255, 0.18)   56%,
+    rgba(0, 229, 255, 0)      68%,
+    rgba(0, 229, 255, 0)     100%
+  );
+  mix-blend-mode: screen;
+  transform: translateX(-110%);
+  animation: stat-scan 5.4s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Scanlines-Pattern-Overlay — Broadcast-Feed-Visual-Language. */
+.stat--alarm::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 2px,
+      rgba(0, 229, 255, 0.04) 2px,
+      rgba(0, 229, 255, 0.04) 3px
+    );
+  opacity: 0;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: 1;
+  animation: stat-scanlines 5.4s linear infinite;
+}
+
+@keyframes stat-scan {
+  0%           { transform: translateX(-110%); }
+  44%          { transform: translateX(245%); }
+  44.01%, 100% { transform: translateX(245%); }
+}
+
+@keyframes stat-scanlines {
+  0%, 100% { opacity: 0; }
+  10%, 38% { opacity: 1; }
+  46%      { opacity: 0; }
+}
+
+/* Stat-Inhalt liegt ueber dem Scan-Beam. */
+.stat > * { position: relative; z-index: 2; }
+
+/* ── Safe variant: neutral, kein Scan-Beam ────────────────── */
+
+.stat--safe {
+  border-left: 2px solid var(--border-subtle);
+  padding-left: 22px;
+}
+
+/* ── Eyebrow-Label (uppercase mono) ──────────────────────── */
+
+.stat__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stat__label .bracket { color: var(--text-ghost); }
+
+.stat--safe .stat__label { color: var(--text-tertiary); }
+.stat--safe .stat__label .bracket { color: var(--text-tertiary); }
+
+/* Live-Status-Dot (pulsiert mit op-pulse — Reuse aus topbar.css). */
+.stat__label-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: op-pulse 2.4s ease-in-out infinite;
+}
+
+/* ── Figure-Zeile: grosse Zahl + Unit ──────────────────────── */
+
+.stat__figure {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+}
+
+.stat__num {
+  font-family: var(--font-display);
+  font-size: 144px;
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+
+/* Alarm: dim rest-state damit cyan-Flash als echtes Signal wirkt. */
+.stat--alarm .stat__num { color: var(--text-ghost); }
+
+.stat--safe .stat__num {
+  font-size: 96px;
+  color: var(--text-secondary);
+}
+
+.stat__unit {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.stat--safe .stat__unit { color: var(--text-tertiary); }
+
+/* ── Sub-Counter-Zeile (mono, gedaempft) ─────────────────── */
+
+.stat__sub {
+  margin-top: 22px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  line-height: 1.7;
+}
+
+.stat__sub b { color: var(--text-primary); font-weight: 400; }
+.stat--alarm .stat__sub b { color: var(--text-primary); }
+
+/* ── CTA-Button mit scan-flash ────────────────────────────── */
+
+.stat__cta {
+  margin-top: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-ghost);
+  background: none;
+  border: none;
+  border-bottom: 1px solid currentColor;
+  padding: 0 0 6px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: gap var(--dur-hover) var(--ease-drift),
+              letter-spacing var(--dur-hover) var(--ease-drift);
+}
+
+/* Hover pinnt den Wert auf accent — User-Intent ueberschreibt den Sweep. */
+.stat__cta:hover {
+  gap: 18px;
+  letter-spacing: 0.12em;
+  animation: none;
+  color: var(--accent);
+}
+
+.stat__cta:hover .scan-flash {
+  animation: none;
+  color: var(--accent);
+}
+
+.stat__cta-arrow {
+  transition: transform var(--dur-hover) var(--ease-drift);
+}
+
+.stat__cta:hover .stat__cta-arrow { transform: translateX(2px); }
+
+/* ── Scan-Flash — per-Char Cyan-Highlight-Sweep ───────────── */
+
+/* Jeder .scan-flash-Span wird vom useScanFlashSync-JS-Hook mit einem
+   individuellen animation-delay versehen, sodass der Cyan-Peak exakt
+   dann eintrifft wenn der Scan-Beam-Center ueber das Element wandert
+   (Sonar-Return-Visual-Language, ADR-0036). */
+.scan-flash {
+  color: var(--text-ghost);
+  animation: scan-flash 5.4s linear infinite;
+}
+
+@keyframes scan-flash {
+  0%, 8% { color: var(--text-ghost); }
+  14%    { color: var(--accent); }
+  100%   { color: var(--text-ghost); }
+}
+
+/* scan-chars ist ein Inline-Wrapper; display:inline-block auf den Spans
+   damit getBoundingClientRect() eine Breite fuer Spaces zurueckgibt. */
+.scan-chars { display: inline; }
+.scan-chars .scan-flash { display: inline-block; }
+
+/* ── Bracket-Highlights ───────────────────────────────────── */
+
+.bracket {
+  /* Brackets erhalten die scan-flash-Animation via separaten .scan-flash-
+     Klassen im Markup — hier nur die semantische Farb-Referenz. */
+}

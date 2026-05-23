@@ -38,6 +38,10 @@ from app.models import (
     Severity,
 )
 from app.schemas.dashboard_filter import DashboardFilter
+from app.services.dashboard_kpis import (
+    _load_action_needed_card_data,
+    _load_nominal_card_data,
+)
 from app.services.risk_engine import yes_band_values
 from app.services.stale_detection import (
     is_stale,
@@ -232,12 +236,30 @@ def _build_pane_context(
     }
     risk_kpis = _load_risk_kpi_counters(sess, risk_bands_by_server, active_server_ids)
 
+    # Phase D (Block W, ADR-0036): neue Context-Keys fuer Action-Needed-Card
+    # und Nominal-Card. Nutzen risk_bands_by_server und active_server_ids
+    # wieder — kein extra DB-Roundtrip fuer die Band-Summen.
+    action_needed_card_data = _load_action_needed_card_data(
+        sess, risk_bands_by_server, active_server_ids
+    )
+    nominal_card_data = _load_nominal_card_data(
+        sess,
+        risk_bands_by_server,
+        active_server_ids,
+        hosts_total=action_needed_card_data["hosts_total"],
+        action_server_count=action_needed_card_data["server_count"],
+    )
+
     return {
         "servers": visible,
         "filter": filt,
         "filter_tags": filt.tags,
-        # Block O (ADR-0022).
+        # Block O (ADR-0022) — behalten fuer Rueckwaerts-Compat mit Tests
+        # die noch gegen die alten Context-Keys pruefen.
         "risk_kpis": risk_kpis,
+        # Block W Phase D (ADR-0036) — neue Card-Context-Keys.
+        "action_needed_card_data": action_needed_card_data,
+        "nominal_card_data": nominal_card_data,
     }
 
 

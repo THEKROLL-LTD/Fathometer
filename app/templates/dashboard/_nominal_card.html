@@ -1,0 +1,32 @@
+{# Nominal-Card (stat--safe).
+   Portiert aus docs/design/app.jsx::App() stat--safe-Block (Block W).
+
+   Color-Reduction-Rule (ADR-0033 §3): stat--safe traegt kein Cyan.
+   Kein Scan-Beam, kein scan-flash — neutrale, gedaempfte Variante.
+
+   In Phase F wird diese Card per OOB-Swap (#nominal-card) aktualisiert.
+   Kein hx-preserve noetig (keine kontinuierliche Animation).
+
+   Variablen-Vertrag (gesetzt in app/views/dashboard.py::_build_pane_context):
+     nominal_card_data.monitor_count -- Anzahl Monitor/Safe-Server (int)
+     nominal_card_data.hosts_total   -- Gesamt-Host-Anzahl (int)
+     nominal_card_data.monitor       -- monitor-Findings-Count (int)
+     nominal_card_data.noise         -- noise-Findings-Count (int)
+     nominal_card_data.unknown       -- unknown-Findings-Count (int)
+
+   Sicherheit: kein |safe — alle Werte sind serverseitig autoescaped.
+#}
+<div class="stat stat--safe" id="nominal-card">
+  <p class="stat__label">
+    <span class="bracket">[</span>nominal<span class="bracket">]</span>
+  </p>
+  <div class="stat__figure">
+    <span class="stat__num">{{ nominal_card_data.monitor_count }}</span>
+    <span class="stat__unit">/ {{ nominal_card_data.hosts_total }} hosts</span>
+  </div>
+  <p class="stat__sub">
+    <b>{{ nominal_card_data.monitor }}</b> monitor &nbsp;·&nbsp;
+    <b>{{ nominal_card_data.noise }}</b> noise &nbsp;·&nbsp;
+    {{ nominal_card_data.unknown }} unknown
+  </p>
+</div>
