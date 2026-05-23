@@ -1,4 +1,4 @@
-"""Dashboard-View `/` — Server-Karten mit Tag-Filter und Aufmerksamkeits-Sektion.
+"""Dashboard-View `/` — Risk-KPI-Uebersicht mit Server-Filter-Counter.
 
 ARCHITECTURE.md §7 + §14 + §15.
 
@@ -6,13 +6,11 @@ Datenfluss:
 1. Filter aus Query-String parsen (`DashboardFilter.from_request`).
 2. Alle Server mit eager-loaded Tag-Links laden (selectinload — vermeidet
    N+1).
-3. EINE konsolidierte Aggregations-Query: OPEN-Findings pro server_id mit
-   FILTER-Aggregaten fuer jede Severity, KEV und alle risk_bands (Phase D,
-   ADR-0030 Befund 5). Liefert `counts_by_server`, `kev_by_server` und
-   `risk_bands_by_server`.
+3. Eine konsolidierte Aggregations-Query: OPEN-Findings pro server_id mit
+   FILTER-Aggregaten fuer KEV und alle risk_bands. Liefert `kev_by_server`
+   und `risk_bands_by_server`.
 4. Filter anwenden (Tags via Set-Ops im Python, KEV/Stale post-query).
-5. "Aufmerksamkeit noetig" zusammenstellen (stale, KEV, db-stale) und
-   deduplizieren.
+5. Risk-KPIs fuer das aktuelle Dashboard-Markup laden.
 
 Der `frontend-implementer` baut auf die unten dokumentierten Dataclasses
 auf — die Variablen-Vertraege sind im Block-Plan beschrieben.
@@ -21,7 +19,7 @@ auf — die Variablen-Vertraege sind im Block-Plan beschrieben.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -32,25 +30,18 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_session
-from app.forms import BulkActionForm, CSRFOnlyForm
 from app.models import (
     Finding,
     FindingStatus,
     Server,
     ServerTag,
     Severity,
-    Tag,
 )
 from app.schemas.dashboard_filter import DashboardFilter
 from app.services.risk_engine import yes_band_values
-from app.services.severity_history import daily_severity_counts_fleet
 from app.services.stale_detection import (
-    get_db_stale_threshold_h,
-    is_db_stale,
     is_stale,
 )
-from app.services.stale_history import daily_stale_server_counts
-from app.settings_service import get_settings_row
 from app.views._sidebar_context import is_hx_request
 
 log = structlog.get_logger(__name__)
@@ -61,26 +52,6 @@ dashboard_bp = Blueprint("dashboard", __name__)
 # ---------------------------------------------------------------------------
 # View-Models — die Templates konsumieren diese Strukturen.
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class SeverityCounts:
-    """OPEN-Findings nach Severity-Bucket. Default: alles 0."""
-
-    critical: int = 0
-    high: int = 0
-    medium: int = 0
-    low: int = 0
-    unknown: int = 0
-
-    @property
-    def total(self) -> int:
-        return self.critical + self.high + self.medium + self.low + self.unknown
-
-    @property
-    def above_threshold(self) -> int:
-        """Counts kumuliert ab einer Schwelle — Template kann das nutzen."""
-        return self.total
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,35 +77,14 @@ class RiskKpiCounters:
 class ServerCardData:
     """Render-Daten fuer eine Server-Karte.
 
-    Felder bleiben mutable, damit der Builder sie schrittweise befuellen
-    kann. `severity_counts` ist nach Initialisierung effektiv read-only.
+    Wird aktuell nur noch fuer die sichtbare Server-Anzahl und Filterlogik
+    genutzt; die fruehere Karten-UI ist auf die Sidebar gewandert.
     """
 
     server: Server
-    severity_counts: SeverityCounts = field(default_factory=SeverityCounts)
     kev_open_count: int = 0
     is_stale: bool = False
-    is_db_stale: bool = False
     is_active: bool = True  # nicht revoked und nicht retired
-
-    @property
-    def highest_severity(self) -> Severity | None:
-        """Hoechste offene Severity — fuer Karten-Badge-Farbe."""
-        if self.severity_counts.critical:
-            return Severity.CRITICAL
-        if self.severity_counts.high:
-            return Severity.HIGH
-        if self.severity_counts.medium:
-            return Severity.MEDIUM
-        if self.severity_counts.low:
-            return Severity.LOW
-        if self.severity_counts.unknown:
-            return Severity.UNKNOWN
-        return None
-
-    @property
-    def needs_attention(self) -> bool:
-        return self.is_stale or self.is_db_stale or self.kev_open_count > 0
 
 
 # ---------------------------------------------------------------------------
@@ -252,25 +202,16 @@ def _build_pane_context(
     und rendern dann jeweils ihr Outer-Template (`_detail_pane.html` direkt
     fuer HX, `index.html` mit `{% extends base_app.html %}` fuer Full-Page).
     """
-    settings_row = get_settings_row(sess)
-    severity_threshold = filt.severity or settings_row.severity_threshold
-    db_stale_h = get_db_stale_threshold_h()
-
-    # Alle Tags fuer den Filter-Chip-Bereich — egal welcher Filter aktiv ist.
-    available_tags = sess.execute(select(Tag).order_by(Tag.name)).scalars().all()
-
     servers = _load_servers(sess)
-    counts_by_server, kev_by_server, risk_bands_by_server = _load_open_aggregates(sess)
+    kev_by_server, risk_bands_by_server = _load_open_aggregates(sess)
 
     cards: list[ServerCardData] = []
     for srv in servers:
         is_active = srv.revoked_at is None and srv.retired_at is None
         card = ServerCardData(
             server=srv,
-            severity_counts=counts_by_server.get(srv.id, SeverityCounts()),
             kev_open_count=kev_by_server.get(srv.id, 0),
             is_stale=is_stale(srv, now=now) if is_active else False,
-            is_db_stale=(is_db_stale(srv, now=now, threshold_h=db_stale_h) if is_active else False),
             is_active=is_active,
         )
         cards.append(card)
@@ -280,13 +221,6 @@ def _build_pane_context(
     # Sidebar-Variablen werden via Context-Processor injiziert
     # (`_inject_sidebar_context` in app/__init__.py).
     #
-    # Block M (ADR-0020): KPI-Sparklines und Stale-Sparkline bleiben am
-    # Dashboard (Trend-Anzeige fuer KPI-Cards/Pills). Die Cross-Server-
-    # Findings-Tabelle ist seit Block Q (ADR-0025 §(5)) auf `/findings`
-    # umgezogen — kein `list_findings_cross_server`-Aufruf mehr hier.
-    kpi_sparklines = daily_severity_counts_fleet(sess, days=50, now=now)
-    stale_sparkline = daily_stale_server_counts(sess, days=50, now=now)
-
     # Block O (ADR-0022): Risk-KPI-Counter fuer Action-Required-Cards,
     # Risk-Band-Pills und Severity-Strip. Phase D: risk_bands_by_server aus
     # _load_open_aggregates weitergeben, damit yes_servers ohne separaten
@@ -301,15 +235,7 @@ def _build_pane_context(
     return {
         "servers": visible,
         "filter": filt,
-        "view_filter": filt,
-        "available_tags": available_tags,
-        "severity_threshold": severity_threshold,
-        "db_stale_threshold_h": db_stale_h,
         "filter_tags": filt.tags,
-        "kpi_sparklines": kpi_sparklines,
-        "stale_sparkline": stale_sparkline,
-        "bulk_form": BulkActionForm(),
-        "csrf_form": CSRFOnlyForm(),
         # Block O (ADR-0022).
         "risk_kpis": risk_kpis,
     }
@@ -354,15 +280,14 @@ def _load_servers(sess: Session) -> list[Server]:
 
 def _load_open_aggregates(
     sess: Session,
-) -> tuple[dict[int, SeverityCounts], dict[int, int], dict[int, dict[str, int]]]:
-    """EINE konsolidierte SQL-Query fuer Severity-, KEV- und Risk-Band-Counts.
+) -> tuple[dict[int, int], dict[int, dict[str, int]]]:
+    """EINE konsolidierte SQL-Query fuer KEV- und Risk-Band-Counts.
 
-    Phase D (ADR-0030 Befund 5): vorher 2 separate Queries (Severity GROUP BY
-    + KEV GROUP BY), jetzt eine einzige Query mit COUNT(*) FILTER (...) pro
-    Bucket. Postgres erledigt beide Aggregationen in einem einzigen Seq Scan.
+    Das aktuelle Dashboard-Markup braucht fuer die Server-Filterung nur KEV
+    pro Server; die Risk-Band-Buckets werden fuer die Yes-Server-Ableitung in
+    `_load_risk_kpi_counters` wiederverwendet.
 
     Rueckgabe:
-      counts_by_server   — dict[server_id, SeverityCounts]
       kev_by_server      — dict[server_id, int]  (Anzahl OPEN KEV-Findings)
       risk_bands_by_server — dict[server_id, dict[risk_band_str, int]]
 
@@ -370,14 +295,9 @@ def _load_open_aggregates(
     weitergereicht, damit der yes_servers-Count ohne separaten JOIN ableitbar
     ist (Variante a gemaess Block-V-Spec §Phase D).
     """
-    sev_kev_stmt = (
+    aggregate_stmt = (
         select(
             Finding.server_id,
-            func.count().filter(Finding.severity == Severity.CRITICAL).label("crit"),
-            func.count().filter(Finding.severity == Severity.HIGH).label("high"),
-            func.count().filter(Finding.severity == Severity.MEDIUM).label("medium"),
-            func.count().filter(Finding.severity == Severity.LOW).label("low"),
-            func.count().filter(Finding.severity == Severity.UNKNOWN).label("unknown"),
             func.count().filter(Finding.is_kev.is_(True)).label("kev"),
             func.count().filter(Finding.risk_band == "escalate").label("rb_escalate"),
             func.count().filter(Finding.risk_band == "act").label("rb_act"),
@@ -391,19 +311,11 @@ def _load_open_aggregates(
         .group_by(Finding.server_id)
     )
 
-    counts: dict[int, SeverityCounts] = {}
     kev_counts: dict[int, int] = {}
     risk_bands_by_server: dict[int, dict[str, int]] = {}
 
-    for row in sess.execute(sev_kev_stmt).all():
+    for row in sess.execute(aggregate_stmt).all():
         sid = int(row.server_id)
-        counts[sid] = SeverityCounts(
-            critical=int(row.crit),
-            high=int(row.high),
-            medium=int(row.medium),
-            low=int(row.low),
-            unknown=int(row.unknown),
-        )
         kev_counts[sid] = int(row.kev)
         risk_bands_by_server[sid] = {
             "escalate": int(row.rb_escalate),
@@ -415,7 +327,7 @@ def _load_open_aggregates(
             "noise": int(row.rb_noise),
         }
 
-    return counts, kev_counts, risk_bands_by_server
+    return kev_counts, risk_bands_by_server
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +361,5 @@ def _card_tag_names(card: ServerCardData) -> set[str]:
 __all__ = [
     "RiskKpiCounters",
     "ServerCardData",
-    "SeverityCounts",
     "dashboard_bp",
 ]

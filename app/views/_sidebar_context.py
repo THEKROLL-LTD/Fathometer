@@ -2,7 +2,6 @@
 
 Variablen-Vertrag — initialer Page-Render (Context-Processor-Pfad):
   - sidebar_servers    : list[Server]  (mit eager-loaded tag_links/tag)
-  - available_tags     : list[Tag]
   - filter_tags        : list[str]
   - active_server_id   : int | None  (vom View gesetzt)
 
@@ -33,7 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import Server, ServerTag, Tag
+from app.models import Server, ServerTag
 from app.services.heartbeat_aggregation import heartbeats_for_servers
 from app.services.sidebar_risk_counts import escalate_act_counts_by_server
 
@@ -43,8 +42,8 @@ def build_sidebar_context(
 ) -> dict[str, Any]:
     """Sammelt die **billigen** Variablen die `base_app.html` fuer die Sidebar braucht.
 
-    Liefert nur die Server-Liste (Namen, Tags, Lifecycle-Status) und die
-    verfuegbaren Filter-Tags — keine Heartbeats, keine Risk-Counts.
+    Liefert nur die Server-Liste (Namen, Tags, Lifecycle-Status) — keine
+    Heartbeats, keine Risk-Counts und keine globalen Tag-Select-Daten.
     Diese teuren Aggregate kommen ausschliesslich vom Polling-Endpoint
     `/_partials/sidebar` (ADR-0030 Phase C).
 
@@ -64,11 +63,8 @@ def build_sidebar_context(
     )
     servers = list(sess.execute(server_stmt).scalars().unique().all())
 
-    available_tags = list(sess.execute(select(Tag).order_by(Tag.name)).scalars().all())
-
     return {
         "sidebar_servers": servers,
-        "available_tags": available_tags,
         "filter_tags": tags,
         "active_server_id": None,
     }

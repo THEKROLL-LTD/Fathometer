@@ -394,7 +394,7 @@ def create_app() -> Flask:
         """Billige Sidebar-Variablen fuer `base_app.html` (Phase C, ADR-0030).
 
         Liefert nur die Server-Liste (Namen, Tags, Lifecycle-Status) und
-        die Filter-Tags — keine Heartbeats, keine Risk-Counts. Diese teuren
+        die aktiven Filter-Tags — keine Heartbeats, keine Risk-Counts. Diese teuren
         Aggregate kommen ausschliesslich vom Polling-Endpoint `/_partials/sidebar`
         und werden im initialen Page-Render als Skeleton dargestellt.
 
@@ -404,7 +404,7 @@ def create_app() -> Flask:
         leerer dict, das Template faellt auf seine `or []`/`or {}`-
         Defaults zurueck.
 
-        Variablen-Vertrag: `sidebar_servers`, `available_tags`, `filter_tags`,
+        Variablen-Vertrag: `sidebar_servers`, `filter_tags`,
         `active_server_id`. Kein `sidebar_heartbeats` mehr — der liegt
         ausschliesslich im Polling-Endpoint-Kontext.
         """

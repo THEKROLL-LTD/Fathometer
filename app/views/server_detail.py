@@ -37,7 +37,6 @@ from app.forms import (
     AcknowledgeForm,
     BulkActionForm,
     CSRFOnlyForm,
-    GroupAcknowledgeForm,
     NoteForm,
     ReopenForm,
 )
@@ -442,20 +441,25 @@ def _render_findings_section(
     application_groups = _load_application_groups_for_server(sess, server.id)
     pending_grouping_counts: dict[str, int] = _load_pending_grouping_counts(sess, server.id)
 
-    return {
+    ctx = {
         "server": server,
         "view_filter": view_filter,
         "counts": counts,
         "findings": findings_list,
         "application_groups": application_groups,
         "pending_grouping_counts": pending_grouping_counts,
-        "ack_form": AcknowledgeForm(),
-        "reopen_form": ReopenForm(),
-        "note_form": NoteForm(),
-        "group_ack_form": GroupAcknowledgeForm(),
-        "bulk_form": BulkActionForm(),
-        "csrf_form": CSRFOnlyForm(),
     }
+    if flat_mode:
+        ctx.update(
+            {
+                "ack_form": AcknowledgeForm(),
+                "reopen_form": ReopenForm(),
+                "note_form": NoteForm(),
+                "bulk_form": BulkActionForm(),
+                "csrf_form": CSRFOnlyForm(),
+            }
+        )
+    return ctx
 
 
 # ---------------------------------------------------------------------------
@@ -514,23 +518,6 @@ def show(server_id: int) -> Any:
     # Block O (ADR-0022): Action-Required-Counts + Host-Snapshot fuer Header.
     action_required = _load_action_required_counts(sess, server.id)
     snapshot_ctx = _load_host_snapshot(sess, server.id)
-    # Noise-Findings fuer den Bulk-Ack-Noise-Modal-Inhalt (max 50 inline +
-    # Truncation-Hinweis im Template). Wir laden gezielt nur OPEN-noise-IDs
-    # + identifier_key + package_name (selectinload nicht noetig).
-    noise_findings = list(
-        sess.execute(
-            select(Finding)
-            .where(
-                Finding.server_id == server.id,
-                Finding.status == FindingStatus.OPEN,
-                Finding.risk_band == "noise",
-            )
-            .order_by(Finding.identifier_key.asc())
-            .limit(50)
-        )
-        .scalars()
-        .all()
-    )
     noise_total = int(
         sess.execute(
             select(func.count(Finding.id)).where(
@@ -541,6 +528,25 @@ def show(server_id: int) -> Any:
         ).scalar()
         or 0
     )
+    # Noise-Findings fuer den Bulk-Ack-Noise-Modal-Inhalt (max 50 inline +
+    # Truncation-Hinweis im Template). Ohne Noise-Button braucht das Template
+    # keine Vorschau-Liste.
+    noise_findings = []
+    if noise_total > 0:
+        noise_findings = list(
+            sess.execute(
+                select(Finding)
+                .where(
+                    Finding.server_id == server.id,
+                    Finding.status == FindingStatus.OPEN,
+                    Finding.risk_band == "noise",
+                )
+                .order_by(Finding.identifier_key.asc())
+                .limit(50)
+            )
+            .scalars()
+            .all()
+        )
 
     # Block I: `active_server_id` markiert die Sidebar-Zeile, `hx_partial`
     # entscheidet zwischen Vollseite (`base_app.html`) und Fragment-Shell

@@ -48,7 +48,7 @@ def test_build_sidebar_context_does_not_call_heartbeats(monkeypatch: pytest.Monk
 
 
 def test_build_sidebar_context_returns_cheap_keys_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    """build_sidebar_context liefert genau die billigen Keys, kein sidebar_heartbeats."""
+    """build_sidebar_context liefert nur die billigen Keys, kein sidebar_heartbeats."""
     mock_sess = MagicMock()
     mock_sess.execute.return_value.scalars.return_value.unique.return_value.all.return_value = []
     mock_sess.execute.return_value.scalars.return_value.all.return_value = []
@@ -61,10 +61,10 @@ def test_build_sidebar_context_returns_cheap_keys_only(monkeypatch: pytest.Monke
     ctx = build_sidebar_context()
 
     assert "sidebar_servers" in ctx
-    assert "available_tags" in ctx
     assert "filter_tags" in ctx
     assert "active_server_id" in ctx
     # Teure Keys duerfen NICHT im Context-Processor-Pfad stehen
+    assert "available_tags" not in ctx
     assert "sidebar_heartbeats" not in ctx
     assert "sidebar_risk_counts" not in ctx
     assert "hosts_total" not in ctx

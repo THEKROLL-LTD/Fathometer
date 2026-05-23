@@ -3,8 +3,8 @@ Konsolidierung.
 
 Deckt:
   * `_load_open_aggregates`: eine einzige Query (Query-Count-Beweis via
-    session.execute-Spy). Verhaltens-Aequivalenz: liefert identische
-    `counts_by_server`- und `kev_by_server`-Maps wie vor der Konsolidierung.
+    session.execute-Spy). Verhaltens-Aequivalenz: liefert KEV- und
+    Risk-Band-Maps fuer den aktuellen Dashboard-Renderpfad.
   * `_load_risk_kpi_counters`: zwei Queries (Findings + aktive Server).
     Verhaltens-Aequivalenz: liefert identisches `RiskKpiCounters`-Objekt.
   * `yes_servers`-Ableitung aus `risk_bands_by_server` (kein Distinct-JOIN).
@@ -74,16 +74,11 @@ def _mock_session_for_risk_kpi_counters(
 
 def test_load_open_aggregates_makes_exactly_one_execute_call() -> None:
     """DoD-D-1: `_load_open_aggregates` darf exakt einen session.execute-Call
-    machen — Beweis dass Severity-, KEV- und Risk-Band-Aggregation in einer
-    einzigen Query konsolidiert sind.
+    machen — Beweis dass KEV- und Risk-Band-Aggregation in einer einzigen
+    Query konsolidiert sind.
     """
     row = _make_row(
         server_id=1,
-        crit=3,
-        high=5,
-        medium=1,
-        low=0,
-        unknown=0,
         kev=2,
         rb_escalate=1,
         rb_act=0,
@@ -104,51 +99,14 @@ def test_load_open_aggregates_makes_exactly_one_execute_call() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _load_open_aggregates — Verhaltens-Aequivalenz (counts_by_server)
+# _load_open_aggregates — Verhaltens-Aequivalenz
 # ---------------------------------------------------------------------------
-
-
-def test_load_open_aggregates_returns_correct_severity_counts() -> None:
-    """Severity-Buckets werden korrekt in SeverityCounts gemapped."""
-    row = _make_row(
-        server_id=42,
-        crit=10,
-        high=20,
-        medium=5,
-        low=2,
-        unknown=1,
-        kev=3,
-        rb_escalate=4,
-        rb_act=1,
-        rb_mitigate=0,
-        rb_pending=5,
-        rb_unknown=0,
-        rb_monitor=0,
-        rb_noise=0,
-    )
-    sess = _mock_session_for_open_aggregates([row])
-
-    counts_by_server, _kev, _bands = _load_open_aggregates(sess)
-
-    assert 42 in counts_by_server
-    sc = counts_by_server[42]
-    assert sc.critical == 10
-    assert sc.high == 20
-    assert sc.medium == 5
-    assert sc.low == 2
-    assert sc.unknown == 1
-    assert sc.total == 38
 
 
 def test_load_open_aggregates_returns_correct_kev_counts() -> None:
     """KEV-Counts werden korrekt in kev_by_server gemapped."""
     row = _make_row(
         server_id=7,
-        crit=0,
-        high=0,
-        medium=0,
-        low=0,
-        unknown=0,
         kev=11,
         rb_escalate=0,
         rb_act=0,
@@ -160,7 +118,7 @@ def test_load_open_aggregates_returns_correct_kev_counts() -> None:
     )
     sess = _mock_session_for_open_aggregates([row])
 
-    _counts, kev_by_server, _bands = _load_open_aggregates(sess)
+    kev_by_server, _bands = _load_open_aggregates(sess)
 
     assert kev_by_server.get(7) == 11
 
@@ -169,11 +127,6 @@ def test_load_open_aggregates_returns_correct_risk_bands() -> None:
     """risk_bands_by_server enthaelt alle sieben Band-Keys mit korrekten Werten."""
     row = _make_row(
         server_id=3,
-        crit=0,
-        high=0,
-        medium=0,
-        low=0,
-        unknown=0,
         kev=0,
         rb_escalate=5,
         rb_act=2,
@@ -185,7 +138,7 @@ def test_load_open_aggregates_returns_correct_risk_bands() -> None:
     )
     sess = _mock_session_for_open_aggregates([row])
 
-    _, _, risk_bands_by_server = _load_open_aggregates(sess)
+    _, risk_bands_by_server = _load_open_aggregates(sess)
 
     assert 3 in risk_bands_by_server
     bands = risk_bands_by_server[3]
@@ -202,9 +155,8 @@ def test_load_open_aggregates_empty_findings_returns_empty_dicts() -> None:
     """Wenn keine OPEN-Findings vorhanden sind, werden leere Dicts zurueckgegeben."""
     sess = _mock_session_for_open_aggregates([])
 
-    counts_by_server, kev_by_server, risk_bands_by_server = _load_open_aggregates(sess)
+    kev_by_server, risk_bands_by_server = _load_open_aggregates(sess)
 
-    assert counts_by_server == {}
     assert kev_by_server == {}
     assert risk_bands_by_server == {}
 
@@ -214,11 +166,6 @@ def test_load_open_aggregates_multiple_servers() -> None:
     rows = [
         _make_row(
             server_id=1,
-            crit=3,
-            high=0,
-            medium=0,
-            low=0,
-            unknown=0,
             kev=1,
             rb_escalate=1,
             rb_act=0,
@@ -230,11 +177,6 @@ def test_load_open_aggregates_multiple_servers() -> None:
         ),
         _make_row(
             server_id=2,
-            crit=0,
-            high=2,
-            medium=0,
-            low=0,
-            unknown=0,
             kev=0,
             rb_escalate=0,
             rb_act=2,
@@ -247,11 +189,8 @@ def test_load_open_aggregates_multiple_servers() -> None:
     ]
     sess = _mock_session_for_open_aggregates(rows)
 
-    counts_by_server, kev_by_server, risk_bands_by_server = _load_open_aggregates(sess)
+    kev_by_server, risk_bands_by_server = _load_open_aggregates(sess)
 
-    assert len(counts_by_server) == 2
-    assert counts_by_server[1].critical == 3
-    assert counts_by_server[2].high == 2
     assert kev_by_server[1] == 1
     assert kev_by_server.get(2, 0) == 0
     assert risk_bands_by_server[1]["escalate"] == 1
