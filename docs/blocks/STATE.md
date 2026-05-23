@@ -4,7 +4,25 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
-**MVP + UI v2 + ADR-0016 bis ADR-0023 + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 + Worker-Stability v0.9.5 + Worker-Idle-Throttle v0.9.6 + Server-Detail/Findings-Slim-Down v0.10.0 + TICKET-004-Test-Suite-Entkopplung + ADR-0029 Block-U-Worker-Concurrency + ADR-0030 Block-V-UI-Performance abgeschlossen — Ziel v0.12.0 (2026-05-23).**
+**MVP + UI v2 + ADR-0016 bis ADR-0023 + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 + Worker-Stability v0.9.5 + Worker-Idle-Throttle v0.9.6 + Server-Detail/Findings-Slim-Down v0.10.0 + TICKET-004-Test-Suite-Entkopplung + ADR-0029 Block-U-Worker-Concurrency + ADR-0030 Block-V-UI-Performance abgeschlossen + ADR-0032/0033/0034/0035/0036 Block-W-Redesign-Phase-1 geplant — Ziel v0.12.0 (2026-05-23).**
+
+**Block W geplant 2026-05-23 — Frontend-Redesign Phase 1 (Login + Dashboard + App-Shell).** Branch `feat/block-w-redesign-phase-1` (noch nicht erstellt). Sieben Phasen (A Build-Toolchain + Tokens, B Topbar+Footer+bg-grid, C Sidebar+Group-Migration+Viewport-Lazy, D Action+Nominal-Cards, E Triage+Severity-Strip, F Sysline+OOB-Polling, G Login+Final-Polish). Fünf neue ADRs:
+
+- **ADR-0032** — Frontend-Build-Toolchain: Plain CSS + esbuild, kein Tailwind/DaisyUI im neuen Design. Löst ADR-0001 partiell ab (Phase 1 dual-Stack, Phase 2 vollständige Migration eliminiert TD-010).
+- **ADR-0033** — Brand-Identity Fathometer (Logo, Wordmark "Fathometer · CVE Intelligence", JetBrains-Mono self-hosted, Color-Reduction-Rule "nur escalate trägt cyan", Easing-Doctrine, Border-Radius-/Box-Shadow-Verbotsliste, Sprach-Policy englisch).
+- **ADR-0034** — Host-Group-Datenmodell (1:N, `server_groups`-Tabelle + nullable `servers.group_id`, Migration 0014, Sidebar-Verhalten "Gruppen oben eingeklappt → Ungrouped flach unten", CRUD out-of-Block-W).
+- **ADR-0035** — Daily-Risk-State als Heartbeat-Mapping (4 Zustände abgeleitet aus `Finding.risk_band`, 30 Ticks statt 50, Live-Aggregation erweitert ohne Schema-Change, Viewport-Aware Lazy-Loading via IntersectionObserver + Batch-Endpoint, Polling-Cadence 60 s).
+- **ADR-0036** — Single-Pane Dashboard-Polling mit hx-preserve + OOB-Swaps (Action-Card-Animation-Preservation, ein KPI-Endpoint `/_partials/dashboard/kpis`).
+
+Quelle des Designs: `docs/design/` (React-Mockup mit plain CSS + design-tokens.css + JetBrains-Mono woff2-Assets, vom Operator bereitgestellt). Block W portiert das zu Jinja+Alpine+vanilla-JS, behält die Komponenten-Struktur 1:1.
+
+**Out of Scope (Phase 1):** Server-Detail-Redesign, Settings/Findings/Audit/Setup-Wizard-Redesign, Host-Group-CRUD-UI, Add-Host-UI, vollständige Tailwind/DaisyUI-Elimination (Phase 2-Block), Repo-Rename `secscan` → `fathometer` (separater ADR).
+
+**Migration 0014** legt `server_groups`-Tabelle + `servers.group_id`-Spalte an. Backwards-compatible (alle existierenden Server bekommen `group_id = NULL`, kein Backfill). 0013 ist bereits durch ADR-0031 (Theme-Switcher-Removal) belegt — Down-Revision = `"0013_remove_default_theme"`.
+
+**Phase-1-Dual-Stack** lädt parallel: das neue esbuild-Bundle (Plain-CSS + Design-Tokens + JetBrains-Mono + esbuild-Bundle für Alpine/HTMX + neue JS-Module) **und** Tailwind/DaisyUI-CDN (für Legacy-Templates Settings/Server-Detail/Findings/Audit/Setup die in Phase 1 unangetastet bleiben). TD-010-Safelist und Lint-Test bleiben bis Phase 2.
+
+---
 
 **Block U abgeschlossen 2026-05-23 — Parallele LLM-Job-Verarbeitung im einzigen Worker-Prozess.** Branch `feat/block-u-worker-concurrency`, sieben Phasen in Reihenfolge A → B → D → C → F → G → E (alle pro Phase vom `reviewer`-Subagent APPROVED). Einzelner Block-Abschluss-Commit auf User-Wunsch (statt sieben Phase-Commits — Option 2 aus der Workflow-Frage). ADR-0029 ist die Quelle der Wahrheit; CLAUDE.md/ARCHITECTURE.md unverändert.
 

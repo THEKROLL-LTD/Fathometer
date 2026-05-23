@@ -1,0 +1,1285 @@
+/* SecScan — app shell styles. Tokens come from design-tokens.css. */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 300;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  height: 100vh;
+}
+
+#root { height: 100vh; }
+
+/* ── Ambient 80x80 grid lattice (DS) ──────────────────────── */
+.bg-grid {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right,  rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 80px 80px;
+}
+
+/* ── App shell layout ─────────────────────────────────────── */
+.app {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: 64px 1fr 28px;
+  grid-template-columns: 480px 1fr;
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar main"
+    "footer footer";
+  height: 100vh;
+}
+
+.topbar  { grid-area: topbar;  border-bottom: var(--hairline); display: flex; align-items: center; padding: 0 32px; gap: 32px; }
+.sidebar { grid-area: sidebar; border-right: var(--hairline); display: flex; flex-direction: column; min-height: 0; }
+.main    { grid-area: main;    overflow: auto; }
+.footer  { grid-area: footer;  border-top: var(--hairline); display: flex; align-items: center; padding: 0 32px; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.04em; gap: 16px; }
+
+/* ── Topbar ───────────────────────────────────────────────── */
+.topbar__brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.topbar__logo {
+  width: 40px;
+  height: 40px;
+  display: block;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+.topbar__logo-sweep {
+  transform-origin: 32px 32px;
+  transform-box: view-box;
+  animation: fathom-sweep 4.4s var(--ease-drift) infinite alternate;
+}
+@keyframes fathom-sweep {
+  0%   { transform: rotate(-72deg); }
+  100% { transform: rotate( 72deg); }
+}
+.topbar__logo-echo {
+  animation: op-pulse 2.4s ease-in-out infinite;
+  transform-origin: 32px 10px;
+  transform-box: view-box;
+}
+.topbar__wordmark {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.topbar__wordmark-name {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  line-height: 1;
+}
+.topbar__wordmark-sub {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.topbar__nav { display: flex; gap: 4px; margin-left: 8px; }
+.topbar__navitem {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  transition: color var(--dur-hover) var(--ease-drift), letter-spacing var(--dur-hover) var(--ease-drift);
+  position: relative;
+}
+.topbar__navitem:hover { color: var(--text-primary); letter-spacing: 0.08em; }
+.topbar__navitem--active { color: var(--text-primary); }
+.topbar__navitem--active::after {
+  content: ""; position: absolute; left: 12px; right: 12px; bottom: -19px;
+  height: 1px; background: var(--accent);
+}
+
+.topbar__right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+.topbar__status { display: flex; align-items: center; gap: 8px; }
+.topbar__status-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--status-operational);
+  box-shadow: 0 0 8px var(--status-operational);
+  animation: op-pulse 2.4s ease-in-out infinite;
+}
+@keyframes op-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+.topbar__profile {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.topbar__user {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  background: none;
+  border: 1px solid transparent;
+  padding: 6px 9px;
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-drift),
+              border-color var(--dur-hover) var(--ease-drift),
+              background var(--dur-hover) var(--ease-drift);
+}
+.topbar__user:hover  { color: var(--text-primary); border-color: var(--border-subtle); }
+.topbar__user--open  { color: var(--text-primary); border-color: var(--border-visible); background: var(--surface-raised); }
+.topbar__user:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ── Profile dropdown ─────────────────────────────────────── */
+.profile-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 224px;
+  background: var(--surface-elevated);
+  border: var(--border);
+  z-index: 100;
+  font-family: var(--font-mono);
+  /* Materialize-in per DS §1 — slow enter, no exit anim (DS: exits are
+     fast/decisive; instant unmount IS the decisive exit). */
+  animation: profile-menu-in 260ms var(--ease-materialize) both;
+  transform-origin: top right;
+}
+@keyframes profile-menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);     }
+}
+
+.profile-menu__user {
+  padding: var(--space-4) var(--space-4) calc(var(--space-4) + 2px);
+  border-bottom: var(--hairline);
+}
+.profile-menu__label {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  /* DS terminal-prompt prefix — same pattern as the sysline ">last scan…" */
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.profile-menu__label::before {
+  content: ">";
+  color: var(--text-tertiary);
+  letter-spacing: 0;
+}
+.profile-menu__name {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.profile-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px var(--space-4);
+  background: none;
+  border: 0;
+  border-bottom: var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-drift),
+              color      var(--dur-hover) var(--ease-drift),
+              padding-left var(--dur-hover) var(--ease-drift);
+}
+.profile-menu__item:last-child { border-bottom: 0; }
+/* DS text-link hover spec: primary → accent + 4px translate. */
+.profile-menu__item:hover {
+  background: var(--surface-hover);
+  padding-left: calc(var(--space-4) + 4px);
+  color: var(--accent);
+}
+.profile-menu__item svg {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  transition: color var(--dur-hover) var(--ease-drift);
+}
+.profile-menu__item:hover svg { color: var(--accent); }
+
+/* Restricted/danger item: explicit hover override so it stays red — without
+   it, .profile-menu__item:hover (specificity 0,2,0) would beat the danger
+   rule (0,1,0) and turn the logout item cyan. */
+.profile-menu__item--danger,
+.profile-menu__item--danger svg { color: var(--status-restricted); }
+.profile-menu__item--danger:hover,
+.profile-menu__item--danger:hover svg { color: var(--status-restricted); }
+.profile-menu__item--danger:hover { background: rgba(255, 68, 68, 0.06); }
+
+/* ── Sidebar ──────────────────────────────────────────────── */
+.sidebar__filter {
+  padding: 24px 32px 16px;
+  border-bottom: var(--hairline);
+}
+.sidebar__input {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 10px 12px;
+  outline: none;
+  letter-spacing: 0.02em;
+  transition: border-color var(--dur-hover) var(--ease-drift);
+}
+.sidebar__input:focus { border-color: var(--accent); }
+.sidebar__input::placeholder { color: var(--text-tertiary); }
+
+.sidebar__meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 18px 32px 14px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.sidebar__meta b { color: var(--text-secondary); font-weight: 400; }
+
+.sidebar__colhead {
+  display: grid;
+  grid-template-columns: 12px 1fr 76px 48px;
+  gap: 12px;
+  padding: 0 32px 10px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  border-bottom: var(--hairline);
+}
+.sidebar__colhead span { text-align: right; }
+.sidebar__colhead span:nth-child(1),
+.sidebar__colhead span:nth-child(2) { text-align: left; }
+
+.sidebar__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0 32px;
+}
+
+/* ── Host group (collapsible) ─────────────────────────────────
+   Compact header with chevron, group name, host-count, and aggregated
+   escalate + act totals. Click toggles collapse. Hosts inside use the
+   same .host markup and live in .hostgroup__body (only rendered when
+   the group is open). */
+.hostgroup {
+  border-bottom: var(--hairline);
+}
+.hostgroup__header {
+  display: grid;
+  grid-template-columns: 12px 1fr 76px 48px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 12px 32px;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  font-family: var(--font-mono);
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background var(--dur-hover) var(--ease-drift),
+              color      var(--dur-hover) var(--ease-drift),
+              border-color var(--dur-hover) var(--ease-drift);
+}
+.hostgroup__header:hover { background: var(--surface-raised); color: var(--text-primary); }
+.hostgroup__header:focus-visible { outline: none; border-left-color: var(--accent); }
+
+.hostgroup__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-hover) var(--ease-drift), color var(--dur-hover) var(--ease-drift);
+}
+.hostgroup--open  .hostgroup__chevron { transform: rotate(90deg); color: var(--text-secondary); }
+.hostgroup__header:hover .hostgroup__chevron { color: var(--text-primary); }
+
+.hostgroup__title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.hostgroup__name {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: inherit;
+}
+.hostgroup__count {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+.hostgroup__stat {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: right;
+  color: var(--text-primary);
+}
+.hostgroup__stat--crit { color: var(--accent); }
+.hostgroup__stat--zero { color: var(--text-tertiary); font-weight: 400; }
+
+/* When the group is open, host cards inside hang together visually */
+.hostgroup__body .host { border-bottom: var(--hairline); }
+.hostgroup__body .host:last-child { border-bottom: 0; }
+
+/* Indent dot + hostname so they align with the OS subline and heartbeat
+   strip beneath. Only applied when the body follows a real group header
+   (adjacent-sibling guard) — ungrouped hosts keep their original position. */
+.hostgroup__header + .hostgroup__body .host__top {
+  padding-left: 24px;
+}
+
+.host {
+  display: block;
+  padding: 14px 32px 14px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  border-bottom: var(--hairline);
+  transition: background var(--dur-hover) var(--ease-drift), border-color var(--dur-hover) var(--ease-drift);
+}
+.host:hover { background: var(--surface-raised); }
+/* Selected host — DS canonical 3px accent left-bar (same pattern as the
+   action-card) + surface-elevated background to stand apart from the
+   surface-raised hover state. */
+.host--active {
+  border-left-color: var(--accent);
+  background: var(--surface-elevated);
+}
+.host--active:hover { background: var(--surface-elevated); }
+
+.host__top {
+  display: grid;
+  grid-template-columns: 12px 1fr 76px 48px;
+  gap: 12px;
+  align-items: center;
+}
+
+.host__dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+}
+/* Two-state colour reduction: only "escalate" (alarm) wears the cyan signal;
+   ok / warn / unknown collapse to a single calm gray. The dashboard's job is
+   to surface what needs attention, not paint a rainbow of "OK" states. */
+.host__dot--ok,
+.host__dot--warn,
+.host__dot--unknown { background: var(--text-tertiary); }
+.host__dot--alarm   { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+
+.host__name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.host__count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  text-align: right;
+  letter-spacing: 0.02em;
+}
+.host__count--zero { color: var(--text-tertiary); }
+.host__count--crit { color: var(--accent); }
+.host__last {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-align: right;
+  letter-spacing: 0.04em;
+}
+
+.host__os {
+  margin: 4px 0 0 24px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+}
+
+.host__beat {
+  display: flex;
+  gap: 2px;
+  margin: 10px 0 0 24px;
+  height: 22px;
+  align-items: stretch;
+  position: relative;     /* anchor for the hover tooltip */
+}
+.host__beat-tick {
+  flex: 1;
+  min-width: 3px;
+  cursor: pointer;
+  transform-origin: center;
+  transition: transform var(--dur-hover) var(--ease-drift),
+              opacity   var(--dur-hover) var(--ease-drift),
+              filter    var(--dur-hover) var(--ease-drift);
+}
+.host__beat-tick:hover,
+.host__beat-tick--hover {
+  transform: scaleY(1.18);
+  opacity: 1;
+  filter: brightness(1.3);
+}
+.beat--ok      { background: var(--border-visible); }
+.beat--warn    { background: var(--text-secondary); opacity: 0.7; }
+.beat--alarm   { background: var(--accent); }
+.beat--unknown { background: var(--text-ghost); opacity: 0.35; }
+
+/* Day-of-the-beat tooltip — materializes on tick hover.
+   surface-elevated + hairline border, mono type, no shadow. */
+.heartbeat-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  background: var(--surface-elevated);
+  border: var(--border);
+  padding: 7px 10px 8px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+  animation: heartbeat-tip-in 200ms var(--ease-materialize) both;
+}
+@keyframes heartbeat-tip-in {
+  from { opacity: 0; transform: translate(-50%, 4px); }
+  to   { opacity: 1; transform: translate(-50%, 0);   }
+}
+.heartbeat-tip__date {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+.heartbeat-tip__state {
+  margin-top: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.heartbeat-tip__state--alarm   { color: var(--accent); }
+.heartbeat-tip__state--warn    { color: var(--text-primary); }
+.heartbeat-tip__state--ok      { color: var(--text-secondary); }
+.heartbeat-tip__state--unknown { color: var(--text-tertiary); }
+
+.host__beat-axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 5px 0 0 24px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-ghost);
+}
+
+.sort-btn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--dur-hover) var(--ease-drift);
+}
+.sort-btn:hover { color: var(--text-secondary); }
+.sort-btn.active { color: var(--accent); }
+
+/* ── Main content ─────────────────────────────────────────── */
+.main__inner {
+  max-width: 1100px;
+  padding: 72px 88px 96px;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 0;
+  padding-bottom: 24px;
+  border-bottom: var(--hairline);
+}
+
+.headline {
+  font-family: var(--font-display);
+  font-size: 72px;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  color: var(--text-primary);
+  margin: 0;
+}
+.headline-meta {
+  display: none;
+}
+
+/* ── Stat blocks (Action / Safe) ──────────────────────────── */
+.stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 80px;
+  margin: 80px 0 96px;
+  align-items: start;
+}
+
+.stat {
+  position: relative;
+  padding-left: 28px;
+}
+.stat--alarm {
+  border-left: 3px solid var(--accent);
+  overflow: hidden;          /* clip the scan beam */
+  isolation: isolate;        /* keep mix-blend-mode local to this card */
+}
+/* On-brand diagnostic scan — a wide vertical bright band sweeps slowly
+   across the entire card. When it crosses the big number, that number
+   lights up cyan (via the .stat__num animation below), then slowly fades
+   back to gray until the next sweep refreshes it. Same visual language as
+   the heartbeat scan-probe in the sidebar — radar reading the field. */
+.stat--alarm::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  background: linear-gradient(
+    to right,
+    rgba(0, 229, 255, 0)       0%,
+    rgba(0, 229, 255, 0)      32%,
+    rgba(0, 229, 255, 0.18)   44%,
+    rgba(217, 250, 255, 0.95) 50%,
+    rgba(0, 229, 255, 0.18)   56%,
+    rgba(0, 229, 255, 0)      68%,
+    rgba(0, 229, 255, 0)     100%
+  );
+  mix-blend-mode: screen;
+  transform: translateX(-110%);
+  animation: stat-scan 5.4s linear infinite;
+  pointer-events: none;
+  z-index: 1;                /* over background, under content */
+}
+/* Faint vertical "scan-line" inside the beam — gives it the broadcast-feed
+   feel referenced in the DS (film grain / scanlines / HUD). */
+.stat--alarm::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 2px,
+      rgba(0, 229, 255, 0.04) 2px,
+      rgba(0, 229, 255, 0.04) 3px
+    );
+  opacity: 0;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: 1;
+  animation: stat-scanlines 5.4s linear infinite;
+}
+@keyframes stat-scan {
+  0%        { transform: translateX(-110%); }
+  44%       { transform: translateX(245%);  }
+  44.01%, 100% { transform: translateX(245%); }
+}
+@keyframes stat-scanlines {
+  0%, 100% { opacity: 0; }
+  10%, 38% { opacity: 1; }
+  46%      { opacity: 0; }
+}
+/* Stat content needs to sit over the scan beam, not behind it. */
+.stat > * { position: relative; z-index: 2; }
+.stat--safe  { border-left: 2px solid var(--border-subtle); padding-left: 22px; }
+
+.stat__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stat__label .bracket { color: var(--text-ghost); }
+.stat--safe .stat__label { color: var(--text-tertiary); }
+.stat--safe .stat__label .bracket { color: var(--text-tertiary); }
+
+.stat__label-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  /* Reuse the topbar's operational-pulse (opacity only, no scale) — the
+     brand's canonical "live indicator" pattern. Confident, not anxious. */
+  animation: op-pulse 2.4s ease-in-out infinite;
+}
+
+.stat__figure {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+}
+.stat__num {
+  font-family: var(--font-display);
+  font-size: 144px;
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+.stat--alarm .stat__num {
+  color: var(--text-ghost);     /* darker rest = stronger cyan-spike contrast */
+}
+/* Unified sonar fade: every .scan-flash element peaks cyan at 14% of the
+   5.4s cycle, then fades linearly back to a deep gray (--text-ghost).
+   The dim rest-state makes the cyan flash feel like a real signal hit,
+   not just a color shift. The useScanFlashSync hook sets per-element
+   animation-delay so each char/glyph peaks the instant the scan beam's
+   center is over it — true sonar return per position. */
+.scan-flash {
+  color: var(--text-ghost);
+  animation: scan-flash 5.4s linear infinite;
+}
+@keyframes scan-flash {
+  0%, 8% { color: var(--text-ghost); }
+  14%    { color: var(--accent); }
+  100%   { color: var(--text-ghost); }
+}
+/* scan-chars wrapper is inline — preserves text layout, splits children to spans */
+.scan-chars { display: inline; }
+.scan-chars .scan-flash { display: inline-block; }   /* needed so getBoundingClientRect returns a width for spaces */
+
+.stat--safe .stat__num  { font-size: 96px; color: var(--text-secondary); }
+.stat__unit {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+.stat--safe .stat__unit { color: var(--text-tertiary); }
+
+.stat__sub {
+  margin-top: 22px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  line-height: 1.7;
+}
+.stat__sub b { color: var(--text-primary); font-weight: 400; }
+.stat--alarm .stat__sub b { color: var(--text-primary); }
+
+.stat__worst {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.stat__worst .worst-label {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+  display: block;
+}
+.stat__worst .worst-host {
+  color: var(--text-primary);
+}
+.stat__worst .worst-crit { color: var(--accent); }
+
+.stat__cta {
+  margin-top: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-ghost);
+  background: none;
+  border: none;
+  border-bottom: 1px solid currentColor;   /* tracks the scan-flash color */
+  padding: 0 0 6px;
+  cursor: pointer;
+  transition: gap var(--dur-hover) var(--ease-drift), letter-spacing var(--dur-hover) var(--ease-drift);
+}
+/* Pin to accent on hover — the user's intent overrides the sweep cadence. */
+.stat__cta:hover {
+  gap: 18px;
+  letter-spacing: 0.12em;
+  animation: none;
+  color: var(--accent);
+}
+.stat__cta:hover .scan-flash { animation: none; color: var(--accent); }
+.stat__cta-arrow { transition: transform var(--dur-hover) var(--ease-drift); }
+.stat__cta:hover .stat__cta-arrow { transform: translateX(2px); }
+
+/* ── Triage row ───────────────────────────────────────────── */
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 0 0 28px;
+}
+
+.triage {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-top: var(--hairline);
+  border-bottom: var(--hairline);
+  margin-bottom: 80px;
+}
+.triage__cell {
+  padding: 28px 16px 28px 18px;
+  border-right: var(--hairline);
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-drift);
+}
+.triage__cell:last-child { border-right: none; }
+.triage__cell:first-child { padding-left: 0; }
+.triage__cell:hover { background: var(--surface-raised); }
+
+.triage__cell-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 0 0 14px;
+}
+.triage__cell-num {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  color: var(--text-primary);
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.triage__cell-num--zero { color: var(--text-tertiary); }
+.triage__cell--accent .triage__cell-label { color: var(--accent); }
+
+/* ── Severity strip ───────────────────────────────────────── */
+.severity {
+  display: flex;
+  gap: 64px;
+  margin-bottom: 80px;
+}
+.severity__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 120px;
+}
+.severity__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.severity__num {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.severity__bar {
+  width: 140px;
+  height: 2px;
+  background: var(--border-subtle);
+  margin-top: 10px;
+  overflow: hidden;
+}
+.severity__bar-fill { height: 100%; background: var(--text-secondary); }
+.severity__item--crit .severity__bar-fill { background: var(--accent); }
+.severity__item--crit .severity__num { color: var(--accent); }
+
+/* ── Fleet status section ─────────────────────────────────── */
+.fleet-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 16px;
+}
+.fleet-hdr h2 {
+  font-family: var(--font-display);
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  font-weight: 400;
+  margin: 0;
+  color: var(--text-primary);
+}
+.fleet-actions {
+  display: flex;
+  gap: 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+.fleet-actions button {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--dur-hover) var(--ease-drift);
+}
+.fleet-actions button:hover { color: var(--accent); }
+.fleet-actions button.active { color: var(--accent); }
+
+.fleet {
+  border-top: var(--hairline);
+  margin-bottom: 64px;
+}
+.fleet__row {
+  display: grid;
+  grid-template-columns: 220px 1fr 90px 90px 90px 80px;
+  gap: 24px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: var(--hairline);
+  transition: background var(--dur-hover) var(--ease-drift);
+  cursor: pointer;
+  position: relative;
+}
+.fleet__row:hover { background: var(--surface-raised); }
+.fleet__row::before {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background var(--dur-hover) var(--ease-drift);
+}
+.fleet__row--alarm::before { background: var(--accent); }
+
+.fleet__head {
+  display: grid;
+  grid-template-columns: 220px 1fr 90px 90px 90px 80px;
+  gap: 24px;
+  padding: 12px 0 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.fleet__head span { text-align: right; }
+.fleet__head span:first-child,
+.fleet__head span:nth-child(2) { text-align: left; }
+
+.fleet__hostname {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.fleet__os {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+.fleet__beat {
+  display: flex;
+  gap: 1px;
+  height: 22px;
+}
+.fleet__beat-tick {
+  flex: 1;
+  min-width: 3px;
+}
+.fleet__num {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-align: right;
+  color: var(--text-primary);
+}
+.fleet__num--zero { color: var(--text-tertiary); }
+.fleet__num--crit { color: var(--accent); }
+.fleet__last {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: right;
+  letter-spacing: 0.04em;
+}
+
+/* ── Last scan / system status terminal line ──────────────── */
+.sysline {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  padding: 14px 0;
+  border-top: var(--hairline);
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.sysline span { display: inline-flex; align-items: center; gap: 6px; }
+.sysline b { color: var(--text-secondary); font-weight: 400; }
+.sysline .prompt { color: var(--accent); }
+
+/* ── Footer ───────────────────────────────────────────────── */
+.footer__sep { color: var(--border-visible); }
+.footer a {
+  color: var(--text-tertiary);
+  text-decoration: none;
+  transition: color var(--dur-hover) var(--ease-drift);
+}
+.footer a:hover { color: var(--accent); }
+.footer__link--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.footer__link--icon svg { flex: 0 0 auto; }
+
+/* ── Auth (login page) ────────────────────────────────────── */
+.app--auth {
+  /* Drop the sidebar — single-column layout. */
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "topbar"
+    "main"
+    "footer";
+}
+.main--auth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  overflow: auto;
+}
+
+.auth {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.auth__panel {
+  width: 100%;
+  max-width: 440px;
+  padding: 56px 56px 48px;
+  background: var(--surface-raised);
+  border: var(--border);
+  /* No box-shadow — DS §4 verbotsliste. The surface-step against the page
+     background carries the elevation. */
+  position: relative;
+}
+/* Accent left-bar — same DS canonical "this is important" marker used on
+   the action-needed card. Marks the auth panel as live/active. */
+.auth__panel::before {
+  content: "";
+  position: absolute;
+  left: -1px; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+.auth__eyebrow {
+  margin: 0 0 18px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.auth__prompt {
+  color: var(--accent);
+  letter-spacing: 0;
+}
+.auth__title {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 36px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+.auth__sub {
+  margin: 0 0 36px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.auth__field-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.auth__input {
+  width: 100%;
+  background: var(--surface-base);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  padding: 12px 14px;
+  outline: none;
+  letter-spacing: 0.02em;
+  transition: border-color var(--dur-hover) var(--ease-drift),
+              background var(--dur-hover) var(--ease-drift);
+}
+.auth__input:hover:not(:focus) { border-color: var(--border-visible); }
+.auth__input:focus { border-color: var(--accent); background: var(--surface-raised); }
+.auth__input:disabled { color: var(--text-tertiary); cursor: not-allowed; }
+
+.auth__status {
+  margin: 2px 0 -4px;
+  min-height: 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.auth__hint   { color: var(--text-tertiary); }
+.auth__error  { color: var(--status-restricted); }
+.auth__error .bracket { color: var(--status-restricted); }
+.auth__pending { color: var(--accent); }
+
+.auth__submit {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--accent);
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-drift),
+              letter-spacing var(--dur-hover) var(--ease-drift),
+              color var(--dur-hover) var(--ease-drift);
+}
+.auth__submit:hover {
+  background: rgba(0, 229, 255, 0.08);
+  letter-spacing: 0.18em;
+}
+.auth__submit:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+.auth__submit:disabled,
+.auth__submit--busy {
+  cursor: progress;
+  color: var(--text-tertiary);
+  border-color: var(--border-visible);
+}
+.auth__submit-arrow { transition: transform var(--dur-hover) var(--ease-drift); }
+.auth__submit:hover .auth__submit-arrow { transform: translateX(3px); }
+
+.topbar--auth { padding: 0 32px; }
+
+/* ── Tweaks panel host hook ───────────────────────────────── */
+.tweaks-panel input[type="color"] { width: 32px; height: 22px; border: 0; padding: 0; background: transparent; }
+
+/* ── Skeleton loading ─────────────────────────────────────────
+   Heartbeat + escalate/act stats render in a "materializing"
+   skeleton state while data is in-flight. Hostname / OS / arch
+   are already known from page load and stay visible.
+   Per DS §1: a soft accent probe sweeps L→R across dim ticks
+   (radar / oscilloscope), then real data fades in L→R.
+   ─────────────────────────────────────────────────────────── */
+
+/* Host status dot in loading state — neutral, no glow. */
+.host__dot--skel {
+  background: var(--text-ghost);
+  opacity: 0.55;
+  animation: skel-dot-pulse 2.4s var(--ease-drift) infinite;
+}
+@keyframes skel-dot-pulse {
+  0%, 100% { opacity: 0.30; }
+  50%      { opacity: 0.65; }
+}
+
+/* Stat placeholder dash (crit / high / scan cells) ----------- */
+.stat-skel {
+  display: flex;
+  align-items: center;
+  height: 16px;             /* matches mono 12px line-height */
+}
+.stat-skel--right { justify-content: flex-end; }
+.stat-skel--left  { justify-content: flex-start; }
+.stat-skel__dash {
+  display: block;
+  height: 1.5px;
+  background: var(--text-ghost);
+  opacity: 0.55;
+  animation: skel-dash-pulse 2.4s var(--ease-drift) infinite;
+}
+@keyframes skel-dash-pulse {
+  0%, 100% { opacity: 0.30; transform: scaleX(0.92); }
+  50%      { opacity: 0.70; transform: scaleX(1.00); }
+}
+.stat-skel__dash { transform-origin: right center; }
+.stat-skel--left .stat-skel__dash { transform-origin: left center; }
+
+/* Heartbeat bar in skeleton mode ----------------------------- */
+.host__beat--skel {
+  position: relative;
+  overflow: hidden;       /* clip the scan probe to the strip bounds */
+}
+.host__beat-tick--skel {
+  background: var(--border-subtle);   /* dim base — barely visible */
+  opacity: 0.55;
+}
+
+/* The scan probe — soft accent beam sweeping L→R ------------- */
+.host__beat__probe {
+  position: absolute;
+  inset: 0 0 0 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(0, 229, 255, 0.00) 35%,
+    rgba(0, 229, 255, 0.22) 50%,
+    rgba(0, 229, 255, 0.00) 65%,
+    transparent 100%
+  );
+  /* Screen-blend so the beam brightens the ticks beneath, not the gaps. */
+  mix-blend-mode: screen;
+  transform: translateX(-100%);
+  animation: skel-scan 1.8s var(--ease-drift) infinite;
+}
+@keyframes skel-scan {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Materialize: real ticks fade in L→R from skeleton state.
+   Applied for ~1.2s after a host resolves, then removed. */
+.host__beat--materialize .host__beat-tick {
+  animation: skel-materialize 600ms var(--ease-materialize) both;
+}
+@keyframes skel-materialize {
+  0%   { opacity: 0; transform: scaleY(0.55); }
+  100% { opacity: 1; transform: scaleY(1.00); }
+}
+
+/* Tweaks panel — make TweakButton honour the dark theme */
+.twk-btn {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-visible); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }

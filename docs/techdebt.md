@@ -409,6 +409,16 @@ erreicht). Spaetestens bei v1.0 vor Production-Release — CDN-JIT in
 Produktion ist offiziell nicht supported und kann jederzeit von Tailwind
 deprecated werden.
 
+**Update 2026-05-23 (Block W geplant):** [ADR-0032](decisions/0032-frontend-build-plain-css.md)
+fuehrt esbuild-Build-Stage ein. Block W Phase 1 baut die neuen Surfaces
+(Login, Dashboard, App-Shell) als Plain-CSS — Tailwind-CDN bleibt fuer
+Legacy-Templates (Settings, Server-Detail, Findings, Audit, Setup) im
+Dual-Stack-Modus aktiv. Die Safelist + der Lint-Test bleiben in Phase 1
+unangetastet, weil die Legacy-Templates Tailwind weiter brauchen. Eine
+spaetere Phase 2 (separater Block, vermutlich nach Server-Detail-Redesign)
+loescht Tailwind/DaisyUI komplett und erledigt damit TD-010 final. Bis
+dahin bleibt der Mitigations-Code in `base_app.html` Z. 52-73 stehen.
+
 ---
 
 ## TD-011 — Default-Coverage-Luecke fuer register/keys_rotate/bulk_acknowledge nach Phase-3.2-Bulk-Migration
@@ -547,6 +557,71 @@ priorisieren, ausser TD-005-HIGH (Test-Migration) wird aktiv angegangen
 Querverweis: TD-005 (Test-Migrations-Schuld die TD-012 als Vorarbeit
 braucht), TD-011 (analoges API-Coverage-Problem mit Bulk-Migration als
 Kurzschluss).
+
+---
+
+## TD-013 — Materialized `daily_risk_state`-Tabelle
+
+**Was:** Heute aggregiert `app/services/heartbeat_aggregation.py` die Tages-
+Aggregate fuer die Sidebar-Heartbeat-Bar **live** bei jedem Polling-Tick
+(eine schmale Projektion-Query auf `findings` + Python-Loop ueber 30 Tage
+pro Server). Mit der Block-W-Erweiterung kommt ein weiteres Aggregat-Feld
+(`dominant_risk_band`) parallel zur Severity-Reduktion. Performance heute
+unkritisch bei kleinen-bis-mittleren Flotten (50–200 Server).
+
+**Warum (Symptom):** Bei sehr grossen Flotten (500+ Server, 100k+ Findings)
+koennte die Live-Aggregation pro Polling-Tick im Sidebar-Batch-Endpoint
+(`POST /_partials/sidebar/batch`) das Server-Zeit-Budget reissen
+(>500 ms pro Tick). Heute kein konkretes Operator-Symptom, sondern
+prophylaktisch dokumentiert weil die Skalierungs-Eigenschaft bekannt ist
+(`heartbeat_aggregation.py` Datei-Header: "MVP-Zielwert 50 Server x 50
+Tage = 2500 Cells in einer Batch-Query unter 200 ms").
+
+**Loesung:** Neue Tabelle `daily_risk_state` (server_id, day,
+dominant_risk_band, max_severity, kev_count, had_scan). Befuellt
+inkrementell:
+
+a) **Worker-Sub-Tick** (analog zum heutigen `feed_enrichment_tick`-Pattern
+   in `app/workers/llm_worker.py`): einmal pro 5 Minuten alle Tages-
+   Aggregate fuer den aktuellen Tag refresh'en, plus an Tagesgrenzen die
+   Vortags-Zeile finalisieren. Aggregations-Query laeuft im Worker-Process,
+   schreibt UPSERT auf `(server_id, day)`-PK.
+b) **Backfill-Migration**: einmaliger Backfill der letzten 50 Tage fuer
+   alle existierenden Server beim ersten Deploy.
+c) **Sidebar-Endpoint liest direkt** die Tabelle (`SELECT … FROM
+   daily_risk_state WHERE server_id IN (…) AND day >= now()::date - 29`)
+   statt die Live-Aggregation aufzurufen. O(1) pro Sidebar-Render statt
+   O(N × F) wo F = Findings pro Server.
+
+Schema-Skizze:
+```sql
+CREATE TABLE daily_risk_state (
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    day DATE NOT NULL,
+    dominant_risk_band TEXT,
+    max_severity TEXT,
+    kev_count INTEGER NOT NULL DEFAULT 0,
+    had_scan BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (server_id, day)
+);
+CREATE INDEX ix_daily_risk_state_day ON daily_risk_state(day);
+```
+
+**Aufwand:** ~1-2 Tage. Migration + Backfill-Skript + Worker-Sub-Tick
++ Tests + Operator-Smoke. Plus ADR weil das eine neue Schema-Schicht
+zwischen `findings` und der Sidebar einfuehrt.
+
+**Wann:** Sobald Live-Aggregation in einer Operator-Umgebung die Polling-
+Latency ueber ein akzeptables Budget (~500 ms Server-Zeit pro Batch)
+drueckt. Heute kein konkreter Trigger — wird beim ersten 500+-Server-
+Deployment relevant. Vermutlich frueher relevant als TD-001 (EPSS-Pull-
+Hotspot) weil Sidebar-Polling viel haeufiger laeuft als EPSS-Pull.
+
+Querverweis: [ADR-0035](decisions/0035-daily-risk-state-heartbeat-mapping.md)
+§Verworfen — die materialized-Variante wurde fuer Block W zugunsten der
+Live-Aggregation verworfen, dieser TD-Eintrag haelt sie als Folge-Option
+fest.
 
 ---
 
