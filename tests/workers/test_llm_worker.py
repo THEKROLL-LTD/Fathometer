@@ -72,14 +72,15 @@ def test_idle_backoff_resets_on_pickup(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_main_returns_when_shutdown_flag_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Wenn das Shutdown-Flag VOR dem ersten Tick gesetzt ist, kehrt ``main()``
-    sofort zurueck — ohne Tick auszufuehren.
+    """Wenn das Shutdown-Flag VOR dem ersten Dispatcher-Loop gesetzt ist,
+    kehrt ``main()`` sofort zurueck — ohne Sub-Tick / Pickup auszufuehren.
 
-    Pure-Unit-Variante: Heartbeat-Thread und Mode-Log-Read (beide DB-Calls)
-    werden modul-weit auf No-Ops gepatcht. ``load_settings()`` wird ueber die
-    Standard-Env-Vars befriedigt; ein Tick-/DB-Zugriff findet nicht statt,
-    da der Loop-Body vor dem ersten ``_tick()`` ueber das ``_shutdown``-Flag
-    verlassen wird.
+    Pure-Unit-Variante (Block U Phase C, ADR-0029): das alte ``_tick()`` ist
+    durch :func:`_run_async_main` ersetzt. Wir patchen Heartbeat-Thread und
+    Mode-Log-Read modulweit auf No-Ops und ersetzen ``_run_subticks``,
+    ``_pick_next_job_id`` und ``_get_concurrency_throttled`` durch
+    Defensivsicherungen — sobald das Shutdown-Flag *vor* ``main()`` gesetzt
+    ist, darf nichts davon aufgerufen werden.
     """
     monkeypatch.setenv("SECSCAN_ENCRYPTION_KEY", "x" * 32)
     monkeypatch.setenv("SECSCAN_SECRET_KEY", "test-secret-key-not-used-in-prod")
@@ -95,12 +96,21 @@ def test_main_returns_when_shutdown_flag_set(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(llm_worker, "_stop_heartbeat_thread", lambda timeout=5.0: None)
     monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
-    # _tick() darf gar nicht erst aufgerufen werden — Defensivsicherung
-    # damit ein Bug im Shutdown-Pfad sofort sichtbar wird.
-    def _boom() -> None:  # pragma: no cover — wird nicht aufgerufen
-        raise AssertionError("_tick must not run when _shutdown is set before main()")
+    # Block U Phase C: _run_subticks und Pickup duerfen gar nicht erst
+    # aufgerufen werden — Defensivsicherung damit ein Bug im Shutdown-Pfad
+    # sofort sichtbar wird. Das Dispatcher-Run wird ueber das _shutdown-Flag
+    # bereits in der ersten ``while not _shutdown``-Pruefung verlassen.
+    def _boom_subticks() -> None:  # pragma: no cover
+        raise AssertionError("_run_subticks must not run when _shutdown is set before main()")
 
-    monkeypatch.setattr(llm_worker, "_tick", _boom)
+    def _boom_pick() -> int | None:  # pragma: no cover
+        raise AssertionError("_pick_next_job_id must not run when _shutdown is set before main()")
+
+    monkeypatch.setattr(llm_worker, "_run_subticks", _boom_subticks)
+    monkeypatch.setattr(llm_worker, "_pick_next_job_id", _boom_pick)
+    # Concurrency-Read ist *vor* der while-Pruefung — wir lassen ihn 1
+    # liefern (legal), darf aber keinen DB-Zugriff machen.
+    monkeypatch.setattr(llm_worker, "_get_concurrency_throttled", lambda: 1)
 
     try:
         llm_worker.request_shutdown_for_tests()

@@ -36,6 +36,24 @@ from tests._helpers import (
 # ---------------------------------------------------------------------------
 
 
+def _drive_dispatch_iteration() -> None:
+    """Block U Phase C (ADR-0029) Migration-Helper: ersetzt ``llm_worker._tick()``.
+
+    Treibt einen Single-Job-Pickup + Verarbeitung. Sub-Ticks bleiben
+    aussen vor — die Tests checken nur LLM-Job-Lifecycle.
+    """
+    import asyncio as _asyncio
+
+    llm_worker.invalidate_throttle_caches_for_tests()
+    mode = llm_worker._get_mode_throttled()
+    if mode == "off" or not llm_worker._budget_ok_throttled():
+        return
+    job_id = llm_worker._pick_next_job_id()
+    if job_id is None:
+        return
+    _asyncio.run(llm_worker._process_one_async(job_id, mode))
+
+
 @pytest.fixture(autouse=True)
 def _reset_singleton() -> Any:
     GroupMatcher._reset_for_tests()
@@ -173,7 +191,7 @@ def test_observation_e2e_scan_ingest_worker_pickup_and_settings_stats(
     # 3) Worker-Tick (sleeps muten).
     monkeypatch.setattr(time_mod, "sleep", lambda s: None)
     monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
-    llm_worker._tick()
+    _drive_dispatch_iteration()
 
     # 4) Job ist done, would_call-Marker im Result.
     with db_app.app_context():
@@ -225,7 +243,7 @@ def test_observation_token_budget_accumulates(
 
     monkeypatch.setattr(time_mod, "sleep", lambda s: None)
     monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
-    llm_worker._tick()
+    _drive_dispatch_iteration()
 
     factory = get_session_factory(db_app)
     with db_app.app_context():

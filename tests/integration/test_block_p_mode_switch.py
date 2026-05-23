@@ -37,6 +37,29 @@ from tests._helpers import (
 from tests.integration.conftest import MockReviewer
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _drive_dispatch_iteration() -> None:
+    """Block U Phase C (ADR-0029) Migration-Helper: ersetzt ``llm_worker._tick()``.
+
+    Pickt einen Job aus der Queue und verarbeitet ihn via
+    ``asyncio.run(_process_one_async(...))``. Sub-Ticks bleiben aussen vor.
+    """
+    import asyncio as _asyncio
+
+    llm_worker.invalidate_throttle_caches_for_tests()
+    mode = llm_worker._get_mode_throttled()
+    if mode == "off" or not llm_worker._budget_ok_throttled():
+        return
+    job_id = llm_worker._pick_next_job_id()
+    if job_id is None:
+        return
+    _asyncio.run(llm_worker._process_one_async(job_id, mode))
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
@@ -196,7 +219,7 @@ def test_mode_switch_to_off_skips_worker_pickup(
     monkeypatch.setattr(time_mod, "sleep", lambda s: None)
     monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
-    llm_worker._tick()
+    _drive_dispatch_iteration()
 
     with db_app.app_context():
         sess = factory()
@@ -280,7 +303,7 @@ def test_mode_switch_observation_to_live_changes_worker_behavior(
             sess.close()
 
     # 1) Observation-Tick → would_call, kein DB-Group, kein LLM-Call.
-    llm_worker._tick()
+    _drive_dispatch_iteration()
 
     with db_app.app_context():
         sess = factory()
@@ -350,7 +373,7 @@ def test_mode_switch_observation_to_live_changes_worker_behavior(
     # v0.9.6: Mode-Cache invalidieren — sonst sieht der naechste Tick noch
     # das gecachte "observation" und der Test schlaegt fehl.
     llm_worker.invalidate_throttle_caches_for_tests()
-    llm_worker._tick()
+    _drive_dispatch_iteration()
     assert mock_reviewer.pass1_call_count == 1
 
     with db_app.app_context():

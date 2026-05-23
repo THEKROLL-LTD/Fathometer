@@ -30,6 +30,40 @@ from app.config import load_settings
 from app.models import LLMDebugLog, LLMJob
 
 
+def should_sample_debug_log(
+    job_id: int,
+    job_type: str,
+    status: str,
+    sample_rate: int,
+) -> bool:
+    """Entscheidet, ob eine Debug-Log-Row fuer diesen Call geschrieben werden soll.
+
+    Block U Phase G (ADR-0029): unter N=200-Concurrency wuerde der Worker
+    bis zu ~12 Inserts/s in ``llm_debug_log`` erzeugen. Wir samplen
+    Success-Calls auf 1:``sample_rate`` herunter und behalten alle
+    Fehler-Calls 1:1, damit Forensik (validation_error, timeout, error,
+    ...) verlustfrei bleibt.
+
+    Semantik:
+
+    * ``status != "success"`` -> immer True (Errors werden nie gesampelt).
+    * ``sample_rate <= 1``    -> immer True (Sampling deaktiviert).
+    * sonst                   -> True wenn ``hash((job_id, job_type)) %
+      sample_rate == 0``.
+
+    ``hash()`` ist innerhalb desselben Prozesses deterministisch (gleicher
+    Input -> gleicher Output), zwischen Prozessen aber via
+    ``PYTHONHASHSEED`` randomisiert. Das ist hier kein Problem, weil
+    Sampling-Entscheidungen pro Job genau einmal getroffen werden.
+    """
+    if status != "success":
+        return True
+    if sample_rate <= 1:
+        return True
+    h = abs(hash((int(job_id), job_type)))
+    return (h % sample_rate) == 0
+
+
 def _apply_body_cap(body: dict[str, Any] | None, cap_bytes: int) -> dict[str, Any] | None:
     """Trimmt ``body`` falls ``json.dumps(body)`` > ``cap_bytes``.
 
@@ -134,14 +168,19 @@ def evict_old(session: Session) -> tuple[int, int]:
     time_evicted = int(getattr(time_result, "rowcount", 0) or 0)
 
     # Step 2: Count-Cap.
+    # Block U Phase G (ADR-0029): CTE-DELETE statt ``NOT IN`` — der NOT-IN-
+    # Plan ist auf grossen Tabellen O(n^2)-haftig und blockt unter N=200-
+    # Last den Insert-Strom. ``ORDER BY created_at DESC, id DESC`` mit ``id``
+    # als Tie-Breaker, damit Sub-Sekunden-Kollisionen in ``created_at``
+    # deterministisch sind.
     count_result = session.execute(
         text(
-            "DELETE FROM llm_debug_log "
-            "WHERE id NOT IN ("
+            "DELETE FROM llm_debug_log USING ("
             "  SELECT id FROM llm_debug_log "
-            "  ORDER BY created_at DESC "
-            "  LIMIT :max_rows"
-            ")"
+            "  ORDER BY created_at DESC, id DESC "
+            "  OFFSET :max_rows"
+            ") AS to_evict "
+            "WHERE llm_debug_log.id = to_evict.id"
         ),
         {"max_rows": cfg.llm_debug_log_max_rows},
     )
@@ -151,4 +190,4 @@ def evict_old(session: Session) -> tuple[int, int]:
     return time_evicted, count_evicted
 
 
-__all__ = ["evict_old", "record"]
+__all__ = ["evict_old", "record", "should_sample_debug_log"]

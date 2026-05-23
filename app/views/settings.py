@@ -37,6 +37,7 @@ from app.config import load_settings
 from app.db import get_session
 from app.forms import (
     CSRFOnlyForm,
+    LlmReviewerConcurrencyForm,
     LlmReviewerModeForm,
     LlmReviewerRequeueForm,
     MasterKeyRotateForm,
@@ -395,6 +396,7 @@ def _llm_reviewer_stats(sess: Any) -> dict[str, Any]:
 
     return {
         "current_mode": setting_row.block_p_llm_mode,
+        "current_concurrency": int(setting_row.llm_worker_job_concurrency),
         "active_model": setting_row.llm_model,
         "job_counts": job_counts,
         "would_call_count": would_call_count,
@@ -419,6 +421,7 @@ def llm_reviewer_view() -> Any:
         content_template="settings/llm_reviewer.html",
         mode_form=LlmReviewerModeForm(),
         requeue_form=LlmReviewerRequeueForm(),
+        concurrency_form=LlmReviewerConcurrencyForm(),
         sub_tab="overview",
         **stats,
     )
@@ -513,6 +516,88 @@ def llm_reviewer_change_mode() -> Any:
     )
     sess.commit()
     flash(f"LLM-Mode auf '{new_mode}' gesetzt.", "success")
+    return redirect(url_for("settings.llm_reviewer_view"))
+
+
+@settings_bp.post("/llm-reviewer/concurrency")
+@login_required
+def llm_reviewer_change_concurrency() -> Any:
+    """Setzt ``settings.llm_worker_job_concurrency`` (mit Master-Key-Bestaetigung).
+
+    Block U / ADR-0029 §Entscheidung Punkt 7. Worker liest den neuen Wert
+    binnen <30 s via ``_get_concurrency_throttled`` (Phase C) — kein
+    Pod-Restart noetig.
+
+    Erfolg: 302-Redirect auf den Tab; Flash mit Success-Meldung. Audit-
+    Event ``llm.concurrency_changed`` mit ``from``/``to``-Metadata.
+
+    Fehler:
+      - CSRF-Fehler oder out-of-range (1..200) / non-int -> 400 + Render
+        mit Form-Errors.
+      - Master-Key falsch -> 403 + Render mit Form-Error.
+
+    No-Op: wenn der neue Wert == alter Wert ist, kein Audit-Event und ein
+    302-Redirect mit Info-Flash ``Concurrency ist bereits 'N'.``.
+    """
+    sess = get_session()
+    form = LlmReviewerConcurrencyForm()
+    if not form.validate_on_submit():
+        # Sowohl CSRF-Fehler als auch Bounds-/Type-Fehler landen hier.
+        for field_name, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field_name}: {err}", "error")
+        if not form.errors:
+            flash("Ungueltiger CSRF-Token oder Pflichtfelder fehlen.", "error")
+        stats = _llm_reviewer_stats(sess)
+        return make_response(
+            render_settings(
+                active="llm_reviewer",
+                content_template="settings/llm_reviewer.html",
+                mode_form=LlmReviewerModeForm(),
+                requeue_form=LlmReviewerRequeueForm(),
+                concurrency_form=form,
+                sub_tab="overview",
+                **stats,
+            ),
+            400,
+        )
+
+    if not _verify_master_key_from_form(sess, form.master_key.data):
+        flash("Master-Key falsch.", "error")
+        stats = _llm_reviewer_stats(sess)
+        return make_response(
+            render_settings(
+                active="llm_reviewer",
+                content_template="settings/llm_reviewer.html",
+                mode_form=LlmReviewerModeForm(),
+                requeue_form=LlmReviewerRequeueForm(),
+                concurrency_form=form,
+                sub_tab="overview",
+                **stats,
+            ),
+            403,
+        )
+
+    new_value = int(cast(int, form.concurrency.data))
+    setting_row = get_settings_row(sess)
+    old_value = int(setting_row.llm_worker_job_concurrency)
+    if old_value == new_value:
+        flash(f"Concurrency ist bereits '{new_value}'.", "info")
+        return redirect(url_for("settings.llm_reviewer_view"))
+
+    setting_row.llm_worker_job_concurrency = new_value
+    log_event(
+        "llm.concurrency_changed",
+        target_type="settings",
+        target_id="1",
+        metadata={"from": old_value, "to": new_value},
+        session=sess,
+    )
+    sess.commit()
+    flash(
+        f"Concurrency auf '{new_value}' gesetzt — Worker uebernimmt binnen 30 s.",
+        "success",
+    )
     return redirect(url_for("settings.llm_reviewer_view"))
 
 

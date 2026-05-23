@@ -195,6 +195,36 @@ class LlmReviewerModeForm(FlaskForm):
     )
 
 
+class LlmReviewerConcurrencyForm(FlaskForm):
+    """Concurrency-Wechsel-Form fuer den LLM-Risk-Reviewer (Block U, ADR-0029).
+
+    Felder:
+      - `concurrency` : Integer im Bereich [1, 200] — neuer Wert fuer
+                        ``settings.llm_worker_job_concurrency``.
+      - `master_key`  : Klartext-Master-Key zur Bestaetigung (analog
+                        Mode-Form aus Block P).
+
+    Format-Validierung passiert hier; der Master-Key-Vergleich (Konstant-
+    zeit via ``hmac.compare_digest``) findet im View-Handler statt — siehe
+    ``LlmReviewerModeForm``-Pattern.
+    """
+
+    concurrency = IntegerField(
+        "Concurrency",
+        validators=[
+            DataRequired(),
+            NumberRange(min=1, max=200, message="Concurrency muss zwischen 1 und 200 liegen."),
+        ],
+    )
+    master_key = PasswordField(
+        "Master-Key",
+        validators=[
+            DataRequired(),
+            Length(min=10, max=128),
+        ],
+    )
+
+
 class LlmReviewerRequeueForm(FlaskForm):
     """Backlog-Re-queue-Form (Block P, ADR-0023).
 
@@ -361,6 +391,7 @@ __all__ = [
     "BulkActionForm",
     "CSRFOnlyForm",
     "GroupAcknowledgeForm",
+    "LlmReviewerConcurrencyForm",
     "LlmSettingsForm",
     "LoginForm",
     "MasterKeyRotateForm",

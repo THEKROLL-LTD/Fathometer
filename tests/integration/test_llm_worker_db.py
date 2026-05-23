@@ -60,6 +60,37 @@ from app.settings_service import ensure_settings_row
 from app.workers import llm_worker
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _drive_dispatch_iteration() -> None:
+    """Block U Phase C (ADR-0029) Migration-Helper: ersetzt ``_drive_dispatch_iteration()``.
+
+    Pickt synchron einen Job aus der Queue und verarbeitet ihn via
+    ``asyncio.run(_process_one_async(...))``. Sub-Ticks (Stale-Reaper,
+    Eviction, Feed-Pull, Ingest, Retention) bleiben aussen vor — die Tests
+    ueber Sub-Ticks rufen die jeweiligen Helper direkt auf
+    (z.B. ``llm_worker._run_stale_reaper()``).
+    """
+    llm_worker.invalidate_throttle_caches_for_tests()
+    mode = llm_worker._get_mode_throttled()
+    if mode == "off" or not llm_worker._budget_ok_throttled():
+        # Idle-Pfad: Backoff-State updaten damit die alten Idle-Tests
+        # (siehe ``test_tick_idle_uses_backoff_sleep``) weiter funktionieren.
+        sleep_s = llm_worker._compute_idle_sleep()
+        time_mod.sleep(sleep_s)
+        return
+    job_id = llm_worker._pick_next_job_id()
+    if job_id is None:
+        sleep_s = llm_worker._compute_idle_sleep()
+        time_mod.sleep(sleep_s)
+        return
+    llm_worker._reset_idle_backoff()
+    asyncio.run(llm_worker._process_one_async(job_id, mode))
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
@@ -331,7 +362,7 @@ def test_tick_mode_off_skips_pickup(db_app: Flask, monkeypatch: pytest.MonkeyPat
             monkeypatch.setattr(time_mod, "sleep", lambda s: sleeps.append(s))
             monkeypatch.setattr(llm_worker.time, "sleep", lambda s: sleeps.append(s))
 
-            llm_worker._tick()
+            _drive_dispatch_iteration()
 
             sess.expire_all()
             updated = sess.get(LLMJob, job_id)
@@ -362,7 +393,7 @@ def test_tick_observation_marks_would_call(db_app: Flask, monkeypatch: pytest.Mo
             monkeypatch.setattr(time_mod, "sleep", lambda s: None)
             monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
-            llm_worker._tick()
+            _drive_dispatch_iteration()
 
             sess.expire_all()
             updated = sess.get(LLMJob, job_id)
@@ -450,7 +481,7 @@ def test_live_pass1_persists_group_and_assigns_findings(
             monkeypatch.setattr(time_mod, "sleep", lambda s: None)
             monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
-            llm_worker._tick()
+            _drive_dispatch_iteration()
 
             sess.expire_all()
             updated = sess.get(LLMJob, job_id)
@@ -532,7 +563,7 @@ def test_live_pass2_writes_cache_and_group_band(
             monkeypatch.setattr(time_mod, "sleep", lambda s: None)
             monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
-            llm_worker._tick()
+            _drive_dispatch_iteration()
 
             sess.expire_all()
             updated_job = sess.get(LLMJob, job_id)
@@ -684,7 +715,7 @@ def test_budget_exhausted_pauses_pickup(db_app: Flask, monkeypatch: pytest.Monke
             monkeypatch.setattr(time_mod, "sleep", lambda s: None)
             monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
-            llm_worker._tick()
+            _drive_dispatch_iteration()
 
             sess.expire_all()
             updated = sess.get(LLMJob, job_id)
@@ -768,7 +799,7 @@ def test_worker_records_meta_on_validation_error_in_debug_log(
             monkeypatch.setattr(time_mod, "sleep", lambda s: None)
             monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
-            llm_worker._tick()
+            _drive_dispatch_iteration()
 
             sess.expire_all()
             # Job sollte requeued/failed sein (Validator wirft).
@@ -841,28 +872,40 @@ def test_heartbeat_thread_stops_on_event(db_app: Flask) -> None:
 
 
 # ---------------------------------------------------------------------------
-# v0.9.5 — Logging-Smoke (Phasen-Marker im Live-Pass1)
+# Block U Phase F (ADR-0029) — Logging-Refactor: die alten Per-Job-Phasen-
+# Marker (pass1_started / llm_call_started / llm_call_completed /
+# pass1_persist_done / job_picked / job_done / pass2_started / pass2_persist_
+# done / pass1_skipped / pass2_skipped / pass2_cache_lookup /
+# pass2_cache_hit_applied) wurden entfernt. Forensik laeuft jetzt
+# ausschliesslich ueber ``llm_debug_log`` (UI ``/settings/llm-reviewer/
+# debug-log``) plus aggregierte ``llm_worker.status``-Snapshots alle 30s.
+#
+# Der ehemalige ``test_pass1_logs_phase_markers``-Test wurde in einen
+# Negativ-Smoke umgeschrieben: die entfernten Marker DUERFEN NICHT mehr im
+# Live-Pass-1-Lauf auftauchen. Der Pure-Unit-Backstop (Source-Check) lebt
+# in ``tests/workers/test_llm_worker_logging.py``.
 # ---------------------------------------------------------------------------
 
 
-def test_pass1_logs_phase_markers(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
-    """v0.9.5: Live-Pass-1 schreibt pass1_started/llm_call_started/
-    llm_call_completed/pass1_persist_done Phasen-Marker."""
+def test_pass1_does_not_emit_removed_phase_markers(
+    db_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Block U Phase F Negativ-Smoke: die entfernten Phasen-Marker
+    tauchen im Live-Pass-1-Lauf nicht mehr auf.
+
+    Wenn dieser Test gruen ist, war der Logging-Refactor erfolgreich.
+    Wenn jemand einen der Marker versehentlich wieder einbaut, faellt
+    dieser Test durch und der Source-Check in
+    ``tests/workers/test_llm_worker_logging.py`` ebenfalls.
+    """
     import logging as _logging
 
-    # Eigenen Capture-Handler an den Worker-Logger haengen (caplog ist mit
-    # structlog/Flask-App-Logger-Setup nicht zuverlaessig fuer den
-    # ``secscan.llm_worker``-Logger — wir wollen die echten Records sehen,
-    # also direkt am Logger lauschen).
     captured: list[str] = []
 
     class _Handler(_logging.Handler):
         def emit(self, record: _logging.LogRecord) -> None:
             captured.append(record.getMessage())
 
-    # configure_logging() (App-Factory) ruft logging.config.dictConfig auf,
-    # was alle bestehenden Logger ``disabled=True`` setzt. Wir
-    # reaktivieren den Worker-Logger fuer diesen Test.
     worker_logger = llm_worker.log
     prev_level = worker_logger.level
     prev_disabled = worker_logger.disabled
@@ -911,13 +954,21 @@ def test_pass1_logs_phase_markers(db_app: Flask, monkeypatch: pytest.MonkeyPatch
             monkeypatch.setattr(time_mod, "sleep", lambda s: None)
             monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
-            llm_worker._tick()
+            _drive_dispatch_iteration()
 
             messages = " | ".join(captured)
-            assert "llm_worker.pass1_started" in messages, f"got: {messages!r}"
-            assert "llm_worker.llm_call_started" in messages
-            assert "llm_worker.llm_call_completed" in messages
-            assert "llm_worker.pass1_persist_done" in messages
+            for removed in (
+                "llm_worker.pass1_started",
+                "llm_worker.llm_call_started",
+                "llm_worker.llm_call_completed",
+                "llm_worker.pass1_persist_done",
+                "llm_worker.job_picked",
+                "llm_worker.job_done",
+                "llm_worker.pass1_skipped",
+            ):
+                assert removed not in messages, (
+                    f"Block U Phase F: Marker {removed!r} wurde wieder eingebaut. got: {messages!r}"
+                )
     finally:
         worker_logger.removeHandler(handler)
         worker_logger.setLevel(prev_level)
@@ -968,7 +1019,7 @@ def test_pass1_logs_failure_marker_on_validation_error(
             monkeypatch.setattr(time_mod, "sleep", lambda s: None)
             monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
-            llm_worker._tick()
+            _drive_dispatch_iteration()
 
             messages = " | ".join(captured)
             assert "llm_worker.llm_call_failed" in messages, f"got: {messages!r}"
@@ -1085,8 +1136,8 @@ def test_tick_idle_uses_backoff_sleep(db_app: Flask, monkeypatch: pytest.MonkeyP
             monkeypatch.setattr(llm_worker, "_poll_interval", lambda: 2.0)
 
             llm_worker.invalidate_throttle_caches_for_tests()
-            llm_worker._tick()
-            llm_worker._tick()
+            _drive_dispatch_iteration()
+            _drive_dispatch_iteration()
 
             assert len(sleeps) == 2
             assert sleeps[0] == 2.0

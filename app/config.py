@@ -133,10 +133,30 @@ class Settings(BaseSettings):
     # `failed` (bei `attempts >= 3`).
     worker_stale_timeout_min: int = Field(default=10, ge=1, le=1440)
 
+    # ----- Block U (ADR-0029) — Parallele LLM-Job-Verarbeitung -----
+    # Globaler Cap fuer parallel laufende LLM-Jobs im Worker-Prozess
+    # (asyncio-Semaphore, In-Process-Concurrency — kein Multi-Container-
+    # Scope, siehe ADR-0029 §Out-of-Scope). Default 1 ist backward-
+    # compatible — bestehende Deploys behalten das Block-P-Verhalten,
+    # bis der Operator manuell in /settings/llm-reviewer hochregelt.
+    # Hot-Reload alle 30 s im Worker via ``_get_concurrency_throttled``.
+    # Setzen via SECSCAN_LLM_WORKER_JOB_CONCURRENCY.
+    llm_worker_job_concurrency: int = Field(default=1, ge=1, le=200)
+    # Sampling-Rate fuer ``llm_debug_log``-Inserts bei ``status='success'``.
+    # Errors (validation_error/timeout/error) werden weiterhin 1:1 persistiert,
+    # Successes nur 1:N. Default 1:10 ist Skalierungs-Mitigation fuer N=200
+    # (siehe ADR-0029 §Konsequenzen "Debug-Log-Tabelle explodiert").
+    # Setzen via SECSCAN_LLM_DEBUG_LOG_SUCCESS_SAMPLE_RATE.
+    llm_debug_log_success_sample_rate: int = Field(default=10, ge=1, le=1000)
+
     # ----- Block P (ADR-0023) — LLM-Debug-Log (v0.9.3) -----
     # Operator-Debugging-Tabelle fuer LLM-Job-Request/Response-Bodies.
     # Eviction laeuft im Worker als Sub-Tick (analog Stale-Reaper).
-    llm_debug_log_max_rows: int = Field(default=500, ge=10, le=100_000)
+    # v0.11.0 (Block U Phase A): Default von 500 auf 2000 angehoben — bei
+    # N=200 Concurrency und 1:10-Sampling (Phase G) bietet 2000 Rows
+    # ein deutlich breiteres Forensik-Fenster, ohne dass die
+    # CTE-DELETE-Eviction (Phase G.3) teurer wird.
+    llm_debug_log_max_rows: int = Field(default=2000, ge=10, le=100_000)
     llm_debug_log_max_age_days: int = Field(default=14, ge=1, le=365)
     # Per-Body-Size-Cap. Bodies werden bei Ueberschreitung getrimmt mit
     # ``{"__truncated": True, "original_size_bytes": N}`` Marker.

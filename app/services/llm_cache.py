@@ -18,6 +18,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.config import Settings, load_settings
@@ -81,28 +82,45 @@ def store(
     reason: str,
     llm_model: str | None,
     action_type: str | None = None,
-) -> LLMRiskCache:
+) -> None:
     """Legt einen neuen Cache-Eintrag an. Caller muss commit.
 
     ``action_type`` ist v0.9.3-Pflichtfeld auf der Group, im Cache aber
     nullable fuer Forward-Compat mit Pre-v0.9.3-Eintraegen (alte Caches
     werden beim Restore mit ``action_type=None`` zurueckgespielt; das
     Worker-``_apply_pass2_to_group`` setzt das Feld dann nicht).
+
+    Block U Phase D (ADR-0029 §Entscheidung Punkt 5): Unter paralleler
+    Worker-Concurrency koennen zwei in-flight Pass-2-Jobs denselben
+    ``cache_key`` produzieren (gleicher Group-Fingerprint, derselbe
+    CVE-Snapshot). Wir nutzen ``INSERT ... ON CONFLICT DO NOTHING`` ueber
+    den Primary-Key ``cache_key``: der zweite Insert ist ein No-Op statt
+    eines ``IntegrityError``. Der erste persistierte Eintrag gewinnt; das
+    ist akzeptabel, weil identische Inputs identische Outputs liefern
+    sollten (Cache-Sinn). Vorbild: ADR-0028 §Pass-2-Persistierung mit
+    Junction-UPSERT.
+
+    ``cache_key`` ist Primary-Key in :class:`LLMRiskCache` (siehe
+    ``app/models.py`` Zeile 1003), damit ist der ON-CONFLICT-Target-Index
+    eindeutig.
     """
-    entry = LLMRiskCache(
-        cache_key=cache_key,
-        group_id=group_id,
-        group_findings_fp=group_findings_fp,
-        cve_data_fp=cve_data_fp,
-        server_context_fp=server_context_fp,
-        risk_band=risk_band,
-        action_type=action_type,
-        worst_finding_id=worst_finding_id,
-        reason=reason,
-        llm_model=llm_model,
+    stmt = (
+        pg_insert(LLMRiskCache)
+        .values(
+            cache_key=cache_key,
+            group_id=group_id,
+            group_findings_fp=group_findings_fp,
+            cve_data_fp=cve_data_fp,
+            server_context_fp=server_context_fp,
+            risk_band=risk_band,
+            action_type=action_type,
+            worst_finding_id=worst_finding_id,
+            reason=reason,
+            llm_model=llm_model,
+        )
+        .on_conflict_do_nothing(index_elements=["cache_key"])
     )
-    session.add(entry)
-    return entry
+    session.execute(stmt)
 
 
 def lru_evict_if_needed(session: Session) -> int:

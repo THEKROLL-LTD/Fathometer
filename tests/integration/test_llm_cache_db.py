@@ -156,12 +156,16 @@ def test_record_hit_increments_used_count(db_app: Flask) -> None:
 
 
 def test_store_inserts_row(db_app: Flask) -> None:
+    """Block U Phase D: ``store(...)`` returnt ``None`` (PG-INSERT ON CONFLICT
+    DO NOTHING statt ORM-``session.add``). Wir verifizieren die Persistenz
+    nicht mehr ueber den Return-Wert, sondern via ``lookup``-Roundtrip.
+    """
     factory = get_session_factory(db_app)
     with db_app.app_context():
         sess = factory()
         try:
             grp = _make_group(sess, "delta")
-            entry = store(
+            result = store(
                 sess,
                 cache_key="d" * 64,
                 group_id=grp.id,
@@ -174,7 +178,12 @@ def test_store_inserts_row(db_app: Flask) -> None:
                 llm_model="m",
             )
             sess.commit()
-            assert entry.cache_key == "d" * 64
+            assert result is None, "store() returnt seit Phase D None"
+            persisted = lookup(sess, "d" * 64)
+            assert persisted is not None, "Eintrag muss nach store+commit auffindbar sein"
+            assert persisted.cache_key == "d" * 64
+            assert persisted.risk_band == "escalate"
+            assert persisted.worst_finding_id == 42
             count = sess.execute(select(func.count()).select_from(LLMRiskCache)).scalar_one()
             assert count == 1
         finally:

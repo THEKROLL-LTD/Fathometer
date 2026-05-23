@@ -92,8 +92,10 @@ MAX_ATTEMPTS: int = 3
 HEARTBEAT_INTERVAL_SEC: float = 10.0
 STALE_REAPER_INTERVAL_SEC: float = 60.0
 # v0.9.3 (ADR-0023 §"(e) LLM-Debug-Log-Tabelle"): Eviction-Sub-Tick fuer
-# `llm_debug_log`. Wir laufen alle 10 Minuten (analog Stale-Reaper-Cadence).
-DEBUG_LOG_EVICTION_INTERVAL_SEC: float = 600.0
+# `llm_debug_log`. v0.11.0 (Block U Phase G, ADR-0029): Cadence von 600 s auf
+# 60 s gesenkt, damit der Count-Cap unter N=200-Last (bis ~12 Inserts/s) den
+# Insert-Strom zeitnah deckelt.
+DEBUG_LOG_EVICTION_INTERVAL_SEC: float = 60.0
 # Block Q (ADR-0024): External-EPSS/KEV-Feed-Pull-Sub-Tick. Alle 10 Minuten
 # nachschauen ob ein Pull faellig ist — der Pull selbst laeuft nur 1x pro
 # Tag pro Feed (entscheidet ``feed_enrichment_tick`` per Audit-Log).
@@ -102,6 +104,19 @@ FEED_PULL_CHECK_INTERVAL_SEC: float = 600.0
 # Settings-Row zu pollen ist Verschwendung. Cache 30s — Mode-Switch wird also
 # binnen <30s wirksam, was operativ vollkommen ausreicht.
 MODE_CHECK_INTERVAL_SEC: float = 30.0
+# Block U Phase C (ADR-0029 §Entscheidung Punkt 4): Hot-Reload-Cadence fuer
+# `settings.llm_worker_job_concurrency`. Analog zum Mode-Cache: Operator-Action
+# wirkt binnen <30s ohne Pod-Restart.
+CONCURRENCY_CHECK_INTERVAL_SEC: float = 30.0
+# Block U Phase C: Cadence fuer aggregierten `llm_worker.status`-Snapshot
+# (Phase F fuellt den Helper-Body — hier nur Konstante damit Phase-C-Code
+# stabil bleibt wenn Phase F live geht).
+STATUS_SNAPSHOT_INTERVAL_SEC: float = 30.0
+# Block U Phase C: Shutdown-Drain-Timeout. In-flight Tasks bekommen 30s Zeit
+# bis zum harten Exit. Heutiger LLM-Call dauert 30-90s, typische Persist-Phase
+# <2s — bei N=200 sind die meisten in_flight schon im Persist-Tail wenn der
+# Shutdown faellt. Operativer Backstop: K8s `terminationGracePeriodSeconds=60`.
+SHUTDOWN_DRAIN_TIMEOUT_SEC: float = 30.0
 # v0.9.6: Budget-Check throttle. Token-Budget aendert sich nur post-LLM-Call
 # (via budget_consume) — Idle-Worker sieht keine Aenderung. 60s-Cadence
 # bedeutet: bei Budget-Erschoepfung mid-Cycle koennen noch bis zu ~60s lang
@@ -165,6 +180,13 @@ _budget_cached_at: float = 0.0
 # der Backoff bei ``_poll_interval()``.
 _idle_backoff_sec: float | None = None
 
+# Block U Phase C: Hot-Reload-Cache fuer `llm_worker_job_concurrency`.
+# Default 1 ist backward-compatible mit Pre-Block-U-Verhalten (1 Task gleich
+# alter sync-`_tick()`-Schleife). `None` = Cache noch nie befuellt, naechster
+# Read laedt frisch aus der DB.
+_cached_concurrency: int | None = None
+_concurrency_cached_at: float = 0.0
+
 # v0.9.5: Heartbeat-Daemon-Thread + Stop-Event. Damit der Heartbeat
 # unabhaengig vom (potentiell 30-120s blockierenden) LLM-Call im
 # `_process_job` weiterlaeuft — sonst kickt die k8s livenessProbe
@@ -175,10 +197,42 @@ _heartbeat_thread_stop: threading.Event = threading.Event()
 # Lazy-erzeugte Session-Factory (kein Flask-App-Context).
 _session_factory: sessionmaker[Session] | None = None
 
+# Block U Phase B (ADR-0029 §Entscheidung Punkt 2): Persistenter
+# ``LlmClient`` mit TLS-Connection-Reuse. Pro Worker-Prozess ein einziger
+# Client-Wrapper um ``AsyncOpenAI`` — wird genau dann neu gebaut wenn sich
+# ``(base_url, model, sha256(api_key))`` veraendert. Hot-Reload via
+# Fingerprint-Cache; bei Mismatch alten Client `await aclose()` aufrufen
+# und neuen bauen.
+#
+# Lock wird lazy im async-Kontext gebaut, weil ``asyncio.Lock()`` zur
+# Instanziierung einen laufenden Event-Loop braucht (Python 3.10+).
+_cached_client: LlmClient | None = None
+_cached_client_fingerprint: tuple[str, str, str] | None = None
+_cached_client_lock: asyncio.Lock | None = None
+
 
 # ---------------------------------------------------------------------------
 # Session-Management
 # ---------------------------------------------------------------------------
+
+
+def _compute_pool_sizing(concurrency: int) -> tuple[int, int]:
+    """Berechnet ``(pool_size, max_overflow)`` aus der Concurrency.
+
+    Block U Phase D (ADR-0029 §Entscheidung Punkt 3):
+
+    * ``pool_size = max(N * 2, 10)`` — pro in-flight Job rechnen wir mit bis
+      zu zwei Sessions (Pickup-Session plus Persist-Session koennen sich
+      kurz ueberlappen), plus Sub-Tick-Sessions (Reaper, Eviction, Feed-
+      Pull, Ingest, Retention) die im selben Prozess laufen. Untergrenze
+      10 fuer den Default-N=1-Fall damit Sub-Ticks Headroom haben.
+    * ``max_overflow = N`` — Sicherheitsnetz fuer kurzzeitige Spitzen, z.B.
+      Heartbeat-Daemon-Thread oder Status-Snapshot-Read parallel zu allen
+      in-flight Jobs.
+
+    Pure-Funktion fuer Testbarkeit — kein DB-/Engine-Bau.
+    """
+    return max(concurrency * 2, 10), concurrency
 
 
 def _get_session_factory() -> sessionmaker[Session]:
@@ -188,11 +242,30 @@ def _get_session_factory() -> sessionmaker[Session]:
     verwenden), bauen sie aber lazy damit Tests die Factory per
     :func:`set_session_factory_for_tests` ersetzen koennen, bevor der erste
     Tick laeuft.
+
+    Block U Phase D (ADR-0029 §Entscheidung Punkt 3): Pool-Sizing wird
+    einmalig beim ersten Aufruf aus ``cfg.llm_worker_job_concurrency``
+    festgelegt. Hot-Reload des Concurrency-Werts veraendert die Pool-Groesse
+    NICHT — der Pool ist Engine-Lifetime. Ein Operator-Hochregeln des
+    Worker-Concurrency-Settings benoetigt einen Worker-Pod-Restart fuer
+    die volle Pool-Auswirkung.
     """
     global _session_factory
     if _session_factory is None:
         cfg = load_settings()
-        engine = create_engine(cfg.database_url, pool_pre_ping=True, future=True)
+        pool_size, max_overflow = _compute_pool_sizing(cfg.llm_worker_job_concurrency)
+        engine = create_engine(
+            cfg.database_url,
+            pool_pre_ping=True,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            future=True,
+        )
+        log.info(
+            "llm_worker.engine_built pool_size=%s max_overflow=%s",
+            pool_size,
+            max_overflow,
+        )
         _session_factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
     return _session_factory
 
@@ -266,11 +339,19 @@ def invalidate_throttle_caches_for_tests() -> None:
     """
     global _cached_mode, _mode_cached_at, _cached_budget_ok, _budget_cached_at
     global _idle_backoff_sec
+    global _cached_concurrency, _concurrency_cached_at
     _cached_mode = None
     _mode_cached_at = 0.0
     _cached_budget_ok = True
     _budget_cached_at = 0.0
     _idle_backoff_sec = None
+    # Block U Phase C: Concurrency-Hot-Reload-Cache.
+    _cached_concurrency = None
+    _concurrency_cached_at = 0.0
+    # Block U Phase B: persistenten Client-Cache zwischen Tests resetten.
+    # Das Lock-Objekt bleibt None — der naechste async-Aufruf baut es
+    # frisch im aktiven Event-Loop.
+    reset_client_cache_for_tests()
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +360,14 @@ def invalidate_throttle_caches_for_tests() -> None:
 
 
 def main() -> None:
-    """Worker-Entrypoint — Endlos-Schleife, bricht bei Shutdown-Flag ab."""
+    """Worker-Entrypoint (Block U Phase C — ADR-0029).
+
+    Setup laeuft synchron (Logging, Signal-Handler, Heartbeat-Daemon-Thread),
+    der eigentliche Dispatcher-Loop laeuft asynchron in
+    :func:`_run_async_main`. Der Heartbeat-Daemon (eigener Thread, eigene
+    Session) bleibt vom Event-Loop unberuehrt — er startet *vor* und stoppt
+    *nach* dem ``asyncio.run()``-Block.
+    """
     logging.basicConfig(
         level=load_settings().log_level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -299,17 +387,113 @@ def main() -> None:
         _stale_timeout_min(),
     )
 
+    try:
+        asyncio.run(_run_async_main())
+    finally:
+        # v0.9.5: graceful shutdown — Heartbeat-Thread stoppen + max 5s warten.
+        _stop_heartbeat_thread(timeout=5.0)
+        log.info("llm_worker.shutdown_complete worker_id=%s", WORKER_ID)
+
+
+async def _run_async_main() -> None:
+    """Async-Dispatcher mit Greedy Slot-Refill (Block U Phase C, ADR-0029).
+
+    Architektur:
+
+    * Genau ein Event-Loop pro Worker-Prozess.
+    * ``in_flight: set[asyncio.Task]`` haelt aktuell laufende Job-Coroutinen.
+    * Sub-Ticks (Reaper, Eviction, Feed-Pull, Ingest, Retention) laufen
+      synchron *zwischen* den Refill-Iterationen — nicht parallel zu
+      LLM-Tasks. Heartbeat-Daemon-Thread laeuft separat und schreibt eine
+      eigene Session.
+    * Greedy Refill: solange Cap nicht erreicht und Mode/Budget/Queue-Pickup
+      es zulassen, werden neue Tasks gestartet.
+    * Bei voller Queue oder erreichtem Cap wartet der Dispatcher auf
+      ``FIRST_COMPLETED`` und refillt sofort.
+    * Bei leerer Queue: exponential Idle-Backoff via :func:`_compute_idle_sleep`.
+    * Shutdown-Drain: in-flight Tasks bekommen ``SHUTDOWN_DRAIN_TIMEOUT_SEC``
+      Zeit zum Beenden, dann WARNING-Log.
+
+    Status-Snapshot- und Counter-Hooks (``_maybe_emit_status_snapshot``,
+    ``_record_task_completion``) sind in Phase C als Stubs angelegt und
+    werden in Phase F gefuellt.
+    """
+    in_flight: set[asyncio.Task[Any]] = set()
+    cap = _get_concurrency_throttled()
+    log.info("llm_worker.dispatcher_started concurrency=%s", cap)
+
     while not _shutdown:
+        # 1) Sub-Ticks (Reaper/Eviction/Feed-Pull/Ingest/Retention) — synchron.
         try:
-            _tick()
-        except Exception:  # pragma: no cover — Tick-Loop-Sicherheit
-            log.exception("llm_worker.tick_failed sleeping_and_retrying")
-            time.sleep(_poll_interval() * 2)
+            _run_subticks()
+        except Exception:  # pragma: no cover — Sub-Tick-Sicherheitsnetz
+            log.exception("llm_worker.subticks_failed continuing")
 
-    # v0.9.5: graceful shutdown — Heartbeat-Thread stoppen + max 5s warten.
-    _stop_heartbeat_thread(timeout=5.0)
+        # 2) Concurrency-Cap hot-reloaden (max 30s alt).
+        cap = _get_concurrency_throttled()
 
-    log.info("llm_worker.shutdown_complete worker_id=%s", WORKER_ID)
+        # 3) Greedy Slot-Refill bis Cap erreicht, Mode/Budget/Queue-Limit
+        #    es erlaubt. Bei Senkung des Cap (in_flight > cap) wird kein
+        #    neuer Pickup gemacht — bestehende Tasks laufen bis zum Ende.
+        picked_any = False
+        while not _shutdown and len(in_flight) < cap:
+            mode = _get_mode_throttled()
+            if mode == "off":
+                break
+            if not _budget_ok_throttled():
+                break
+            job_id = _pick_next_job_id()
+            if job_id is None:
+                break
+            task = asyncio.create_task(_process_one_async(job_id, mode))
+            in_flight.add(task)
+            task.add_done_callback(in_flight.discard)
+            picked_any = True
+
+        # Nach erfolgreichem Pickup Idle-Backoff zuruecksetzen — der
+        # naechste Idle-Cycle startet wieder bei `_poll_interval()`.
+        if picked_any:
+            _reset_idle_backoff()
+
+        # 4) Status-Snapshot (Phase F: echte Implementation; hier Stub).
+        _maybe_emit_status_snapshot(in_flight=len(in_flight), cap=cap)
+
+        # 5) Wenn keine Tasks laufen, ist die Queue gerade leer (oder Mode/
+        #    Budget blockieren). Idle-Sleep statt Busy-Loop.
+        if not in_flight:
+            sleep_sec = _compute_idle_sleep()
+            try:
+                await asyncio.sleep(sleep_sec)
+            except asyncio.CancelledError:  # pragma: no cover — Shutdown
+                break
+            continue
+
+        # 6) Mindestens ein Task fertig abwarten, dann sofort refillen.
+        try:
+            done, _pending = await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:  # pragma: no cover — Shutdown
+            break
+        for task in done:
+            _record_task_completion(task)
+
+    # Shutdown-Drain: in-flight Tasks bekommen Frist zum sauberen Beenden.
+    if in_flight:
+        log.info(
+            "llm_worker.shutdown_drain in_flight=%s waiting_max_sec=%s",
+            len(in_flight),
+            SHUTDOWN_DRAIN_TIMEOUT_SEC,
+        )
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*in_flight, return_exceptions=True),
+                timeout=SHUTDOWN_DRAIN_TIMEOUT_SEC,
+            )
+        except TimeoutError:
+            log.warning(
+                "llm_worker.shutdown_drain_timeout in_flight=%s",
+                len(in_flight),
+            )
+    log.info("llm_worker.dispatcher_shutdown")
 
 
 def _read_mode_safe() -> str:
@@ -379,12 +563,17 @@ def _budget_ok_throttled() -> bool:
     return _cached_budget_ok
 
 
-def _idle_sleep_and_backoff() -> None:
-    """Sleep bei leerer Queue mit exponentieller Backoff bis Cap.
+def _compute_idle_sleep() -> float:
+    """Berechnet die naechste Idle-Sleep-Dauer und aktualisiert den State.
 
-    Bei jedem aufeinanderfolgenden Leer-Pickup steigt die Sleep-Dauer um
-    ``IDLE_BACKOFF_FACTOR``, max ``IDLE_BACKOFF_MAX_SEC``. Reset auf
-    ``_poll_interval()`` erfolgt im Caller sobald ein Pickup gelingt.
+    Block U Phase C (ADR-0029): die Sleep-Dauer waechst exponentiell um
+    ``IDLE_BACKOFF_FACTOR`` pro aufeinanderfolgendem Leer-Pickup, gedeckelt
+    durch ``IDLE_BACKOFF_MAX_SEC``. Die Funktion gibt die berechnete Dauer
+    *zurueck* — der Caller (Dispatcher-Loop bzw. der Backward-Compat-
+    Wrapper :func:`_idle_sleep_and_backoff`) entscheidet selbst ob er
+    ``await asyncio.sleep`` oder ``time.sleep`` aufruft.
+
+    Reset via :func:`_reset_idle_backoff` sobald ein Pickup gelingt.
     """
     global _idle_backoff_sec
     if _idle_backoff_sec is None:
@@ -394,7 +583,20 @@ def _idle_sleep_and_backoff() -> None:
             _idle_backoff_sec * IDLE_BACKOFF_FACTOR,
             IDLE_BACKOFF_MAX_SEC,
         )
-    time.sleep(_idle_backoff_sec)
+    return _idle_backoff_sec
+
+
+def _idle_sleep_and_backoff() -> None:
+    """Backward-compat-Wrapper: berechnet Sleep-Dauer und schlaeft synchron.
+
+    Block U Phase C (ADR-0029) entkoppelt Sleep-Berechnung von der Sleep-
+    Ausfuehrung — der neue async Dispatcher ruft :func:`_compute_idle_sleep`
+    direkt und benutzt ``await asyncio.sleep(...)``. Dieser Wrapper bleibt
+    fuer Pure-Unit-Tests (``tests/workers/test_llm_worker.py``) und
+    Test-Hooks bestehen, wird im Live-Pfad aber nicht mehr aufgerufen.
+    """
+    duration = _compute_idle_sleep()
+    time.sleep(duration)
 
 
 def _reset_idle_backoff() -> None:
@@ -403,22 +605,182 @@ def _reset_idle_backoff() -> None:
     _idle_backoff_sec = None
 
 
-def _tick() -> None:
-    """Einzelne Iteration der Worker-Schleife.
+def _get_concurrency_throttled() -> int:
+    """Liest ``settings.llm_worker_job_concurrency`` mit 30s-Cache.
 
-    v0.9.5: der Heartbeat-Block wurde aus dem Tick entfernt — Heartbeat
-    laeuft jetzt in einem Daemon-Thread (siehe `_heartbeat_loop`), damit
-    er auch wenn `_process_job` 60-120s im LLM-Call blockiert weiter
-    tickt und die k8s livenessProbe nicht den Pod kickt.
+    Block U Phase C (ADR-0029 §Entscheidung Punkt 4): Hot-Reload des
+    Concurrency-Werts ohne Pod-Restart. Operator-Action wirkt binnen
+    ``CONCURRENCY_CHECK_INTERVAL_SEC`` Sekunden.
 
-    v0.9.6: Mode-Check, Budget-Check und Budget-Reset throttled ueber
-    Modul-Caches (siehe ``_get_mode_throttled`` und ``_budget_ok_throttled``).
-    Bei leerer Queue klettert die Sleep-Dauer exponentiell bis 30s
-    (``_idle_sleep_and_backoff``). Reduziert die Idle-SQL-Last drastisch.
+    Defensive Defaults bei DB-Hickup:
 
-    Block R (ADR-0026): Scan-Ingest-Sub-Tick vor LLM-Pickup eingefuegt.
-    Ingest-Jobs werden priorisiert — LLM-Pickup nur wenn keine Ingest-Jobs
-    warten. Stale-Reaper kennt jetzt beide Tabellen. Retention-Sweep stündlich.
+    * Erster Aufruf ohne erfolgreichen DB-Read: Fallback ``1`` (gleicht
+      dem Pre-Block-U-Verhalten).
+    * Spaeterer DB-Hickup: behalten den zuletzt-erfolgreich gelesenen Wert.
+
+    Logs einen ``llm_worker.concurrency_changed``-Marker bei tatsaechlicher
+    Aenderung — der wird sowohl beim allerersten Read (von "unbekannt" auf
+    den Settings-Wert) als auch bei spaeteren Operator-Wechseln getriggert.
+    """
+    global _cached_concurrency, _concurrency_cached_at
+    now = time.monotonic()
+    if (
+        _cached_concurrency is None
+        or (now - _concurrency_cached_at) > CONCURRENCY_CHECK_INTERVAL_SEC
+    ):
+        try:
+            with get_session() as session:
+                row = ensure_settings_row(session)
+                new_value = int(row.llm_worker_job_concurrency or 1)
+        except Exception:  # pragma: no cover — DB-Hickup
+            log.exception("llm_worker.concurrency_check_failed keeping_previous")
+            new_value = _cached_concurrency if _cached_concurrency is not None else 1
+        if new_value != _cached_concurrency:
+            log.info(
+                "llm_worker.concurrency_changed from=%s to=%s",
+                _cached_concurrency,
+                new_value,
+            )
+        _cached_concurrency = new_value
+        _concurrency_cached_at = now
+    # mypy: nach dem Block ist _cached_concurrency garantiert nicht-None.
+    return int(_cached_concurrency)
+
+
+# ---------------------------------------------------------------------------
+# Block U Phase F — Status-Snapshot statt Per-Job-Lärm (ADR-0029 §Punkt 4)
+# ---------------------------------------------------------------------------
+
+
+# Modul-State fuer aggregierte Snapshot-Logs. Ein Snapshot wird alle
+# ``STATUS_SNAPSHOT_INTERVAL_SEC`` Sekunden vom Dispatcher emittiert und die
+# Counter werden danach zurueckgesetzt. ``durations_ms`` ist ein gleitendes
+# Fenster der letzten ``_DURATION_WINDOW_CAP`` LLM-Job-Latenzen — wir lesen
+# daraus den 30s-Schnitt fuer den Snapshot.
+_last_status_at: float = 0.0
+_DURATION_WINDOW_CAP: int = 100
+_status_counters: dict[str, Any] = {
+    "done": 0,
+    "failed": 0,
+    "cache_hits": 0,
+    "durations_ms": [],
+}
+
+
+def _push_duration(ms: int | float) -> None:
+    """Append ``ms`` ans rolling Window; droppt aelteste wenn >Cap."""
+    durations: list[int] = _status_counters["durations_ms"]
+    durations.append(int(ms))
+    if len(durations) > _DURATION_WINDOW_CAP:
+        # Slice in-place damit der Cap auch greift wenn z.B. Tests den
+        # Counter direkt manipulieren und dann viele Appends folgen.
+        del durations[: len(durations) - _DURATION_WINDOW_CAP]
+
+
+def _reset_status_counters() -> None:
+    """Setzt done/failed/cache_hits/durations_ms zurueck nach dem Emit."""
+    _status_counters["done"] = 0
+    _status_counters["failed"] = 0
+    _status_counters["cache_hits"] = 0
+    _status_counters["durations_ms"] = []
+
+
+def _record_task_completion(task: asyncio.Task[Any]) -> None:
+    """Incrementiert ``_status_counters`` fuer den Snapshot.
+
+    Wird vom Dispatcher nach ``asyncio.wait(FIRST_COMPLETED)`` fuer jeden
+    fertigen Task aufgerufen.
+
+    Achtung: ``task.exception()`` MUSS vor ``task.result()`` aufgerufen
+    werden, sonst wuerde ``task.result()`` die Exception erneut werfen.
+    """
+    exc = task.exception()
+    if exc is not None:
+        _status_counters["failed"] += 1
+        return
+    _status_counters["done"] += 1
+    result = task.result()
+    if isinstance(result, dict):
+        if result.get("cache_hit"):
+            _status_counters["cache_hits"] += 1
+        duration = result.get("duration_ms")
+        if duration is not None:
+            _push_duration(duration)
+
+
+def _maybe_emit_status_snapshot(*, in_flight: int, cap: int) -> None:
+    """Aggregierter ``llm_worker.status``-Snapshot, alle 30s.
+
+    Liest live aus der DB: ``queued``-Count aus ``llm_jobs`` plus
+    Budget-Auslastung aus der Settings-Row. Aggregiert mit den Worker-
+    internen Countern (``done``, ``failed``, ``cache_hits``, ``avg_call_ms``)
+    und logged genau eine INFO-Line. Anschliessend werden die Counter
+    zurueckgesetzt.
+
+    Defensiv: DB-Fehler fuhren NICHT zu einem Crash. Bei Read-Fehler werden
+    ``queued`` und ``budget_pct`` auf ``-1`` gesetzt und der Snapshot wird
+    trotzdem geloggt (sonst bliebe der Operator ohne Lebenszeichen).
+    """
+    global _last_status_at
+    now = time.monotonic()
+    if now - _last_status_at < STATUS_SNAPSHOT_INTERVAL_SEC:
+        return
+    _last_status_at = now
+
+    queued: int = -1
+    budget_pct: int = -1
+    try:
+        with get_session() as session:
+            queued_val = session.execute(
+                text("SELECT count(*) FROM llm_jobs WHERE status = 'queued'")
+            ).scalar()
+            queued = int(queued_val) if queued_val is not None else 0
+            row = ensure_settings_row(session)
+            tokens_used = int(row.llm_token_budget_used_today or 0)
+            # ``llm_token_budget_daily`` lebt im Pydantic-Settings-Layer, nicht
+            # in der DB-Row (siehe `app/services/llm_budget.py`).
+            budget = max(1, int(load_settings().llm_token_budget_daily or 1))
+            budget_pct = int(100 * tokens_used / budget)
+            _ = row  # silence linter falls die Row sonst unused waere.
+    except Exception:  # pragma: no cover — DB-Hickup darf Worker nicht killen.
+        log.warning("llm_worker.status_query_failed", exc_info=True)
+
+    durations: list[int] = _status_counters["durations_ms"]
+    avg_ms = int(sum(durations) / len(durations)) if durations else 0
+    log.info(
+        "llm_worker.status in_flight=%s/%s queued=%s done_30s=%s failed_30s=%s "
+        "cache_hits_30s=%s budget_pct=%s avg_call_ms=%s",
+        in_flight,
+        cap,
+        queued,
+        _status_counters["done"],
+        _status_counters["failed"],
+        _status_counters["cache_hits"],
+        budget_pct,
+        avg_ms,
+    )
+    _reset_status_counters()
+
+
+def _run_subticks() -> None:
+    """Synchrone Sub-Ticks zwischen den Dispatcher-Refill-Iterationen.
+
+    Block U Phase C (ADR-0029): ersetzt das alte synchrone ``_tick()``.
+    Pickup, Mode- und Budget-Check sind nicht mehr Teil der Sub-Ticks —
+    die treibt der Async-Dispatcher selbst (siehe :func:`_run_async_main`).
+
+    Sub-Ticks (jeweils mit eigener Cadence-Konstante):
+
+    * Stale-Reaper (60s) — fuer ``llm_jobs`` UND ``scan_ingest_jobs``.
+    * Debug-Log-Eviction (600s — Phase G regelt das spaeter auf 60s).
+    * External-Feed-Pull-Check (600s; echter Pull max 1x/24h, Block Q).
+    * Scan-Ingest-Retention-Sweep (3600s, Block R).
+    * Scan-Ingest-Job-Pickup + Process (synchron, lauft parallel zum
+      LLM-Mode wie heute — auch bei Mode=off/Budget-Erschoepfung).
+
+    Cadence-Tracking via Modul-Globals (``_last_reaper_at`` etc.). Die
+    heutige Logik ist 1:1 uebernommen — nur der Mode/Budget/LLM-Pickup-
+    Teil ist herausgenommen.
     """
     global _last_reaper_at, _last_debug_log_eviction_at, _last_feed_pull_check_at
     global _last_retention_sweep_at
@@ -446,54 +808,16 @@ def _tick() -> None:
         _run_scan_ingest_retention_sweep_safe()
         _last_retention_sweep_at = now_mono
 
-    # Mode-Check (cached 30s).
-    mode = _get_mode_throttled()
-    if mode == "off":
-        # Block R: Scan-Ingest-Sub-Tick laeuft UNABHAENGIG vom LLM-Mode.
-        # Ingest-Jobs muessen auch verarbeitet werden wenn LLM-Mode='off'.
-        with get_session() as session:
-            scan_ingest_job_id = _pick_next_scan_ingest_job_id(session)
-            session.commit()
-        if scan_ingest_job_id is not None:
-            _process_scan_ingest_job_safe(scan_ingest_job_id)
-            _reset_idle_backoff()
-            return
-        _idle_sleep_and_backoff()
-        return
-
-    # Budget-Check (cached 60s) — inkludiert maybe_reset_budget.
-    if not _budget_ok_throttled():
-        # Block R: Scan-Ingest-Sub-Tick laeuft auch bei Budget-Erschoepfung.
-        with get_session() as session:
-            scan_ingest_job_id = _pick_next_scan_ingest_job_id(session)
-            session.commit()
-        if scan_ingest_job_id is not None:
-            _process_scan_ingest_job_safe(scan_ingest_job_id)
-            _reset_idle_backoff()
-            return
-        _idle_sleep_and_backoff()
-        return
-
-    # Block R (ADR-0026): Scan-Ingest-Sub-Tick VOR LLM-Pickup.
-    # Ingest-Jobs werden priorisiert damit Agent-Polling-Timeouts (600s)
-    # selten greifen. Ein Job pro Tick gleichberechtigt mit LLM-Pickup.
+    # Block R (ADR-0026): Scan-Ingest-Job-Pickup laeuft UNABHAENGIG vom
+    # LLM-Mode/Budget — Ingest-Jobs muessen auch verarbeitet werden wenn
+    # LLM-Mode='off' oder Token-Budget erschoepft. Synchron in den
+    # Sub-Ticks: ein Ingest-Job pro Dispatcher-Iteration. Reicht weil der
+    # Async-Dispatcher direkt danach wieder zurueck zum LLM-Refill kommt.
     with get_session() as session:
         scan_ingest_job_id = _pick_next_scan_ingest_job_id(session)
         session.commit()
     if scan_ingest_job_id is not None:
         _process_scan_ingest_job_safe(scan_ingest_job_id)
-        _reset_idle_backoff()
-        return
-
-    job_id = _pick_next_job_id()
-    if job_id is None:
-        _idle_sleep_and_backoff()
-        return
-
-    # Pickup erfolgreich — Backoff zuruecksetzen, damit der naechste Idle-
-    # Cycle wieder bei `_poll_interval()` startet.
-    _reset_idle_backoff()
-    _process_job(job_id, mode)
 
 
 # ---------------------------------------------------------------------------
@@ -572,11 +896,18 @@ def _pick_next_job_id() -> int | None:
 # ---------------------------------------------------------------------------
 
 
-def _process_job(job_id: int, mode: str) -> None:
-    """Dispatcht einen gepickten Job in den Mode-Branch.
+async def _process_one_async(job_id: int, mode: str) -> dict[str, Any] | None:
+    """Single-Job-Coroutine fuer den Async-Dispatcher (Block U Phase C).
 
-    Bei jeder Exception: requeue oder fail. Bei Erfolg: ``status='done'``,
-    ``completed_at=now()`` und Audit ``llm.job_done``.
+    Ersetzt das synchrone ``_process_job`` aus Pre-Block-U. Dispatcht zum
+    Observation- oder Live-Branch wie bisher, faengt Exceptions ab und
+    ruft :func:`_requeue_or_fail`. Bei Erfolg wird ``status='done'``,
+    ``completed_at=now()`` und Audit ``llm.job_done`` geschrieben.
+
+    Returns ein Result-Dict (``duration_ms``, optional ``cache_hit``) das
+    von Phase F's ``_record_task_completion`` fuer Counter-Increment
+    benutzt wird. Bei Fehler returnt die Coroutine ``None`` (die
+    Exception wurde intern in ``_requeue_or_fail`` verarbeitet).
     """
     start = time.monotonic()
     try:
@@ -584,14 +915,7 @@ def _process_job(job_id: int, mode: str) -> None:
             job = session.get(LLMJob, job_id)
             if job is None:
                 log.warning("llm_worker.job_missing job_id=%s", job_id)
-                return
-            log.info(
-                "llm_worker.job_picked job_id=%s job_type=%s mode=%s attempts=%s",
-                job.id,
-                job.job_type,
-                mode,
-                job.attempts,
-            )
+                return None
             _audit(
                 session,
                 "llm.job_picked",
@@ -601,20 +925,30 @@ def _process_job(job_id: int, mode: str) -> None:
             session.commit()
 
         if mode == "observation":
+            # Observation-Mode ist eine sync Funktion (kein LLM-Call) — wir
+            # rufen sie direkt im Event-Loop auf. Sub-50-ms-DB-Session,
+            # blockt den Loop nicht messbar.
             _process_observation(job_id)
         elif mode == "live":
-            asyncio.run(_process_live(job_id))
+            # Phase B/C: _process_live ist async und nutzt den persistenten
+            # AsyncOpenAI-Client mit TLS-Connection-Reuse.
+            await _process_live(job_id)
         else:
-            # Defensive: ein "off"-Job wurde gepickt obwohl der Tick-Check
-            # das verhindern sollte. Wir requeuen ohne Penalty.
-            _requeue(job_id, "mode flipped to off mid-tick", penalty=False)
-            return
+            # Defensive: ein "off"-Job wurde gepickt obwohl der Dispatcher-
+            # Check das verhindern sollte. Wir requeuen ohne Penalty.
+            _requeue(job_id, "mode flipped to off mid-pickup", penalty=False)
+            return None
 
         duration_ms = int((time.monotonic() - start) * 1000)
+        cache_hit = False
         with get_session() as session:
             job2 = session.get(LLMJob, job_id)
             if job2 is None:
-                return
+                return None
+            # cache_hit aus job.result fuer Phase-F-Counter ablesen.
+            result_payload = job2.result or {}
+            if isinstance(result_payload, dict):
+                cache_hit = bool(result_payload.get("cache_hit"))
             _audit(
                 session,
                 "llm.job_done",
@@ -622,13 +956,10 @@ def _process_job(job_id: int, mode: str) -> None:
                 metadata={"job_type": job2.job_type, "duration_ms": duration_ms},
             )
             session.commit()
-        log.info(
-            "llm_worker.job_done job_id=%s duration_ms=%s",
-            job_id,
-            duration_ms,
-        )
+        return {"duration_ms": duration_ms, "cache_hit": cache_hit}
     except Exception as exc:
         _requeue_or_fail(job_id, repr(exc))
+        return None
 
 
 def _process_observation(job_id: int) -> None:
@@ -701,21 +1032,6 @@ async def _aclose_reviewer_client(reviewer: Any) -> None:
         log.debug("llm_worker.client_aclose_failed", exc_info=True)
 
 
-def _usage_tokens(meta: dict[str, Any]) -> tuple[int | None, int | None]:
-    """v0.9.5-Helper: (prompt_tokens, completion_tokens) aus meta.usage ziehen.
-
-    Defensiv gegen non-dict usage (kann bei manchen Providern ein
-    Pydantic-Model bleiben, das vorher in dict konvertiert wurde — wir
-    pruefen trotzdem nochmal isinstance).
-    """
-    usage = meta.get("usage")
-    if not isinstance(usage, dict):
-        return None, None
-    pt = usage.get("prompt_tokens")
-    ct = usage.get("completion_tokens")
-    return (int(pt) if isinstance(pt, int) else None, int(ct) if isinstance(ct, int) else None)
-
-
 async def _do_pass1(job_id: int) -> None:
     """Pass 1: LLM detected Groups, Backend persistiert Library + Match-Pass."""
     with get_session() as session:
@@ -734,33 +1050,21 @@ async def _do_pass1(job_id: int) -> None:
             job.completed_at = datetime.now(UTC)
             job.result = {"skipped": True, "reason": "no findings"}
             session.commit()
-            log.info(
-                "llm_worker.pass1_skipped job_id=%s reason=no_findings",
-                job_id,
-            )
             return
-        # Reviewer-Setup
-        reviewer, model_name = _build_reviewer(session)
         job_server_id: int | None = job.server_id
 
-    # v0.9.5: Phasen-Logs damit Operator sieht wo wir im Lifecycle stehen.
-    log.info(
-        "llm_worker.pass1_started job_id=%s findings_count=%s server_id=%s",
-        job_id,
-        len(finding_ids),
-        job_server_id,
-    )
+    # Reviewer-Setup ausserhalb der Pickup-Session (Block U Phase B):
+    # nutzt persistenten Client mit Connection-Reuse im Live-Pfad. Bei
+    # gesetztem ``_reviewer_factory`` (Tests) liefert die Factory einen
+    # eigenstaendigen Client den der Caller im ``finally`` aclose-d.
+    with get_session() as setup_session:
+        reviewer, model_name, owns_client = await _get_reviewer_for_job(setup_session)
 
     # LLM-Call ausserhalb der DB-Session — sonst halten wir die Connection
-    # waehrend der 30-90s LLM-Latenz auf.
+    # waehrend der 30-90s LLM-Latenz auf. Block U Phase F (ADR-0029): Per-Job-
+    # Lifecycle-Logs entfernt; Forensik laeuft ueber `llm_debug_log`.
     result: Pass1Result
     meta: dict[str, Any]
-    log.info(
-        "llm_worker.llm_call_started job_id=%s job_type=pass1 model=%s findings=%s",
-        job_id,
-        model_name,
-        len(finding_ids),
-    )
     # v0.9.x: try/finally schliesst den httpx-Pool des AsyncOpenAI-Clients
     # noch innerhalb des asyncio.run()-Event-Loops — sonst Stacktrace im GC.
     try:
@@ -808,19 +1112,10 @@ async def _do_pass1(job_id: int) -> None:
             )
             raise
     finally:
-        await _aclose_reviewer_client(reviewer)
-
-    pt, ct = _usage_tokens(meta)
-    log.info(
-        "llm_worker.llm_call_completed job_id=%s job_type=pass1 duration_ms=%s "
-        "prompt_tokens=%s completion_tokens=%s reasoning_chars=%s finish_reason=%s",
-        job_id,
-        meta.get("duration_ms"),
-        pt,
-        ct,
-        len(meta.get("reasoning_field") or ""),
-        meta.get("finish_reason"),
-    )
+        # Block U Phase B: persistenter Client wird *nicht* pro Job
+        # geschlossen — nur der Test-Factory-Reviewer.
+        if owns_client:
+            await _aclose_reviewer_client(reviewer)
 
     _record_pass_debug_log(
         job_id=job_id,
@@ -850,13 +1145,6 @@ async def _do_pass1(job_id: int) -> None:
             # Block-P §1, ADR-0023).
             llm_budget.budget_consume(session, llm_budget.estimate_tokens(job))
             session.commit()
-    # v0.9.5: Persist-Done-Phase-Log nach erfolgreichem Commit.
-    log.info(
-        "llm_worker.pass1_persist_done job_id=%s groups_count=%s ungrouped_count=%s",
-        job_id,
-        len(result.groups),
-        len(result.ungrouped_finding_ids),
-    )
 
 
 async def _persist_pass1_groups(
@@ -1024,13 +1312,6 @@ async def _do_pass2(job_id: int) -> None:
             job.completed_at = datetime.now(UTC)
             job.result = {"skipped": True, "reason": "group or server missing"}
             session.commit()
-            log.info(
-                "llm_worker.pass2_skipped job_id=%s reason=group_or_server_missing "
-                "group_id=%s server_id=%s",
-                job_id,
-                group_id,
-                server_id,
-            )
             return
 
         findings = list(
@@ -1047,24 +1328,7 @@ async def _do_pass2(job_id: int) -> None:
             job.completed_at = datetime.now(UTC)
             job.result = {"skipped": True, "reason": "no findings in group on server"}
             session.commit()
-            log.info(
-                "llm_worker.pass2_skipped job_id=%s reason=no_findings group_id=%s server_id=%s",
-                job_id,
-                group_id,
-                server_id,
-            )
             return
-
-        # v0.9.5: Phasen-Log nach Daten-Hydration.
-        log.info(
-            "llm_worker.pass2_started job_id=%s group_id=%s group_label=%s "
-            "findings_in_group=%s server_id=%s",
-            job_id,
-            group_id,
-            group.label,
-            len(findings),
-            server_id,
-        )
 
         gf_fp = group_findings_fingerprint(findings)
         cve_fp = cve_data_fingerprint(findings)
@@ -1072,13 +1336,6 @@ async def _do_pass2(job_id: int) -> None:
         cache_key = make_cache_key(group.id, gf_fp, cve_fp, sv_fp)
 
         cached = lookup(session, cache_key)
-        # v0.9.5: Cache-Lookup-Phase-Log (hit/miss).
-        log.info(
-            "llm_worker.pass2_cache_lookup job_id=%s cache_key_prefix=%s result=%s",
-            job_id,
-            cache_key[:16],
-            "hit" if cached is not None else "miss",
-        )
         if cached is not None:
             record_hit(session, cached)
             _upsert_evaluation(
@@ -1109,22 +1366,20 @@ async def _do_pass2(job_id: int) -> None:
                 metadata={"server_id": server_id, "cache_key_prefix": cache_key[:16]},
             )
             session.commit()
-            log.info(
-                "llm_worker.pass2_cache_hit_applied job_id=%s group_id=%s "
-                "risk_band=%s action_type=%s findings_inherited=%s",
-                job_id,
-                group_id,
-                cached.risk_band,
-                cached.action_type,
-                inherited,
-            )
             return
 
         # Cache-Miss: Daten fuer den LLM-Call snapshotten.
-        reviewer, model_name = _build_reviewer(session)
         group_label = group.label
         server_id_snapshot = server.id
         group_findings_ids = [int(f.id) for f in findings]
+
+    # Block U Phase B: Reviewer-Setup *ausserhalb* der Pickup-Session,
+    # damit wir den async-Helper aufrufen koennen ohne die Session ueber
+    # den ``await`` hinweg offen zu halten. Live-Pfad nutzt persistenten
+    # Client (kein Per-Job-aclose), Test-Factory-Pfad weiterhin mit
+    # eigenstaendigem Client (Caller schliesst).
+    with get_session() as setup_session:
+        reviewer, model_name, owns_client = await _get_reviewer_for_job(setup_session)
 
     # Phase 2: LLM-Call ausserhalb der Session.
     # Wir nutzen den Reviewer mit detached-Objekten — eine zweite Session
@@ -1132,13 +1387,6 @@ async def _do_pass2(job_id: int) -> None:
     # Session-loese Objekte.
     pass2_result: Pass2Result
     pass2_meta: dict[str, Any]
-    log.info(
-        "llm_worker.llm_call_started job_id=%s job_type=pass2 model=%s group_id=%s findings=%s",
-        job_id,
-        model_name,
-        group_id,
-        len(group_findings_ids),
-    )
     # v0.9.x: try/finally schliesst den httpx-Pool des AsyncOpenAI-Clients
     # noch innerhalb des asyncio.run()-Event-Loops — sonst Stacktrace im GC.
     try:
@@ -1204,19 +1452,9 @@ async def _do_pass2(job_id: int) -> None:
             )
             raise
     finally:
-        await _aclose_reviewer_client(reviewer)
-
-    pt2, ct2 = _usage_tokens(pass2_meta)
-    log.info(
-        "llm_worker.llm_call_completed job_id=%s job_type=pass2 duration_ms=%s "
-        "prompt_tokens=%s completion_tokens=%s reasoning_chars=%s finish_reason=%s",
-        job_id,
-        pass2_meta.get("duration_ms"),
-        pt2,
-        ct2,
-        len(pass2_meta.get("reasoning_field") or ""),
-        pass2_meta.get("finish_reason"),
-    )
+        # Block U Phase B: persistenten Client *nicht* pro Job schliessen.
+        if owns_client:
+            await _aclose_reviewer_client(reviewer)
 
     _record_pass_debug_log(
         job_id=job_id,
@@ -1287,17 +1525,7 @@ async def _do_pass2(job_id: int) -> None:
         # evaluation` ist die Schaetzung konstant 2000.
         llm_budget.budget_consume(session, 2000)
     _ = server_id_snapshot  # keep linter happy
-    # v0.9.5: Persist-Done-Phase-Log nach Result+Cache+Budget-Commit.
-    log.info(
-        "llm_worker.pass2_persist_done job_id=%s group_id=%s risk_band=%s "
-        "action_type=%s worst_finding_id=%s findings_inherited=%s",
-        job_id,
-        group_id,
-        evaluation.risk_band,
-        evaluation.action_type,
-        evaluation.worst_finding_id,
-        inherited,
-    )
+    _ = inherited  # nur fuer den (entfernten) persist-done-Log gebraucht.
 
 
 def _record_pass_debug_log(
@@ -1320,8 +1548,19 @@ def _record_pass_debug_log(
 
     Defensiv geloggt — Debug-Log-Failures duerfen die Job-Pipeline nicht
     killen.
+
+    Block U Phase G (ADR-0029): Success-Calls werden 1:``llm_debug_log_
+    success_sample_rate`` herunter-gesampelt, Fehler-Calls bleiben 1:1.
     """
     try:
+        cfg = load_settings()
+        if not llm_debug_log.should_sample_debug_log(
+            job_id=job_id,
+            job_type=job_type,
+            status=status,
+            sample_rate=cfg.llm_debug_log_success_sample_rate,
+        ):
+            return
         # Request-Body: erste 1KB System-Prompt + erste 8KB User-Prompt, plus
         # Model+max_tokens. Body-Size-Cap im Service wendet zusaetzlich an.
         if meta is not None:
@@ -1477,6 +1716,13 @@ def _build_reviewer(session: Session) -> tuple[LLMRiskReviewer, str | None]:
 
     Returns (reviewer, model_name). Tests koennen den Reviewer ueber
     :func:`set_reviewer_factory_for_tests` ersetzen.
+
+    Hinweis (Block U Phase B): im Live-Pfad rufen ``_do_pass1``/
+    ``_do_pass2`` stattdessen :func:`_get_reviewer_for_job` auf, was den
+    persistenten Client wiederverwendet. ``_build_reviewer`` bleibt fuer
+    Test-Hook-Kompatibilitaet und altinterne Aufrufer erhalten — baut bei
+    Bedarf einen *neuen*, eigenstaendigen Client (Caller ist dann fuer
+    ``_aclose_reviewer_client`` zustaendig).
     """
     if _reviewer_factory is not None:
         result = _reviewer_factory(session)
@@ -1490,6 +1736,30 @@ def _build_reviewer(session: Session) -> tuple[LLMRiskReviewer, str | None]:
     return LLMRiskReviewer(client=client), client.model
 
 
+async def _get_reviewer_for_job(
+    session: Session,
+) -> tuple[LLMRiskReviewer, str | None, bool]:
+    """Live-Pfad-Reviewer-Setup mit persistentem Client (Block U Phase B).
+
+    Returns ``(reviewer, model_name, owns_client_lifecycle)``.
+
+    * ``owns_client_lifecycle=True`` wenn ein Test-Factory-Reviewer
+      geliefert wird (Caller ruft ``_aclose_reviewer_client`` im
+      ``finally``). Backward-compatible mit bestehenden Tests die
+      ``set_reviewer_factory_for_tests`` benutzen.
+    * ``owns_client_lifecycle=False`` im Production-Pfad — der
+      persistente Client bleibt modul-global cached und wird
+      *nicht* pro Job geschlossen. Genau das ist der Punkt von
+      Phase B: TLS-Connection-Reuse ueber Job-Grenzen hinweg.
+    """
+    if _reviewer_factory is not None:
+        # Test-Hook: alte Semantik, Caller schliesst den Client.
+        reviewer, model_name = _build_reviewer(session)
+        return reviewer, model_name, True
+    client, model_name = await _get_or_build_async_client(session)
+    return LLMRiskReviewer(client=client), model_name, False
+
+
 _reviewer_factory: Any | None = None
 
 
@@ -1499,6 +1769,123 @@ def set_reviewer_factory_for_tests(
     """Test-Hook: ``factory(session) -> (LLMRiskReviewer, model_name)``."""
     global _reviewer_factory
     _reviewer_factory = factory
+
+
+# ---------------------------------------------------------------------------
+# Block U Phase B — Persistenter Async-Client mit Fingerprint-Cache
+# ---------------------------------------------------------------------------
+
+
+def _compute_client_fingerprint(
+    base_url: str, model: str, api_key_plaintext: str
+) -> tuple[str, str, str]:
+    """Liefert ``(base_url, model, sha256_hex(api_key))``.
+
+    Der API-Key wird *niemals* im Klartext zurueckgegeben oder geloggt —
+    nur sein SHA-256-Hex-Digest. Bei leerem Key (Ollama-Localhost-Default)
+    hashen wir den leeren String; das ist konsistent und differenziert
+    sauber von einem konfigurierten Key.
+    """
+    import hashlib
+
+    digest = hashlib.sha256(api_key_plaintext.encode("utf-8")).hexdigest()
+    return (base_url, model, digest)
+
+
+async def _get_or_build_async_client(session: Session) -> tuple[LlmClient, str]:
+    """Gibt den persistenten ``LlmClient`` zurueck, rebuilt bei Mismatch.
+
+    Fingerprint = ``(base_url, model, sha256_hex(api_key_plaintext))``.
+
+    * Erster Aufruf: Client wird gebaut, Fingerprint gesetzt.
+    * Unveraenderte Settings: derselbe Client (Connection-Pool-Reuse).
+    * Settings-Aenderung (eines der drei Felder): alter Client wird
+      ``await aclose()``-d, neuer Client gebaut.
+
+    Logging-Marker bei Rebuild: ``llm_worker.client_rebuilt``. API-Key
+    erscheint *nicht* im Log — nur ``base_url`` und ``model``.
+
+    Returns ``(client, model_name)``. Der ``model_name`` wird vom Caller
+    in den ``LLMRiskReviewer``-Konstruktor weiter gereicht (heute
+    ueberfluessig weil Reviewer den Client haelt, aber wir folgen der
+    bestehenden ``_build_reviewer``-Signatur fuer minimale Aufrufer-
+    Anpassung im Live-Pfad).
+
+    Thread-/Coroutine-Sicherheit: ein modul-globales ``asyncio.Lock``
+    serialisiert die Rebuild-Section, damit unter Phase-C-Concurrency
+    nicht zwei Tasks gleichzeitig einen Rebuild starten.
+    """
+    global _cached_client, _cached_client_fingerprint, _cached_client_lock
+
+    # Lock lazy im aktuellen Event-Loop bauen. ``asyncio.Lock()``
+    # erfordert seit Python 3.10 keinen Loop mehr zur Instanziierung,
+    # aber wir bleiben defensiv und bauen ihn beim ersten Async-Aufruf
+    # damit das Lock-Objekt sicher zum laufenden Loop gehoert.
+    if _cached_client_lock is None:
+        _cached_client_lock = asyncio.Lock()
+
+    settings_row = ensure_settings_row(session)
+    cfg = load_settings()
+    # Klartext-Key entschluesseln um den Fingerprint zu berechnen. Wir
+    # lassen den Wert nur so lange im Stack-Frame leben wie noetig und
+    # uebergeben ihn nie an Logging.
+    plain_key = ""
+    if settings_row.llm_api_key_encrypted:
+        from app.services.llm_client import decrypt_api_key
+
+        plain_key = decrypt_api_key(
+            settings_row.llm_api_key_encrypted,
+            cfg.encryption_key.get_secret_value(),
+        )
+    base_url = settings_row.llm_base_url or ""
+    model = settings_row.llm_model or ""
+    if not base_url or not model:
+        # Konsistent mit ``build_client_from_settings``: ohne Provider-
+        # Konfig faellt der Live-Pfad ohnehin frueher (Mode=off oder
+        # _read_mode_safe-Default). Wir reichen den Fehler hoch.
+        from app.services.llm_client import LlmNotConfiguredError
+
+        raise LlmNotConfiguredError("LLM-Provider noch nicht konfiguriert")
+
+    fingerprint = _compute_client_fingerprint(base_url, model, plain_key)
+
+    async with _cached_client_lock:
+        if _cached_client is not None and _cached_client_fingerprint == fingerprint:
+            return _cached_client, _cached_client.model
+        # Rebuild-Pfad.
+        old_client = _cached_client
+        if old_client is not None:
+            try:
+                await old_client.aclose()
+            except Exception:  # pragma: no cover — Best-Effort-Cleanup
+                log.debug("llm_worker.client_rebuild_aclose_failed", exc_info=True)
+        new_client = build_client_from_settings(
+            settings_row, encryption_key=cfg.encryption_key.get_secret_value()
+        )
+        _cached_client = new_client
+        _cached_client_fingerprint = fingerprint
+        # Niemals den API-Key oder seinen Hash loggen — nur base_url +
+        # model + Rebuild-Grund.
+        log.info(
+            "llm_worker.client_rebuilt reason=fingerprint_changed base_url=%s model=%s",
+            base_url,
+            model,
+        )
+        return new_client, new_client.model
+
+
+def reset_client_cache_for_tests() -> None:
+    """Test-Hook — leert den persistenten Client-Cache (Block U Phase B).
+
+    Setzt Client, Fingerprint und Lock zurueck. Schliesst den alten
+    Client *nicht* synchron (es gibt keinen laufenden Loop in Pure-Unit-
+    Tests); das ist ok, weil Tests den Cache vor *Setup* leeren und der
+    GC im Test-Teardown den httpx-Pool aufraeumt.
+    """
+    global _cached_client, _cached_client_fingerprint, _cached_client_lock
+    _cached_client = None
+    _cached_client_fingerprint = None
+    _cached_client_lock = None
 
 
 # ---------------------------------------------------------------------------
@@ -1561,7 +1948,8 @@ def _pick_next_scan_ingest_job_id(session: Session) -> int | None:
 def _process_scan_ingest_job_safe(job_id: int) -> None:
     """Verarbeitet einen Scan-Ingest-Job. Defensiv try/except fuer den Tick-Loop.
 
-    Exception im Worker darf den gesamten llm_worker._tick() nicht killen.
+    Exception im Worker darf den gesamten llm_worker-Dispatcher-Loop nicht
+    killen (Block U Phase C: _run_subticks ist der Caller).
     """
     from app.workers.scan_ingest_worker import (
         _process_scan_ingest_job as _siw_process,
@@ -1912,6 +2300,7 @@ __all__ = [
     "get_session",
     "main",
     "request_shutdown_for_tests",
+    "reset_client_cache_for_tests",
     "reset_shutdown_for_tests",
     "set_reviewer_factory_for_tests",
     "set_session_factory_for_tests",

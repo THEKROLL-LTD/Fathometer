@@ -647,6 +647,20 @@ class Setting(Base):
         server_default=func.now(),
     )
 
+    # Block U (ADR-0029): Globaler Cap fuer parallele LLM-Jobs im Worker-
+    # Prozess (in_process-Concurrency via asyncio.Semaphore). Default 1 ist
+    # backward-compatible mit Block P. Worker liest den Wert via
+    # ``_get_concurrency_throttled`` mit 30-s-Cache-Window (Hot-Reload).
+    llm_worker_job_concurrency: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    # Block U (ADR-0029 §Phase G): Sampling-Rate fuer ``llm_debug_log``-
+    # Inserts mit ``status='success'``. Errors laufen 1:1, Successes nur
+    # wenn ``hash((job_id, job_type)) % sample_rate == 0``.
+    llm_debug_log_success_sample_rate: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
+    )
+
     __table_args__ = (
         CheckConstraint("id = 1", name="ck_settings_singleton"),
         CheckConstraint(
@@ -661,6 +675,16 @@ class Setting(Base):
         CheckConstraint(
             "llm_token_budget_used_today >= 0",
             name="ck_settings_llm_token_budget_used_today_nonneg",
+        ),
+        # Block U (ADR-0029): Bounds gespiegelt zum Pydantic-Field in
+        # ``app/config.py`` (ge=1, le=200 bzw. ge=1, le=1000).
+        CheckConstraint(
+            "llm_worker_job_concurrency BETWEEN 1 AND 200",
+            name="ck_settings_llm_worker_job_concurrency",
+        ),
+        CheckConstraint(
+            "llm_debug_log_success_sample_rate BETWEEN 1 AND 1000",
+            name="ck_settings_llm_debug_log_success_sample_rate",
         ),
     )
 

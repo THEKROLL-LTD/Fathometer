@@ -5,9 +5,11 @@
    beide eine Master-Key-Bestaetigung (analog `/settings/master-key`).
 
    Variablen-Vertrag (aus `app/views/settings.py:llm_reviewer_view`):
-     - `current_mode`     : str — 'off' | 'observation' | 'live'.
-     - `mode_form`        : LlmReviewerModeForm.
-     - `requeue_form`     : LlmReviewerRequeueForm.
+     - `current_mode`        : str — 'off' | 'observation' | 'live'.
+     - `current_concurrency` : int — aktueller `llm_worker_job_concurrency`-Wert (1..200).
+     - `mode_form`           : LlmReviewerModeForm.
+     - `requeue_form`        : LlmReviewerRequeueForm.
+     - `concurrency_form`    : LlmReviewerConcurrencyForm.
      - `job_counts`       : dict[str,int] — queued/in_progress/done/failed.
      - `would_call_count` : int — done-Jobs mit `result.would_call=true`.
      - `groups_total`     : int.
@@ -22,7 +24,7 @@
    ungeprueft gerendert. Strict-Autoescape ueberall.
 #}
 <div class="max-w-3xl p-6 space-y-6"
-     x-data="{ modeOpen: false, requeueOpen: false, privacyAcked: false }">
+     x-data="{ modeOpen: false, requeueOpen: false, concurrencyOpen: false, privacyAcked: false }">
   <header>
     <h1 class="text-2xl font-semibold">LLM Risk Reviewer</h1>
     <p class="opacity-70 text-sm mt-1">
@@ -78,6 +80,36 @@
                 @click="modeOpen = true; privacyAcked = false"
                 data-test="llm-mode-change-button">
           Mode aendern...
+        </button>
+      </div>
+    </div>
+  </div>
+
+  {# Concurrency-Card (Block U, ADR-0029). MVP-Vereinfachung: nur den
+     persistierten Settings-Wert anzeigen — kein Live-`in_flight`-Counter.
+     Operator schaut fuer Live-Werte in das `llm_worker.status`-Snapshot
+     im Container-Log (Phase F). #}
+  <div class="card bg-base-200 shadow-sm" data-test="llm-reviewer-concurrency-card">
+    <div class="card-body">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 class="card-title">Worker-Concurrency</h2>
+          <p class="text-sm opacity-70 mt-1">
+            Parallele LLM-Jobs im Worker:
+            <strong class="font-mono ml-1" data-test="llm-current-concurrency">{{ current_concurrency }}</strong>
+            <span class="opacity-60 text-xs">(1..200)</span>
+          </p>
+          <p class="text-xs opacity-60 mt-1">
+            Hot-Reload binnen 30 s nach AEnderung. Pod-Restart nicht noetig.
+            Live-Werte (<code class="font-mono">in_flight</code>, Durchsatz) im
+            Container-Log via <code class="font-mono">llm_worker.status</code>.
+          </p>
+        </div>
+        <button type="button"
+                class="btn btn-warning btn-sm"
+                @click="concurrencyOpen = true"
+                data-test="llm-concurrency-change-button">
+          Concurrency aendern...
         </button>
       </div>
     </div>
@@ -393,5 +425,75 @@
       </form>
     </div>
     <div class="modal-backdrop bg-black/40" @click="requeueOpen = false"></div>
+  </dialog>
+
+  {# Concurrency-Wechsel-Modal — Slider/Input + Master-Key. #}
+  <dialog class="modal"
+          x-show="concurrencyOpen"
+          x-cloak
+          :class="{'modal-open': concurrencyOpen}"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="llm-concurrency-modal-title"
+          @keydown.escape.window="concurrencyOpen = false"
+          data-test="llm-concurrency-modal">
+    <div class="modal-box max-w-lg"
+         x-data="{ newConcurrency: {{ current_concurrency }} }">
+      <h3 id="llm-concurrency-modal-title" class="text-lg font-semibold">
+        Worker-Concurrency aendern
+      </h3>
+      <p class="text-sm opacity-70 mt-2">
+        Anzahl gleichzeitig laufender LLM-Jobs im
+        <code class="font-mono">secscan-llm-worker</code>. Default
+        <strong>1</strong>, Maximum <strong>200</strong>. Empfehlung: in
+        5er-/10er-Schritten hochregeln und das Container-Log beobachten.
+      </p>
+      <form method="post"
+            action="{{ url_for('settings.llm_reviewer_change_concurrency') }}"
+            class="space-y-3 mt-3">
+        {{ concurrency_form.csrf_token if concurrency_form else '' }}
+
+        <label class="form-control">
+          <span class="label-text text-sm">
+            Neuer Wert: <strong class="font-mono ml-1" x-text="newConcurrency"></strong>
+          </span>
+          <input type="range"
+                 name="concurrency"
+                 class="range range-warning range-sm"
+                 min="1"
+                 max="200"
+                 step="1"
+                 x-model.number="newConcurrency"
+                 required
+                 data-test="llm-concurrency-range" />
+        </label>
+
+        <label class="form-control">
+          <span class="label-text text-sm">Master-Key</span>
+          <input type="password"
+                 name="master_key"
+                 class="input input-bordered input-sm"
+                 autocomplete="off"
+                 required
+                 minlength="10"
+                 maxlength="128"
+                 data-test="llm-concurrency-master-key" />
+        </label>
+
+        <div class="modal-action">
+          <button type="button"
+                  class="btn btn-ghost btn-sm"
+                  @click="concurrencyOpen = false">
+            Abbrechen
+          </button>
+          <button type="submit"
+                  class="btn btn-warning btn-sm"
+                  data-test="llm-concurrency-submit">
+            Concurrency setzen
+          </button>
+        </div>
+      </form>
+    </div>
+    <div class="modal-backdrop bg-black/40" @click="concurrencyOpen = false"></div>
   </dialog>
 </div>

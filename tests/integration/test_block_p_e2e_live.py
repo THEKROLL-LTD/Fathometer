@@ -47,6 +47,25 @@ from tests.integration.conftest import MockReviewer
 # ---------------------------------------------------------------------------
 
 
+def _drive_dispatch_iteration() -> None:
+    """Block U Phase C (ADR-0029) Migration-Helper: ersetzt ``_drive_dispatch_iteration()``.
+
+    Pickt einen einzelnen Job aus der Queue und verarbeitet ihn via
+    ``asyncio.run(_process_one_async(...))``. Sub-Ticks bleiben aussen
+    vor — diese Tests pruefen LLM-Job-Lifecycle gegen den Mock-Reviewer.
+    """
+    import asyncio as _asyncio
+
+    llm_worker.invalidate_throttle_caches_for_tests()
+    mode = llm_worker._get_mode_throttled()
+    if mode == "off" or not llm_worker._budget_ok_throttled():
+        return
+    job_id = llm_worker._pick_next_job_id()
+    if job_id is None:
+        return
+    _asyncio.run(llm_worker._process_one_async(job_id, mode))
+
+
 @pytest.fixture(autouse=True)
 def _reset_singleton() -> Any:
     GroupMatcher._reset_for_tests()
@@ -146,12 +165,10 @@ def _run_all_picks(monkeypatch: pytest.MonkeyPatch, max_iterations: int = 20) ->
     while iterations < max_iterations:
         before = llm_worker._pick_next_job_id  # sanity, not called
         _ = before
-        # Use _tick which auto-picks if a job is ready.
-        # We bail out wenn kein Job mehr drin ist.
-        # Trick: wir pruefen vor und nach dem Tick die "queued"-Count.
+        # Use the Phase-C dispatcher-iteration helper which auto-picks if a
+        # job is ready. We bail out wenn kein Job mehr drin ist.
         iterations += 1
-        # Run one tick:
-        llm_worker._tick()
+        _drive_dispatch_iteration()
         if not _has_queued_jobs():
             break
     return iterations
@@ -260,7 +277,7 @@ def test_live_e2e_full_pass1_then_pass2_cycle(
     monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
     # 3) Pass-1-Tick.
-    llm_worker._tick()
+    _drive_dispatch_iteration()
     assert mock_reviewer.pass1_call_count == 1, "pass1 must have been called"
 
     with db_app.app_context():
@@ -314,7 +331,7 @@ def test_live_e2e_full_pass1_then_pass2_cycle(
             sess.close()
 
     # 5) Pass-2-Tick.
-    llm_worker._tick()
+    _drive_dispatch_iteration()
     assert mock_reviewer.pass2_call_count == 1, "pass2 must have been called once"
 
     with db_app.app_context():
@@ -406,7 +423,7 @@ def test_live_e2e_cache_hit_on_identical_rescan(
     monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
 
     # Erster Pass-1-Tick → Group, Findings zugeordnet.
-    llm_worker._tick()
+    _drive_dispatch_iteration()
     assert mock_reviewer.pass1_call_count == 1
 
     # Re-Scan: GroupMatcher matched, Pass-2 queued.
@@ -415,7 +432,7 @@ def test_live_e2e_cache_hit_on_identical_rescan(
     assert resp.status_code == 202
 
     # Pass-2-Tick → LLM-Call, Cache geschrieben.
-    llm_worker._tick()
+    _drive_dispatch_iteration()
     assert mock_reviewer.pass2_call_count == 1
 
     # Dritter Scan: gleiche Findings, gleicher Fingerprint → Hook queued
@@ -438,7 +455,7 @@ def test_live_e2e_cache_hit_on_identical_rescan(
     assert resp.status_code == 202
 
     # Tick fuer den jetzt erneut existierenden Pass-2-Job.
-    llm_worker._tick()
+    _drive_dispatch_iteration()
     # Mock-Reviewer-Pass-2 darf KEIN zweites Mal aufgerufen worden sein —
     # der Cache-Eintrag matched.
     assert mock_reviewer.pass2_call_count == 1, (
@@ -494,7 +511,7 @@ def test_live_e2e_no_findings_in_envelope_skips_jobs(
     # er darf nicht aufgerufen werden.
     exploding = MockReviewer(pass1_result=None, pass2_result=None)
     _install_mock_reviewer(exploding)
-    llm_worker._tick()
+    _drive_dispatch_iteration()
     assert exploding.pass1_call_count == 0
     assert exploding.pass2_call_count == 0
 

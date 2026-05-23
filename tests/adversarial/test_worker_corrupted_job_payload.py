@@ -5,14 +5,23 @@ manuelle SQL-Manipulation, Schema-Drift) MUSS der Worker:
 
 * den Job auf `status='failed'` setzen,
 * einen verstaendlichen `error`-String hinterlegen,
-* NICHT crashen — der Tick-Loop laeuft weiter.
+* NICHT crashen — der Dispatcher-Loop laeuft weiter.
 
 Wir simulieren mehrere korrupte Payload-Shapes und beobachten den
 Final-Status.
+
+Block U Phase C (ADR-0029) Migration: das alte synchrone ``_tick()``
+existiert nicht mehr. Wir treiben einen Single-Job durch den neuen
+Dispatcher via :func:`_run_one_dispatch_iteration` — pickt aus der Queue,
+ruft ``asyncio.run(_process_one_async(...))`` direkt. Der orchestratorische
+``_tick()``-Sequenz-Test ist durch
+``tests/workers/test_llm_worker_dispatcher.py`` semantisch ersetzt und
+wurde entfernt.
 """
 
 from __future__ import annotations
 
+import asyncio
 import time as time_mod
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -25,6 +34,28 @@ from app.db import get_session_factory
 from app.models import LLMJob, Server
 from app.settings_service import ensure_settings_row
 from app.workers import llm_worker
+
+
+def _run_one_dispatch_iteration() -> None:
+    """Block U Phase C Migration-Helper: ersetzt das alte ``llm_worker._tick()``.
+
+    Pickt synchron einen Job via :func:`_pick_next_job_id` und verarbeitet ihn
+    via ``asyncio.run(_process_one_async(...))``. Sub-Ticks (Reaper, Eviction,
+    Feed-Pull, Ingest, Retention) laufen separat — wir rufen sie hier nicht
+    auf damit die Tests deterministisch nur den Job-Pfad treffen.
+
+    Wenn die Queue leer ist, kehrt der Helper sofort zurueck (Idle-Pfad).
+    """
+    llm_worker.invalidate_throttle_caches_for_tests()
+    mode = llm_worker._get_mode_throttled()
+    if mode == "off":
+        return
+    if not llm_worker._budget_ok_throttled():
+        return
+    job_id = llm_worker._pick_next_job_id()
+    if job_id is None:
+        return
+    asyncio.run(llm_worker._process_one_async(job_id, mode))
 
 
 @pytest.fixture
@@ -147,8 +178,9 @@ def test_worker_handles_corrupted_pass1_payload(
 
     llm_worker.set_reviewer_factory_for_tests(_stub)
 
-    # Der Tick darf nicht crashen.
-    llm_worker._tick()
+    # Block U Phase C: ein Dispatcher-Iteration pickt den Job und verarbeitet ihn.
+    # Darf nicht crashen.
+    _run_one_dispatch_iteration()
 
     factory = get_session_factory(db_app)
     with db_app.app_context():
@@ -201,7 +233,7 @@ def test_worker_handles_corrupted_pass2_payload(
 
     llm_worker.set_reviewer_factory_for_tests(_stub)
 
-    llm_worker._tick()
+    _run_one_dispatch_iteration()
 
     factory = get_session_factory(db_app)
     with db_app.app_context():
@@ -216,52 +248,10 @@ def test_worker_handles_corrupted_pass2_payload(
             sess.close()
 
 
-def test_worker_tick_does_not_crash_on_corrupted_payload_sequence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Mehrere Tick-Iterationen ueber korrupte Jobs — ohne DB/HTTP.
-
-    Der Test prueft nur die Tick-Orchestrierung: Subticks werden nicht
-    ausgefuehrt, Job-Pickup kommt aus einer In-Memory-Queue, und die eigentliche
-    Payload-Behandlung wird an der `_process_job`-Grenze simuliert. Die
-    DB-basierten Einzeltests oben pruefen die reale Payload-Persistenz separat.
-    """
-    llm_worker.reset_shutdown_for_tests()
-    job_ids = [101, 102, 103]
-    queue = list(job_ids)
-    handled: list[tuple[int, str]] = []
-    statuses = dict.fromkeys(job_ids, "queued")
-
-    monkeypatch.setattr(time_mod, "sleep", lambda s: None)
-    monkeypatch.setattr(llm_worker.time, "sleep", lambda s: None)
-    monkeypatch.setattr(llm_worker, "_run_stale_reaper", lambda: None)
-    monkeypatch.setattr(llm_worker, "_run_debug_log_eviction", lambda: None)
-    monkeypatch.setattr(llm_worker, "_run_feed_enrichment_check", lambda: None)
-    monkeypatch.setattr(llm_worker, "_get_mode_throttled", lambda: "live")
-    monkeypatch.setattr(llm_worker, "_budget_ok_throttled", lambda: True)
-    monkeypatch.setattr(
-        llm_worker,
-        "_pick_next_job_id",
-        lambda: queue.pop(0) if queue else None,
-    )
-    monkeypatch.setattr(
-        llm_worker,
-        "_idle_sleep_and_backoff",
-        lambda: pytest.fail("Test-Queue sollte nicht idle sein"),
-    )
-
-    def _process_job(job_id: int, mode: str) -> None:
-        handled.append((job_id, mode))
-        statuses[job_id] = "failed"
-
-    monkeypatch.setattr(llm_worker, "_process_job", _process_job)
-
-    try:
-        for _ in job_ids:
-            llm_worker._tick()
-
-        assert handled == [(jid, "live") for jid in job_ids]
-        assert all(statuses[jid] == "failed" for jid in job_ids)
-        assert queue == []
-    finally:
-        llm_worker.reset_shutdown_for_tests()
+# Block U Phase C: Der frueher hier liegende ``test_worker_tick_does_not_
+# crash_on_corrupted_payload_sequence`` (Mehrfach-Tick-Orchestrierung gegen
+# In-Memory-Queue mit gemocktem ``_process_job``) ist durch
+# ``tests/workers/test_llm_worker_dispatcher.py`` (Cases 1, 2, 5, 7) komplett
+# abgedeckt — der neue Dispatcher fuehrt Pickup-Refill, FIFO-Reihenfolge,
+# Mode-Off-Block und Shutdown-Drain explizit durch. Wir behalten hier nur
+# die DB-orientierten Single-Job-Adversarial-Cases.
