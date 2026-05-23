@@ -1,4 +1,4 @@
-{# Sidebar-Server-Liste — HTMX-Polling-Container (ADR-0019).
+{# Sidebar-Server-Liste — HTMX-Polling-Container (ADR-0019, Phase C ADR-0030).
 
    Wird aus zwei Pfaden konsumiert:
      1. `base_app.html` inkludiert dieses Partial direkt im Full-Page-Render.
@@ -9,10 +9,21 @@
    frisst HTMX den Polling-Trigger und der Re-Bind-Handler in `sidebar.js`
    (Heartbeat-Tooltips, Filter-Re-Apply) findet die Wurzel nicht mehr.
 
-   Variablen-Vertrag (gesetzt von `build_sidebar_context()`):
-     - `sidebar_servers`    : list[Server]  (mit eager-loaded tag_links)
-     - `sidebar_heartbeats` : dict[int, list[DailyStatus]]
-     - `active_server_id`   : int | None
+   Variablen-Vertrag:
+     Initialer Page-Render (Context-Processor-Pfad — billige Keys):
+       - `sidebar_servers`      : list[Server]  (mit eager-loaded tag_links)
+       - `available_tags`       : list[Tag]
+       - `filter_tags`          : list[str]
+       - `active_server_id`     : int | None
+     Polling-Endpoint-Pfad (teure Keys, alle optional mit Skeleton-Fallback):
+       - `sidebar_heartbeats`   : dict[int, list[DailyStatus]]  | Undefined
+       - `sidebar_risk_counts`  : dict[int, dict[str, int]]     | Undefined
+       - `hosts_total`          : int | Undefined
+       - `alarm_count`          : int | Undefined
+
+   HTMX-Trigger (Phase C, ADR-0030 §Konsequenzen):
+     `load`        — einmaliger Lazy-Load direkt nach Page-Render.
+     `every 60s`   — Polling-Cadence 10 s -> 60 s erhoeht.
 
    Sicherheit: kein `|safe` — Server-/Tag-Namen sind server-seitig
    validiert und werden autoescaped gerendert.
@@ -27,13 +38,34 @@
     role="list"
     class="divide-y divide-base-300 flex-1"
     hx-get="{{ url_for('sidebar_partials.sidebar_partial') }}{% if filter_tags %}?{% for t in filter_tags %}tag={{ t | urlencode }}{% if not loop.last %}&{% endif %}{% endfor %}{% endif %}"
-    hx-trigger="every 10s [document.visibilityState === 'visible']"
+    hx-trigger="load, every 60s [document.visibilityState === 'visible']"
     hx-target="this"
     hx-swap="outerHTML"
     hx-disinherit="*">
+
+  {# Header: HOSTS · ALARM — HOSTS initial echt aus Context-Processor, ALARM
+     Skeleton wenn alarm_count noch nicht vom Polling-Endpoint geliefert wurde. #}
+  <li class="px-3 py-1.5 text-xs font-mono opacity-60 select-none"
+      data-test="sidebar-host-summary"
+      aria-hidden="true">
+    <span data-test="sidebar-hosts-total">{{ hosts_total | default(sidebar_servers | length) }}</span>
+    hosts
+    ·
+    {% if alarm_count is defined and alarm_count is not none %}
+      <span data-test="sidebar-alarm-count"
+            class="{% if alarm_count > 0 %}text-error{% endif %}">{{ alarm_count }}</span>
+    {% else %}
+      <span class="inline-block w-4 h-3 bg-base-300 animate-pulse rounded-sm align-middle"
+            data-test="sidebar-alarm-count-skeleton"
+            aria-label="alarm count loading"></span>
+    {% endif %}
+    alarm
+  </li>
+
   {% for srv in (sidebar_servers or []) %}
     {% with server=srv,
             cells=(sidebar_heartbeats or {}).get(srv.id, []),
+            risk=(sidebar_risk_counts or {}).get(srv.id, {}),
             is_active=(active_server_id == srv.id) %}
       {% include "sidebar/_server_row.html" %}
     {% endwith %}

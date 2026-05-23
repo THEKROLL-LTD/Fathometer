@@ -45,13 +45,47 @@ geladen und Tag-fuer-Tag im Python ueber den 50-Tages-Bereich gerollt. Bei
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from typing import NamedTuple, Protocol, runtime_checkable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Finding, FindingStatus, Scan, Severity
+
+
+@runtime_checkable
+class _FindingLike(Protocol):
+    """Strukturelles Protokoll fuer die Heartbeat-Aggregations-Schleife.
+
+    Beides wird unterstuetzt: vollstaendige ORM-`Finding`-Instanzen (Einzel-
+    Server-Pfad in `heartbeat_for_server`) und `_FindingRow`-NamedTuples
+    (Batch-Pfad mit schmaler Projektion in `heartbeats_for_servers`).
+    """
+
+    first_seen_at: datetime
+    resolved_at: datetime | None
+    severity: Severity
+    is_kev: bool
+
+
+class _FindingRow(NamedTuple):
+    """Schmale Projektion aus der Findings-Tabelle fuer die Heartbeat-Aggregation.
+
+    Enthaelt nur die 7 Spalten die `_aggregate_one_server` benoetigt —
+    kein vollstaendiges ORM-Objekt, kein JSONB-`data`-Hydrate.
+    """
+
+    server_id: int
+    severity: Severity
+    first_seen_at: datetime
+    acknowledged_at: datetime | None
+    resolved_at: datetime | None
+    is_kev: bool
+    kev_added_at: datetime | None
+
 
 # ---------------------------------------------------------------------------
 # Severity-Rank — gleiche Ordnung wie in findings_query.py
@@ -109,7 +143,7 @@ def _day_range(end_day: date, days: int) -> list[date]:
 
 
 def _aggregate_one_server(
-    findings: list[Finding],
+    findings: Sequence[_FindingLike] | list[_FindingRow],
     scan_days: set[date],
     day_list: list[date],
 ) -> list[DailyStatus]:
@@ -118,6 +152,11 @@ def _aggregate_one_server(
     `findings` sind alle Findings des Servers, unabhaengig vom Status —
     wir entscheiden pro Tag selbst, ob ein Finding an diesem Tag noch
     "vorhanden" war.
+
+    Akzeptiert vollstaendige ORM-`Finding`-Instanzen (Einzel-Server-Pfad)
+    oder `_FindingRow`-NamedTuples (Batch-Pfad mit schmaler Projektion).
+    Beide haben dieselben Attribute: `first_seen_at`, `resolved_at`,
+    `severity`, `is_kev`.
 
     Annahme: `first_seen_at` und `resolved_at` sind tz-aware UTC. Falls
     naiv, behandeln wir defensiv als UTC.
@@ -223,14 +262,33 @@ def heartbeats_for_servers(
     start_dt = datetime.combine(start_day, time.min, tzinfo=UTC)
     day_list = _day_range(end_day, days)
 
-    # Findings: ein Server-IN-Filter.
-    f_stmt = select(Finding).where(
+    # Findings: schmale Projektion — nur die 7 Spalten die die Aggregation
+    # benoetigt. Kein select(Finding) mehr, kein JSONB-data-Hydrate.
+    f_stmt = select(
+        Finding.server_id,
+        Finding.severity,
+        Finding.first_seen_at,
+        Finding.acknowledged_at,
+        Finding.resolved_at,
+        Finding.is_kev,
+        Finding.kev_added_at,
+    ).where(
         Finding.server_id.in_(server_ids),
         (Finding.resolved_at.is_(None)) | (Finding.resolved_at >= start_dt),
     )
-    findings_by_server: dict[int, list[Finding]] = defaultdict(list)
-    for f in session.execute(f_stmt).scalars().all():
-        findings_by_server[f.server_id].append(f)
+    findings_by_server: dict[int, list[_FindingRow]] = defaultdict(list)
+    for row in session.execute(f_stmt).all():
+        findings_by_server[row.server_id].append(
+            _FindingRow(
+                server_id=row.server_id,
+                severity=row.severity,
+                first_seen_at=row.first_seen_at,
+                acknowledged_at=row.acknowledged_at,
+                resolved_at=row.resolved_at,
+                is_kev=row.is_kev,
+                kev_added_at=row.kev_added_at,
+            )
+        )
 
     # Scans pro Server im Fenster.
     s_stmt = select(Scan.server_id, Scan.received_at).where(

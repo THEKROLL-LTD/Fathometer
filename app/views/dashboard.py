@@ -6,8 +6,10 @@ Datenfluss:
 1. Filter aus Query-String parsen (`DashboardFilter.from_request`).
 2. Alle Server mit eager-loaded Tag-Links laden (selectinload — vermeidet
    N+1).
-3. EINE Aggregations-Query: OPEN-Findings pro `(server_id, severity)` zaehlen,
-   inklusive KEV-Counter pro Server (eigene Aggregation).
+3. EINE konsolidierte Aggregations-Query: OPEN-Findings pro server_id mit
+   FILTER-Aggregaten fuer jede Severity, KEV und alle risk_bands (Phase D,
+   ADR-0030 Befund 5). Liefert `counts_by_server`, `kev_by_server` und
+   `risk_bands_by_server`.
 4. Filter anwenden (Tags via Set-Ops im Python, KEV/Stale post-query).
 5. "Aufmerksamkeit noetig" zusammenstellen (stale, KEV, db-stale) und
    deduplizieren.
@@ -40,7 +42,7 @@ from app.models import (
     Tag,
 )
 from app.schemas.dashboard_filter import DashboardFilter
-from app.services.risk_engine import RiskBand, yes_band_values
+from app.services.risk_engine import yes_band_values
 from app.services.severity_history import daily_severity_counts_fleet
 from app.services.stale_detection import (
     get_db_stale_threshold_h,
@@ -140,75 +142,89 @@ class ServerCardData:
 # ---------------------------------------------------------------------------
 
 
-_ALL_BANDS: tuple[str, ...] = tuple(b.value for b in RiskBand)
-
-
-def _load_risk_kpi_counters(sess: Session) -> RiskKpiCounters:
+def _load_risk_kpi_counters(
+    sess: Session,
+    risk_bands_by_server: dict[int, dict[str, int]],
+    active_server_ids: set[int],
+) -> RiskKpiCounters:
     """Baut die KPI-Counter fuer Action-Required-Cards, Band-Pills und
     Severity-Strip.
 
-    Vier separate Queries, alle ueber `Finding.status == OPEN`:
+    Phase D (ADR-0030 Befund 5): vorher 4 Queries, jetzt 2 Queries.
 
-    1. Risk-Band-Counts (Findings, GROUP BY `risk_band`).
-    2. Distinct-Server-Count fuer `risk_band IN yes_bands`.
-    3. Total aktive Server (nicht retired, nicht revoked) -> daraus
-       `action_no_servers = total - action_yes_servers`.
-    4. Severity-Strip (Findings, GROUP BY `severity`, ohne UNKNOWN).
+    1. Eine konsolidierte Findings-Query mit COUNT(*) FILTER (...) pro
+       risk_band-Bucket UND pro severity-Wert (alle OPEN).
+    2. Total aktive Server (nicht retired, nicht revoked) — operiert auf
+       `servers`-Tabelle, bleibt eigenstaendig.
+
+    `yes_servers` wird aus dem bereits berechneten `risk_bands_by_server`
+    (Ergebnis von `_load_open_aggregates`) abgeleitet — kein separater
+    Distinct-Count-JOIN mehr noetig (Variante a gemaess Block-V-Spec §Phase D).
+
+    Phase-D-Fix (ADR-0030 Befund 5 Folge): `active_server_ids` schliesst den
+    Revoke-Drift. Nur Server in diesem Set werden bei `action_yes_servers`
+    gezaehlt. Ein revoked Server mit historischen OPEN-Findings taucht in
+    `risk_bands_by_server` auf, wird aber hier herausgefiltert, sodass
+    `action_yes_servers <= total_active` immer gilt.
     """
-    yes_bands = yes_band_values()
+    yes_bands = set(yes_band_values())
 
-    # 1. Risk-Band-Counts (Findings).
-    band_stmt = (
-        select(Finding.risk_band, func.count(Finding.id))
-        .where(Finding.status == FindingStatus.OPEN)
-        .group_by(Finding.risk_band)
+    # 1. Konsolidierte Findings-Query: fleet-weite risk_band- und
+    #    severity-Buckets als FILTER-Aggregate in einem einzigen Seq Scan.
+    findings_stmt = select(
+        func.count().filter(Finding.risk_band == "escalate").label("rb_escalate"),
+        func.count().filter(Finding.risk_band == "act").label("rb_act"),
+        func.count().filter(Finding.risk_band == "mitigate").label("rb_mitigate"),
+        func.count().filter(Finding.risk_band == "pending").label("rb_pending"),
+        func.count().filter(Finding.risk_band == "unknown").label("rb_unknown"),
+        func.count().filter(Finding.risk_band == "monitor").label("rb_monitor"),
+        func.count().filter(Finding.risk_band == "noise").label("rb_noise"),
+        func.count().filter(Finding.severity == Severity.CRITICAL).label("sev_critical"),
+        func.count().filter(Finding.severity == Severity.HIGH).label("sev_high"),
+        func.count().filter(Finding.severity == Severity.MEDIUM).label("sev_medium"),
+        func.count().filter(Finding.severity == Severity.LOW).label("sev_low"),
+    ).where(Finding.status == FindingStatus.OPEN)
+    row = sess.execute(findings_stmt).one()
+
+    band_counts: dict[str, int] = {
+        "escalate": int(row.rb_escalate),
+        "act": int(row.rb_act),
+        "mitigate": int(row.rb_mitigate),
+        "pending": int(row.rb_pending),
+        "unknown": int(row.rb_unknown),
+        "monitor": int(row.rb_monitor),
+        "noise": int(row.rb_noise),
+    }
+    severity_strip: dict[str, int] = {
+        Severity.CRITICAL.value: int(row.sev_critical),
+        Severity.HIGH.value: int(row.sev_high),
+        Severity.MEDIUM.value: int(row.sev_medium),
+        Severity.LOW.value: int(row.sev_low),
+    }
+
+    # Yes-Sub-Counters aus band_counts ableiten (Reihenfolge: yes_band_values).
+    action_yes_subcounts: dict[str, int] = {
+        band: band_counts.get(band, 0) for band in yes_band_values()
+    }
+
+    # yes_servers aus den Pro-Server-Risk-Band-Daten ableiten — kein
+    # separater Distinct-Count-JOIN noetig (Variante a).
+    # Nur aktive Server (nicht retired, nicht revoked) werden gezaehlt,
+    # damit revoked Server mit historischen OPEN-Findings nicht faelschlich
+    # als action_yes_servers auftauchen (Phase-D-Fix, ADR-0030 Befund 5).
+    action_yes_servers = sum(
+        1
+        for sid, server_bands in risk_bands_by_server.items()
+        if sid in active_server_ids and any(server_bands.get(b, 0) > 0 for b in yes_bands)
     )
-    band_counts: dict[str, int] = dict.fromkeys(_ALL_BANDS, 0)
-    for band_value, n in sess.execute(band_stmt).all():
-        if band_value in band_counts:
-            band_counts[band_value] = int(n)
 
-    # 2. Distinct-Server-Count fuer Yes-Bands (aktive Server).
-    yes_servers_stmt = (
-        select(func.count(func.distinct(Finding.server_id)))
-        .join(Server, Server.id == Finding.server_id)
-        .where(
-            Finding.status == FindingStatus.OPEN,
-            Finding.risk_band.in_(yes_bands),
-            Server.retired_at.is_(None),
-            Server.revoked_at.is_(None),
-        )
-    )
-    action_yes_servers = int(sess.execute(yes_servers_stmt).scalar() or 0)
-
-    # 3. Total aktive Server.
+    # 2. Total aktive Server (eigenstaendige Query auf servers-Tabelle).
     active_servers_stmt = select(func.count(Server.id)).where(
         Server.retired_at.is_(None),
         Server.revoked_at.is_(None),
     )
     total_active = int(sess.execute(active_servers_stmt).scalar() or 0)
     action_no_servers = max(0, total_active - action_yes_servers)
-
-    # 4. Yes-Sub-Counters: Findings-Counts pro Yes-Band, in der Reihenfolge
-    #    von yes_band_values() (escalate -> unknown).
-    action_yes_subcounts: dict[str, int] = {band: band_counts.get(band, 0) for band in yes_bands}
-
-    # 5. Severity-Strip — Findings-Counts pro Severity, ohne UNKNOWN.
-    sev_stmt = (
-        select(Finding.severity, func.count(Finding.id))
-        .where(Finding.status == FindingStatus.OPEN)
-        .group_by(Finding.severity)
-    )
-    severity_strip: dict[str, int] = {
-        Severity.CRITICAL.value: 0,
-        Severity.HIGH.value: 0,
-        Severity.MEDIUM.value: 0,
-        Severity.LOW.value: 0,
-    }
-    for sev_value, n in sess.execute(sev_stmt).all():
-        sev_key = sev_value.value if hasattr(sev_value, "value") else str(sev_value)
-        if sev_key in severity_strip:
-            severity_strip[sev_key] = int(n)
 
     return RiskKpiCounters(
         action_yes_servers=action_yes_servers,
@@ -236,8 +252,6 @@ def _build_pane_context(
     und rendern dann jeweils ihr Outer-Template (`_detail_pane.html` direkt
     fuer HX, `index.html` mit `{% extends base_app.html %}` fuer Full-Page).
     """
-    from app.services.quick_stats import get_quick_stats
-
     settings_row = get_settings_row(sess)
     severity_threshold = filt.severity or settings_row.severity_threshold
     db_stale_h = get_db_stale_threshold_h()
@@ -246,7 +260,7 @@ def _build_pane_context(
     available_tags = sess.execute(select(Tag).order_by(Tag.name)).scalars().all()
 
     servers = _load_servers(sess)
-    counts_by_server, kev_by_server = _load_open_aggregates(sess)
+    counts_by_server, kev_by_server, risk_bands_by_server = _load_open_aggregates(sess)
 
     cards: list[ServerCardData] = []
     for srv in servers:
@@ -264,11 +278,8 @@ def _build_pane_context(
     visible = _apply_filters(cards, filt)
 
     # Sidebar-Variablen werden via Context-Processor injiziert
-    # (`_inject_sidebar_context` in app/__init__.py). Damit der Tag-Filter
-    # `?tag=prod` auch die QuickStats in der Sidebar mitfiltert, ueber-
-    # schreiben wir `quick_stats` und `filter_tags` hier explizit.
-    quick_stats = get_quick_stats(sess, filter_tags=filt.tags or None, now=now)
-
+    # (`_inject_sidebar_context` in app/__init__.py).
+    #
     # Block M (ADR-0020): KPI-Sparklines und Stale-Sparkline bleiben am
     # Dashboard (Trend-Anzeige fuer KPI-Cards/Pills). Die Cross-Server-
     # Findings-Tabelle ist seit Block Q (ADR-0025 §(5)) auf `/findings`
@@ -277,8 +288,15 @@ def _build_pane_context(
     stale_sparkline = daily_stale_server_counts(sess, days=50, now=now)
 
     # Block O (ADR-0022): Risk-KPI-Counter fuer Action-Required-Cards,
-    # Risk-Band-Pills und Severity-Strip.
-    risk_kpis = _load_risk_kpi_counters(sess)
+    # Risk-Band-Pills und Severity-Strip. Phase D: risk_bands_by_server aus
+    # _load_open_aggregates weitergeben, damit yes_servers ohne separaten
+    # Distinct-Count-JOIN ableitbar ist.
+    # Phase-D-Fix: active_server_ids aus der bereits geladenen servers-Liste
+    # ableiten, damit revoked Server mit OPEN-Findings nicht mitgezaehlt werden.
+    active_server_ids = {
+        srv.id for srv in servers if srv.retired_at is None and srv.revoked_at is None
+    }
+    risk_kpis = _load_risk_kpi_counters(sess, risk_bands_by_server, active_server_ids)
 
     return {
         "servers": visible,
@@ -287,7 +305,6 @@ def _build_pane_context(
         "available_tags": available_tags,
         "severity_threshold": severity_threshold,
         "db_stale_threshold_h": db_stale_h,
-        "quick_stats": quick_stats,
         "filter_tags": filt.tags,
         "kpi_sparklines": kpi_sparklines,
         "stale_sparkline": stale_sparkline,
@@ -337,49 +354,68 @@ def _load_servers(sess: Session) -> list[Server]:
 
 def _load_open_aggregates(
     sess: Session,
-) -> tuple[dict[int, SeverityCounts], dict[int, int]]:
-    """Eine SQL-Query fuer Severity-Counts, zweite fuer KEV-Counts.
+) -> tuple[dict[int, SeverityCounts], dict[int, int], dict[int, dict[str, int]]]:
+    """EINE konsolidierte SQL-Query fuer Severity-, KEV- und Risk-Band-Counts.
 
-    Wir koennten beides in einer Query mit `FILTER (WHERE ...)` machen, aber
-    zwei klare Queries sind lesbarer und vermeiden eine unschoene
-    SQL-Struktur. Beide Queries skalieren mit `count(servers)`, nicht mit
-    `count(findings)` — daher reicht das.
+    Phase D (ADR-0030 Befund 5): vorher 2 separate Queries (Severity GROUP BY
+    + KEV GROUP BY), jetzt eine einzige Query mit COUNT(*) FILTER (...) pro
+    Bucket. Postgres erledigt beide Aggregationen in einem einzigen Seq Scan.
+
+    Rueckgabe:
+      counts_by_server   — dict[server_id, SeverityCounts]
+      kev_by_server      — dict[server_id, int]  (Anzahl OPEN KEV-Findings)
+      risk_bands_by_server — dict[server_id, dict[risk_band_str, int]]
+
+    Das `risk_bands_by_server`-Ergebnis wird an `_load_risk_kpi_counters`
+    weitergereicht, damit der yes_servers-Count ohne separaten JOIN ableitbar
+    ist (Variante a gemaess Block-V-Spec §Phase D).
     """
-    counts: dict[int, SeverityCounts] = {}
-
-    sev_stmt = (
+    sev_kev_stmt = (
         select(
             Finding.server_id,
-            Finding.severity,
-            func.count(Finding.id).label("n"),
+            func.count().filter(Finding.severity == Severity.CRITICAL).label("crit"),
+            func.count().filter(Finding.severity == Severity.HIGH).label("high"),
+            func.count().filter(Finding.severity == Severity.MEDIUM).label("medium"),
+            func.count().filter(Finding.severity == Severity.LOW).label("low"),
+            func.count().filter(Finding.severity == Severity.UNKNOWN).label("unknown"),
+            func.count().filter(Finding.is_kev.is_(True)).label("kev"),
+            func.count().filter(Finding.risk_band == "escalate").label("rb_escalate"),
+            func.count().filter(Finding.risk_band == "act").label("rb_act"),
+            func.count().filter(Finding.risk_band == "mitigate").label("rb_mitigate"),
+            func.count().filter(Finding.risk_band == "pending").label("rb_pending"),
+            func.count().filter(Finding.risk_band == "unknown").label("rb_unknown"),
+            func.count().filter(Finding.risk_band == "monitor").label("rb_monitor"),
+            func.count().filter(Finding.risk_band == "noise").label("rb_noise"),
         )
         .where(Finding.status == FindingStatus.OPEN)
-        .group_by(Finding.server_id, Finding.severity)
-    )
-    rows = sess.execute(sev_stmt).all()
-
-    # Map: server_id -> dict[severity_value -> count]
-    interim: dict[int, dict[str, int]] = {}
-    for server_id, severity, n in rows:
-        interim.setdefault(server_id, {})[severity.value] = int(n)
-
-    for server_id, by_sev in interim.items():
-        counts[server_id] = SeverityCounts(
-            critical=by_sev.get(Severity.CRITICAL.value, 0),
-            high=by_sev.get(Severity.HIGH.value, 0),
-            medium=by_sev.get(Severity.MEDIUM.value, 0),
-            low=by_sev.get(Severity.LOW.value, 0),
-            unknown=by_sev.get(Severity.UNKNOWN.value, 0),
-        )
-
-    kev_stmt = (
-        select(Finding.server_id, func.count(Finding.id).label("n"))
-        .where(Finding.status == FindingStatus.OPEN)
-        .where(Finding.is_kev.is_(True))
         .group_by(Finding.server_id)
     )
-    kev_counts: dict[int, int] = {row.server_id: int(row.n) for row in sess.execute(kev_stmt).all()}
-    return counts, kev_counts
+
+    counts: dict[int, SeverityCounts] = {}
+    kev_counts: dict[int, int] = {}
+    risk_bands_by_server: dict[int, dict[str, int]] = {}
+
+    for row in sess.execute(sev_kev_stmt).all():
+        sid = int(row.server_id)
+        counts[sid] = SeverityCounts(
+            critical=int(row.crit),
+            high=int(row.high),
+            medium=int(row.medium),
+            low=int(row.low),
+            unknown=int(row.unknown),
+        )
+        kev_counts[sid] = int(row.kev)
+        risk_bands_by_server[sid] = {
+            "escalate": int(row.rb_escalate),
+            "act": int(row.rb_act),
+            "mitigate": int(row.rb_mitigate),
+            "pending": int(row.rb_pending),
+            "unknown": int(row.rb_unknown),
+            "monitor": int(row.rb_monitor),
+            "noise": int(row.rb_noise),
+        }
+
+    return counts, kev_counts, risk_bands_by_server
 
 
 # ---------------------------------------------------------------------------

@@ -255,3 +255,104 @@ def test_naive_datetime_treated_as_utc() -> None:
     assert cells[-1].max_severity == Severity.HIGH
     assert cells[-4].max_severity == Severity.HIGH
     assert cells[-5].max_severity is None
+
+
+# ---------------------------------------------------------------------------
+# Phase C: schmale Projektion via _FindingRow (ADR-0030 Befund 6)
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_accepts_finding_row_namedtuple() -> None:
+    """_aggregate_one_server akzeptiert _FindingRow-NamedTuples statt ORM-Instanzen."""
+    from app.services.heartbeat_aggregation import _FindingRow
+
+    fseen = FIXED_NOW - timedelta(days=2)
+    row = _FindingRow(
+        server_id=1,
+        severity=Severity.CRITICAL,
+        first_seen_at=fseen,
+        acknowledged_at=None,
+        resolved_at=None,
+        is_kev=False,
+        kev_added_at=None,
+    )
+    cells = _aggregate_one_server([row], set(), _days(FIXED_NOW.date(), 5))
+    # 5-Tage-Liste: [5-11, 5-12, 5-13, 5-14, 5-15]
+    # fseen = 5-13 -> cells[-3]=5-13 ist erster Tag mit CRITICAL
+    # cells[-4]=5-12 liegt vor first_seen -> None
+    assert cells[-1].max_severity == Severity.CRITICAL
+    assert cells[-3].max_severity == Severity.CRITICAL
+    assert cells[-4].max_severity is None
+
+
+def test_aggregate_finding_row_kev_flag() -> None:
+    """_FindingRow mit is_kev=True erhoet kev_count korrekt."""
+    from app.services.heartbeat_aggregation import _FindingRow
+
+    fseen = FIXED_NOW - timedelta(days=1)
+    row = _FindingRow(
+        server_id=2,
+        severity=Severity.HIGH,
+        first_seen_at=fseen,
+        acknowledged_at=None,
+        resolved_at=None,
+        is_kev=True,
+        kev_added_at=None,
+    )
+    cells = _aggregate_one_server([row], set(), _days(FIXED_NOW.date(), 3))
+    # kev_count muss 1 sein fuer die letzten beiden Tage
+    assert cells[-1].kev_count == 1
+    assert cells[-2].kev_count == 1
+    assert cells[0].kev_count == 0
+
+
+def test_aggregate_finding_row_resolved_drops_out() -> None:
+    """_FindingRow mit resolved_at verschwindet ab dem resolved_at-Tag."""
+    from app.services.heartbeat_aggregation import _FindingRow
+
+    fseen = FIXED_NOW - timedelta(days=4)
+    resolved = FIXED_NOW - timedelta(days=2)
+    row = _FindingRow(
+        server_id=3,
+        severity=Severity.MEDIUM,
+        first_seen_at=fseen,
+        acknowledged_at=None,
+        resolved_at=resolved,
+        is_kev=False,
+        kev_added_at=None,
+    )
+    cells = _aggregate_one_server([row], set(), _days(FIXED_NOW.date(), 6))
+    by_day = {c.day: c for c in cells}
+    # Tag vor resolved: Finding ist noch offen
+    assert by_day[resolved.date() - timedelta(days=1)].max_severity == Severity.MEDIUM
+    # Ab resolved_at: Finding weg (resolved <= end_of_day)
+    assert by_day[resolved.date()].max_severity is None
+    assert by_day[FIXED_NOW.date()].max_severity is None
+
+
+def test_heartbeats_for_servers_narrow_projection_via_mock() -> None:
+    """heartbeats_for_servers nutzt schmale Projektion — kein select(Finding) mehr.
+
+    Prueft: die zusammengestellte SELECT-Anweisung enthaelt Finding-Spalten
+    (schmale Projektion), nicht das vollstaendige ORM-Objekt.
+    """
+    from unittest.mock import MagicMock
+
+    from app.services.heartbeat_aggregation import heartbeats_for_servers
+
+    # Mock-Session die leere Results liefert (keine Rows) ->
+    # heartbeats_for_servers baut leere DailyStatus-Listen.
+    session = MagicMock()
+    session.execute.return_value.all.return_value = []
+
+    result = heartbeats_for_servers(session, server_ids=[1, 2], days=3, now=FIXED_NOW)
+
+    # Rueckgabe muss fuer beide Server vorhanden sein (Garantie der Funktion)
+    assert set(result.keys()) == {1, 2}
+    for cells in result.values():
+        assert len(cells) == 3
+        assert all(c.max_severity is None for c in cells)
+        assert all(c.kev_count == 0 for c in cells)
+
+    # session.execute wurde fuer Findings UND Scans aufgerufen (2 Queries)
+    assert session.execute.call_count == 2

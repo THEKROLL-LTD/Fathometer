@@ -7,13 +7,16 @@
    fuer Pre-Login-Routen (Setup, Login).
 
    Variablen-Vertrag (vom View, siehe `_sidebar_context.py`):
-     - `quick_stats`        : QuickStats | None
      - `sidebar_servers`    : list[Server] (mit eager-loaded tag_links/tag)
-     - `sidebar_heartbeats` : dict[int, list[DailyStatus]]
      - `available_tags`     : list[Tag]
      - `filter_tags`        : list[str]
      - `active_server_id`   : int | None
      - `theme`              : 'auto'|'light'|'dark' (Context-Processor)
+
+   Teure Aggregate (Heartbeats, Risk-Counts) sind im initialen Page-Render
+   NICHT verfuegbar — sie kommen via HTMX-Lazy-Load vom Polling-Endpoint
+   `/_partials/sidebar` (ADR-0030 Phase C). Das Template rendert stattdessen
+   ein Skeleton fuer diese Felder.
 
    Bei `hx_partial=True` rendern die Views nur das Detail-Pane-Fragment
    (sie extenden in dem Fall nicht `base_app.html`).

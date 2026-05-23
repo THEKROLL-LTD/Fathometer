@@ -68,7 +68,7 @@ from app.services.severity_history import (
     daily_severity_counts_for_server,
     severity_snapshots_for_server,
 )
-from app.services.trend import Tendency, compute_tendency
+from app.services.trend import Tendency, tendency_from_counts
 from app.settings_service import get_settings_row
 
 log = structlog.get_logger(__name__)
@@ -361,6 +361,37 @@ def _load_pending_grouping_counts(sess: Any, server_id: int) -> dict[str, int]:
     return {band: raw.get(band, 0) for band in _PENDING_BANDS}
 
 
+def _is_flat_mode(view_filter: FindingsViewFilter) -> bool:
+    """Spiegelt die Template-Conditional aus `_findings_section.html:122-133`.
+
+    Liefert True wenn die flache Tabelle (`_view_list.html`) gerendert wird,
+    False wenn die Group-Card-Ansicht (`_view_groups.html`) gerendert wird.
+
+    Phase B (ADR-0030 Befund 2): `list_findings` wird nur aufgerufen wenn
+    der Rueckgabewert True ist — im Group-Default-Pfad ist die flache Liste
+    nicht sichtbar und jeder `list_findings`-Call waere verworfen.
+
+    Exakte Kopie der Template-Logik:
+        _filters_active = (status != open OR class != both OR kev_only OR
+                           search OR risk_band OR action_required OR ag_id)
+        _sort_default = (sort == 'risk' AND dir == 'desc')
+        _force_flat   = request.args.get('flat') == '1'
+        flat_mode     = _force_flat OR _filters_active OR NOT _sort_default
+    """
+    _filters_active = (
+        view_filter.status != "open"
+        or view_filter.finding_class != "both"
+        or view_filter.kev_only
+        or bool(view_filter.search)
+        or view_filter.risk_band is not None
+        or view_filter.action_required is not None
+        or view_filter.application_group_id is not None
+    )
+    _sort_default = view_filter.sort == "risk" and view_filter.dir == "desc"
+    _force_flat = request.args.get("flat") == "1"
+    return _force_flat or _filters_active or not _sort_default
+
+
 def _render_findings_section(
     server: Server,
     view_filter: FindingsViewFilter,
@@ -376,24 +407,34 @@ def _render_findings_section(
     Group statt nach Risk-Band auf Finding-Ebene.
 
     Block Q (ADR-0025): es gibt nur noch einen Modus (die frueheren
-    `mode=group` und `mode=diff` sind ersatzlos entfallen). Der Helper
-    laedt unkonditional die flache Liste + Application-Groups +
-    Pending-Grouping-Sektion-Daten; das Template entscheidet via
-    `_filters_active`/`_force_flat`/`_sort_default` ob Group-Cards oder
-    flache Tabelle gerendert werden.
+    `mode=group` und `mode=diff` sind ersatzlos entfallen).
+
+    Phase B (ADR-0030 Befund 2): `list_findings` wird nur aufgerufen wenn
+    der Group-Default-Pfad NICHT aktiv ist (d.h. wenn der Flat-Pfad gerendert
+    wird). Im Group-Default-Pfad ist die flache Liste nicht sichtbar; der
+    `list_findings`-Call wuerde ~50 ms DB-Zeit plus N-Row-Hydration kosten
+    fuer Daten die vollstaendig verworfen werden. `total_findings` wird aus
+    `counts` abgeleitet (counts["open"]) statt aus `findings | length`.
     """
     sess = get_session()
     findings_filter = view_filter.to_findings_filter()
 
     counts = count_findings(sess, server.id, findings_filter)
 
-    findings_list = list_findings(
-        sess,
-        server.id,
-        findings_filter,
-        sort=view_filter.sort,
-        dir=view_filter.dir,
-    )
+    flat_mode = _is_flat_mode(view_filter)
+    if flat_mode:
+        findings_list = list_findings(
+            sess,
+            server.id,
+            findings_filter,
+            sort=view_filter.sort,
+            dir=view_filter.dir,
+        )
+    else:
+        # Group-Default-Pfad: flache Liste wird im Template nicht gerendert.
+        # Leere Liste in den Context — kein DB-Call.
+        findings_list = []
+
     # Block P: Group-Aufschluesselung — laeuft ergaenzend zur Listen-Query,
     # weil das Template (siehe `_findings_section.html`) die Groups als
     # primaere Render-Quelle nutzt und die flache Liste nur als
@@ -453,16 +494,18 @@ def show(server_id: int) -> Any:
     # `application_groups` leer und die Sektion bleibt unsichtbar.
     action_sections = _build_action_sections(section_ctx.get("application_groups", []))
 
-    # Block K (ADR-0018): Header-Stats und Trend-Daten aufsammeln. Alle
-    # Aggregations-Calls fuehren je 1 SELECT aus — der Detail-Render bleibt
-    # auch bei ~10k Findings unter den ADR-Zielwerten (siehe Performance-
-    # Bekannte-Limitation).
+    # Block K (ADR-0018): Header-Stats und Trend-Daten aufsammeln.
+    # Phase E (ADR-0030 Befund 3): SQL-Aggregation aktiviert — beide
+    # Aggregatoren laufen ohne vorgeladene `rows=`-Liste direkt gegen die DB.
+    # `_load_findings`-Python-Loop entfaellt; Postgres erledigt die
+    # Aggregation per `generate_series` + FILTER-Aggregate. Query-Count steigt
+    # um 2, CPU-Last sinkt drastisch (keine 1.4M-Python-Iterationen mehr).
     sess = get_session()
-    tendency: Tendency = compute_tendency(sess, server.id)
     sparklines: dict[str, list[int]] = severity_snapshots_for_server(sess, server.id, days=50)
     trend_data: list[DailySeverityCount] = daily_severity_counts_for_server(
         sess, server.id, days=50
     )
+    tendency: Tendency = tendency_from_counts(trend_data)
     kev_events_50d: int = count_kev_events_50d(sess, server.id)
     heartbeat_cells: list[DailyStatus] = heartbeats_for_servers(sess, [server.id], days=50)[
         server.id
@@ -707,8 +750,8 @@ def _load_host_snapshot(sess: Any, server_id: int) -> dict[str, Any]:
 def _quick_counts_for_server(sess: Any, server_id: int) -> dict[str, int]:
     """Liefert OPEN-Counts pro Severity + KEV + Total fuer die KPI-Kacheln.
 
-    Eine einzige aggregierte Query mit `FILTER (WHERE …)`-Clauses, analog zu
-    `quick_stats.get_quick_stats()` — aber Server-scoped statt Tag-gefiltert.
+    Eine einzige aggregierte Query mit `FILTER (WHERE …)`-Clauses,
+    Server-scoped (keine Tag-Filterung).
     """
     is_open = Finding.status == FindingStatus.OPEN
     stmt = select(

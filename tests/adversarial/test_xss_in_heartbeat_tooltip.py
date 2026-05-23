@@ -176,12 +176,18 @@ def test_heartbeat_cells_data_attributes_are_safe(db_app: Flask) -> None:
     """Heartbeat-Pillen tragen `data-day`, `data-severity`, `data-kev`,
     `data-had-scan` — alle Werte stammen aus ISO-Dates, Enum-Werten und
     ganzzahligen Counts. Wir verifizieren, dass kein Attribut einen
-    unescaped Quote enthaelt (Token-Sanity)."""
+    unescaped Quote enthaelt (Token-Sanity).
+
+    Phase C (ADR-0030): Heartbeat-Cells werden nicht mehr im initialen
+    Page-Render geliefert, sondern ausschliesslich vom Polling-Endpoint
+    `/_partials/sidebar`. Der Test prueft daher diesen Endpoint.
+    """
     create_admin_user(db_app)
     _create_xss_server(db_app, name="hb-data-srv")
     client = db_app.test_client()
     login(client)
-    body = client.get("/").get_data(as_text=True)
+    # Polling-Endpoint liefert die Heartbeat-Cells (Phase C, ADR-0030).
+    body = client.get("/_partials/sidebar").get_data(as_text=True)
 
     # Alle data-day-Werte folgen `YYYY-MM-DD`-Form.
     days = re.findall(r'data-day="([^"]*)"', body)

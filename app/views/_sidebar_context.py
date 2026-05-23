@@ -1,20 +1,25 @@
-"""Sidebar-Context-Builder fuer Block-I-View-Routes.
+"""Sidebar-Context-Builder fuer Block-I-View-Routes (Phase C, ADR-0030).
 
-Die Views aus Block D/E/F sollen bei vollem Request (kein HX-Request)
-zusammen mit ihrem Detail-Pane-Inhalt die Sidebar rendern. Damit das
-DRY bleibt, sammelt dieses Modul die Sidebar-Variablen einmal.
-
-Variablen-Vertrag (siehe `base_app.html`):
-  - quick_stats        : QuickStats
+Variablen-Vertrag — initialer Page-Render (Context-Processor-Pfad):
   - sidebar_servers    : list[Server]  (mit eager-loaded tag_links/tag)
-  - sidebar_heartbeats : dict[int, list[DailyStatus]]
   - available_tags     : list[Tag]
   - filter_tags        : list[str]
   - active_server_id   : int | None  (vom View gesetzt)
 
-Zusaetzlich stellt dieses Modul den HTMX-Polling-Endpoint
-`GET /_partials/sidebar` bereit (ADR-0019): dasselbe Sidebar-Markup
-ohne Page-Shell, das `base_app.html` per `hx-get` alle 10s nachzieht.
+Teure Aggregate (Heartbeats, Risk-Counts, Header-Counter) werden NICHT
+mehr im Context-Processor gebaut. Sie erscheinen ausschliesslich im
+Polling-Endpoint `GET /_partials/sidebar` (Phase C, ADR-0030 Befund 8):
+  - sidebar_heartbeats   : dict[int, list[DailyStatus]]
+  - sidebar_risk_counts  : dict[int, dict[str, int]]
+  - hosts_total          : int
+  - alarm_count          : int
+
+Das Template `sidebar/_server_list.html` rendert beim initialen Page-Load
+ein Skeleton fuer die teuren Felder. Der Polling-Endpoint ersetzt das
+Skeleton via HTMX `outerHTML`-Swap mit den echten Werten.
+
+Dieses Modul stellt ausserdem den HTMX-Polling-Endpoint
+`GET /_partials/sidebar` bereit (ADR-0019).
 """
 
 from __future__ import annotations
@@ -30,26 +35,26 @@ from sqlalchemy.orm import selectinload
 from app.db import get_session
 from app.models import Server, ServerTag, Tag
 from app.services.heartbeat_aggregation import heartbeats_for_servers
-from app.services.quick_stats import get_quick_stats
+from app.services.sidebar_risk_counts import escalate_act_counts_by_server
 
 
 def build_sidebar_context(
     filter_tags: list[str] | None = None,
-    days: int = 50,
-    now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Sammelt alle Variablen die `base_app.html` fuer die Sidebar braucht.
+    """Sammelt die **billigen** Variablen die `base_app.html` fuer die Sidebar braucht.
+
+    Liefert nur die Server-Liste (Namen, Tags, Lifecycle-Status) und die
+    verfuegbaren Filter-Tags — keine Heartbeats, keine Risk-Counts.
+    Diese teuren Aggregate kommen ausschliesslich vom Polling-Endpoint
+    `/_partials/sidebar` (ADR-0030 Phase C).
 
     Argumente:
       `filter_tags` — aktive Tag-Filter (OR), optional.
-      `days`        — Heartbeat-Fenster in Tagen (Default 50).
-      `now`         — Test-Zeitpunkt; sonst `datetime.now(UTC)`.
 
     Rueckgabe: dict mit den oben definierten Keys. `active_server_id`
     wird vom aufrufenden View selbst gesetzt.
     """
     sess = get_session()
-    current = now if now is not None else datetime.now(tz=UTC)
     tags = filter_tags or []
 
     server_stmt = (
@@ -61,18 +66,8 @@ def build_sidebar_context(
 
     available_tags = list(sess.execute(select(Tag).order_by(Tag.name)).scalars().all())
 
-    heartbeats = heartbeats_for_servers(
-        sess,
-        [srv.id for srv in servers],
-        days=days,
-        now=current,
-    )
-    quick_stats = get_quick_stats(sess, filter_tags=tags or None, now=current)
-
     return {
-        "quick_stats": quick_stats,
         "sidebar_servers": servers,
-        "sidebar_heartbeats": heartbeats,
         "available_tags": available_tags,
         "filter_tags": tags,
         "active_server_id": None,
@@ -94,12 +89,19 @@ sidebar_partials_bp = Blueprint("sidebar_partials", __name__)
 @sidebar_partials_bp.get("/_partials/sidebar")
 @login_required
 def sidebar_partial() -> Any:
-    """HTMX-Polling-Endpoint fuer die Sidebar-Server-Liste (ADR-0019).
+    """HTMX-Polling-Endpoint fuer die Sidebar-Server-Liste (ADR-0019, Phase C).
 
     Liefert ausschliesslich das `<ul id="server-list">`-Fragment ohne
     `<html>`/`<head>`/`<body>`-Shell. Wird von `base_app.html` per
-    `hx-get` alle 10 s (nur bei sichtbarem Tab) nachgezogen und ersetzt
-    sich selbst via `outerHTML`.
+    `hx-get` alle 60 s (nur bei sichtbarem Tab) nachgezogen und ersetzt
+    sich selbst via `outerHTML` (Cadence-Wechsel 10 s -> 60 s, ADR-0030
+    §Konsequenzen).
+
+    Dies ist der **einzige** Pfad der die teuren Aggregate baut:
+    - `sidebar_heartbeats`  — Findings + Scans, schmale Projektion (Befund 6).
+    - `sidebar_risk_counts` — ESCALATE/ACT-Counts pro Server (eine Query).
+    - `hosts_total`         — Anzahl Server (aus der ohnehin geladenen Liste).
+    - `alarm_count`         — Anzahl Server mit mind. 1 ESCALATE-Finding.
 
     Filter-Tags werden — analog zum Dashboard-Polling-Pane — aus dem
     Query-String (`?tag=...`) uebernommen, damit ein aktiver Tag-Filter
@@ -107,9 +109,25 @@ def sidebar_partial() -> Any:
     """
     filter_tags = request.args.getlist("tag") or None
     ctx = build_sidebar_context(filter_tags=filter_tags)
+
     active_id = request.args.get("active_server_id", type=int)
     if active_id is not None:
         ctx["active_server_id"] = active_id
+
+    sess = get_session()
+    server_ids = [srv.id for srv in ctx["sidebar_servers"]]
+
+    now = datetime.now(tz=UTC)
+    ctx["sidebar_heartbeats"] = heartbeats_for_servers(sess, server_ids, now=now)
+
+    risk_counts = escalate_act_counts_by_server(sess, server_ids)
+    ctx["sidebar_risk_counts"] = risk_counts
+
+    ctx["hosts_total"] = len(server_ids)
+    ctx["alarm_count"] = sum(
+        1 for sid in server_ids if risk_counts.get(sid, {}).get("escalate", 0) > 0
+    )
+
     return render_template("sidebar/_server_list.html", **ctx)
 
 

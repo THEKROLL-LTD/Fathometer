@@ -1,4 +1,4 @@
-{# Sidebar Heartbeat-Bar Partial (Block I, §7a Aufgabe 3).
+{# Sidebar Heartbeat-Bar Partial (Block I, §7a Aufgabe 3; Phase C ADR-0030).
 
    Erwartete Variablen:
      - `cells` : list[DailyStatus] — aelteste zuerst (Index 0) bis heute
@@ -7,6 +7,7 @@
                    - max_severity : Severity | None
                    - kev_count    : int
                    - had_scan     : bool
+                 Leer beim initialen Page-Render — Skeleton-Pfad wird gerendert.
 
    Severity-Farb-Mapping (Tailwind/DaisyUI-Klassen, §7a):
      - critical            -> bg-error
@@ -18,35 +19,53 @@
      - None + !had_scan    -> bg-base-300 (grau, kein Scan)
    `kev_count > 0` -> zusaetzlicher roter Ring + volle Opacity.
 
+   Skeleton-Pfad (Phase C, ADR-0030 Befund 8):
+     Wenn `cells` leer ist (Initial-Render), werden 50 Skeleton-Cells mit
+     `animate-pulse` gerendert. Identische Abmessungen (w-1 h-5) wie die
+     Live-Cells — Layout-Reflow beim Swap wird so vermieden.
+
    Tooltip via Alpine: hover startet 300ms-Delay-Timer, zeigt dann
    absoluten Tooltip rechts/oberhalb der Pille mit Datum, Severity, KEV
    und Scan-Status. Implementiert in `static/js/sidebar.js` via
    delegierten Listenern auf `#server-list`.
 #}
-<span class="heartbeat-bar inline-flex gap-px items-end"
-      role="img"
-      aria-label="Heartbeat letzte {{ cells | length }} Tage">
-  {% for cell in cells %}
-    {% set sev = cell.max_severity.value if cell.max_severity else '' %}
-    {% set kev = cell.kev_count %}
-    {% set scan = '1' if cell.had_scan else '0' %}
-    {% set cls = 'bg-base-300' %}
-    {% if sev == 'critical' %}{% set cls = 'bg-error' %}
-    {% elif sev == 'high' %}{% set cls = 'bg-warning' %}
-    {% elif sev == 'medium' %}{% set cls = 'bg-accent' %}
-    {% elif sev == 'low' %}{% set cls = 'bg-info' %}
-    {% elif sev == 'unknown' %}{% set cls = 'bg-base-content/40' %}
-    {% elif cell.had_scan %}{% set cls = 'bg-success/40' %}
-    {% endif %}
-    <span class="heartbeat-cell inline-block w-1 h-5 rounded-sm transition-opacity
-                 {{ cls }}
-                 {% if kev > 0 %}ring-1 ring-error{% endif %}
-                 {% if not cell.had_scan and not sev %}opacity-50{% endif %}"
-          data-day="{{ cell.day.isoformat() }}"
-          data-severity="{{ sev }}"
-          data-kev="{{ kev }}"
-          data-had-scan="{{ scan }}"
-          tabindex="0"
-          aria-label="{{ cell.day.isoformat() }}{% if sev %} max {{ sev }}{% endif %}{% if kev %} {{ kev }} KEV{% endif %}{% if not cell.had_scan %} kein Scan{% endif %}"></span>
-  {% endfor %}
-</span>
+{% if cells %}
+  <span class="heartbeat-bar inline-flex gap-px items-end"
+        role="img"
+        aria-label="Heartbeat letzte {{ cells | length }} Tage">
+    {% for cell in cells %}
+      {% set sev = cell.max_severity.value if cell.max_severity else '' %}
+      {% set kev = cell.kev_count %}
+      {% set scan = '1' if cell.had_scan else '0' %}
+      {% set cls = 'bg-base-300' %}
+      {% if sev == 'critical' %}{% set cls = 'bg-error' %}
+      {% elif sev == 'high' %}{% set cls = 'bg-warning' %}
+      {% elif sev == 'medium' %}{% set cls = 'bg-accent' %}
+      {% elif sev == 'low' %}{% set cls = 'bg-info' %}
+      {% elif sev == 'unknown' %}{% set cls = 'bg-base-content/40' %}
+      {% elif cell.had_scan %}{% set cls = 'bg-success/40' %}
+      {% endif %}
+      <span class="heartbeat-cell inline-block w-1 h-5 rounded-sm transition-opacity
+                   {{ cls }}
+                   {% if kev > 0 %}ring-1 ring-error{% endif %}
+                   {% if not cell.had_scan and not sev %}opacity-50{% endif %}"
+            data-day="{{ cell.day.isoformat() }}"
+            data-severity="{{ sev }}"
+            data-kev="{{ kev }}"
+            data-had-scan="{{ scan }}"
+            tabindex="0"
+            aria-label="{{ cell.day.isoformat() }}{% if sev %} max {{ sev }}{% endif %}{% if kev %} {{ kev }} KEV{% endif %}{% if not cell.had_scan %} kein Scan{% endif %}"></span>
+    {% endfor %}
+  </span>
+{% else %}
+  {# Skeleton-Pfad: 50 pulsierende Cells — identische Abmessungen wie Live-Cells
+     damit der Polling-Swap kein Layout-Reflow ausloest (Phase C, ADR-0030). #}
+  <span class="heartbeat-bar inline-flex gap-px items-end"
+        role="img"
+        aria-label="Heartbeat letzte 50 Tage (laedt)"
+        data-test="heartbeat-skeleton">
+    {% for _ in range(50) %}
+      <span class="inline-block w-1 h-5 bg-base-300 animate-pulse rounded-sm"></span>
+    {% endfor %}
+  </span>
+{% endif %}

@@ -12,7 +12,7 @@ zaehlt hier `acknowledged` **nicht** als "noch offen" — der Trend-Chart
 soll den Triage-Fortschritt zeigen. Acknowledged-Findings sind aus
 Operator-Sicht erledigt; nur OPEN ist offen.
 
-Drei Public Entry-Points:
+Vier Public Entry-Points:
 
 - `severity_snapshots_for_server()` — pro Severity (plus Pseudo-Key `"kev"`)
   eine Liste von Tag-Ende-OPEN-Counts. Speist die KPI-Sparklines.
@@ -23,21 +23,26 @@ Drei Public Entry-Points:
 - `count_kev_events_50d()` — Anzahl distincter Findings, die in den letzten
   50 Tagen entweder neu als KEV markiert oder neu mit `is_kev=True`
   ingestet wurden. Speist die Meta-Zeile in der Lebenszeichen-Sektion.
+- `daily_severity_counts_fleet()` — Flotten-weite Daily-OPEN-Counts fuer
+  die Dashboard-KPI-Sparklines.
 
-Performance-Profil: ein einziges SELECT laedt alle relevanten Findings,
-die Python-Aggregation rollt die 50 Tages-Buckets in O(F * D). Bei 10k
-Findings * 50 Tage = 500k Iterationen — unter 100 ms auf moderner Hardware,
-ohne Index-Spielereien.
+Performance-Profil (Phase E, ADR-0030 Befund 3):
+- Default-Pfad: eine SQL-Query mit `generate_series` + `COUNT(*) FILTER
+  (WHERE ...)` pro Tag-Bucket liefert die Aggregation direkt aus Postgres.
+  Erwartet < 50 ms fuer 10k Findings * 50 Tage vs. ~500k Python-Iterationen
+  im alten O(F * D)-Python-Loop.
+- Backward-Compat: `rows=`-Parameter (Phase B, ADR-0030 Befund 1) kanalisi-
+  ert vorgeladene Rows an den Python-Loop — bleibt erhalten fuer Tests und
+  fuer Aufrufer, die den Loader-Call bereits selbst gemacht haben.
 """
 
 from __future__ import annotations
 
-import bisect
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import Date, DateTime, bindparam, cast, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.models import Finding, Severity
@@ -209,6 +214,405 @@ def _load_findings(
 
 
 # ---------------------------------------------------------------------------
+# SQL-Aggregations-Helper (Phase E, ADR-0030 Befund 3)
+# ---------------------------------------------------------------------------
+
+# Interval-Literal fuer generate_series — sicheres Postgres-Literal, kein
+# User-Input. `text()` ist hier erlaubt weil kein externer Wert injiziert
+# wird (nur Konstanten).
+_INTERVAL_1_DAY = text("interval '1 day'")
+_INTERVAL_1_MICROSECOND = text("interval '1 microsecond'")
+
+
+def _eod_expr(d_col: object) -> object:
+    """SQL-Ausdruck fuer Tagesende (23:59:59.999999 UTC) eines Date-Ausdrucks.
+
+    Semantisch identisch zu `_end_of_day(d)` in Python:
+        d + interval '1 day' - interval '1 microsecond'
+
+    Postgres liefert TIMESTAMP; die Finding-Timestamp-Spalten sind
+    TIMESTAMP WITH TIME ZONE — der Vergleich ist korrekt solange die
+    DB-Timezone-Konfiguration stimmt (UTC-Only-Behoerden-Ansatz). Die
+    generate_series-Column ist naiv (kein TZ), daher casten wir explizit
+    nach TIMESTAMPTZ bevor wir mit TIMESTAMPTZ-Feldern vergleichen.
+    """
+    # cast to TIMESTAMPTZ (timezone=True) damit Postgres keine impliziten
+    # Konversionen macht.
+    return cast(d_col, DateTime(timezone=True)) + _INTERVAL_1_DAY - _INTERVAL_1_MICROSECOND
+
+
+def _build_server_daily_sql(
+    session: Session,
+    server_id: int,
+    *,
+    days: int,
+    now: datetime,
+) -> list[tuple[date, int, int, int, int, int]]:
+    """Eine SQL-Query liefert die Daily-Aggregation fuer einen Server.
+
+    Verwendet `generate_series` + `COUNT(*) FILTER (...)` pro Tag-Bucket.
+    Semantik der OPEN-Bedingung ist identisch zu `_is_open_at`:
+
+        first_seen_at <= end_of_day(T)
+        AND (acknowledged_at IS NULL OR acknowledged_at > end_of_day(T))
+        AND (resolved_at IS NULL OR resolved_at > end_of_day(T))
+
+    KEV-Events-Bucket: `kev_added_at::date == d` — identisch zur Python-
+    Implementierung in `_compute_daily_counts` (kev_events_per_day-Lookup).
+
+    Sicherheits-Constraint: `server_id` und `days` werden als gebundene
+    Parameter uebergeben (`:server_id`, `:days` via SQLAlchemy-Core-Bind).
+    Das `text()`-Literal fuer `interval '1 day'` enthaelt keinerlei User-Input.
+
+    Returns:
+        Liste von (day, critical, high, medium, low, kev_events) — aelteste
+        zuerst. `days` Zeilen (eine pro Tag) — Tage ohne Findings enthalten
+        0-Werte (LEFT JOIN + COALESCE im SELECT).
+    """
+    end_day = now.date()
+    start_day = end_day - timedelta(days=days - 1)
+
+    # generate_series liefert einen Date-Row pro Tag von start_day bis end_day.
+    # Wir joinen LEFT OUTER alle Findings des Servers die im Fenster noch
+    # offen gewesen sein koennen (grosszuegiger Vorfilter analog _load_findings).
+    # Dann COUNT(*) FILTER (...) pro Severity — Postgres rechnet das in einem
+    # einzigen Sequential Scan ab, ohne Python-Loop.
+    #
+    # `bindparam` ist der korrekte SQLAlchemy-2.x-Weg um Werte an eine
+    # generate_series-Inline-Funktion zu binden. Kein `text()` mit User-Input.
+    days_subq = select(
+        func.cast(
+            func.generate_series(
+                bindparam("srv_start_day", value=start_day, type_=Date),
+                bindparam("srv_end_day", value=end_day, type_=Date),
+                _INTERVAL_1_DAY,
+            ),
+            Date,
+        ).label("d")
+    ).subquery()
+
+    # Tagesende-Ausdruck fuer das Join-On und die FILTER-Klauseln.
+    eod = _eod_expr(days_subq.c.d)
+
+    # Vorfilter-Bedingungen auf Finding-Ebene (LEFT-JOIN-ON-Erweiterung
+    # im WHERE ist nicht moeglich; stattdessen: nur nicht-offensichtlich-
+    # erledigte Findings joinen via join condition).
+    window_start = _start_of_day(start_day)
+
+    stmt = (
+        select(
+            days_subq.c.d,
+            func.count()
+            .filter(
+                Finding.severity == Severity.CRITICAL,
+                Finding.first_seen_at <= eod,
+                or_(Finding.acknowledged_at.is_(None), Finding.acknowledged_at > eod),
+                or_(Finding.resolved_at.is_(None), Finding.resolved_at > eod),
+            )
+            .label("crit"),
+            func.count()
+            .filter(
+                Finding.severity == Severity.HIGH,
+                Finding.first_seen_at <= eod,
+                or_(Finding.acknowledged_at.is_(None), Finding.acknowledged_at > eod),
+                or_(Finding.resolved_at.is_(None), Finding.resolved_at > eod),
+            )
+            .label("high"),
+            func.count()
+            .filter(
+                Finding.severity == Severity.MEDIUM,
+                Finding.first_seen_at <= eod,
+                or_(Finding.acknowledged_at.is_(None), Finding.acknowledged_at > eod),
+                or_(Finding.resolved_at.is_(None), Finding.resolved_at > eod),
+            )
+            .label("medium"),
+            func.count()
+            .filter(
+                Finding.severity == Severity.LOW,
+                Finding.first_seen_at <= eod,
+                or_(Finding.acknowledged_at.is_(None), Finding.acknowledged_at > eod),
+                or_(Finding.resolved_at.is_(None), Finding.resolved_at > eod),
+            )
+            .label("low"),
+            # KEV-Event-Counter: Anzahl Findings deren kev_added_at::date == d.
+            # Semantisch identisch zu kev_events_per_day[d] in _compute_daily_counts.
+            func.count()
+            .filter(
+                Finding.kev_added_at.is_not(None),
+                func.cast(Finding.kev_added_at, Date) == days_subq.c.d,
+            )
+            .label("kev_events"),
+        )
+        .select_from(days_subq)
+        .outerjoin(
+            Finding,
+            (Finding.server_id == server_id)
+            & or_(
+                Finding.acknowledged_at.is_(None),
+                Finding.acknowledged_at >= window_start,
+            )
+            & or_(
+                Finding.resolved_at.is_(None),
+                Finding.resolved_at >= window_start,
+            ),
+        )
+        .group_by(days_subq.c.d)
+        .order_by(days_subq.c.d)
+    )
+
+    rows = session.execute(stmt).all()
+    return [
+        (
+            r.d if isinstance(r.d, date) else r.d.date(),
+            r.crit,
+            r.high,
+            r.medium,
+            r.low,
+            r.kev_events,
+        )
+        for r in rows
+    ]
+
+
+def _sql_rows_to_snapshots(
+    sql_rows: list[tuple[date, int, int, int, int, int]],
+    day_list: list[date],
+    session: Session,
+    server_id: int,
+) -> dict[str, list[int]]:
+    """Baut den Snapshots-Dict aus SQL-Aggregat-Rows.
+
+    Wir benoetigen fuer den `"kev"`-Bucket im Snapshot den OPEN-KEV-STAND
+    (nicht den KEV-Event-Counter). Die SQL-Query liefert keinen kumulativen
+    KEV-OPEN-Stand — wir holen den gezielt via separater Query oder rechnen
+    ihn aus den OPEN-Counts wenn wir `is_kev` in der SQL haben.
+
+    Loesung: wir ersetzen den kev-OPEN-Snapshot-Bucket durch eine separate
+    leichtgewichtige Query die nur den is_kev-Filter neben der normalen
+    OPEN-Bedingung hinzufuegt. Diese Query hat dieselbe Tagesraster-Logik
+    wie `_build_server_daily_sql`, ist aber auf den KEV-OPEN-Stand ausgelegt.
+
+    Diese Funktion wird nur durch `severity_snapshots_for_server` benutzt.
+    """
+    # Normale Severity-Buckets aus den Aggregat-Rows bauen.
+    by_day: dict[date, tuple[int, int, int, int, int]] = {}
+    for d, crit, high, medium, low, kev_events in sql_rows:
+        by_day[d] = (crit, high, medium, low, kev_events)
+
+    crit_list = [by_day.get(d, (0, 0, 0, 0, 0))[0] for d in day_list]
+    high_list = [by_day.get(d, (0, 0, 0, 0, 0))[1] for d in day_list]
+    medium_list = [by_day.get(d, (0, 0, 0, 0, 0))[2] for d in day_list]
+    low_list = [by_day.get(d, (0, 0, 0, 0, 0))[3] for d in day_list]
+
+    # KEV-OPEN-Bucket: separate SQL-Query mit is_kev-Filter.
+    kev_list = _build_kev_open_sql(session, server_id, day_list=day_list)
+
+    return {
+        "critical": crit_list,
+        "high": high_list,
+        "medium": medium_list,
+        "low": low_list,
+        "kev": kev_list,
+    }
+
+
+def _build_kev_open_sql(
+    session: Session,
+    server_id: int,
+    *,
+    day_list: list[date],
+) -> list[int]:
+    """OPEN-KEV-Stand pro Tag fuer den Sparkline-kev-Bucket.
+
+    Identisch zu `_build_server_daily_sql` aber mit `is_kev = True`-Filter
+    zusaetzlich zur OPEN-Bedingung. Ergebnis: pro Tag die Anzahl Findings
+    die an diesem Tag OPEN + is_kev waren.
+    """
+    if not day_list:
+        return []
+
+    start_day = day_list[0]
+    end_day = day_list[-1]
+    window_start = _start_of_day(start_day)
+
+    days_subq = select(
+        func.cast(
+            func.generate_series(
+                bindparam("kev_start_day", value=start_day, type_=Date),
+                bindparam("kev_end_day", value=end_day, type_=Date),
+                _INTERVAL_1_DAY,
+            ),
+            Date,
+        ).label("d")
+    ).subquery()
+
+    eod = _eod_expr(days_subq.c.d)
+
+    stmt = (
+        select(
+            days_subq.c.d,
+            func.count()
+            .filter(
+                Finding.is_kev.is_(True),
+                Finding.first_seen_at <= eod,
+                or_(Finding.acknowledged_at.is_(None), Finding.acknowledged_at > eod),
+                or_(Finding.resolved_at.is_(None), Finding.resolved_at > eod),
+            )
+            .label("kev_open"),
+        )
+        .select_from(days_subq)
+        .outerjoin(
+            Finding,
+            (Finding.server_id == server_id)
+            & or_(
+                Finding.acknowledged_at.is_(None),
+                Finding.acknowledged_at >= window_start,
+            )
+            & or_(
+                Finding.resolved_at.is_(None),
+                Finding.resolved_at >= window_start,
+            ),
+        )
+        .group_by(days_subq.c.d)
+        .order_by(days_subq.c.d)
+    )
+
+    rows = session.execute(stmt).all()
+    by_day: dict[date, int] = {}
+    for r in rows:
+        d = r.d if isinstance(r.d, date) else r.d.date()
+        by_day[d] = r.kev_open
+
+    return [by_day.get(d, 0) for d in day_list]
+
+
+def _build_fleet_daily_sql(
+    session: Session,
+    *,
+    days: int,
+    now: datetime,
+) -> dict[FleetSparklineKey, list[int]]:
+    """Fleet-weite Daily-OPEN-Counts via SQL-Aggregation (Phase E, ADR-0030).
+
+    Identisch zu `_build_server_daily_sql` aber ohne server_id-Filter —
+    zaehlt alle Findings flotten-weit. Buckets: total, kev, critical, high.
+
+    Returns:
+        Dict mit Keys `"total"`, `"kev"`, `"critical"`, `"high"`.
+        Jeder Wert ist eine Liste von `days` ints — aelteste zuerst.
+    """
+    end_day = now.date()
+    start_day = end_day - timedelta(days=days - 1)
+    day_list = _day_range(end_day, days)
+    window_start = _start_of_day(start_day)
+
+    days_subq = select(
+        func.cast(
+            func.generate_series(
+                bindparam("fleet_start_day", value=start_day, type_=Date),
+                bindparam("fleet_end_day", value=end_day, type_=Date),
+                _INTERVAL_1_DAY,
+            ),
+            Date,
+        ).label("d")
+    ).subquery()
+
+    eod = _eod_expr(days_subq.c.d)
+
+    stmt = (
+        select(
+            days_subq.c.d,
+            func.count()
+            .filter(
+                Finding.first_seen_at <= eod,
+                or_(Finding.acknowledged_at.is_(None), Finding.acknowledged_at > eod),
+                or_(Finding.resolved_at.is_(None), Finding.resolved_at > eod),
+            )
+            .label("total"),
+            func.count()
+            .filter(
+                Finding.is_kev.is_(True),
+                Finding.first_seen_at <= eod,
+                or_(Finding.acknowledged_at.is_(None), Finding.acknowledged_at > eod),
+                or_(Finding.resolved_at.is_(None), Finding.resolved_at > eod),
+            )
+            .label("kev"),
+            func.count()
+            .filter(
+                Finding.severity == Severity.CRITICAL,
+                Finding.first_seen_at <= eod,
+                or_(Finding.acknowledged_at.is_(None), Finding.acknowledged_at > eod),
+                or_(Finding.resolved_at.is_(None), Finding.resolved_at > eod),
+            )
+            .label("crit"),
+            func.count()
+            .filter(
+                Finding.severity == Severity.HIGH,
+                Finding.first_seen_at <= eod,
+                or_(Finding.acknowledged_at.is_(None), Finding.acknowledged_at > eod),
+                or_(Finding.resolved_at.is_(None), Finding.resolved_at > eod),
+            )
+            .label("high"),
+        )
+        .select_from(days_subq)
+        .outerjoin(
+            Finding,
+            or_(
+                Finding.acknowledged_at.is_(None),
+                Finding.acknowledged_at >= window_start,
+            )
+            & or_(
+                Finding.resolved_at.is_(None),
+                Finding.resolved_at >= window_start,
+            ),
+        )
+        .group_by(days_subq.c.d)
+        .order_by(days_subq.c.d)
+    )
+
+    sql_rows = session.execute(stmt).all()
+
+    by_day: dict[date, tuple[int, int, int, int]] = {}
+    for r in sql_rows:
+        d = r.d if isinstance(r.d, date) else r.d.date()
+        by_day[d] = (r.total, r.kev, r.crit, r.high)
+
+    return {
+        "total": [by_day.get(d, (0, 0, 0, 0))[0] for d in day_list],
+        "kev": [by_day.get(d, (0, 0, 0, 0))[1] for d in day_list],
+        "critical": [by_day.get(d, (0, 0, 0, 0))[2] for d in day_list],
+        "high": [by_day.get(d, (0, 0, 0, 0))[3] for d in day_list],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Public API #0: Shared Row-Loader fuer Aufrufer mit mehreren Aggregatoren
+# ---------------------------------------------------------------------------
+
+
+def load_findings_for_server(
+    session: Session,
+    server_id: int,
+    *,
+    days: int = 50,
+    now: datetime | None = None,
+) -> list[_FindingRow]:
+    """Laedt die Findings-Rows fuer das angegebene Fenster.
+
+    Thin Public-Wrapper um `_load_findings`, damit Aufrufer die die Rows
+    an mehrere Aggregatoren weiterreichen wollen (Phase B, ADR-0030) keinen
+    Underscore-Import benoetigen. Der Rueckgabetyp ist bewusst `list[_FindingRow]`
+    — ein Modul-privater Typ, der stabil als interne Schnittstelle gilt
+    (TICKET-004 Slice 3).
+    """
+    current = _resolve_now(now)
+    end_day = current.date()
+    start_day = end_day - timedelta(days=days - 1)
+    window_start = _start_of_day(start_day)
+    return _load_findings(session, server_id, window_start=window_start)
+
+
+# ---------------------------------------------------------------------------
 # Public API #1: Per-Severity-Sparkline-Daten
 # ---------------------------------------------------------------------------
 
@@ -248,8 +652,20 @@ def severity_snapshots_for_server(
     *,
     days: int = 50,
     now: datetime | None = None,
+    rows: list[_FindingRow] | None = None,
 ) -> dict[str, list[int]]:
     """Pro Severity (plus `"kev"`) eine Liste von `days` ints.
+
+    Args:
+        session: aktive SQLAlchemy-Session.
+        server_id: Ziel-Server.
+        days: Anzahl der Tage (Default 50).
+        now: optionaler "Jetzt"-Zeitstempel (fuer Tests).
+        rows: optionale vorgeladene Row-Liste (Phase B, ADR-0030). Wenn
+            gesetzt, wird der DB-Aufruf uebersprungen. Nützlich wenn der
+            Aufrufer bereits `_load_findings` aufgerufen hat, um den
+            redundanten Seq-Scan zu vermeiden. Rueckwaerts-kompatibel:
+            Bestands-Aufrufer ohne `rows=` verwenden den normalen Pfad.
 
     Returns:
         Ein Dict mit den Keys `"critical"`, `"high"`, `"medium"`, `"low"`
@@ -262,12 +678,15 @@ def severity_snapshots_for_server(
     """
     current = _resolve_now(now)
     end_day = current.date()
-    start_day = end_day - timedelta(days=days - 1)
-    window_start = _start_of_day(start_day)
     day_list = _day_range(end_day, days)
 
-    rows = _load_findings(session, server_id, window_start=window_start)
-    return _compute_snapshots(rows, day_list)
+    if rows is not None:
+        # Phase-B-Backward-Compat: vorgeladene Rows -> Python-Aggregator.
+        return _compute_snapshots(rows, day_list)
+
+    # Phase E (ADR-0030 Befund 3): Default-Pfad ist SQL-Aggregation.
+    sql_rows = _build_server_daily_sql(session, server_id, days=days, now=current)
+    return _sql_rows_to_snapshots(sql_rows, day_list, session, server_id)
 
 
 # ---------------------------------------------------------------------------
@@ -335,8 +754,18 @@ def daily_severity_counts_for_server(
     *,
     days: int = 50,
     now: datetime | None = None,
+    rows: list[_FindingRow] | None = None,
 ) -> list[DailySeverityCount]:
     """Pro Tag ein `DailySeverityCount`-Record (aelteste-zuerst).
+
+    Args:
+        session: aktive SQLAlchemy-Session.
+        server_id: Ziel-Server.
+        days: Anzahl der Tage (Default 50).
+        now: optionaler "Jetzt"-Zeitstempel (fuer Tests).
+        rows: optionale vorgeladene Row-Liste (Phase B, ADR-0030). Wenn
+            gesetzt, wird der DB-Aufruf uebersprungen. Rueckwaerts-kompatibel:
+            Bestands-Aufrufer ohne `rows=` verwenden den normalen Pfad.
 
     `kev` ist die Anzahl NEUER KEV-Ereignisse an dem Tag
     (`kev_added_at::date == day`) — Event-Counter fuer das KEV-Dot-Overlay
@@ -344,12 +773,18 @@ def daily_severity_counts_for_server(
     """
     current = _resolve_now(now)
     end_day = current.date()
-    start_day = end_day - timedelta(days=days - 1)
-    window_start = _start_of_day(start_day)
     day_list = _day_range(end_day, days)
 
-    rows = _load_findings(session, server_id, window_start=window_start)
-    return _compute_daily_counts(rows, day_list)
+    if rows is not None:
+        # Phase-B-Backward-Compat: vorgeladene Rows -> Python-Aggregator.
+        return _compute_daily_counts(rows, day_list)
+
+    # Phase E (ADR-0030 Befund 3): Default-Pfad ist SQL-Aggregation.
+    sql_rows = _build_server_daily_sql(session, server_id, days=days, now=current)
+    return [
+        DailySeverityCount(day=d, critical=crit, high=high, medium=med, low=low, kev=kev)
+        for d, crit, high, med, low, kev in sql_rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -423,113 +858,23 @@ def daily_severity_counts_fleet(
         kein NaN. ADR-0020 spezifiziert filter-unabhaengige Sparklines, daher
         kein Tag-/Severity-Filter-Parameter.
 
-    Performance: eine einzige Findings-Query, Python-side O(F * D)-Bucket-
-    Walk. Bei 50k Findings * 50 Tage = 2.5M Iterationen — unter 200 ms auf
-    moderner Hardware (Mini-Bench in `tests/services/test_severity_history_fleet.py`).
-    Re-Open-Trigger bei realer Drift siehe ADR-0020.
+    Performance (Phase E, ADR-0030 Befund 3): SQL-Aggregation mit
+    `generate_series` + `COUNT(*) FILTER (WHERE ...)` pro Tag-Bucket.
+    Erwartet < 100 ms fuer 50k Findings * 50 Tage vs. 2.5M Python-Iterationen
+    im alten Differenz-Array-Walk.
     """
     current = _resolve_now(now)
-    end_day = current.date()
-    start_day = end_day - timedelta(days=days - 1)
-    window_start = _start_of_day(start_day)
-    day_list = _day_range(end_day, days)
-
-    # Eine flache Findings-Query (kein server_id-Filter) — wir holen alle
-    # Findings die im Fenster offen gewesen sein KOENNTEN.
-    stmt = (
-        select(
-            Finding.severity,
-            Finding.first_seen_at,
-            Finding.acknowledged_at,
-            Finding.resolved_at,
-            Finding.is_kev,
-        )
-        .where(
-            or_(
-                Finding.acknowledged_at.is_(None),
-                Finding.acknowledged_at >= window_start,
-            )
-        )
-        .where(
-            or_(
-                Finding.resolved_at.is_(None),
-                Finding.resolved_at >= window_start,
-            )
-        )
-    )
-
-    # Tagesende-Liste vorrechnen — einmaliger UTC-`combine` pro Tag, dann
-    # binsearch auf datetime-Vergleichen.
-    eods: list[datetime] = [_end_of_day(d) for d in day_list]
-
-    # Differenz-Arrays: `arr[a] += 1, arr[b+1] -= 1` markiert das Inkrement-
-    # Range [a, b]; Prefix-Summe am Ende rekonstruiert die OPEN-Counts pro
-    # Tag. O(F) statt O(F * D-Span) — entscheidend fuer den 50k-Bench.
-    n = days + 1  # extra Slot fuer den "schliessenden" Decrement-Index.
-    d_total = [0] * n
-    d_kev = [0] * n
-    d_crit = [0] * n
-    d_high = [0] * n
-
-    for sev, first_seen, ack, res, is_kev in session.execute(stmt).all():
-        first_seen_utc = _as_utc(first_seen) if first_seen.tzinfo is None else first_seen
-        # `bisect_left(eods, first_seen)` liefert den ersten Index i mit
-        # eods[i] >= first_seen — genau der erste Tag, an dem das Finding
-        # `first_seen <= end_of_day(T)` erfuellt.
-        start_idx = bisect.bisect_left(eods, first_seen_utc)
-        if start_idx >= days:
-            continue
-        # End-Index analog zur naiven OPEN-Bedingung: closer > end_of_day(T)
-        # heisst der erste Tag mit closer <= eods[i] ist der erste *nicht*-
-        # OPEN-Tag. b+1 (Decrement-Position) ist genau dieser Index.
-        close_decr = days
-        if ack is not None:
-            ack_utc = _as_utc(ack) if ack.tzinfo is None else ack
-            close_decr = min(close_decr, bisect.bisect_left(eods, ack_utc))
-        if res is not None:
-            res_utc = _as_utc(res) if res.tzinfo is None else res
-            close_decr = min(close_decr, bisect.bisect_left(eods, res_utc))
-        if close_decr <= start_idx:
-            continue
-        d_total[start_idx] += 1
-        d_total[close_decr] -= 1
-        if is_kev:
-            d_kev[start_idx] += 1
-            d_kev[close_decr] -= 1
-        if sev is Severity.CRITICAL:
-            d_crit[start_idx] += 1
-            d_crit[close_decr] -= 1
-        elif sev is Severity.HIGH:
-            d_high[start_idx] += 1
-            d_high[close_decr] -= 1
-
-    # Prefix-Summe.
-    out: dict[FleetSparklineKey, list[int]] = {
-        "total": [0] * days,
-        "kev": [0] * days,
-        "critical": [0] * days,
-        "high": [0] * days,
-    }
-    accum_total = accum_kev = accum_crit = accum_high = 0
-    for i in range(days):
-        accum_total += d_total[i]
-        accum_kev += d_kev[i]
-        accum_crit += d_crit[i]
-        accum_high += d_high[i]
-        out["total"][i] = accum_total
-        out["kev"][i] = accum_kev
-        out["critical"][i] = accum_crit
-        out["high"][i] = accum_high
-
-    return out
+    return _build_fleet_daily_sql(session, days=days, now=current)
 
 
 __all__ = [
     "DailySeverityCount",
     "FleetSparklineKey",
+    "_FindingRow",
     "count_kev_events_50d",
     "daily_severity_counts_fleet",
     "daily_severity_counts_for_server",
+    "load_findings_for_server",
     "severity_snapshots_for_server",
 ]
 

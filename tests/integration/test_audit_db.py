@@ -180,7 +180,7 @@ def test_audit_filter_by_server_name_substring(db_app: Flask) -> None:
     resp = client.get("/audit/?server_name=prod-web")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    # Audit-Tabelle isolieren — Sidebar/QuickStats koennen IDs als
+    # Audit-Tabelle isolieren — Sidebar-Aggregate koennen IDs als
     # Aggregat-Counter rendern ("2 Server", `>2<`), das soll den Test
     # nicht stoeren. `data-test="audit-table"` markiert die Result-Tabelle.
     table_start = body.index('data-test="audit-table"')
@@ -214,8 +214,8 @@ def test_audit_filter_by_tag(db_app: Flask) -> None:
     resp = client.get("/audit/?tag=prod")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    # Audit-Tabelle isolieren — Sidebar-QuickStats koennen Aggregat-IDs
-    # `>2<` rendern, die nichts mit dem Tabellen-Inhalt zu tun haben.
+    # Audit-Tabelle isolieren — Sidebar-Aggregate koennen IDs als `>2<`
+    # rendern, die nichts mit dem Tabellen-Inhalt zu tun haben.
     table_start = body.index('data-test="audit-table"')
     table_end = body.index("</table>", table_start)
     table = body[table_start:table_end]

@@ -1,4 +1,4 @@
-"""Unit-Tests fuer `app.services.trend.compute_tendency` (Block K, ADR-0018).
+"""Unit-Tests fuer `app.services.trend` (Block K, ADR-0018, Phase B ADR-0030).
 
 Deckt:
   * Stabile Reihe -> STABLE.
@@ -7,6 +7,9 @@ Deckt:
   * Leere History -> STABLE (Default).
   * Schwelle-Grenzfaelle (knapp unter / knapp ueber +5%).
   * `Tendency.label` Lowercase-Format ("ueber 50 tage ...").
+
+Phase B (ADR-0030 Befund 1): neue Pure-Unit-Tests fuer `tendency_from_counts`.
+Die Pure-Funktion benoetigt weder Session noch DB und ist direkt testbar.
 """
 
 from __future__ import annotations

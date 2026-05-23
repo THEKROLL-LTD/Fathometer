@@ -4,6 +4,211 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block V: Performance-Tuning UI-Views (ADR-0030)
+
+Dashboard `/` und Server-Detail `/servers/<id>` rendern signifikant
+schneller. Sammel-ADR-0030 mit neun Befunden in fünf Phasen umgesetzt,
+Code-only (kein Schema-Touch, keine Alembic-Migration).
+
+Befunde + Maßnahmen:
+
+- **Befund 9 (Phase A) — Dead-Code-Entfernung:** `get_quick_stats` wurde
+  vom Dashboard-View und vom Sidebar-Context-Processor unkonditional
+  aufgerufen, aber im aktiven Template nirgendwo gerendert (Partial
+  `_quick_stats.html` ohne `{% include %}`-Aufrufer). Service und
+  Partial ersatzlos entfernt — vier redundante Findings-Queries pro
+  Request weg.
+- **Befund 1 (Phase B) — Server-Detail Trend-Aggregator-Redundanz:**
+  `compute_tendency` rief intern `daily_severity_counts_for_server`
+  auf, das wenige Zeilen später im View nochmal direkt geladen wurde;
+  `severity_snapshots_for_server` lud dieselbe Row-Liste ein drittes
+  Mal. Neue Pure-Funktion `tendency_from_counts(counts, …)` in
+  `app/services/trend.py` (delegiert von `compute_tendency`-Wrapper
+  aus); optionaler `rows=`-Parameter auf beiden Aggregatoren als
+  Stepping-Stone für Phase E.
+- **Befund 2 (Phase B) — `list_findings` unkonditional im
+  Group-Default-Pfad:** Helper `_is_flat_mode` spiegelt die
+  Template-Conditional aus `_findings_section.html:122-133` im
+  View-Code; `list_findings` läuft nur noch wenn die flache Liste
+  tatsächlich gerendert wird. Template `detail.html:Z.42` Eyebrow-
+  Counter auf `total_findings = counts.open if counts else (findings |
+  length)` umgestellt.
+- **Befund 5 (Phase D) — Dashboard-Findings-Aggregat-Konsolidierung:**
+  `_load_open_aggregates` 2 → 1 Query (FILTER-Aggregat liefert
+  Severity-/KEV-/Risk-Band-Buckets pro Server in einer Query),
+  `_load_risk_kpi_counters` 4 → 2 Queries (Findings-FILTER-Aggregat +
+  Active-Server-Count getrennt). `yes_servers` wird aus dem bereits
+  geladenen `_load_servers`-Result abgeleitet, statt per
+  Distinct-Count-JOIN — Filter auf aktive Server (`retired_at IS NULL
+  AND revoked_at IS NULL`) explizit erhalten, damit revoked Server mit
+  historischen OPEN-Findings nicht in den Yes-Counter mitlaufen.
+- **Befunde 4 + 6 + 7 + 8 (Phase C) — Sidebar-Lazy-HTMX-Load
+  (Sammel-Maßnahme):** Sidebar-Context-Processor liefert nur noch die
+  billigen Felder (Server-Liste, Tags, filter_tags);
+  `heartbeats_for_servers` auf schmale 7-Spalten-Projektion
+  (`_FindingRow`-NamedTuple) statt `select(Finding)` — ~30 MB
+  Hydrate-Ersparnis pro Call. Neuer Pure-Service
+  `app/services/sidebar_risk_counts.py::escalate_act_counts_by_server`
+  (eine GROUP-BY-Query auf `(server_id, risk_band)`). Polling-Endpoint
+  `/_partials/sidebar` ist jetzt die einzige Quelle der teuren
+  Aggregate (Heartbeats, Risk-Counts, Header-Counter). HTMX-Trigger
+  von `every 10s` auf `load, every 60s [document.visibilityState ===
+  'visible']` umgestellt — bewusste Spec-Änderung im Rahmen Phase C
+  (siehe ADR-0030 §Konsequenzen). Initialer Render zeigt
+  Skeleton-Markup (50 Heartbeat-Cells + ESCALATE/ACT-Spalten +
+  ALARM-Header-Count, alle mit `animate-pulse`-Klasse und identischen
+  Tailwind-Größenklassen wie die Live-Variante — kein Layout-Sprung
+  beim Swap). Server-Anzahl ist initial bereits echt (aus
+  `_load_servers`). Neue Sidebar-Datenfelder pro Server-Row: ESCALATE-
+  und ACT-Counts plus Header `HOSTS · ALARM`.
+- **Befund 3 (Phase E) — SQL-Trend-Aggregation:** Drei neue SQL-Helper
+  in `app/services/severity_history.py` mit `generate_series` +
+  `COUNT(*) FILTER (...)`: `_build_server_daily_sql`,
+  `_build_kev_open_sql`, `_build_fleet_daily_sql`.
+  `severity_snapshots_for_server` und `daily_severity_counts_for_server`
+  nutzen SQL als Default-Pfad — Phase-B-Python-Aggregator nur noch bei
+  `rows=`-Backward-Compat-Pfad. `daily_severity_counts_fleet`-
+  Differenz-Array-Walk ersatzlos durch SQL ersetzt.
+  Server-Detail-View `show()` ruft Aggregatoren ohne `rows=` →
+  SQL-Pfad aktiv im produktiven Render.
+
+### Added
+
+- **Neuer Service** `app/services/sidebar_risk_counts.py` mit
+  `escalate_act_counts_by_server(session, server_ids) ->
+  dict[int, dict[str, int]]` — pro Server die OPEN-Findings-Counts in
+  den Risk-Bands `escalate` und `act`, eine SQL-Query.
+- **Neue Public-Funktion** `tendency_from_counts(counts, *,
+  days_short=7, days_long=50, threshold=0.05) -> Tendency` in
+  `app/services/trend.py` (Pure-Funktion ohne Session-Argument).
+- **Neuer Public-Helper** `load_findings_for_server(session, server_id,
+  *, days=50, now=None) -> list[_FindingRow]` in
+  `app/services/severity_history.py` als dünner Wrapper um den
+  Underscore-prefixed `_load_findings`-Helper.
+- **Drei neue SQL-Helper** in `app/services/severity_history.py`:
+  `_build_server_daily_sql`, `_build_kev_open_sql`,
+  `_build_fleet_daily_sql` — alle mit `generate_series` + `COUNT(*)
+  FILTER (WHERE …)`-Aggregaten.
+- **Optionaler `rows=`-Parameter** (Keyword-only) auf
+  `severity_snapshots_for_server` und
+  `daily_severity_counts_for_server` — wenn gesetzt, überspringt die
+  Funktion den DB-Lade-Pfad und gibt direkt an den Pure-Aggregator
+  weiter.
+- **Drei neue Sidebar-Context-Keys** im Polling-Endpoint
+  `/_partials/sidebar`: `sidebar_risk_counts`, `hosts_total`,
+  `alarm_count`. Sidebar-Templates konsumieren sie für ESCALATE/ACT-
+  Spalten und Header-Counter; bei Initial-Render-Fallback greift
+  Skeleton-Markup.
+- **82 neue Pure-Unit-Tests** in 9 Files: `test_tendency_from_counts.py`
+  (7), `test_severity_history_sql.py` (11), `test_severity_history.py`
+  (+4 für `rows=`-Pfad), `test_server_detail.py` (+12 für
+  `_is_flat_mode`, Render-Conditional und SQL-Default-Aktivierung),
+  `test_dashboard_phase_d.py` (14), `test_sidebar_risk_counts.py` (7),
+  `test_heartbeat_aggregation.py` (+4 für schmale Projektion),
+  `test_sidebar_context.py` (8), `test_sidebar_partial.py` (15).
+
+### Changed
+
+- **`app/views/dashboard.py::_load_open_aggregates`** liefert jetzt ein
+  3-Tuple `(counts_by_server, kev_by_server, risk_bands_by_server)` —
+  eine FILTER-Aggregat-Query statt zwei separate GROUP-BYs.
+- **`app/views/dashboard.py::_load_risk_kpi_counters`** bekommt einen
+  dritten Parameter `active_server_ids: set[int]` und konsumiert
+  `risk_bands_by_server` aus `_load_open_aggregates`; `yes_servers`-
+  Ableitung jetzt in Python aus der bereits geladenen Server-Liste,
+  ohne separaten Distinct-Count-JOIN. Active-Server-Filter explizit
+  über das Set, damit revoked Server nicht miteinfliessen.
+- **`app/services/heartbeat_aggregation.py::heartbeats_for_servers`**
+  nutzt eine schmale 7-Spalten-Projektion via `_FindingRow`-NamedTuple
+  statt `select(Finding)`. Öffentliche Signatur (`dict[int,
+  list[DailyStatus]]`) unverändert.
+- **`app/services/trend.py::compute_tendency`** ist jetzt ein dünner
+  Wrapper: lädt Counts via `daily_severity_counts_for_server` und
+  delegiert an `tendency_from_counts`. Backward-Compat erhalten.
+- **`app/views/_sidebar_context.py::build_sidebar_context`** schrumpft
+  auf billig-only — kein `heartbeats_for_servers`-Call mehr, kein
+  `get_quick_stats` (Phase A). Polling-Endpoint `sidebar_partial`
+  übernimmt die teuren Aggregate.
+- **`app/views/server_detail.py::show`** ruft
+  `severity_snapshots_for_server` und
+  `daily_severity_counts_for_server` ohne `rows=`-Parameter auf —
+  SQL-Default-Pfad ist im produktiven View aktiv. Tendency wird aus
+  `trend_data` via `tendency_from_counts` abgeleitet,
+  `compute_tendency`-Call entfällt.
+- **`app/templates/sidebar/_server_list.html`** HTMX-Trigger
+  `load, every 60s [document.visibilityState === 'visible']` (vorher
+  `every 10s`). Header-Markup `HOSTS · ALARM` mit data-test-Attributen
+  für die zwei Counter.
+- **`app/templates/sidebar/_server_row.html`** zwei neue Spalten
+  ESCALATE/ACT mit Skeleton-Fallback (`animate-pulse`-Span bei `risk`
+  falsy, Live-Werte mit `text-error`/`text-warning`/`—`-Marker).
+- **`app/templates/sidebar/_heartbeat_bar.html`** mit `{% if cells %}`-
+  Guard; Else-Zweig rendert 50 Skeleton-Cells in identischer
+  Tailwind-Größenklasse wie die Live-Cells.
+- **`app/templates/servers/detail.html:Z.42`** Eyebrow-Counter
+  `{% set total_findings = counts.open if counts else (findings |
+  length) %}` — funktioniert auch wenn `findings` im
+  Group-Default-Pfad leer ist.
+- **`tests/adversarial/test_xss_in_heartbeat_tooltip.py`** auf
+  Polling-Endpoint `/_partials/sidebar` umgestellt (Heartbeat-Cells
+  kommen nicht mehr beim initialen Page-Render). XSS-Schutz-Eigenschaft
+  unverändert, anderer Render-Pfad.
+
+### Removed
+
+- **`app/services/quick_stats.py`** und
+  **`app/templates/sidebar/_quick_stats.html`** ersatzlos gelöscht
+  (Dead Code).
+- **Differenz-Array-Walk** in
+  `app/services/severity_history.py::daily_severity_counts_fleet`
+  durch SQL-Helper `_build_fleet_daily_sql` ersetzt.
+- **Doppelte Heartbeat-Buildung pro Page-Load** (Context-Processor +
+  Polling-Endpoint im selben Request) entfällt — Polling-Endpoint ist
+  jetzt einziger Build-Pfad.
+- **`load_findings_for_server`-Aufruf** in
+  `app/views/server_detail.py::show` (nach Phase-E-Aktivierung). Die
+  Funktion bleibt als Public-API in `app/services/severity_history.py`
+  erhalten (Backward-Compat).
+- **`tests/services/test_quick_stats.py`** und
+  **`tests/integration/test_quick_stats_db.py`** mit `quick_stats.py`
+  gelöscht.
+
+### Performance-Erwartung (DoD-0030 — User-Verifikation gegen k8s-DB ausstehend)
+
+ADR-0030 §Definition of Done listet folgende Wallclock-Ziele, die nur
+gegen eine echte Postgres-DB messbar sind (Pure-Unit kann das nicht
+abdecken):
+
+- `GET /` (Dashboard) Server-Zeit median **< 800 ms** (heute Wallclock
+  3.45 s, 2 Server / 18 537 Findings).
+- `GET /servers/<id>` Server-Zeit median **< 1.5 s** (heute Wallclock
+  7.88 s, 9 224 OPEN-Findings).
+- DB-Query-Count Dashboard **≤ 6**, Server-Detail **≤ 12**.
+- Trend-Sektion (Sparklines + Daily + Tendency) **< 100 ms**.
+- Sidebar zeigt echte Server-Namen ≤ 500 ms nach Page-Open;
+  Heartbeats + ESCALATE/ACT erscheinen ≤ 2 s danach via Skeleton-Swap.
+
+Operator-Verifikation post-Deploy: Pod-Restart `secscan-app`, `/`
+öffnen (Sidebar-Skeleton-Swap sichtbar), `/servers/<id>` für einen
+großen Server prüfen (TTFB spürbar schneller).
+
+### Bekannte Re-Open-Trigger (deferred, eigene ADRs/Tech-Debt)
+
+- **Timezone-Edge-Case in `generate_series`** — korrekt unter
+  UTC-Session-TZ (Standard-Setup), bei anderer DB-TZ Off-by-One an
+  Tagesgrenzen möglich. Aktuell akademisch.
+- **`test_severity_history_fleet.py`-Bench-Schranke** (heute
+  `< 200 ms`) — nach SQL-Pfad neu kalibrierbar (`< 50 ms` plausibel),
+  db_integration-Marker, nur auf User-Anweisung gefahren.
+- **„Weitere Performance-Aspekte" aus ADR-0030** (bewusst aus Scope
+  ausgeschlossen, eigene Folge-ADRs/Tech-Debt-Einträge sobald operativ
+  relevant): `/findings` Cross-Server-Liste, Worker-Lese-Pfade,
+  `_load_action_required_counts`/`_quick_counts_for_server`-
+  Konsolidierung im Server-Detail-Header, Render-Time-Instrumentierung,
+  DB-Pool-Sizing-Review, abgebrochener Sidebar-Request
+  `NS_BINDING_ABORTED` (HTMX-Race-Analyse), `stale_servers`-Counter
+  wenn er später wieder gebraucht wird.
+
 ## [Unreleased] — v0.12.0: Scan-Ingest immer Async (Cutover-Abschluss Block R)
 
 Das in ADR-0026 / Block R Phase H als Cutover-Schutz eingefuehrte

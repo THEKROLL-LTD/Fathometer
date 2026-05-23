@@ -35,6 +35,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0027](0027-no-per-finding-risk-band-audit.md) | Keine per-Finding-`risk_band`-Audit-Events | Akzeptiert |
 | [0028](0028-application-group-evaluations-junction.md) | Application-Group-Evaluations als Junction-Tabelle (Block T) | Akzeptiert |
 | [0029](0029-parallel-llm-worker-concurrency.md) | Parallele LLM-Job-Verarbeitung im Worker (Single-Worker, In-Process-Concurrency, Block U) | Akzeptiert |
+| [0030](0030-server-detail-performance.md) | Performance-Tuning UI-Views (Dashboard + Server-Detail + Sidebar-Lazy-Load, Block V) | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

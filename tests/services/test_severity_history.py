@@ -7,11 +7,17 @@ sind die Range-/Lifecycle-/KEV-Tests DB-frei ausfuehrbar.
 
 DB-backed Smokes fuer `_load_findings` und das Round-Trip-Verhalten der
 public Wrapper liegen in `tests/integration/test_severity_history_db.py`.
+
+Phase B (ADR-0030 Befund 1): neue Tests fuer den `rows=`-Parameter der
+Public-Wrapper (`severity_snapshots_for_server`, `daily_severity_counts_for_server`).
+Die Tests verifizieren, dass vorgeladene Rows identische Ergebnisse liefern
+wie der direkte Pure-Aggregations-Pfad — ohne Session/DB.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from unittest.mock import MagicMock
 
 from app.models import Severity
 from app.services.severity_history import (
@@ -19,6 +25,8 @@ from app.services.severity_history import (
     _compute_daily_counts,
     _compute_snapshots,
     _FindingRow,
+    daily_severity_counts_for_server,
+    severity_snapshots_for_server,
 )
 
 FIXED_NOW = datetime(2026, 5, 15, 12, 0, 0, tzinfo=UTC)
@@ -239,3 +247,150 @@ def test_daily_counts_kev_event_outside_window_ignored() -> None:
     out = _compute_daily_counts(rows, _day_list(FIXED_NOW.date(), 50))
     for d in out:
         assert d.kev == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase B (ADR-0030 Befund 1): rows=-Parameter fuer die Public-Wrapper
+# ---------------------------------------------------------------------------
+
+
+def test_severity_snapshots_with_preloaded_rows_matches_pure_aggregation() -> None:
+    """severity_snapshots_for_server mit rows= liefert identisches Ergebnis
+    wie der direkte Pure-Aggregations-Pfad (_compute_snapshots) —
+    kein Session-Call bei vorgeladenen Rows.
+
+    DoD-B-Beweis: wenn rows= gesetzt ist, wird _load_findings nicht aufgerufen
+    (kein session.execute-Aufruf). Der Mock-Session darf niemals aufgerufen
+    werden — sonst schlaegt MagicMock mit einem unerwarteten Call an.
+    """
+    fseen = FIXED_NOW - timedelta(days=10)
+    rows = [
+        _row(severity=Severity.HIGH, first_seen_at=fseen),
+        _row(severity=Severity.CRITICAL, first_seen_at=fseen, is_kev=True),
+    ]
+    day_list = _day_list(FIXED_NOW.date(), 50)
+
+    # Erwartetes Ergebnis direkt via Pure-Helper berechnen (DB-frei).
+    expected = _compute_snapshots(rows, day_list)
+
+    # Mock-Session darf nicht aufgerufen werden wenn rows= gesetzt ist.
+    mock_session = MagicMock()
+    mock_session.execute.side_effect = AssertionError(
+        "_load_findings wurde aufgerufen obwohl rows= gesetzt war"
+    )
+
+    result = severity_snapshots_for_server(
+        mock_session,
+        server_id=42,
+        days=50,
+        now=FIXED_NOW,
+        rows=rows,
+    )
+
+    assert result == expected, "rows=-Pfad liefert anderes Ergebnis als Pure-Aggregation"
+
+
+def test_daily_severity_counts_with_preloaded_rows_matches_pure_aggregation() -> None:
+    """daily_severity_counts_for_server mit rows= liefert identisches Ergebnis
+    wie der direkte Pure-Aggregations-Pfad (_compute_daily_counts) —
+    kein Session-Call bei vorgeladenen Rows.
+
+    DoD-B-Beweis: wenn rows= gesetzt ist, wird _load_findings nicht aufgerufen.
+    """
+    fseen = FIXED_NOW - timedelta(days=20)
+    kev_at = FIXED_NOW - timedelta(days=10)
+    rows = [
+        _row(severity=Severity.CRITICAL, first_seen_at=fseen),
+        _row(
+            severity=Severity.HIGH,
+            first_seen_at=fseen,
+            is_kev=True,
+            kev_added_at=kev_at,
+        ),
+        _row(
+            severity=Severity.MEDIUM,
+            first_seen_at=fseen,
+            resolved_at=FIXED_NOW - timedelta(days=5),
+        ),
+    ]
+    day_list = _day_list(FIXED_NOW.date(), 50)
+
+    # Erwartetes Ergebnis direkt via Pure-Helper berechnen (DB-frei).
+    expected = _compute_daily_counts(rows, day_list)
+
+    # Mock-Session darf nicht aufgerufen werden wenn rows= gesetzt ist.
+    mock_session = MagicMock()
+    mock_session.execute.side_effect = AssertionError(
+        "_load_findings wurde aufgerufen obwohl rows= gesetzt war"
+    )
+
+    result = daily_severity_counts_for_server(
+        mock_session,
+        server_id=42,
+        days=50,
+        now=FIXED_NOW,
+        rows=rows,
+    )
+
+    assert result == expected, "rows=-Pfad liefert anderes Ergebnis als Pure-Aggregation"
+
+
+def test_severity_snapshots_without_rows_calls_session() -> None:
+    """Ohne rows= wird die Session aufgerufen (normaler DB-Pfad bleibt erhalten).
+
+    Backward-Compat: Bestands-Aufrufer ohne rows=-Parameter funktionieren
+    unveraendert.
+    """
+    mock_session = MagicMock()
+    # session.execute(...).all() muss eine leere Liste zurueckliefern.
+    mock_session.execute.return_value.all.return_value = []
+
+    result = severity_snapshots_for_server(
+        mock_session,
+        server_id=99,
+        days=50,
+        now=FIXED_NOW,
+        # rows= nicht gesetzt -> normaler Pfad
+    )
+
+    # Session muss aufgerufen worden sein.
+    assert mock_session.execute.called, "Session-Aufruf erwartet ohne rows="
+    # Ergebnis ist korrekt strukturiert (leere Rows -> alle Nullen).
+    assert set(result.keys()) == {"critical", "high", "medium", "low", "kev"}
+    for v in result.values():
+        assert all(x == 0 for x in v)
+
+
+def test_daily_counts_without_rows_calls_session() -> None:
+    """Ohne rows= wird die Session aufgerufen (SQL-Pfad, Phase E ADR-0030).
+
+    Phase-E-Update: der Default-Pfad ist jetzt der SQL-Aggregations-Pfad.
+    Die Mock-Session simuliert eine SQL-Query die pro Tag einen Row liefert.
+    Korrekte Semantik: session.execute muss aufgerufen werden; das Ergebnis
+    enthaelt genau so viele Records wie SQL-Rows zurueckkommen (bei echter
+    Postgres-generate_series immer `days` Rows, hier 1 Zeile als Smoke).
+    """
+    # Simuliere einen Row wie SQLAlchemy ihn zurueckgibt (benannte Attribute).
+    mock_row = MagicMock()
+    mock_row.d = FIXED_NOW.date()
+    mock_row.crit = 0
+    mock_row.high = 0
+    mock_row.medium = 0
+    mock_row.low = 0
+    mock_row.kev_events = 0
+
+    mock_session = MagicMock()
+    mock_session.execute.return_value.all.return_value = [mock_row]
+
+    result = daily_severity_counts_for_server(
+        mock_session,
+        server_id=99,
+        days=50,
+        now=FIXED_NOW,
+    )
+
+    # Session muss aufgerufen worden sein (SQL-Pfad aktiv).
+    assert mock_session.execute.called, "Session-Aufruf erwartet ohne rows="
+    # Ein SQL-Row -> ein DailySeverityCount.
+    assert len(result) == 1
+    assert all(isinstance(d, DailySeverityCount) for d in result)

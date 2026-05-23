@@ -404,7 +404,12 @@ def create_app() -> Flask:
 
     @app.context_processor
     def _inject_sidebar_context() -> dict[str, Any]:
-        """Sidebar-Variablen fuer `base_app.html` (Block I).
+        """Billige Sidebar-Variablen fuer `base_app.html` (Phase C, ADR-0030).
+
+        Liefert nur die Server-Liste (Namen, Tags, Lifecycle-Status) und
+        die Filter-Tags — keine Heartbeats, keine Risk-Counts. Diese teuren
+        Aggregate kommen ausschliesslich vom Polling-Endpoint `/_partials/sidebar`
+        und werden im initialen Page-Render als Skeleton dargestellt.
 
         Wird nur fuer authentifizierte, nicht-HX-Requests gebaut — bei
         HTMX-Fragmenten extenden Templates `_partial_shell.html` und
@@ -412,9 +417,9 @@ def create_app() -> Flask:
         leerer dict, das Template faellt auf seine `or []`/`or {}`-
         Defaults zurueck.
 
-        View-Kontext hat Vorrang vor Context-Processor (Flask-Default),
-        d.h. `server_detail.show` kann `active_server_id` und Dashboard
-        kann `quick_stats`/`available_tags` weiterhin selbst setzen.
+        Variablen-Vertrag: `sidebar_servers`, `available_tags`, `filter_tags`,
+        `active_server_id`. Kein `sidebar_heartbeats` mehr — der liegt
+        ausschliesslich im Polling-Endpoint-Kontext.
         """
         # API-Endpoints und HTMX-Fragmente brauchen keinen Sidebar-Build.
         if request.headers.get("HX-Request") == "true":

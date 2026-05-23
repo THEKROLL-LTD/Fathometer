@@ -28,7 +28,7 @@ from enum import StrEnum
 
 from sqlalchemy.orm import Session
 
-from app.services.severity_history import daily_severity_counts_for_server
+from app.services.severity_history import DailySeverityCount, daily_severity_counts_for_server
 
 
 class Tendency(StrEnum):
@@ -53,30 +53,29 @@ class Tendency(StrEnum):
         }[self]
 
 
-def compute_tendency(
-    session: Session,
-    server_id: int,
+def tendency_from_counts(
+    counts: list[DailySeverityCount],
     *,
     days_short: int = 7,
     days_long: int = 50,
     threshold: float = 0.05,
-    now: datetime | None = None,
 ) -> Tendency:
-    """Berechnet die Tendenz fuer einen Server.
+    """Berechnet die Tendenz aus einer bereits berechneten Counts-Liste.
+
+    Pure-Funktion ohne Session-Abhaengigkeit. Empfohlene Schnittstelle fuer
+    Aufrufer, die bereits `daily_severity_counts_for_server` aufgerufen haben
+    (Phase B, ADR-0030 Befund 1) — vermeidet doppelten DB-Call.
 
     Args:
-        session: aktive SQLAlchemy-Session.
-        server_id: Ziel-Server.
-        days_short: Kurzfenster (Default 7 Tage).
-        days_long: Langfenster (Default 50 Tage).
+        counts: Ergebnis von `daily_severity_counts_for_server`. Leere Liste
+            liefert STABLE als Default.
+        days_short: Kurzfenster fuer den avg-Short-Vergleich (Default 7).
+        days_long: Langfenster; sollte `len(counts)` entsprechen (Default 50).
         threshold: Schwelle fuer signifikante Aenderung (Default 5%).
-        now: optionaler "Jetzt"-Zeitstempel (fuer Tests).
 
     Returns:
         `Tendency.STABLE` bei leerer History oder Differenz < threshold.
     """
-    counts = daily_severity_counts_for_server(session, server_id, days=days_long, now=now)
-
     if not counts:
         return Tendency.STABLE
 
@@ -105,4 +104,37 @@ def compute_tendency(
     return Tendency.STABLE
 
 
-__all__ = ["Tendency", "compute_tendency"]
+def compute_tendency(
+    session: Session,
+    server_id: int,
+    *,
+    days_short: int = 7,
+    days_long: int = 50,
+    threshold: float = 0.05,
+    now: datetime | None = None,
+) -> Tendency:
+    """Duenner Wrapper um `tendency_from_counts` fuer Bestands-Aufrufer.
+
+    Laedt die Counts via `daily_severity_counts_for_server` und delegiert
+    die Berechnung an die Pure-Funktion `tendency_from_counts`. Neuer Code
+    der bereits Counts hat sollte `tendency_from_counts` direkt aufrufen
+    (Phase B, ADR-0030 Befund 1).
+
+    Args:
+        session: aktive SQLAlchemy-Session.
+        server_id: Ziel-Server.
+        days_short: Kurzfenster (Default 7 Tage).
+        days_long: Langfenster (Default 50 Tage).
+        threshold: Schwelle fuer signifikante Aenderung (Default 5%).
+        now: optionaler "Jetzt"-Zeitstempel (fuer Tests).
+
+    Returns:
+        `Tendency.STABLE` bei leerer History oder Differenz < threshold.
+    """
+    counts = daily_severity_counts_for_server(session, server_id, days=days_long, now=now)
+    return tendency_from_counts(
+        counts, days_short=days_short, days_long=days_long, threshold=threshold
+    )
+
+
+__all__ = ["Tendency", "compute_tendency", "tendency_from_counts"]

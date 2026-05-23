@@ -1,13 +1,20 @@
-{# Sidebar Server-Listenzeile (Block I, §7a Aufgabe 4).
+{# Sidebar Server-Listenzeile (Block I, §7a Aufgabe 4; Phase C ADR-0030).
 
-   Erwartete Variablen (per `{% with %}` aus base_app.html):
+   Erwartete Variablen (per `{% with %}` aus `_server_list.html`):
      - `server`    : Server — ORM-Objekt mit eager-loaded tag_links.
      - `cells`     : list[DailyStatus] — Heartbeat-Daten aelteste-zuerst.
+                     Leer beim initialen Page-Render (Skeleton-Pfad).
+     - `risk`      : dict[str, int] — {'escalate': n, 'act': m} vom Polling-
+                     Endpoint. Leeres Dict beim initialen Page-Render (Skeleton).
      - `is_active` : bool — `True` wenn diese Zeile aktuell im Detail-Pane.
 
-   Density-Layout (§7a):
-     [Status-Pill] [Name + Tags (mono)] ... [Heartbeat-Bar 50 Tage]
+   Density-Layout (§7a, Phase C):
+     [Status-Pill] [Name + Tags (mono)] [ESCALATE] [ACT] ... [Heartbeat-Bar 50 Tage]
    Eine Zeile = ~36px hoch. 10+ Zeilen passen in einen 1080p-Viewport.
+
+   ESCALATE/ACT-Spalten zeigen beim initialen Render ein Skeleton (animate-pulse).
+   Beim Polling-Swap erscheinen die echten Zahlen — identische DOM-Struktur
+   damit der Swap kein Layout-Reflow ausloest.
 
    Click-Verhalten: das ganze `<li>` ist der HTMX-Trigger. Wir setzen
    `hx-trigger="click"` und `hx-get` auf das `<a>` als sichtbaren Anker,
@@ -69,6 +76,37 @@
       </div>
     {% endif %}
   </a>
+
+  {# Phase C (ADR-0030): ESCALATE-Spalte — Skeleton beim initialen Render,
+     Live-Zahl nach dem Polling-Swap. `risk` ist {} beim Initial-Render. #}
+  <span class="shrink-0 w-8 text-right font-mono text-xs tabular-nums"
+        data-test="sidebar-row-escalate-{{ server.id }}">
+    {% if risk %}
+      {% if risk.get('escalate', 0) > 0 %}
+        <span class="text-error">{{ risk['escalate'] }}</span>
+      {% else %}
+        <span class="opacity-30">—</span>
+      {% endif %}
+    {% else %}
+      <span class="inline-block w-4 h-3 bg-base-300 animate-pulse rounded-sm align-middle"
+            aria-label="escalate count loading"></span>
+    {% endif %}
+  </span>
+
+  {# Phase C (ADR-0030): ACT-Spalte — Skeleton beim initialen Render. #}
+  <span class="shrink-0 w-8 text-right font-mono text-xs tabular-nums"
+        data-test="sidebar-row-act-{{ server.id }}">
+    {% if risk %}
+      {% if risk.get('act', 0) > 0 %}
+        <span class="text-warning">{{ risk['act'] }}</span>
+      {% else %}
+        <span class="opacity-30">—</span>
+      {% endif %}
+    {% else %}
+      <span class="inline-block w-4 h-3 bg-base-300 animate-pulse rounded-sm align-middle"
+            aria-label="act count loading"></span>
+    {% endif %}
+  </span>
 
   {# Block N (ADR-0021): Outdated-Marker. Sichtbar wenn Agent, Trivy oder
      Trivy-DB veraltet sind — der Operator sieht in der Sidebar sofort, dass
