@@ -1,6 +1,91 @@
-# ADR-0032 — Frontend-Build-Toolchain: Plain CSS + esbuild, kein Tailwind/DaisyUI im neuen Design
+# ADR-0032 — Frontend-Build-Toolchain: Plain CSS + esbuild, kein Tailwind/DaisyUI
 
-**Status:** Akzeptiert · **Datum:** 2026-05-23 · **Block:** W — Redesign Phase 1
+**Status:** Akzeptiert (Addendum 2026-05-23 — Phase 2 vorgezogen) · **Datum:** 2026-05-23 · **Block:** W — Redesign Phase 1
+
+## Addendum 2026-05-23 — Tailwind+DaisyUI komplett raus (Phase 2 vorgezogen)
+
+Wenige Stunden nach dem ursprünglichen Block-W-Abschluss zeigte die
+Browser-Verifikation am Dual-Stack-Modell zwei Klassen von Cascade-
+Konflikten zwischen Plain-CSS und Tailwind/DaisyUI-CDN, die sich nicht
+mit einem einfachen Selektor-Boost beheben lassen:
+
+1. **DaisyUI definiert eigene Klassen die identische Namen mit unseren
+   Plain-CSS-Komponenten haben** (`.footer`, `.stats`, `.stat`, `.toast`,
+   `.alert`, `.card`, `.menu`, `.btn`, `.input`, `.label`). DaisyUI nutzt
+   in v4 zwar `@layer components`, aber wenn die CDN-File ohne Layer-
+   Wrapper ausgeliefert wird oder die Layer-Reihenfolge nicht stimmt,
+   kollidieren Selektoren bei gleicher Specificity nach Source-Order.
+2. **Tailwind-`forms`-Plugin styled Input-Elemente per Attribute-Selektor
+   `[type='text']`/`[type='password']` mit eigenem `background-color: #fff`
+   und `border-color: #2563eb` auf Focus**. Selber Specificity-Level wie
+   `.auth__input`, Source-Order entscheidet → CDN-injected CSS gewinnt.
+
+Beide Konflikte sind nur über Specificity-Boosts (`.parent .child`),
+`!important`-Salat oder `@layer`-Wrapping zu lösen — alle drei Optionen
+machen die Plain-CSS-Komponenten unleserlich und erhöhen die Pflege-Last.
+
+**Entscheidung:** Phase 2 wird vorgezogen. Tailwind-CDN-Script-Tag und
+DaisyUI-CDN-Link-Tag sind komplett aus `base.html` und `base_app.html`
+entfernt. `window.tailwind.config`-Safelist-Script ist weg. TD-010 ist
+erledigt. ADR-0001 ist final auf „Superseded by ADR-0032" gesetzt.
+
+**Trade-off — Legacy-Shim für die noch nicht redesigneten Templates:**
+
+Settings, Server-Detail, Findings, Audit, Setup-Wizard, Chat, Dashboard-
+`_card.html`, `_partials/*`, `_empty/*` nutzen heute ~150 Tailwind-/
+DaisyUI-Klassen in ihrem Markup. Ein vollständiges Template-Re-Design
+würde mehrere Phasen brauchen. Statt zu warten liefert
+`frontend/src/css/components/legacy-shim.css` eine Minimal-CSS-Schicht
+die diese Klassen mit „benutzbar, nicht hübsch"-Defaults belegt:
+
+- Tailwind-Utility-Klassen (`.flex`, `.items-center`, `.gap-2`, `.p-4`,
+  `.text-sm`, `.bg-base-100`, …) bekommen die selben Werte wie Tailwind-
+  Defaults (rem-Skala, 0.25rem-Step).
+- DaisyUI-Component-Klassen (`.btn`, `.card`, `.alert`, `.input`, `.modal`,
+  `.toast`, `.badge`, `.menu`, `.tabs`, `.table`, `.loading`, `.tooltip`,
+  weitere) bekommen Minimal-Styles auf Basis der Fathometer-Design-Tokens
+  (Surface-Layering, Text-Stufen, Accent, Status-Restricted).
+- Keine Animationen, kein Border-Radius > 4 px (Doctrine aus ADR-0033 §5),
+  keine Schatten-Hierarchie (Doctrine-Verbotsliste).
+
+Wenn ein zukünftiger Block (z. B. Server-Detail-Redesign) eine Surface
+anfasst, wandert das spezifische Styling in eine eigene Komponenten-CSS-
+Datei (`frontend/src/css/components/<surface>.css`) und die Klassen-
+Strings im Template wechseln auf BEM-Plain-CSS. Der Shim schrumpft dann
+schrittweise — am Ende der Re-Design-Welle kann `legacy-shim.css`
+gelöscht werden.
+
+**Bundle-Größe:** App-CSS wuchs von ~26 KB auf ~41 KB un-gzipped
+(+15 KB Shim, ~5 KB gzipped). Immer noch deutlich unter dem alten
+Dual-Stack (Tailwind-CDN ~50 KB JIT-generiert + DaisyUI-CDN ~200 KB
+unkomprimiert). Netto-Performance besser.
+
+**JS-Bundle:** Alpine.js + HTMX kommen jetzt ausschließlich aus
+`vendor.js` (esbuild-Bundle). CDN-Scripts sind weg. Lade-Reihenfolge:
+App-eigene `window.*`-Factory-Scripts (`bulk_ack.js`, `stale.js`,
+`sidebar.js`, …) vor `vendor.js` — Pattern unverändert, nur die
+Alpine-/HTMX-Marker im Script-Load-Order-Test wechseln von der
+CDN-URL auf den `js/vendor.js`-Bundle-Namen.
+
+**Entfernt (Cleanup):**
+
+- `<script src="https://cdn.tailwindcss.com/3.4.16?plugins=forms,typography">` aus base.html + base_app.html
+- `<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css">` aus base.html + base_app.html
+- `<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.7/dist/cdn.min.js">` (zugunsten von `vendor.js`)
+- `<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js">` (zugunsten von `vendor.js`)
+- `window.tailwind.config`-Safelist-Inline-Script aus base_app.html
+- TD-010-Mitigation-Code (Safelist + Lint-Test) ist obsolet
+- `tests/templates/test_tailwind_safelist.py` — als deprecated markiert, zu löschen beim nächsten Repo-Cleanup
+
+**Bezug zu den Original-Entscheidungen unten:** Die ursprüngliche
+„Phase-1-Übergangs-Stack"-Sektion mit Dual-Stack-Loading + Safelist-
+Pflege ist **nicht mehr aktuell** — sie beschreibt einen Zustand der
+nie länger als ein paar Stunden bestand. Phase 2 wurde vorgezogen,
+weil die Konflikte sich praktisch nicht ohne Aufwand isolieren ließen.
+
+---
+
+## Original-Entscheidung (2026-05-23, vor dem Addendum)
 
 Bezug: [ADR-0001](0001-no-node-build.md) (kein Node-Build im MVP — wird durch diese ADR **teilweise abgelöst**, Migrationspfad in zwei Phasen unten), [ADR-0031](0031-theme-switcher-removed.md) §"Geplante Folge-Arbeit Option D" (npm-Build als Folge-ADR vorgesehen), [TD-010](../techdebt.md#td-010--tailwind-via-cdn-jit-nicht-via-vite-build) (Tailwind-CDN-JIT Mitigation, wird durch diese ADR adressiert).
 

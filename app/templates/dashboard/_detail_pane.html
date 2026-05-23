@@ -6,6 +6,16 @@
    hx-preserve="true" auf dem Action-Card-Wrapper (Scan-Beam-Animation
    laeuft kontinuierlich), Sysline-Include ergaenzt.
 
+   Fix-Pass (2026-05-23):
+     - `.dashboard__eyebrow` → `.eyebrow` (Klassen-Drift behoben).
+     - `<div class="main__inner">`-Wrapper fuer das Design-Padding
+       72px/88px/96px (sonst klebt Content am Pane-Rand).
+     - `<p class="section-label">Triage queue</p>` vor _triage_row.html
+       und `<p class="section-label">CVSS Severity distribution · all
+       hosts</p>` vor _severity_strip.html (waren komplett missing).
+     - `max-w-[1600px] mx-auto px-6 py-6 space-y-8`-Tailwind-Wrapper
+       weg — `.main__inner` uebernimmt das Padding via Plain-CSS.
+
    Wird von zwei Pfaden konsumiert (ADR-0017):
      1. `dashboard/index.html` (Full-Page-Render) inkludiert dieses Partial
         im `{% block detail_pane %}`.
@@ -28,32 +38,40 @@
    Sicherheit: kein `|safe` auf Variablen — alles autoescaped.
 #}
 <div id="dashboard-pane"
-     class="max-w-[1600px] mx-auto px-6 py-6 space-y-8"
      hx-get="/_partials/dashboard/kpis"
      hx-trigger="every 60s [document.visibilityState === 'visible']"
      hx-swap="none"
      hx-disinherit="*">
+  <div class="main__inner">
 
-  <p class="dashboard__eyebrow" id="dashboard-eyebrow">
-    Dashboard &nbsp;·&nbsp; Fleet overview &nbsp;·&nbsp; last refresh &nbsp;·&nbsp;
-    <span id="dashboard-last-refresh" data-test="dashboard-last-refresh">--:-- UTC</span>
-  </p>
+    <p class="eyebrow" id="dashboard-eyebrow">
+      Dashboard &nbsp;·&nbsp; Fleet overview &nbsp;·&nbsp; last refresh &nbsp;·&nbsp;
+      <span id="dashboard-last-refresh" data-test="dashboard-last-refresh">--:-- UTC</span>
+    </p>
 
-  <section class="stats">
-    {# Action-Needed-Card: _action_needed_card.html rendert den Wrapper mit
-       id="action-needed-card" und hx-preserve="true". Die inneren Werte
-       (#action-needed-num/-hosts-total/-sub) werden per OOB-Swap getauscht.
-       Der Wrapper bleibt dank hx-preserve erhalten (Scan-Beam-Animation). #}
-    {% include "dashboard/_action_needed_card.html" %}
+    <section class="stats">
+      {# Action-Needed-Card: Wrapper traegt id="action-needed-card" und
+         hx-preserve="true". Die inneren Werte (#action-needed-num/-hosts-
+         total/-sub) werden per OOB-Swap getauscht. Wrapper bleibt dank
+         hx-preserve erhalten (Scan-Beam-Animation kontinuierlich). #}
+      {% include "dashboard/_action_needed_card.html" %}
 
-    {# Nominal-Card: kein hx-preserve noetig (keine kontinuierliche Animation).
-       Wird in der OOB-Response via #nominal-card komplett ersetzt. #}
-    {% include "dashboard/_nominal_card.html" %}
-  </section>
+      {# Nominal-Card: kein hx-preserve noetig (keine kontinuierliche
+         Animation). Wird in der OOB-Response via #nominal-card komplett
+         ersetzt. #}
+      {% include "dashboard/_nominal_card.html" %}
+    </section>
 
-  {# Triage-Row + Severity-Strip + Sysline — OOB-Targets in Phase F. #}
-  {% include "dashboard/_triage_row.html" %}
-  {% include "dashboard/_severity_strip.html" %}
-  {% include "dashboard/_sysline.html" %}
+    {# Triage-Row mit Section-Label (Phase-W-Drift-Fix). #}
+    <p class="section-label">Triage queue</p>
+    {% include "dashboard/_triage_row.html" %}
 
+    {# Severity-Strip mit Section-Label (Phase-W-Drift-Fix). #}
+    <p class="section-label">CVSS Severity distribution &nbsp;·&nbsp; all hosts</p>
+    {% include "dashboard/_severity_strip.html" %}
+
+    {# Sysline — neues Element in Phase F (ADR-0036). #}
+    {% include "dashboard/_sysline.html" %}
+
+  </div>
 </div>

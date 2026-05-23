@@ -1,0 +1,671 @@
+/* ──────────────────────────────────────────────────────────────────────
+   Legacy-Shim — Minimal-CSS fuer Tailwind/DaisyUI-Klassen in den noch
+   nicht redesigneten Templates (Settings, Server-Detail, Findings,
+   Audit, Setup-Wizard, Chat, _partials, _empty, dashboard/_card.html).
+
+   Block W Addendum 2026-05-23: Tailwind+DaisyUI komplett aus dem
+   Dual-Stack entfernt (ADR-0032 Phase 2 vorgezogen). Dieser Shim hat
+   den einzigen Zweck, die o.g. Templates **benutzbar** zu halten
+   bis sie selbst redesigned werden — nicht hübsch, nicht 1:1 zu
+   DaisyUI-Look, nur Layout-/Lesbarkeits-Garantie.
+
+   Strategie:
+     - Tailwind-Utility-Klassen (.flex, .items-center, .gap-2, .p-4 etc.)
+       bekommen die gleichen Werte wie Tailwind-Defaults (rem-Skala
+       0.25rem-Step).
+     - DaisyUI-Component-Klassen (.btn, .card, .alert, .input, .modal,
+       weitere) bekommen Minimal-Styles auf Basis der Fathometer-
+       Design-Tokens (surface-base/raised/elevated, text-primary/
+       secondary/tertiary, accent, status-restricted, hairline,
+       border-visible).
+     - Keine Animationen, keine Pseudo-Element-Tricks, kein Border-
+       Radius groesser als 4px (Doctrine-Konformitaet aus ADR-0033 §5).
+
+   Wenn ein redesignter Block diese Surface anfasst, wandert das
+   spezifische Styling in eine eigene Komponenten-CSS (z.B.
+   `frontend/src/css/components/settings.css`) und die Klassen-Strings
+   im Template wechseln auf BEM-Plain-CSS. Der Shim schrumpft dann
+   schrittweise — am Ende der Re-Design-Welle kann diese Datei
+   geloescht werden. */
+
+/* ──────────────────────────────────────────────────────────────────────
+   Tailwind-Layout-Utilities
+   ────────────────────────────────────────────────────────────────────── */
+
+.flex     { display: flex; }
+.inline-flex { display: inline-flex; }
+.grid     { display: grid; }
+.block    { display: block; }
+.inline-block { display: inline-block; }
+.inline   { display: inline; }
+.hidden   { display: none; }
+
+.flex-col  { flex-direction: column; }
+.flex-row  { flex-direction: row; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-1    { flex: 1 1 0%; min-width: 0; }
+
+.items-center  { align-items: center; }
+.items-start   { align-items: flex-start; }
+.items-end     { align-items: flex-end; }
+.items-baseline{ align-items: baseline; }
+.items-stretch { align-items: stretch; }
+
+.justify-start   { justify-content: flex-start; }
+.justify-end     { justify-content: flex-end; }
+.justify-center  { justify-content: center; }
+.justify-between { justify-content: space-between; }
+
+.grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+.grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.shrink-0 { flex-shrink: 0; }
+.grow     { flex-grow: 1; }
+.min-w-0  { min-width: 0; }
+.min-h-0  { min-height: 0; }
+.w-full   { width: 100%; }
+.h-full   { height: 100%; }
+.h-screen { height: 100vh; }
+.min-h-screen { min-height: 100vh; }
+.w-2      { width: 0.5rem; }
+.w-2\.5   { width: 0.625rem; }
+.w-3      { width: 0.75rem; }
+.w-4      { width: 1rem; }
+.w-6      { width: 1.5rem; }
+.w-8      { width: 2rem; }
+.w-20     { width: 5rem; }
+.h-2      { height: 0.5rem; }
+.h-2\.5   { height: 0.625rem; }
+.h-3      { height: 0.75rem; }
+.h-4      { height: 1rem; }
+.h-6      { height: 1.5rem; }
+.h-screen { height: 100vh; }
+.max-w-lg { max-width: 32rem; }
+.max-w-2xl{ max-width: 42rem; }
+.max-w-3xl{ max-width: 48rem; }
+.max-w-md { max-width: 28rem; }
+.max-w-\[44ch\] { max-width: 44ch; }
+.max-h-96 { max-height: 24rem; }
+
+.overflow-hidden { overflow: hidden; }
+.overflow-auto   { overflow: auto; }
+.overflow-x-auto { overflow-x: auto; }
+.overflow-y-auto { overflow-y: auto; }
+
+/* ──────────────────────────────────────────────────────────────────────
+   Tailwind-Spacing-Utilities (rem-Skala 0.25rem-Step)
+   ────────────────────────────────────────────────────────────────────── */
+
+.gap-1   { gap: 0.25rem; }
+.gap-1\.5{ gap: 0.375rem; }
+.gap-2   { gap: 0.5rem; }
+.gap-3   { gap: 0.75rem; }
+.gap-4   { gap: 1rem; }
+.gap-6   { gap: 1.5rem; }
+.gap-8   { gap: 2rem; }
+
+.p-1  { padding: 0.25rem; }
+.p-2  { padding: 0.5rem; }
+.p-3  { padding: 0.75rem; }
+.p-4  { padding: 1rem; }
+.p-6  { padding: 1.5rem; }
+.p-8  { padding: 2rem; }
+
+.px-1 { padding-left: 0.25rem; padding-right: 0.25rem; }
+.px-2 { padding-left: 0.5rem;  padding-right: 0.5rem; }
+.px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+.px-4 { padding-left: 1rem;    padding-right: 1rem; }
+.px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }
+.px-6 { padding-left: 1.5rem;  padding-right: 1.5rem; }
+
+.py-1 { padding-top: 0.25rem;  padding-bottom: 0.25rem; }
+.py-2 { padding-top: 0.5rem;   padding-bottom: 0.5rem; }
+.py-3 { padding-top: 0.75rem;  padding-bottom: 0.75rem; }
+.py-4 { padding-top: 1rem;     padding-bottom: 1rem; }
+.py-6 { padding-top: 1.5rem;   padding-bottom: 1.5rem; }
+.py-8 { padding-top: 2rem;     padding-bottom: 2rem; }
+
+.pt-2 { padding-top: 0.5rem; }
+.pt-4 { padding-top: 1rem; }
+.pb-1 { padding-bottom: 0.25rem; }
+.pb-2 { padding-bottom: 0.5rem; }
+.pr-0 { padding-right: 0; }
+
+.m-1   { margin: 0.25rem; }
+.mt-0\.5 { margin-top: 0.125rem; }
+.mt-1  { margin-top: 0.25rem; }
+.mt-2  { margin-top: 0.5rem; }
+.mt-3  { margin-top: 0.75rem; }
+.mt-4  { margin-top: 1rem; }
+.mt-6  { margin-top: 1.5rem; }
+.mb-1  { margin-bottom: 0.25rem; }
+.mb-2  { margin-bottom: 0.5rem; }
+.mb-4  { margin-bottom: 1rem; }
+.ml-1  { margin-left: 0.25rem; }
+.ml-1\.5 { margin-left: 0.375rem; }
+.ml-2  { margin-left: 0.5rem; }
+.ml-4  { margin-left: 1rem; }
+.mr-1  { margin-right: 0.25rem; }
+.mr-1\.5 { margin-right: 0.375rem; }
+.mr-2  { margin-right: 0.5rem; }
+.mx-auto { margin-left: auto; margin-right: auto; }
+
+/* space-y-* (Tailwind: vertical spacing zwischen direkten Children) */
+.space-y-1 > * + * { margin-top: 0.25rem; }
+.space-y-2 > * + * { margin-top: 0.5rem; }
+.space-y-3 > * + * { margin-top: 0.75rem; }
+.space-y-4 > * + * { margin-top: 1rem; }
+.space-y-6 > * + * { margin-top: 1.5rem; }
+.space-y-8 > * + * { margin-top: 2rem; }
+
+/* ──────────────────────────────────────────────────────────────────────
+   Tailwind-Typography-Utilities
+   ────────────────────────────────────────────────────────────────────── */
+
+.text-\[10px\] { font-size: 10px; }
+.text-xs   { font-size: 0.75rem;  line-height: 1rem; }
+.text-sm   { font-size: 0.875rem; line-height: 1.25rem; }
+.text-base { font-size: 1rem;     line-height: 1.5rem; }
+.text-lg   { font-size: 1.125rem; line-height: 1.75rem; }
+.text-xl   { font-size: 1.25rem;  line-height: 1.75rem; }
+.text-2xl  { font-size: 1.5rem;   line-height: 2rem; }
+.text-3xl  { font-size: 1.875rem; line-height: 2.25rem; }
+
+.font-mono     { font-family: var(--font-mono); }
+.font-medium   { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.font-bold     { font-weight: 700; }
+
+.uppercase     { text-transform: uppercase; }
+.lowercase     { text-transform: lowercase; }
+.italic        { font-style: italic; }
+.text-left     { text-align: left; }
+.text-center   { text-align: center; }
+.text-right    { text-align: right; }
+.truncate      { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.whitespace-nowrap   { white-space: nowrap; }
+.whitespace-pre-wrap { white-space: pre-wrap; }
+.break-all     { word-break: break-all; }
+.break-words   { overflow-wrap: break-word; }
+
+.tracking-wide   { letter-spacing: 0.025em; }
+.tracking-wider  { letter-spacing: 0.05em; }
+.tracking-\[0\.12em\] { letter-spacing: 0.12em; }
+
+.opacity-30 { opacity: 0.30; }
+.opacity-50 { opacity: 0.50; }
+.opacity-60 { opacity: 0.60; }
+.opacity-65 { opacity: 0.65; }
+.opacity-70 { opacity: 0.70; }
+.opacity-80 { opacity: 0.80; }
+.opacity-90 { opacity: 0.90; }
+.opacity-100 { opacity: 1; }
+
+.hover\:opacity-100:hover { opacity: 1; }
+
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* ──────────────────────────────────────────────────────────────────────
+   Tailwind-Color-Utilities — gemappt auf Fathometer-Tokens
+   ────────────────────────────────────────────────────────────────────── */
+
+.bg-base-100        { background-color: var(--surface-raised); }
+.bg-base-200        { background-color: var(--surface-elevated); }
+.bg-base-200\/40    { background-color: rgba(26, 26, 26, 0.40); }
+.bg-base-200\/60    { background-color: rgba(26, 26, 26, 0.60); }
+.bg-base-300        { background-color: var(--surface-hover); }
+.bg-base-300\/40    { background-color: rgba(34, 34, 34, 0.40); }
+.bg-primary\/10     { background-color: rgba(0, 229, 255, 0.10); }
+.bg-error           { background-color: var(--status-restricted); }
+.bg-error\/5        { background-color: rgba(255, 68, 68, 0.05); }
+.bg-black\/40       { background-color: rgba(0, 0, 0, 0.40); }
+.bg-transparent     { background-color: transparent; }
+
+.text-base-content { color: var(--text-primary); }
+.text-primary      { color: var(--accent); }
+.text-error        { color: var(--status-restricted); }
+.text-warning      { color: var(--status-degraded); }
+.text-success      { color: var(--status-operational); }
+.text-info         { color: var(--accent); }
+.text-secondary    { color: var(--text-secondary); }
+
+.border           { border: 1px solid var(--border-subtle); }
+.border-b         { border-bottom: 1px solid var(--border-subtle); }
+.border-t         { border-top: 1px solid var(--border-subtle); }
+.border-l         { border-left: 1px solid var(--border-subtle); }
+.border-r         { border-right: 1px solid var(--border-subtle); }
+.border-base-300  { border-color: var(--border-visible); }
+.border-error     { border-color: var(--status-restricted); }
+
+.rounded       { border-radius: 4px; }
+.rounded-sm    { border-radius: 2px; }
+.rounded-full  { border-radius: 9999px; }
+.rounded-box   { border-radius: 4px; }
+
+.shadow-sm     { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.20); }
+
+.cursor-pointer { cursor: pointer; }
+
+.align-middle  { vertical-align: middle; }
+.align-\[1px\] { vertical-align: 1px; }
+
+/* ──────────────────────────────────────────────────────────────────────
+   DaisyUI-Komponenten (Minimal-Styles)
+   ────────────────────────────────────────────────────────────────────── */
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border-visible);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1;
+  cursor: pointer;
+  text-decoration: none;
+  border-radius: 2px;
+  transition: background 0.2s ease;
+}
+.btn:hover { background: var(--surface-hover); }
+.btn:disabled, .btn-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.btn-sm  { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
+.btn-xs  { padding: 0.25rem 0.5rem;   font-size: 0.75rem; }
+.btn-primary {
+  background: transparent;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn-primary:hover { background: rgba(0, 229, 255, 0.08); }
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.btn-ghost:hover { background: var(--surface-raised); border-color: var(--border-subtle); }
+.btn-warning {
+  background: transparent;
+  border-color: var(--status-degraded);
+  color: var(--status-degraded);
+}
+.btn-warning:hover { background: rgba(255, 149, 0, 0.08); }
+.btn-error {
+  background: transparent;
+  border-color: var(--status-restricted);
+  color: var(--status-restricted);
+}
+.btn-active { background: var(--surface-hover); }
+
+/* Cards */
+.card {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.card-body {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.card-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+.card-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* Alerts */
+.alert {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-visible);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  border-radius: 2px;
+  font-size: 0.875rem;
+}
+.alert-info    { border-color: var(--accent);           color: var(--text-primary); background: rgba(0, 229, 255, 0.06); }
+.alert-success { border-color: var(--status-operational); color: var(--text-primary); background: rgba(57, 255, 20, 0.06); }
+.alert-warning { border-color: var(--status-degraded);  color: var(--text-primary); background: rgba(255, 149, 0, 0.06); }
+.alert-error   { border-color: var(--status-restricted); color: var(--text-primary); background: rgba(255, 68, 68, 0.06); }
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--border-visible);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.badge-sm { padding: 0.0625rem 0.375rem; font-size: 0.6875rem; }
+.badge-xs { padding: 0;          font-size: 0.625rem;  padding: 0 0.3rem; }
+.badge-ghost   { background: transparent; color: var(--text-tertiary); border-color: var(--border-subtle); }
+.badge-outline { background: transparent; }
+.badge-success { border-color: var(--status-operational); color: var(--status-operational); }
+.badge-warning { border-color: var(--status-degraded);    color: var(--status-degraded); }
+.badge-error   { border-color: var(--status-restricted);  color: var(--status-restricted); }
+
+/* Inputs */
+.input, .select, .textarea {
+  display: block;
+  width: auto;
+  background: var(--surface-base);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  outline: none;
+  border-radius: 2px;
+  appearance: none;
+}
+.input:focus, .select:focus, .textarea:focus {
+  border-color: var(--accent);
+}
+.input-bordered, .select-bordered, .textarea-bordered {
+  border-color: var(--border-subtle);
+}
+.input-sm, .select-sm { padding: 0.375rem 0.625rem; font-size: 0.8125rem; }
+
+/* Form-Control + Label */
+.form-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.label-text {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.label-text-alt {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* Checkbox */
+.checkbox {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--border-visible);
+  background: var(--surface-base);
+  cursor: pointer;
+  position: relative;
+  border-radius: 2px;
+}
+.checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.checkbox:checked::after {
+  content: "✓";
+  color: var(--surface-base);
+  position: absolute;
+  font-size: 0.75rem;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-weight: 700;
+}
+.checkbox-sm { width: 0.875rem; height: 0.875rem; }
+
+/* Modal */
+.modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.70);
+}
+.modal-open, .modal[open] { display: flex; }
+.modal-box {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-visible);
+  padding: 1.5rem;
+  max-width: 32rem;
+  width: 90%;
+  max-height: 85vh;
+  overflow: auto;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.modal-action {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.toast-end    { right: 1rem; }
+.toast-start  { left:  1rem; }
+.toast-top    { top:    1rem; }
+.toast-bottom { bottom: 1rem; }
+
+/* Link */
+.link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-hover     { text-decoration: none; }
+.link-hover:hover { text-decoration: underline; }
+
+/* Dropdown — DaisyUI nutzt details/summary oder eigene Logic.
+   Hier nur Container-Reset; Sichtbarkeit kommt aus Alpine x-show/x-cloak. */
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+.dropdown-content {
+  position: absolute;
+  z-index: 50;
+  min-width: 12rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-visible);
+  padding: 0.25rem;
+}
+
+/* Menu */
+.menu {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.menu > li > a, .menu > li > button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  text-decoration: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  text-align: left;
+  width: 100%;
+}
+.menu > li > a:hover, .menu > li > button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.menu-active { background: var(--surface-hover); color: var(--text-primary); }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.tab {
+  padding: 0.5rem 1rem;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+.tab:hover { color: var(--text-primary); }
+.tab-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* Table */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+.table th, .table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+.table th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.table-sm th, .table-sm td { padding: 0.375rem 0.5rem; font-size: 0.8125rem; }
+
+/* Loading */
+.loading {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--border-subtle);
+  border-top-color: var(--accent);
+  border-radius: 9999px;
+  animation: legacy-spin 0.8s linear infinite;
+}
+.loading-xs { width: 0.75rem; height: 0.75rem; border-width: 1.5px; }
+.loading-spinner { /* same default — alias */ }
+@keyframes legacy-spin { to { transform: rotate(360deg); } }
+
+/* Tooltip — sehr minimal, kein dynamisches Positioning. */
+.tooltip {
+  position: relative;
+  cursor: help;
+}
+.tooltip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  padding: 0.25rem 0.5rem;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-visible);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 100;
+}
+.tooltip:hover::after, .tooltip:focus-visible::after { opacity: 1; }
+.tooltip-bottom::after { bottom: auto; top: 100%; transform: translateX(-50%) translateY(4px); }
+.tooltip-left::after   { bottom: 50%; left: auto; right: 100%; transform: translateY(50%) translateX(-4px); }
+
+/* Join — DaisyUI button-/input-Gruppen ohne Inner-Border-Doppelung.
+   Minimal: nur als flex-Container, ohne Border-Magic. */
+.join {
+  display: inline-flex;
+  align-items: stretch;
+}
+.join-item {
+  border-radius: 0;
+}
+.join > :first-child.join-item { border-top-left-radius: 2px; border-bottom-left-radius: 2px; }
+.join > :last-child.join-item  { border-top-right-radius: 2px; border-bottom-right-radius: 2px; }
+
+/* Steps (Setup-Wizard) */
+.step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+
+/* DaisyUI "alert shadow-lg" auf Toast-Items im base-template Toast-Host. */
+.shadow-lg { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.50); }
+
+/* Tailwind .sr-only — visuell unsichtbar, fuer Screenreader sichtbar.
+   Identisch zur .visually-hidden in app.css (Alias-Klasse). Wird in
+   Sidebar/Search/Tag-Filter benutzt fuer accessible Labels die im
+   Design kein visuelles Pendant haben. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

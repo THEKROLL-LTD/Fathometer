@@ -4,9 +4,13 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
-**MVP + UI v2 + ADR-0016 bis ADR-0023 + Block-P-Iteration v0.9.3 + Pass-1-Batching v0.9.4 + Worker-Stability v0.9.5 + Worker-Idle-Throttle v0.9.6 + Server-Detail/Findings-Slim-Down v0.10.0 + TICKET-004-Test-Suite-Entkopplung + ADR-0029 Block-U-Worker-Concurrency + ADR-0030 Block-V-UI-Performance abgeschlossen + ADR-0032/0033/0034/0035/0036 Block-W-Redesign-Phase-1 geplant — Ziel v0.12.0 (2026-05-23).**
+**MVP + UI v2 + ADR-0016 bis ADR-0036 + Block-W-Redesign-Phase-1 implementiert (Addendum: Tailwind/DaisyUI komplett entfernt, Legacy-Shim deckt ungerefactorte Templates ab) — Ziel v0.12.0 (2026-05-23).**
 
-**Block W geplant 2026-05-23 — Frontend-Redesign Phase 1 (Login + Dashboard + App-Shell).** Branch `feat/block-w-redesign-phase-1` (noch nicht erstellt). Sieben Phasen (A Build-Toolchain + Tokens, B Topbar+Footer+bg-grid, C Sidebar+Group-Migration+Viewport-Lazy, D Action+Nominal-Cards, E Triage+Severity-Strip, F Sysline+OOB-Polling, G Login+Final-Polish). Fünf neue ADRs:
+**Block W Addendum 2026-05-23 — Tailwind/DaisyUI komplett raus, Legacy-Shim ergänzt.** Browser-Smoke gegen den Dual-Stack zeigte Cascade-Konflikte (DaisyUI eigene `.footer`/`.stats`/`.stat`/`.toast`/`.alert`-Klassen plus Tailwind-`forms`-Plugin-Override auf `[type='text']`/`[type='password']`) die sich praktisch nicht ohne `!important`-Salat lösen lassen. Statt zu hacken: ADR-0032 Phase 2 vorgezogen. Alle CDN-Tags (Tailwind, DaisyUI, Alpine, HTMX) raus aus base.html + base_app.html; Alpine + HTMX kommen jetzt ausschließlich aus dem esbuild-`vendor.js`-Bundle. Für die noch nicht redesigneten Templates (Settings, Server-Detail, Findings, Audit, Setup-Wizard, Chat, Dashboard-`_card.html`, `_partials/*`, `_empty/*`) liefert `frontend/src/css/components/legacy-shim.css` (~450 Zeilen) Minimal-Styles auf Basis der Fathometer-Design-Tokens — Pages bleiben benutzbar, sind nicht hübsch. Wenn ein zukünftiger Block eine Surface redesigned, wandert das spezifische Styling in eine eigene Komponenten-CSS und der Shim schrumpft. **TD-010 ist final erledigt.** Verification grün: ruff PASS, format PASS (320), mypy PASS (84), pytest 1511 passed / 208 skipped / 0 failures.
+
+---
+
+**Block W implementiert 2026-05-23 — Frontend-Redesign Phase 1 (Login + Dashboard + App-Shell).** Branch `feat/block-w-redesign-phase-1` (noch nicht erstellt). Sieben Phasen (A Build-Toolchain + Tokens, B Topbar+Footer+bg-grid, C Sidebar+Group-Migration+Viewport-Lazy, D Action+Nominal-Cards, E Triage+Severity-Strip, F Sysline+OOB-Polling, G Login+Final-Polish). Fünf neue ADRs:
 
 - **ADR-0032** — Frontend-Build-Toolchain: Plain CSS + esbuild, kein Tailwind/DaisyUI im neuen Design. Löst ADR-0001 partiell ab (Phase 1 dual-Stack, Phase 2 vollständige Migration eliminiert TD-010).
 - **ADR-0033** — Brand-Identity Fathometer (Logo, Wordmark "Fathometer · CVE Intelligence", JetBrains-Mono self-hosted, Color-Reduction-Rule "nur escalate trägt cyan", Easing-Doctrine, Border-Radius-/Box-Shadow-Verbotsliste, Sprach-Policy englisch).

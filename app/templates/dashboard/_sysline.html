@@ -1,6 +1,13 @@
 {# Sysline — System-Status-Terminal-Zeile (Block W Phase F, ADR-0036).
    Portiert aus docs/design/app.jsx Z. 729-734.
 
+   Fix-Pass (2026-05-23):
+     - `.sysline__prompt` → `.prompt` (Klassen-Drift behoben; CSS hat
+       `.sysline .prompt { color: var(--accent); }`).
+     - `.sysline__sep`-Spans entfernt — Design hat keine Sep-Spans, das
+       `·` ist inline am Anfang vom naechsten Span. Die Gap zwischen
+       Items kommt aus `.sysline { gap: 24px; }`.
+
    Variablen-Vertrag (gesetzt via build_sysline_context):
      sysline.last_scan_ago    : str | None  ("3m", "2h", "5d" oder None)
      sysline.epss_feed_status : "synced" | "stale" | "never"
@@ -11,11 +18,8 @@
    Sicherheit: kein |safe — alle Variablen autoescaped.
 #}
 <div class="sysline" id="sysline">
-  <span><span class="sysline__prompt">&gt;</span> last scan <b>{% if sysline.last_scan_ago %}{{ sysline.last_scan_ago }} ago{% else %}never{% endif %}</b></span>
-  <span class="sysline__sep">·</span>
-  <span>epss-feed <b>{{ sysline.epss_feed_status }}</b></span>
-  <span class="sysline__sep">·</span>
-  <span>kev-feed <b>{{ sysline.kev_feed_status }}</b></span>
-  <span class="sysline__sep">·</span>
-  <span>worker <b>{{ sysline.worker_status if sysline.worker_status is not none else "off" }}</b></span>
+  <span><span class="prompt">&gt;</span> last scan <b>{% if sysline.last_scan_ago %}{{ sysline.last_scan_ago }} ago{% else %}never{% endif %}</b></span>
+  <span>&middot; epss-feed <b>{{ sysline.epss_feed_status }}</b></span>
+  <span>&middot; kev-feed <b>{{ sysline.kev_feed_status }}</b></span>
+  <span>&middot; worker <b>{{ sysline.worker_status if sysline.worker_status is not none else "off" }}</b></span>
 </div>

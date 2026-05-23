@@ -29,7 +29,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BASE_APP = REPO_ROOT / "app" / "templates" / "base_app.html"
 BASE = REPO_ROOT / "app" / "templates" / "base.html"
 
-ALPINE_MARKER = "https://cdn.jsdelivr.net/npm/alpinejs@3"
+ALPINE_MARKER = "js/vendor.js"
+# Block W Addendum 2026-05-23: Alpine + HTMX kommen nicht mehr via CDN
+# sondern via dem esbuild-Bundle vendor.js (ADR-0032 Phase 2 vorgezogen).
+# Die Lade-Reihenfolge-Invariante bleibt identisch: alle window-Factory-
+# Skripte muessen VOR vendor.js geladen werden — sonst sind die Factories
+# beim Alpine-DOM-Scan noch nicht registriert.
 
 # Pro Template: nur Skripte pruefen die das Template tatsaechlich verlinkt.
 # `base.html` ist die Pre-Auth-Shell (Setup/Login) und braucht weder

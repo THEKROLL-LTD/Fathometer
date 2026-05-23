@@ -101,24 +101,35 @@ def _render_login_with_flash(
 # ---------------------------------------------------------------------------
 
 
-def test_login_renders_status_hint_when_no_error(
+def test_login_renders_empty_status_when_no_error(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ohne Flash-Error und ohne form.errors zeigt die Status-Line den Hint-Text.
+    """Idle-State (kein Flash-Error, keine Form-Errors): `.auth__status`-Div ist
+    leer und reserviert nur Layout-Platz via `min-height: 14px`.
 
-    Erwarteter Hint: 'enter credentials to proceed.'
+    Drift-Fix 2026-05-23: das Template hatte einen hardcoded Default-Hint
+    `enter credentials to proceed.` der nicht im Design steht (docs/design/
+    login.jsx Z. 121-127 rendert im Idle-State `null`, also leer). Hint
+    entfernt — Status-Div bleibt leer im Idle.
     """
     html = _render_login_with_flash(app, monkeypatch)
 
-    assert "enter credentials to proceed." in html, (
-        f"Hint-Text 'enter credentials to proceed.' fehlt wenn kein Fehler vorhanden. "
+    # Idle: kein hardcoded Hint-Text mehr
+    assert "enter credentials to proceed" not in html, (
+        f"Default-Hint 'enter credentials to proceed' soll entfernt sein (Drift-Fix). "
+        f"Idle-State rendert nur die leere .auth__status-Div als Layout-Reserve. "
         f"HTML-Laenge: {len(html)}"
     )
-    # Im Hint-State darf der Error-Zweig nicht auftreten
+    # Im Idle-State darf der Error-Zweig nicht auftreten
     assert "auth__status--error" not in html, (
         f"CSS-Klasse 'auth__status--error' erscheint faelschlicherweise ohne Fehler-State. "
         f"HTML-Laenge: {len(html)}"
+    )
+    # Die `auth__status`-Wrapper-Div muss aber da sein (Layout-Reserve)
+    assert 'class="auth__status"' in html, (
+        f".auth__status-Wrapper-Div fehlt — wird fuer die `min-height: 14px`-"
+        f"Layout-Reserve benoetigt. HTML-Laenge: {len(html)}"
     )
 
 
@@ -144,9 +155,9 @@ def test_login_renders_access_denied_on_flash_error(
     assert "access denied" in html, (
         f"Text 'access denied' fehlt bei Flash-Error. HTML-Laenge: {len(html)}"
     )
-    # Hint-Text darf im Error-State nicht auftreten
-    assert "enter credentials to proceed." not in html, (
-        f"Hint-Text erscheint faelschlicherweise im Fehler-State. HTML-Laenge: {len(html)}"
+    # Hint-Text (vorher hardcoded) ist generell entfernt — auch im Error-State darf er nicht stehen
+    assert "enter credentials to proceed" not in html, (
+        f"Hint-Text wurde entfernt und darf nirgendwo erscheinen. HTML-Laenge: {len(html)}"
     )
 
 
@@ -214,7 +225,8 @@ def test_login_info_flash_does_not_trigger_access_denied(
         f"CSS-Klasse 'auth__status--error' erscheint faelschlicherweise bei 'info'-Flash. "
         f"HTML-Laenge: {len(html)}"
     )
-    # Hint-Text soll erscheinen
-    assert "enter credentials to proceed." in html, (
-        f"Hint-Text fehlt bei 'info'-Flash (kein Fehler-State). HTML-Laenge: {len(html)}"
+    # Idle-State: kein hardcoded Hint-Text mehr (Drift-Fix 2026-05-23)
+    assert "enter credentials to proceed" not in html, (
+        f"Default-Hint wurde entfernt und darf bei 'info'-Flash nicht erscheinen. "
+        f"HTML-Laenge: {len(html)}"
     )

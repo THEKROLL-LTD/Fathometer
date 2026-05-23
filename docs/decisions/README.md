@@ -6,7 +6,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 
 | Nummer | Thema | Status |
 |--------|-------|--------|
-| [0001](0001-no-node-build.md) | Kein Node-Build im MVP | Teilweise abgelöst durch 0032 (Block W führt esbuild-Build-Stage ein) |
+| [0001](0001-no-node-build.md) | Kein Node-Build im MVP | Superseded by 0032 (Block W führt esbuild-Build-Stage ein, Addendum 2026-05-23 zieht Tailwind/DaisyUI komplett raus) |
 | [0002](0002-openai-compatible-llm.md) | OpenAI-kompatible LLM-Abstraktion | Akzeptiert |
 | [0003](0003-push-not-pull.md) | Push statt Pull, keine Server-Credentials | Akzeptiert |
 | [0004](0004-single-user-auth.md) | Single-User Admin-Auth im MVP | Akzeptiert |
@@ -37,7 +37,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0029](0029-parallel-llm-worker-concurrency.md) | Parallele LLM-Job-Verarbeitung im Worker (Single-Worker, In-Process-Concurrency, Block U) | Akzeptiert |
 | [0030](0030-server-detail-performance.md) | Performance-Tuning UI-Views (Dashboard + Server-Detail + Sidebar-Lazy-Load, Block V) | Akzeptiert |
 | [0031](0031-theme-switcher-removed.md) | Theme-Switcher entfernt, `data-theme="dark"` statisch (Tech-Debt-Removal) | Akzeptiert |
-| [0032](0032-frontend-build-plain-css.md) | Frontend-Build-Toolchain: Plain CSS + esbuild, kein Tailwind/DaisyUI im neuen Design (Block W) | Akzeptiert |
+| [0032](0032-frontend-build-plain-css.md) | Frontend-Build-Toolchain: Plain CSS + esbuild, kein Tailwind/DaisyUI (Block W; Addendum 2026-05-23 zieht Phase 2 vor — Tailwind/DaisyUI komplett raus + Legacy-Shim für ungerefactorte Templates) | Akzeptiert |
 | [0033](0033-brand-identity-fathometer.md) | Brand-Identity Fathometer + Design-Doctrine + Sprach-Policy (Block W) | Akzeptiert |
 | [0034](0034-host-group-data-model.md) | Host-Group-Datenmodell (1:N, nullable, ohne Default-Group, Block W) | Akzeptiert |
 | [0035](0035-daily-risk-state-heartbeat-mapping.md) | Daily-Risk-State als Heartbeat-Mapping + Viewport-Lazy-Loading (Block W) | Akzeptiert |

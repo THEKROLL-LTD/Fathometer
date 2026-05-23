@@ -212,21 +212,26 @@ def test_sysline_has_accent_prompt(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sysline enthaelt den '>' Accent-Prompt (Klasse sysline__prompt).
+    """Sysline enthaelt den '>' Accent-Prompt (Klasse `prompt`).
 
-    Das Template rendert: <span class="sysline__prompt">&gt;</span>
-    &gt; ist HTML-Entity fuer '>'.
+    Drift-Fix 2026-05-23: das Template nutzte vorher `sysline__prompt` —
+    Klassen-Drift zum CSS, das `.sysline .prompt { color: var(--accent); }`
+    definiert (1:1 aus docs/design/styles.css). Template auf `.prompt`
+    angeglichen, Test mitgezogen.
+
+    Markup: <span class="prompt">&gt;</span>
     """
     html = _render_sysline(app, monkeypatch)
 
-    assert "sysline__prompt" in html, (
-        "Klasse 'sysline__prompt' fehlt im Sysline-Render. "
-        "Accent-Prompt '>' ist das Terminal-Brand-Element. HTML: {html[:400]}"
+    assert 'class="prompt"' in html, (
+        "Klasse 'prompt' fehlt im Sysline-Render. "
+        "CSS-Selektor ist `.sysline .prompt` (cyan-Accent). "
+        f"HTML: {html[:400]}"
     )
     # &gt; ist die HTML-Entity fuer '>' — Jinja autoescaped
     assert "&gt;" in html, (
         f"'&gt;' (HTML-Entity fuer '>') fehlt im Sysline-Render. "
-        f"Template rendert den Prompt als: <span class='sysline__prompt'>&gt;</span>. "
+        f"Template rendert den Prompt als: <span class='prompt'>&gt;</span>. "
         f"HTML: {html[:400]}"
     )
 
@@ -264,11 +269,24 @@ def test_sysline_has_pipe_separators(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sysline enthaelt Pipe-Separatoren zwischen den Feldern (sysline__sep-Klasse)."""
+    """Sysline enthaelt mittlere-Punkt-Separatoren zwischen den Feldern.
+
+    Drift-Fix 2026-05-23: die separate `.sysline__sep`-Span-Konstruktion
+    wurde entfernt — Design (docs/design/app.jsx Z. 729-734) hat keine
+    Sep-Spans, das `·` ist inline am Anfang vom naechsten Span (z.B.
+    `<span>· epss-feed <b>synced</b></span>`). Die Gap zwischen Items
+    kommt aus `.sysline { gap: 24px; }`.
+
+    Pflicht: mindestens drei `·`-Marker (zwischen 4 Feldern). `&middot;`
+    ist die HTML-Entity die das Template rendert.
+    """
     html = _render_sysline(app, monkeypatch)
 
-    assert "sysline__sep" in html, (
-        "Klasse 'sysline__sep' (Pipe-Separator zwischen Feldern) fehlt. "
+    sep_count = html.count("&middot;") + html.count("·")
+    assert sep_count >= 3, (
+        f"Mindestens 3 mittlere-Punkt-Separatoren erwartet zwischen 4 Feldern, "
+        f"gefunden {sep_count}. Im Template sollten `&middot;`-Entities am "
+        f"Anfang von epss-feed-/kev-feed-/worker-Span stehen. "
         f"HTML-Ausschnitt: {html[:400]}"
     )
 

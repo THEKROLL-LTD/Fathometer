@@ -13,6 +13,14 @@
 @import "./components/sysline.css";
 @import "./components/auth.css";
 
+/* Legacy-Shim als LETZTER Import — die Tailwind-Utility-Klassen darin
+   sollen die niedrigste Cascade-Prioritaet haben (gleiche Specificity
+   wie alles andere; LATER-wins waere fuer Shim-Defaults schaedlich,
+   weil sie generischer sind). Aber: wir haben hier nur Klassen die in
+   den Plain-CSS-Komponenten NICHT vorkommen, also kein Konflikt. Der
+   Shim ist eine reine Erweiterung. */
+@import "./components/legacy-shim.css";
+
 /* ── Global Reset ──────────────────────────────────────────── */
 
 *,
@@ -68,6 +76,72 @@ html, body {
 .sidebar { grid-area: sidebar; border-right: var(--hairline); display: flex; flex-direction: column; min-height: 0; }
 .main    { grid-area: main;    overflow: auto; }
 .footer  { grid-area: footer;  border-top: var(--hairline); display: flex; align-items: center; padding: 0 32px; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.04em; gap: 16px; }
+
+/* ── Shell-Modifier fuer die Auth-Variante (Login).
+   MUESSEN nach `.app`/`.main`/`.topbar` definiert sein damit sie bei
+   gleicher Specificity die Cascade gewinnen — sonst greift `.app`'s
+   zweispaltiges Grid (480px sidebar | 1fr main) auch auf der Login-
+   Seite und die Card landet im rechten Sub-Slot statt zentriert im
+   Viewport. Diese Modifier waren urspruenglich in components/auth.css
+   was im @import-Order VOR den Shell-Defs landete (Bug 2026-05-23). */
+
+.app--auth {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "topbar"
+    "main"
+    "footer";
+}
+
+.main--auth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  overflow: auto;
+}
+
+.topbar--auth {
+  /* Identische Padding-Variante; Hauptzweck ist semantischer Marker
+     fuer JS/CSS-Hooks, falls Auth-Topbar spaeter divergiert. */
+  padding: 0 32px;
+}
+
+/* ── Main inner padding & content rhythm (1:1 aus docs/design/styles.css) ──
+   Wrappt den Pane-Content; gibt dem Dashboard das designte Padding und
+   begrenzt die Lese-Breite auf 1100px. */
+
+.main__inner {
+  max-width: 1100px;
+  padding: 72px 88px 96px;
+}
+
+/* ── Eyebrow (Pflicht-Class fuer "DASHBOARD · FLEET OVERVIEW · LAST REFRESH ·"
+   und vergleichbare Section-Brueche; aus docs/design/styles.css). */
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 0;
+  padding-bottom: 24px;
+  border-bottom: var(--hairline);
+}
+
+/* ── Section-Label ("TRIAGE QUEUE", "CVSS SEVERITY DISTRIBUTION · ALL HOSTS").
+   Aus docs/design/styles.css. Setzt sich unter die Eyebrow ein und vor
+   die jeweilige Section (Triage-Row, Severity-Strip). */
+
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 0 0 28px;
+}
 
 /* ── Accessibility: Screenreader-only (nicht visuell sichtbar) */
 

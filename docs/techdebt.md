@@ -419,6 +419,17 @@ spaetere Phase 2 (separater Block, vermutlich nach Server-Detail-Redesign)
 loescht Tailwind/DaisyUI komplett und erledigt damit TD-010 final. Bis
 dahin bleibt der Mitigations-Code in `base_app.html` Z. 52-73 stehen.
 
+**ERLEDIGT 2026-05-23 (Block W Addendum):** Phase 2 vorgezogen.
+Tailwind-CDN + DaisyUI-CDN + Alpine-CDN + HTMX-CDN sind komplett aus
+base.html + base_app.html entfernt. `window.tailwind.config`-Safelist-
+Script weg. `frontend/src/css/components/legacy-shim.css` (~450 Zeilen)
+liefert Minimal-Styles fuer die noch nicht redesignten Templates damit
+sie benutzbar bleiben. Alpine + HTMX kommen jetzt ausschliesslich aus
+`vendor.js`-Bundle. `tests/templates/test_tailwind_safelist.py` ist als
+deprecated markiert (pytest.skip), zu loeschen beim naechsten Repo-
+Cleanup. TD-010 ist damit final geschlossen. Siehe ADR-0032 Addendum
+2026-05-23 und docs/blocks/W-redesign-phase-1.md Addendum.
+
 ---
 
 ## TD-011 — Default-Coverage-Luecke fuer register/keys_rotate/bulk_acknowledge nach Phase-3.2-Bulk-Migration

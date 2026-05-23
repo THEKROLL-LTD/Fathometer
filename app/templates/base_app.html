@@ -1,10 +1,9 @@
 <!doctype html>
-{# App-Shell fuer eingeloggte secscan-Routen (Block I, §7a).
+{# App-Shell fuer eingeloggte Fathometer-Routen (Block W / ADR-0032 + ADR-0033).
 
    Standalone-Layout (extends NICHT von base.html), damit die App-Shell
-   eine eigene Topbar (kompakt, ohne Nav-Links) und ein Sidebar+Detail-
-   Pane-Skelett rendern kann. `base.html` bleibt unveraendert die Shell
-   fuer Pre-Login-Routen (Setup, Login).
+   eine eigene Topbar + Sidebar + Main + Footer als Plain-CSS-Grid (.app)
+   rendern kann. `base.html` bleibt die Pre-Login-Shell (Setup, Login).
 
    Variablen-Vertrag (vom View, siehe `_sidebar_context.py`):
      - `sidebar_servers`    : list[Server] (mit eager-loaded tag_links/tag)
@@ -13,13 +12,32 @@
 
    Theme ist statisch auf "dark" gesetzt (ADR-0031).
 
-   Teure Aggregate (Heartbeats, Risk-Counts) sind im initialen Page-Render
-   NICHT verfuegbar — sie kommen via HTMX-Lazy-Load vom Polling-Endpoint
-   `/_partials/sidebar` (ADR-0030 Phase C). Das Template rendert stattdessen
-   ein Skeleton fuer diese Felder.
+   Teure Aggregate (Heartbeats, Risk-Counts) kommen via HTMX-Lazy-Load vom
+   Polling-Endpoint `/_partials/sidebar` (ADR-0030). Das Template rendert
+   stattdessen Skeleton-Markup fuer diese Felder.
 
    Bei `hx_partial=True` rendern die Views nur das Detail-Pane-Fragment
    (sie extenden in dem Fall nicht `base_app.html`).
+
+   Layout (ADR-0033 §App-Shell):
+     <body>
+       <div class="bg-grid">           Ambient 80x80px Gitter
+       <div class="app">                3-Zeilen-Grid (topbar/main/footer),
+         <header class="topbar">          2-Spalten (sidebar 480px / main).
+         <aside  class="sidebar">         Topbar, Sidebar, Main, Footer als
+         <main   class="main">            direkte Grid-Children.
+         <footer class="footer">
+       </div>
+       <toast-host>                     Globaler Toast-Container (Block F).
+       <modal-host>                     HTMX-eingespielte Modals.
+
+   Dual-Stack-Hinweis (ADR-0032 Phase 1):
+     - Tailwind-CDN + DaisyUI-CDN bleiben fuer Legacy-Templates eingebunden
+       (Settings, Server-Detail, Findings, Audit, Setup), die INNERHALB
+       von `<main class="main">` ihre Klassen weiter nutzen duerfen.
+     - Die Shell SELBST hat KEINE Tailwind/DaisyUI-Klassen mehr (vorher
+       `bg-base-100`, `w-80 lg:w-96`, `flex flex-col`). Plain-CSS-Grid
+       beherrscht das Layout.
 
    Sicherheit:
      - Jinja-Autoescape global aktiv (siehe app/__init__.py).
@@ -36,165 +54,106 @@
   {# Alpine-Initial-Hide muss vor Stylesheets greifen. #}
   <style>[x-cloak] { display: none !important; }</style>
 
-  {# Tailwind-CDN-Safelist (siehe TD-010):
-     Tailwind-CDN-JIT scannt nur den initialen DOM und generiert CSS-Regeln
-     nur fuer dort gefundene Klassen. Klassen, die ausschliesslich in HTMX-
-     nachgeladenen Subtrees auftauchen (Server-Detail, Settings, etc.),
-     werden vom MutationObserver nicht zuverlaessig erfasst — Layout bricht
-     dann nach Pane-Swap (z.B. h-full ohne CSS -> SVG faellt auf intrinsische
-     Default-Hoehe von 300 px). Diese Safelist garantiert dass die hier
-     gelisteten Klassen schon beim initialen JIT-Bootstrap CSS bekommen.
-     Pflege: Eintrag hinzufuegen sobald eine Klasse in einem HTMX-Subtree-
-     Template auftaucht und auf einer Dashboard-/Login-Initial-Seite fehlt.
-     Der Lint-Test `tests/templates/test_tailwind_safelist.py` schuetzt
-     gegen Drift fuer high-risk-Klassen wie h-full/h-screen. #}
-  <script>
-    window.tailwind = window.tailwind || {};
-    window.tailwind.config = {
-      safelist: [
-        // Vertikale Layout-Klasse (Settings-Sub-Pages).
-        "h-full",
-        // Arbitrary-value-Klassen aus HTMX-Subtree-Templates.
-        // `w-[180px]` ist die einzige sichtbar-kritische (KPI-Card-Breite,
-        // verifiziert broken 2026-05-22). Die `max-w-[Nch]`/`min-w-[Nch]`-
-        // Eintraege sichern Text-Truncation in den Findings-/Pending-/Group-
-        // Tabellen ab — ohne sie wuerden Zeilenumbruechen wackeln, was als
-        // Drift-Schutz egal-aber-billig in die Safelist gehoert.
-        "w-[180px]",
-        "max-w-[22ch]",
-        "max-w-[24ch]",
-        "max-w-[28ch]",
-        "max-w-[44ch]",
-        "min-w-[12ch]",
-        "min-h-[1.75rem]",
-      ],
-    };
-  </script>
-  {# Block W / ADR-0032 — Plain-CSS-Bundle (Design-Tokens + Komponenten).
-     Dual-Stack Phase 1: Tailwind/DaisyUI-CDN bleiben fuer Legacy-Templates.
-     asset_url() liest das esbuild-Manifest und gibt den gehashten Pfad zurueck. #}
+  {# Block W / ADR-0032 (Phase 2 vorgezogen, Addendum 2026-05-23) —
+     Plain-CSS-Bundle ist die EINZIGE Quelle fuer Styles. Tailwind-CDN +
+     DaisyUI-CDN sind komplett raus; Legacy-Templates (Settings, Server-
+     Detail, Findings, Audit, Setup, Chat) werden vom legacy-shim.css
+     (Teil von app.css) abgedeckt damit sie benutzbar bleiben bis sie
+     selbst redesigned werden. #}
   <link rel="stylesheet" href="{{ asset_url('css/app.css') }}" />
 
-  {# Tailwind + DaisyUI via CDN — siehe ADR-0001. Pins identisch zu base.html. #}
-  <script src="https://cdn.tailwindcss.com/3.4.16?plugins=forms,typography"></script>
-  <link
-    href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css"
-    rel="stylesheet"
-    type="text/css"
-  />
-
-  {# Wichtige Lade-Reihenfolge (vgl. base.html-Kommentar):
-     Alle App-Skripte die `window.*`-Factories registrieren (bulkAckIds/
+  {# App-Skripte die window.*-Factories registrieren (bulkAckIds,
      bulkAckMatch, staleTick, sidebarSearch, sseHighlight,
-     llmProviderForm, ...) MUESSEN vor `alpinejs.cdn.min.js` stehen.
-     Mit `defer` werden Scripts in DOM-Reihenfolge ausgefuehrt; Alpine v3
-     startet aus defer-Kontext SOFORT (readyState === 'interactive' beim
-     Script-Eval), feuert dann `alpine:init` und scannt den DOM. Sind die
-     Factories zu dem Zeitpunkt noch nicht definiert, gibt es
-     `ReferenceError`s und Komponenten wie das Bulk-Ack-Modal werden nicht
-     gemounted (Cancel kaputt, x-cloak haengt, etc.). #}
-
-  {# Wiederverwendete Block-A/F/H-Komponenten. #}
+     llmProviderForm, ...) MUESSEN vor Alpine geladen werden. #}
   <script defer src="{{ url_for('static', filename='js/bulk_ack.js') }}"></script>
   <script defer src="{{ url_for('static', filename='js/bulk_ack_noise.js') }}"></script>
   <script defer src="{{ url_for('static', filename='js/stale.js') }}"></script>
-
-  {# Block-I-Skripte. #}
   <script defer src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
   <script defer src="{{ url_for('static', filename='js/sse_highlight.js') }}"></script>
-
-  {# Settings-Sub-View-Skripte. Registrieren nur globale Alpine-Komponenten;
-     ohne passendes `x-data` keine Nebeneffekte. Notwendig hier (statt im
-     Sub-Template `block head`) weil die Settings-Sub-Templates nach
-     ADR-0016-Refactor reines Content-Markup sind (kein `extends`). #}
   <script defer src="{{ url_for('static', filename='js/llm_settings.js') }}"></script>
 
   {% block head %}{% endblock %}
 
-  {# Alpine.js + HTMX zuletzt — siehe Reihenfolgen-Kommentar oben. #}
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.7/dist/cdn.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
-
-  {# Block W / ADR-0032 — JS-Bundles (Dual-Stack Phase 1: CDN-Tags oben bleiben).
-     vendor.js enthaelt Alpine + HTMX als IIFE; app.js enthaelt App-Module.
-     Stehen NACH den CDN-Tags — bei Doppel-Load haben CDN-Globals Vorrang.
-     In Phase 2 werden CDN-Tags entfernt und das Bundle uebernimmt allein. #}
+  {# JS-Bundles aus esbuild. vendor.js enthaelt Alpine + HTMX als IIFE
+     (registriert window.Alpine + window.htmx); app.js enthaelt die
+     Block-W-App-Module (dashboard_scan_sync, sidebar_viewport,
+     sidebar_loading_wave, dashboard_last_refresh). #}
   <script defer src="{{ asset_url('js/vendor.js') }}"></script>
   <script defer src="{{ asset_url('js/app.js') }}"></script>
 </head>
-<body class="flex flex-col h-screen overflow-hidden bg-base-100 text-base-content antialiased text-sm">
+<body>
+  {# Ambient Background-Grid (DS §6) — fixed, pointer-events:none, hinter allem. #}
   <div class="bg-grid" aria-hidden="true"></div>
 
   {# ------------------------------------------------------------------
-     Header (ADR-0016): Logo + Dashboard + Suche links,
-     Profile-Avatar rechts. Theme statisch dark (ADR-0031).
+     App-Shell: 3-Zeilen-Grid (topbar/main/footer), 2-Spalten (sidebar/main).
+     Topbar+Sidebar+Main+Footer MUESSEN direkte Children von .app sein —
+     sonst greifen die grid-area-Zuweisungen nicht.
      ------------------------------------------------------------------ #}
-  {% include "layout/_header.html" %}
+  <div class="app">
 
-  {# Flash-Messages liegen ausserhalb des Sidebar/Detail-Pane-Splits, damit
-     sie immer sichtbar sind. Kein Scroll-Container — Topbar-naehe. #}
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      <div class="px-4 pt-2 space-y-1 shrink-0">
-        {% for category, message in messages %}
-          {% set cls = "alert-info" %}
-          {% if category == "success" %}{% set cls = "alert-success" %}
-          {% elif category == "error" %}{% set cls = "alert-error" %}
-          {% elif category == "warning" %}{% set cls = "alert-warning" %}
-          {% endif %}
-          <div class="alert {{ cls }} py-2" role="status">
-            <span>{{ message }}</span>
-          </div>
-        {% endfor %}
-      </div>
-    {% endif %}
-  {% endwith %}
+    {# ---- Topbar (grid-area: topbar) ---- #}
+    {% include "layout/_header.html" %}
 
-  {# ------------------------------------------------------------------
-     Main-Container: Sidebar links + Detail-Pane rechts.
-     ------------------------------------------------------------------ #}
-  <div class="flex flex-1 overflow-hidden min-h-0">
-
-    {# ---- Sidebar ---- #}
-    <aside class="w-80 lg:w-96 shrink-0 border-r border-base-300 bg-base-200/40
-                  overflow-y-auto flex flex-col"
+    {# ---- Sidebar (grid-area: sidebar) ---- #}
+    <aside class="sidebar"
            id="sidebar-root"
            aria-label="Sidebar"
            x-data="sidebarSearch()">
       {% block sidebar %}
-        {# Sidebar ist nach ADR-0016 reduziert auf Server-Suche und
-           Server-Liste. Quick-Stats und Filter wandern in den Dashboard-
-           Detail-Pane, Settings ins Profile-Dropdown. #}
+        {# Sidebar nach ADR-0016 reduziert auf Suche + Server-Liste.
+           Quick-Stats und Filter wandern in den Dashboard-Detail-Pane. #}
         {% include "sidebar/_search.html" %}
 
         {# Server-Liste als HTMX-Polling-Container ausgelagert (ADR-0019).
            Das Partial enthaelt die Pflicht-`id="server-list"` und die
-           Polling-Attribute; bei einem Self-Replace via `outerHTML` bleibt
-           die Sticky-Search drueber stehen, weil sie ausserhalb des
-           Polling-Targets liegt. #}
+           Polling-Attribute; bei Self-Replace via `outerHTML` bleibt die
+           Sticky-Search drueber stehen (ausserhalb des Polling-Targets). #}
         {% include "sidebar/_server_list.html" %}
       {% endblock %}
     </aside>
 
-    {# ---- Detail-Pane ---- #}
-    <main class="flex-1 min-w-0 overflow-y-auto"
+    {# ---- Main / Detail-Pane (grid-area: main) ----
+       Flash-Messages liegen INNERHALB des Main-Slots damit sie im Detail-
+       Pane sichtbar sind und nicht den Grid-Layout sprengen. #}
+    <main class="main"
           id="detail-pane"
           role="main">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="px-4 pt-2 space-y-1 shrink-0">
+            {% for category, message in messages %}
+              {% set cls = "alert-info" %}
+              {% if category == "success" %}{% set cls = "alert-success" %}
+              {% elif category == "error" %}{% set cls = "alert-error" %}
+              {% elif category == "warning" %}{% set cls = "alert-warning" %}
+              {% endif %}
+              <div class="alert {{ cls }} py-2" role="status">
+                <span>{{ message }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
       {% block detail_pane %}
         {% if main_pane %}
           {% include main_pane %}
         {% endif %}
         {# Sonst: leerer Pane. Alle aktiven Views ueberschreiben
            `{% block detail_pane %}` selbst (Dashboard, Server-Detail,
-           Findings-Suche, Settings, Chat, Audit). Der frueher hier
-           inkludierte `_pane/welcome.html`-Fallback ist nach ADR-0017
-           weggefallen — eine fehlende Pane-Definition zu maskieren hat
-           den Dashboard-Drift erst entstehen lassen. #}
+           Findings, Settings, Chat, Audit). Der frueher hier inkludierte
+           `_pane/welcome.html`-Fallback ist nach ADR-0017 weg. #}
       {% endblock %}
     </main>
+
+    {# ---- Footer (grid-area: footer) ---- #}
+    {% include "layout/_footer.html" %}
+
   </div>
 
-  {# Global Toast-Host — gleiche Komponente wie base.html (Block F). #}
+  {# Global Toast-Host — DaisyUI-Toast-Slot, lebt ausserhalb des .app-Grids
+     damit er als fixed-positioned Overlay funktioniert. #}
   <div id="global-toast-host"
        x-data="{
          items: [],
@@ -228,6 +187,5 @@
   <div id="modal-host"></div>
 
   {% block scripts %}{% endblock %}
-  {% include "layout/_footer.html" %}
 </body>
 </html>

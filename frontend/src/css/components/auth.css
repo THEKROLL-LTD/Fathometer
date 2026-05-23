@@ -1,25 +1,13 @@
 /* Fathometer — Auth / Login-Page Styles (Phase G).
    1:1 aus docs/design/styles.css Sektion "Auth (login page)" portiert.
-   Abhaengig von den Design-Tokens in tokens.css. */
+   Abhaengig von den Design-Tokens in tokens.css.
 
-/* ── Auth Shell-Variant — kein Sidebar ───────────────────────
-   Ueberschreibt das zweispaltige .app-Grid auf ein einspaltiges
-   Topbar/Main/Footer-Layout. */
-.app--auth {
-  grid-template-columns: 1fr;
-  grid-template-areas:
-    "topbar"
-    "main"
-    "footer";
-}
-
-.main--auth {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 24px;
-  overflow: auto;
-}
+   Wichtig: die Shell-Modifier .app--auth, .main--auth, .topbar--auth
+   leben NICHT mehr hier sondern in app.css (Bottom), DAMIT sie in der
+   CSS-Source-Order NACH den Shell-Defs .app, .main, .topbar stehen.
+   Sonst wuerde bei gleicher Specificity der .app-Block gewinnen und
+   .app--auth waere wirkungslos (2026-05-23 beobachtet — Login-Card
+   nicht zentriert weil .app's 2-Spalten-Grid greift). */
 
 /* ── Auth wrapper ─────────────────────────────────────────── */
 .auth {
@@ -113,8 +101,15 @@
   color: var(--text-tertiary);
 }
 
-/* ── Input: Mono-Style, dark surface ─────────────────────── */
-.auth__input {
+/* ── Input: Mono-Style, dark surface ───────────────────────
+   Hinweis: alle .auth__input-Selektoren leben unter `.auth__panel`
+   (Specificity-Boost 0,1,0 → 0,2,0). Das Tailwind-`forms`-Plugin
+   (laedt via CDN, Phase-1 Dual-Stack) styled `[type='text']`/
+   `[type='password']` mit Specificity (0,1,0) und White-Background +
+   Blue-Focus-Border — durch Specificity-Erhoehung schlagen wir das
+   ohne `!important`. Phase 2 (Tailwind raus) → Parent-Selector kann
+   wieder weg. */
+.auth__panel .auth__input {
   width: 100%;
   background: var(--surface-base);
   border: 1px solid var(--border-subtle);
@@ -124,13 +119,58 @@
   padding: 12px 14px;
   outline: none;
   letter-spacing: 0.02em;
+  border-radius: 0;
+  appearance: none;
   transition: border-color var(--dur-hover) var(--ease-drift),
               background   var(--dur-hover) var(--ease-drift);
 }
 
-.auth__input:hover:not(:focus) { border-color: var(--border-visible); }
-.auth__input:focus              { border-color: var(--accent); background: var(--surface-raised); }
-.auth__input:disabled           { color: var(--text-tertiary); cursor: not-allowed; }
+.auth__panel .auth__input:hover:not(:focus) { border-color: var(--border-visible); }
+.auth__panel .auth__input:disabled           { color: var(--text-tertiary); cursor: not-allowed; }
+
+/* Focus-Override mit !important UND Specificity-Boost via .auth__panel-
+   Parent, damit das Tailwind-`forms`-Plugin (laedt via CDN, styled
+   `[type='text']:focus`/`[type='password']:focus` mit `border-color:
+   #2563eb` und Ring-Box-Shadow) nicht durchschlaegt. Specificity:
+   (0,2,1) — schlaegt Tailwind's (0,1,1). `!important` ist Belt-and-
+   Suspenders, weil die CDN-JIT-Generierung manchmal !important einfuegt
+   (Dual-Stack Phase 1; in Phase 2 wenn Tailwind raus ist, kann das
+   !important wieder weg). */
+.auth__panel .auth__input:focus {
+  border-color: var(--accent) !important;
+  background: var(--surface-raised) !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* ── Browser-Autofill-Overrides ──────────────────────────────
+   Chrome/Edge/Safari malen Autofill-Inputs mit eigenem Background
+   (gelb/weiss) und eigener Text-Farbe. Chrome-Spec verlangt
+   `-webkit-box-shadow inset` um das Background-Painting zu uebermalen;
+   `-webkit-text-fill-color` ist die EINZIGE Property die die Auto-
+   fill-Text-Farbe overridet (color reicht nicht). `!important` ist
+   bei Autofill-Pseudo-Class Pflicht — Chrome ignoriert sonst die
+   Custom-Values. Firefox nutzt `:autofill` (ohne -webkit-prefix). */
+
+.auth__panel .auth__input:-webkit-autofill,
+.auth__panel .auth__input:-webkit-autofill:hover,
+.auth__panel .auth__input:-webkit-autofill:focus,
+.auth__panel .auth__input:-webkit-autofill:active,
+.auth__panel .auth__input:autofill {
+  -webkit-text-fill-color: var(--text-primary) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--surface-base) inset !important;
+  box-shadow: 0 0 0 1000px var(--surface-base) inset !important;
+  caret-color: var(--text-primary) !important;
+  border-color: var(--border-subtle) !important;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+.auth__panel .auth__input:-webkit-autofill:focus,
+.auth__panel .auth__input:autofill:focus {
+  border-color: var(--accent) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--surface-raised) inset !important;
+  box-shadow: 0 0 0 1000px var(--surface-raised) inset !important;
+}
 
 /* ── Status line: Hint / Error ───────────────────────────── */
 .auth__status {
@@ -185,8 +225,3 @@
 
 .auth__submit-arrow { transition: transform var(--dur-hover) var(--ease-drift); }
 .auth__submit:hover .auth__submit-arrow { transform: translateX(3px); }
-
-/* ── Topbar auth-variant: kein Nav, kein Profile — nur Brand */
-.topbar--auth {
-  padding: 0 32px;
-}

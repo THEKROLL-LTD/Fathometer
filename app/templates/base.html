@@ -1,16 +1,27 @@
 <!doctype html>
-{# Basislayout fuer alle secscan-Seiten.
+{# Basislayout fuer Pre-Login Fathometer-Seiten (Login, Setup-Wizard).
 
-   Tech-Stack (siehe ADR-0001):
-     - Tailwind CSS via Play-CDN  (Pin: tailwindcss@3.4.16)
-     - DaisyUI als Tailwind-Plugin via CDN  (Pin: daisyui@4.12.14)
-     - Alpine.js fuer kleine interaktive Bits  (Pin: alpinejs@3.14.7)
-     - HTMX fuer Server-Fragmente  (Pin: htmx.org@2.0.4)
+   Block W / ADR-0032 + ADR-0033:
+     - Plain-CSS-Bundle ist die Layout-Wurzel (`.app app--auth`-Grid).
+     - Tailwind-CDN + DaisyUI-CDN bleiben fuer Legacy-Templates (Setup-
+       Wizard nutzt sie noch innerhalb von <main class="main">).
+     - Theme statisch `dark` (ADR-0031).
+     - Body hat KEINE Tailwind-Klassen mehr — Layout kommt aus .app/.main.
 
-   Theme:
-     - `data-theme="dark"` ist statisch gesetzt (ADR-0031).
-     - DaisyUI-CDN-Datei enthaelt weiterhin alle Themes; nur
-       [data-theme="dark"]-Regeln greifen.
+   Block-Override-Patterns (fuer abgeleitete Templates):
+     - `block title`        → Page-Title.
+     - `block app_class`    → Default `"app app--auth"`. Login behaelt das;
+                              andere Pre-Login-Templates muessen es nicht
+                              anfassen.
+     - `block main_class`   → Default `"main"`. Login setzt
+                              `"main main--auth"` fuer flex-zentrierte Card.
+     - `block page_content` → Inhalt im `<main>`. Default rendert Flash-
+                              Banner plus `<div class="container">`-Wrapper
+                              (Setup-Wizard erbt den Wrapper).
+     - `block content`      → Inhalt im Default-Container. Setup-Wizard
+                              ueberschreibt nur `content`.
+     - `block head`         → zusaetzliche `<link>`-/`<script>`-Tags.
+     - `block scripts`      → zusaetzliche `<script>`-Tags am Body-Ende.
 
    Sicherheit:
      - Jinja-Autoescape global aktiv (siehe app/__init__.py).
@@ -21,124 +32,83 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
-  {# Global CSRF-Token fuer JSON-Fetch-Calls (Bulk-Ack & Co).
-     `flask-wtf` validiert auch den `X-CSRFToken`-Header gegen das hier
-     verankerte Token; reine GET-Seiten lassen das Meta-Tag leer wenn der
-     User nicht eingeloggt ist — die geschuetzten JSON-Endpoints sind dann
-     ohnehin nicht erreichbar. #}
+  {# Global CSRF-Token fuer JSON-Fetch-Calls (Bulk-Ack & Co). #}
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>{% block title %}Fathometer · CVE Intelligence{% endblock %}</title>
 
-  {# Block W / ADR-0032 — Plain-CSS-Bundle (Design-Tokens + Komponenten).
-     Dual-Stack Phase 1: Tailwind/DaisyUI-CDN bleiben fuer Legacy-Templates.
-     asset_url() liest das esbuild-Manifest und gibt den gehashten Pfad zurueck. #}
+  {# Block W / ADR-0032 (Phase 2 vorgezogen, Addendum 2026-05-23) —
+     Plain-CSS-Bundle ist die EINZIGE Quelle fuer Styles. Tailwind-CDN +
+     DaisyUI-CDN sind komplett raus; Legacy-Templates werden vom
+     legacy-shim.css (Teil von app.css) abgedeckt. #}
   <link rel="stylesheet" href="{{ asset_url('css/app.css') }}" />
 
-  {# Tailwind Play CDN (3.4.x) inkl. DaisyUI-Plugin (4.12.x).
-     Pin via expliziter Version-URL; DaisyUI-Plugin haengt sich an die
-     globale `tailwind.config`-Hook. #}
-  <script src="https://cdn.tailwindcss.com/3.4.16?plugins=forms,typography"></script>
-  <link
-    href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css"
-    rel="stylesheet"
-    type="text/css"
-  />
-
-  {# Alpine-`x-cloak`-Pattern: Elemente mit `x-cloak` bleiben hidden bis
-     Alpine die Direktive entfernt (= Komponente initialisiert). Verhindert
-     Flash-of-Content fuer Modals, Dropdowns etc. Ohne diese Regel ist
-     `x-cloak` ein No-Op. #}
+  {# Alpine-`x-cloak`-Pattern. #}
   <style>
     [x-cloak] { display: none !important; }
   </style>
 
-  {# Reihenfolge ist wichtig: Alle App-eigenen Skripte, die globale
-     Alpine-Komponenten-Factories an `window.*` haengen (bulkAckIds/
-     bulkAckMatch, staleTick, llmChat, llmProviderForm, ...),
-     MUESSEN vor `alpinejs.cdn.min.js` stehen. Mit `defer` werden Scripts
-     in DOM-Reihenfolge ausgefuehrt — wenn Alpine zuerst laeuft, scannt
-     es den DOM nach `x-data` und ruft die Factory-Namen sofort auf; sind
-     sie zu dem Zeitpunkt noch nicht definiert, gibt es `ReferenceError`s
-     und das Dashboard bleibt tot.
-     (Alternative waere `document.addEventListener("alpine:init", ...)` —
-     hier ist die Reihenfolge die kleinere Aenderung.) #}
-
-  {# Bulk-Acknowledge-Komponenten (Alpine `bulkAckIds` / `bulkAckMatch` /
-     `bulkAckNoise`). Reine Frontend-Logik — POSTs gehen an
-     /api/findings/bulk-acknowledge mit X-CSRFToken-Header aus dem oben
-     gesetzten <meta>. `bulkAckNoise` setzt `risk_band_filter="noise"`. #}
+  {# App-Skripte vor Alpine — registrieren window.*-Factories. #}
   <script defer src="{{ url_for('static', filename='js/bulk_ack.js') }}"></script>
   <script defer src="{{ url_for('static', filename='js/bulk_ack_noise.js') }}"></script>
-
-  {# Stale-Re-Render-Komponente (Block H, nach ADR-0019 ohne SSE).
-     Stellt `window.staleTick()` als Alpine-Component-Factory bereit.
-     Nur das Dashboard verdrahtet sie. #}
   <script defer src="{{ url_for('static', filename='js/stale.js') }}"></script>
 
-  {# Page-spezifische Komponenten-Skripte (z.B. `llm_chat.js`,
-     `llm_settings.js`). Stehen bewusst VOR Alpine — sie registrieren
-     `window.llmChat`, `window.llmProviderForm`, ... als Komponenten-
-     Factories und muessen verfuegbar sein, bevor Alpine den DOM scannt
-     (siehe Kommentar oben). #}
   {% block head %}{% endblock %}
 
-  {# Alpine.js (defer) — siehe ADR-0001. MUSS nach den App-Skripten oben
-     UND nach `{% block head %}` stehen, damit alle Komponenten-Factories
-     beim ersten DOM-Scan bereits definiert sind. #}
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.7/dist/cdn.min.js"></script>
-
-  {# HTMX (lazy, aber generell verfuegbar fuer spaetere Blocks). #}
-  <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
-
-  {# Block W / ADR-0032 — JS-Bundles (Dual-Stack Phase 1: CDN-Tags oben bleiben).
-     vendor.js enthaelt Alpine + HTMX als IIFE; app.js enthaelt App-Module.
-     Beide werden NACH den CDN-Tags geladen — bei Doppel-Load gewinnt die
-     CDN-Version (bereits registriert), das Bundle ist ein No-Op. In Phase 2
-     werden die CDN-Tags entfernt und das Bundle uebernimmt. #}
+  {# JS-Bundles aus esbuild — Alpine + HTMX via vendor.js. #}
   <script defer src="{{ asset_url('js/vendor.js') }}"></script>
   <script defer src="{{ asset_url('js/app.js') }}"></script>
 </head>
-<body class="min-h-screen bg-base-100 text-base-content antialiased">
+<body>
+  {# Ambient Background-Grid (DS §6) — fixed, pointer-events:none, hinter allem. #}
   <div class="bg-grid" aria-hidden="true"></div>
-  {# Fathometer Topbar (Block W Phase B). `_header.html` degraded sauber
-     im unauthentifizierten Zustand (Nav + Profile nur sichtbar wenn
-     current_user.is_authenticated) — funktioniert fuer Login und Setup
-     ohne Auth-Variante. Phase G kann den Auth-Variant-Feinschliff machen. #}
-  {% include "layout/_header.html" %}
 
-  {# page_content-Block: Flash-Messages + Main-Bereich.
-     Login-Template ueberschreibt diesen Block komplett, um die
-     Auth-Shell-Struktur (app--auth Grid, main--auth Flex-Center)
-     ohne DaisyUI-Flash-Banner zu rendern. Alle anderen Templates
-     nutzen `block content` innerhalb des Default-Inhalts. #}
-  {% block page_content %}
-  {# Flash-Messages: Kategorie -> DaisyUI alert variant. #}
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      <div class="container mx-auto px-4 mt-4 space-y-2">
-        {% for category, message in messages %}
-          {% set cls = "alert-info" %}
-          {% if category == "success" %}{% set cls = "alert-success" %}
-          {% elif category == "error" %}{% set cls = "alert-error" %}
-          {% elif category == "warning" %}{% set cls = "alert-warning" %}
+  {# ------------------------------------------------------------------
+     App-Shell (Plain-CSS-Grid). Pre-Login-Default: `.app app--auth`
+     (eine Spalte, kein Sidebar-Slot). Login behaelt diesen Default.
+     ------------------------------------------------------------------ #}
+  <div class="{% block app_class %}app app--auth{% endblock %}">
+
+    {# ---- Topbar (grid-area: topbar) ---- #}
+    {% include "layout/_header.html" %}
+
+    {# ---- Main (grid-area: main) ----
+       `block main_class` default `"main"`. Login setzt `"main main--auth"`
+       fuer das flex-center-Layout der Auth-Card. #}
+    <main class="{% block main_class %}main{% endblock %}" role="main">
+      {% block page_content %}
+        {# Default-Pfad: Flash-Banner + Tailwind-Container fuer Setup-Wizard
+           und sonstige Pre-Login-Templates die `block content` nutzen.
+           Login ueberschreibt `block page_content` komplett und rendert
+           sein eigenes <section class="auth">-Markup. #}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="container mx-auto px-4 mt-4 space-y-2">
+              {% for category, message in messages %}
+                {% set cls = "alert-info" %}
+                {% if category == "success" %}{% set cls = "alert-success" %}
+                {% elif category == "error" %}{% set cls = "alert-error" %}
+                {% elif category == "warning" %}{% set cls = "alert-warning" %}
+                {% endif %}
+                <div class="alert {{ cls }}" role="status">
+                  <span>{{ message }}</span>
+                </div>
+              {% endfor %}
+            </div>
           {% endif %}
-          <div class="alert {{ cls }}" role="status">
-            <span>{{ message }}</span>
-          </div>
-        {% endfor %}
-      </div>
-    {% endif %}
-  {% endwith %}
+        {% endwith %}
 
-  <main class="container mx-auto px-4 py-8">
-    {% block content %}{% endblock %}
-  </main>
-  {% endblock %}
+        <div class="container mx-auto px-4 py-8">
+          {% block content %}{% endblock %}
+        </div>
+      {% endblock %}
+    </main>
 
-  {# Global Toast-Container.
-     Listener auf `toast`-Window-Event — feuert von Alpine-Komponenten via
-     `$dispatch('toast', {msg: '...', kind: 'success'|'error'|'info'})`.
-     DaisyUI-`toast`-Slot rechts unten, Auto-Dismiss nach 3s. #}
+    {# ---- Footer (grid-area: footer) ---- #}
+    {% include "layout/_footer.html" %}
+
+  </div>
+
+  {# Global Toast-Container — fixed positioned, ausserhalb von .app. #}
   <div id="global-toast-host"
        x-data="{
          items: [],
@@ -168,13 +138,9 @@
     </template>
   </div>
 
-  {# Modal-Mount fuer HTMX-eingespielte Inhalte (Finding-Detail, Status-Change).
-     Endpoints liefern HTML-Fragmente; HTMX schreibt sie in `#modal-host`
-     hinein. Das Schliessen passiert ueber `closeModal()` (Alpine-Snippet im
-     Template) ODER per `htmx:afterSwap`-Reset wenn das Fragment leer ist. #}
+  {# Modal-Mount fuer HTMX-eingespielte Inhalte. #}
   <div id="modal-host"></div>
 
   {% block scripts %}{% endblock %}
-  {% include "layout/_footer.html" %}
 </body>
 </html>

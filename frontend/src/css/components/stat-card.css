@@ -222,6 +222,14 @@
   animation: scan-flash 5.4s linear infinite;
 }
 
+/* Keyframe 1:1 aus docs/design/styles.css uebernommen (Design-Original):
+   0-8 % Rest auf --text-ghost, sharp jump auf --accent bei 14 %, dann
+   86 % des Zyklus linearer Fade zurueck zu --text-ghost. Der visuelle
+   Cyan-Trail kommt durch die RGB-Interpolation cyan↔#444 (durchlaeuft
+   teal-Midtones) — bewusste Designer-Entscheidung (User-Bestaetigung
+   2026-05-23: „nutze die design animation"). Der Sync-Drift-Fix sitzt
+   ausschliesslich im dashboard_scan_sync.js (kein Re-Sync bei jedem
+   OOB-Swap, nur bei tatsaechlicher Span-Anzahl-Aenderung). */
 @keyframes scan-flash {
   0%, 8% { color: var(--text-ghost); }
   14%    { color: var(--accent); }

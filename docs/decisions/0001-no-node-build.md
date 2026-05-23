@@ -1,6 +1,17 @@
 # ADR-0001 — Kein Node-Build im MVP
 
-**Status:** Akzeptiert · **Datum:** 2026-05-14
+**Status:** Superseded by [ADR-0032](0032-frontend-build-plain-css.md) (2026-05-23) · **Datum:** 2026-05-14
+
+> **Hinweis (2026-05-23):** Block W führt einen esbuild-Node-Build ein.
+> Das ursprüngliche „CDN-only"-Modell mit Tailwind/DaisyUI/Alpine/HTMX
+> via Script-Tags ist abgelöst. Plain-CSS-Bundle + esbuild-JS-Bundle
+> kommen aus `frontend/`, Multi-Stage-Dockerfile mit `node:20-alpine`
+> als Build-Stage 1 und Python-Slim als Stage 2. Siehe ADR-0032 für
+> die volle Begründung, die Trade-Offs und das Phase-2-Addendum (in
+> dem Tailwind/DaisyUI auch endgültig aus dem Dual-Stack rausgeflogen
+> sind). Das Original unten bleibt als historischer Kontext stehen.
+
+---
 
 ## Kontext
 

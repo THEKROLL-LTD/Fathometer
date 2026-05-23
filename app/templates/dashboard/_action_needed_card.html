@@ -22,8 +22,12 @@
 #}
 {% from "_macros.html" import scan_chars %}
 <div class="stat stat--alarm" id="action-needed-card" hx-preserve="true">
+  {# „action needed" zwischen den Klammern ist Plain-Text — bekommt die
+     Farbe aus .stat__label (--text-secondary, gray #999) und ist NICHT
+     scan-flash-animiert. Nur die Brackets `[` und `]` haben scan-flash
+     und blitzen cyan. 1:1 aus docs/design/app.jsx::ActionNeededCard. #}
   <p class="stat__label">
-    <span class="bracket scan-flash" aria-hidden="true">[</span>{{ scan_chars("action needed") }}<span class="bracket scan-flash" aria-hidden="true">]</span>
+    <span class="bracket scan-flash" aria-hidden="true">[</span>action needed<span class="bracket scan-flash" aria-hidden="true">]</span>
   </p>
   <div class="stat__figure">
     <span class="stat__num" id="action-needed-num">{{ scan_chars(action_needed_card_data.server_count) }}</span>
@@ -35,7 +39,7 @@
     <b>{{ action_needed_card_data.pending }}</b> pending
   </p>
   <a class="stat__cta" href="{{ url_for('findings.index', risk_band='escalate') }}">
-    <span class="stat__cta-text">{{ scan_chars("triage now") }}</span>
+    <span class="stat__cta-text">{{ scan_chars("open triage queue") }}</span>
     <span class="stat__cta-arrow scan-flash" aria-hidden="true">→</span>
   </a>
 </div>

@@ -4,7 +4,57 @@
 **Branch:** `feat/block-w-redesign-phase-1`
 **Zielversion:** v0.12.0
 **Vorgänger:** Block V (v0.11.0, ADR-0030 Sidebar-Lazy-Load)
-**Status:** Geplant
+**Status:** Implementiert (Addendum 2026-05-23 — Tailwind/DaisyUI komplett raus, Legacy-Shim)
+
+## Addendum 2026-05-23 — Tailwind/DaisyUI komplett entfernt
+
+Browser-Verifikation am Dual-Stack-Modell (Phase 1) zeigte zwei Klassen
+von Cascade-Konflikten, die sich praktisch nicht ohne `!important`-
+Salat oder Specificity-Boost-Wars beheben lassen: (1) DaisyUI definiert
+eigene Klassen mit Namen wie `.footer`, `.stats`, `.stat`, `.toast`,
+`.alert` — kollidieren mit gleichnamigen Plain-CSS-Komponenten; (2)
+Tailwind-`forms`-Plugin styled `[type='text']`/`[type='password']` mit
+weißem Background + blauem Focus-Border, gewinnt bei gleicher Specificity
+durch Source-Order.
+
+Statt mit Cascade-Hacks weiterzumachen wurde **ADR-0032 Phase 2
+vorgezogen**: Tailwind-CDN + DaisyUI-CDN + Alpine-CDN + HTMX-CDN sind
+komplett aus `base.html` und `base_app.html` entfernt. `window.tailwind.
+config`-Safelist-Inline-Script weg. Alpine + HTMX kommen jetzt
+ausschließlich aus `vendor.js`.
+
+Für die noch nicht redesigneten Templates (Settings, Server-Detail,
+Findings, Audit, Setup-Wizard, Chat, Dashboard-`_card.html`,
+`_partials/*`, `_empty/*`) wurde `frontend/src/css/components/legacy-
+shim.css` eingeführt — eine Minimal-CSS-Schicht die ~150 der häufigsten
+Tailwind-/DaisyUI-Klassen mit „benutzbar, nicht hübsch"-Defaults belegt
+(siehe ADR-0032 Addendum für Details). Wenn ein zukünftiger Block
+eine Surface redesigned, wandert das spezifische Styling in
+`frontend/src/css/components/<surface>.css` und die Templates wechseln
+auf BEM-Plain-CSS. Der Shim schrumpft schrittweise.
+
+**Files entfernt/aktualisiert für das Addendum:**
+
+- `app/templates/base_app.html` — alle CDN-Tags + Safelist-Inline-Script raus
+- `app/templates/base.html` — analog
+- `frontend/src/css/components/legacy-shim.css` — neu, ~450 Zeilen
+- `frontend/src/css/app.css` — Shim als letzter `@import`
+- `tests/templates/test_tailwind_safelist.py` — als `pytest.skip` deprecated markiert
+- `tests/views/test_script_load_order.py` — `ALPINE_MARKER` von CDN-URL auf `js/vendor.js`-Bundle-Namen umgestellt
+
+**Bundle-Größe:** App-CSS 26 KB → 41 KB un-gzipped (+15 KB für Shim,
+~5 KB gzipped). Bleibt deutlich unter dem alten Dual-Stack-Total
+(Tailwind ~50 KB + DaisyUI ~200 KB).
+
+**Verification nach Addendum:** ruff PASS, ruff format PASS (320 files),
+mypy PASS (84 source files), pytest 1511 passed / 208 skipped (DB-
+Integration ohne Postgres) / 662 deselected / 0 failures.
+
+**TD-010 ist final erledigt.**
+
+---
+
+## Original-Block-Spec (vor Addendum)
 
 ## Ziel
 

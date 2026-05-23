@@ -1,5 +1,13 @@
 {# Login-Page (Block W Phase G / ADR-0033).
    Englische Strings, plain-CSS-Klassen, kein Tailwind/DaisyUI.
+
+   Layout:
+     base.html liefert `.app app--auth`-Grid + Topbar + Footer.
+     Login ueberschreibt nur:
+       - `block main_class`  → setzt `"main main--auth"` fuer flex-center.
+       - `block page_content` → ersetzt den Default-Container-Wrapper
+         durch <section class="auth"><div class="auth__panel">…</div>.
+
    Variablen: `form` (LoginForm — benutzt form.errors fuer Flash-Erkennung).
    Flash-Messages werden via get_flashed_messages() direkt gelesen.
    Kein JS-busy-State / kein HTMX — sync <form method="post"> (Phase-1-Trade-off).
@@ -8,91 +16,87 @@
 
 {% block title %}Authenticate · Fathometer · CVE Intelligence{% endblock %}
 
-{# page_content ueberschreiben: Auth-Shell statt DaisyUI-Flash-Banner + container-main. #}
+{# Main bekommt `main--auth`-Modifier fuer das flex-center-Layout. #}
+{% block main_class %}main main--auth{% endblock %}
+
+{# page_content ueberschreiben: Auth-Card statt Default-Container. #}
 {% block page_content %}
-<div class="app app--auth">
-  {# Topbar: nur Brand (Logo + Wordmark), kein Nav, kein Profile.
-     _header.html degraded sauber: zeigt Nav/Profile nur wenn
-     current_user.is_authenticated — auf der Login-Seite ist er es nicht. #}
+<section class="auth">
+  <div class="auth__panel">
 
-  <main class="main main--auth">
-    <section class="auth">
-      <div class="auth__panel">
+    <p class="auth__eyebrow">
+      <span class="auth__prompt">&gt;</span>
+      <span>authenticate</span>
+    </p>
 
-        <p class="auth__eyebrow">
-          <span class="auth__prompt">&gt;</span>
-          <span>authenticate</span>
-        </p>
+    <h1 class="auth__title">Operator credentials.</h1>
+    <p class="auth__sub">No signup. No reset. No SSO. Internal operators only.</p>
 
-        <h1 class="auth__title">Operator credentials.</h1>
-        <p class="auth__sub">No signup. No reset. No SSO. Internal operators only.</p>
+    <form method="post" action="{{ url_for('auth.login') }}" class="auth__form">
+      {# CSRF-Token — flask-wtf validiert gegen X-CSRFToken-Header und Hidden-Field. #}
+      {{ form.csrf_token }}
 
-        <form method="post" action="{{ url_for('auth.login') }}" class="auth__form">
-          {# CSRF-Token — flask-wtf validiert gegen X-CSRFToken-Header und Hidden-Field. #}
-          {{ form.csrf_token }}
+      {# next-URL als Hidden-Field weitergeben (vom Query-Parameter). #}
+      {% set _next = request.args.get('next') %}
+      {% if _next %}<input type="hidden" name="next" value="{{ _next }}" />{% endif %}
 
-          {# next-URL als Hidden-Field weitergeben (vom Query-Parameter). #}
-          {% set _next = request.args.get('next') %}
-          {% if _next %}<input type="hidden" name="next" value="{{ _next }}" />{% endif %}
-
-          <div class="auth__field">
-            <label class="auth__field-label" for="auth-username">username</label>
-            <input class="auth__input"
-                   type="text"
-                   id="auth-username"
-                   name="username"
-                   required
-                   autofocus
-                   autocapitalize="off"
-                   autocorrect="off"
-                   spellcheck="false"
-                   autocomplete="username" />
-          </div>
-
-          <div class="auth__field">
-            <label class="auth__field-label" for="auth-password">password</label>
-            <input class="auth__input"
-                   type="password"
-                   id="auth-password"
-                   name="password"
-                   required
-                   autocomplete="current-password" />
-          </div>
-
-          {# Status-Zeile: Error-State wenn Flash-Messages vorhanden oder form.errors;
-             Hint-State sonst. Keine Pflicht-Kommentare (ADR-0006). #}
-          <div class="auth__status" role="status" aria-live="polite">
-            {% set _flash_errors = get_flashed_messages(with_categories=true)
-                                   | selectattr(0, 'in', ['error', 'warning'])
-                                   | list %}
-            {% if form.errors or _flash_errors %}
-              <span class="auth__status--error">
-                <span class="bracket">[</span>access denied<span class="bracket">]</span>
-                {%- if _flash_errors %}
-                  &nbsp;&middot;&nbsp;
-                  {%- for _cat, _msg in _flash_errors %}
-                    {{ _msg }}{% if not loop.last %} &middot; {% endif %}
-                  {%- endfor %}
-                {%- elif form.username.errors or form.password.errors %}
-                  &nbsp;&middot;&nbsp;
-                  {%- for _err in (form.username.errors + form.password.errors) %}
-                    {{ _err }}{% if not loop.last %} &middot; {% endif %}
-                  {%- endfor %}
-                {%- endif %}
-              </span>
-            {% else %}
-              <span class="auth__status--hint">enter credentials to proceed.</span>
-            {% endif %}
-          </div>
-
-          <button type="submit" class="auth__submit">
-            <span>authenticate</span>
-            <span class="auth__submit-arrow" aria-hidden="true">&#x2192;</span>
-          </button>
-        </form>
-
+      <div class="auth__field">
+        <label class="auth__field-label" for="auth-username">username</label>
+        <input class="auth__input"
+               type="text"
+               id="auth-username"
+               name="username"
+               required
+               autofocus
+               autocapitalize="off"
+               autocorrect="off"
+               spellcheck="false"
+               autocomplete="username" />
       </div>
-    </section>
-  </main>
-</div>
+
+      <div class="auth__field">
+        <label class="auth__field-label" for="auth-password">password</label>
+        <input class="auth__input"
+               type="password"
+               id="auth-password"
+               name="password"
+               required
+               autocomplete="current-password" />
+      </div>
+
+      {# Status-Zeile (ADR-0033 §8 Sprach-Policy + Design login.jsx):
+         - Idle-State: leer (nur min-height-Reserve fuer Layout).
+         - Error-State: `[access denied] · <reason>` mit auth__status--error.
+         Default-Hint-Text wurde absichtlich entfernt (Drift zum Design,
+         User-Feedback L6 im W-redesign-diffs.tmp.md). #}
+      <div class="auth__status" role="status" aria-live="polite">
+        {% set _flash_errors = get_flashed_messages(with_categories=true)
+                               | selectattr(0, 'in', ['error', 'warning'])
+                               | list %}
+        {% if form.errors or _flash_errors %}
+          <span class="auth__status--error">
+            <span class="bracket">[</span>access denied<span class="bracket">]</span>
+            {%- if _flash_errors %}
+              &nbsp;&middot;&nbsp;
+              {%- for _cat, _msg in _flash_errors %}
+                {{ _msg }}{% if not loop.last %} &middot; {% endif %}
+              {%- endfor %}
+            {%- elif form.username.errors or form.password.errors %}
+              &nbsp;&middot;&nbsp;
+              {%- for _err in (form.username.errors + form.password.errors) %}
+                {{ _err }}{% if not loop.last %} &middot; {% endif %}
+              {%- endfor %}
+            {%- endif %}
+          </span>
+        {% endif %}
+      </div>
+
+      <button type="submit" class="auth__submit">
+        <span>authenticate</span>
+        <span class="auth__submit-arrow" aria-hidden="true">&#x2192;</span>
+      </button>
+    </form>
+
+  </div>
+</section>
 {% endblock %}
