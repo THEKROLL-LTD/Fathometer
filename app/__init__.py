@@ -17,6 +17,8 @@ Konfiguriert in dieser Reihenfolge:
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 import threading
 from datetime import UTC, datetime, timedelta
@@ -39,6 +41,13 @@ if TYPE_CHECKING:
     pass
 
 __all__ = ["create_app", "csrf", "limiter"]
+
+# Erlaubtes Zeichenset fuer SECSCAN_VERSION / SECSCAN_BUILD_REVISION.
+# Regex pre-compiled als Modul-Konstante — wird pro Request nicht neu kompiliert.
+# Ziel: verhindert XSS via Env-Var-Injection in Footer-Links/Text-Nodes
+# (z.B. `"$(rm -rf /)"` wuerde den Link zerbrechen und ist kein gueltiges
+# Semver-Token). Fuer hochentropische Build-Hashes reicht das Whitelist-Muster.
+_SECSCAN_VERSION_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9._-]+$")
 
 # Global verfuegbarer Limiter — wird in `create_app` initialisiert. Andere
 # Module duerfen ihn via `from app import limiter` importieren und Decorators
@@ -507,6 +516,37 @@ def create_app() -> Flask:
         except Exception as exc:  # pragma: no cover — DB/Setup-Edge-Case
             log.warning("sidebar_context.unavailable", error=str(exc))
             return {}
+
+    @app.context_processor
+    def _inject_version() -> dict[str, str]:
+        """Stellt `secscan_version` und `secscan_build_revision` als Template-Variablen bereit.
+
+        Liest `SECSCAN_VERSION` bzw. `SECSCAN_BUILD_REVISION` aus der
+        Prozess-Umgebung. Beide Werte werden gegen `_SECSCAN_VERSION_RE`
+        (`^[A-Za-z0-9._-]+$`, max. 64 Zeichen) validiert, bevor sie ins
+        Template gelangen.
+
+        Sicherheitsbegruendung: Der Footer rendert `v{{ secscan_version }}`
+        sowohl als Text-Node als auch in einem Href-Attribut
+        (`https://github.com/.../releases/tag/v{{ secscan_version }}`).
+        Ein boeswilliges Env wie `'"><script>alert(1)</script>` wuerde bei
+        unvalidierter Ausgabe den Link zerbrechen oder XSS ermoeglichen.
+        Die Regex-Whitelist erlaubt ausschliesslich semantisch valide
+        Semver- und Commit-Hash-Zeichen — bei Mismatch, leerem String oder
+        Ueberschreiten der Max-Laenge (64) wird auf `"dev"` zurueckgefallen.
+        """
+        _max_len = 64
+
+        def _validated(env_key: str) -> str:
+            raw = os.environ.get(env_key, "").strip()
+            if raw and len(raw) <= _max_len and _SECSCAN_VERSION_RE.match(raw):
+                return raw
+            return "dev"
+
+        return {
+            "secscan_version": _validated("SECSCAN_VERSION"),
+            "secscan_build_revision": _validated("SECSCAN_BUILD_REVISION"),
+        }
 
     # Setup-Guard: solange das Setup nicht abgeschlossen ist, leiten wir
     # alle Browser-Requests auf den Wizard. `is_setup_completed()` liest aus

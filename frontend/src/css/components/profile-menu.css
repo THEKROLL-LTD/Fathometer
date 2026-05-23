@@ -1,0 +1,120 @@
+/* Fathometer — Profile-Dropdown-Komponente (Phase B).
+   BEM: .profile-menu, .profile-menu__user, .profile-menu__label,
+   .profile-menu__name, .profile-menu__item, .profile-menu__item--danger.
+   Animation: profile-menu-in (Materialize-Enter per DS §1).
+   Quelle: docs/design/styles.css §Profile-Dropdown. */
+
+/* ── Dropdown-Container ────────────────────────────────────── */
+
+.profile-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 224px;
+  background: var(--surface-elevated);
+  border: var(--border);
+  z-index: 100;
+  font-family: var(--font-mono);
+  /* DS §1 Materialize-in — langsamer Enter, kein Exit-Anim (Exit ist instant unmount). */
+  animation: profile-menu-in 260ms var(--ease-materialize) both;
+  transform-origin: top right;
+}
+
+@keyframes profile-menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);     }
+}
+
+/* ── User-Header ───────────────────────────────────────────── */
+
+.profile-menu__user {
+  padding: var(--space-4) var(--space-4) calc(var(--space-4) + 2px);
+  border-bottom: var(--hairline);
+}
+
+.profile-menu__label {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  /* DS Terminal-Prompt-Prefix — gleiche Pattern wie Sysline ">last scan…" */
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.profile-menu__label::before {
+  content: ">";
+  color: var(--text-tertiary);
+  letter-spacing: 0;
+}
+
+.profile-menu__name {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+/* ── Menu-Items ────────────────────────────────────────────── */
+
+.profile-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px var(--space-4);
+  background: none;
+  border: 0;
+  border-bottom: var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--dur-hover) var(--ease-drift),
+              color      var(--dur-hover) var(--ease-drift),
+              padding-left var(--dur-hover) var(--ease-drift);
+}
+
+.profile-menu__item:last-child {
+  border-bottom: 0;
+}
+
+/* DS Text-Link-Hover: primary → accent + 4px translate. */
+.profile-menu__item:hover {
+  background: var(--surface-hover);
+  padding-left: calc(var(--space-4) + 4px);
+  color: var(--accent);
+}
+
+.profile-menu__item svg {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  transition: color var(--dur-hover) var(--ease-drift);
+}
+
+.profile-menu__item:hover svg {
+  color: var(--accent);
+}
+
+/* ── Danger-Override (Logout) ──────────────────────────────── */
+/* Expliziter Override: .profile-menu__item:hover (Spezifität 0,2,0)
+   würde sonst die Danger-Regel (0,1,0) schlagen und Logout cyan färben. */
+
+.profile-menu__item--danger,
+.profile-menu__item--danger svg {
+  color: var(--status-restricted);
+}
+
+.profile-menu__item--danger:hover,
+.profile-menu__item--danger:hover svg {
+  color: var(--status-restricted);
+}
+
+.profile-menu__item--danger:hover {
+  background: rgba(255, 68, 68, 0.06);
+}

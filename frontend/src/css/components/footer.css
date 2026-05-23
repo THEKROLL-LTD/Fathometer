@@ -1,0 +1,39 @@
+/* Fathometer — Footer-Komponente (Phase B).
+   BEM: .footer, .footer__sep, .footer__link, .footer__link--icon.
+   Quelle: docs/design/styles.css §Footer. */
+
+/* ── Trennzeichen ──────────────────────────────────────────── */
+
+.footer__sep {
+  color: var(--border-visible);
+}
+
+/* ── Links ─────────────────────────────────────────────────── */
+
+.footer a {
+  color: var(--text-tertiary);
+  text-decoration: none;
+  transition: color var(--dur-hover) var(--ease-drift);
+}
+
+.footer a:hover {
+  color: var(--accent);
+}
+
+/* ── Icon-Link (mit SVG + Label nebeneinander) ─────────────── */
+
+.footer__link--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.footer__link--icon svg {
+  flex: 0 0 auto;
+}
+
+/* ── Tagline (rechtsbündig via margin-left: auto) ──────────── */
+
+.footer__tagline {
+  margin-left: auto;
+}

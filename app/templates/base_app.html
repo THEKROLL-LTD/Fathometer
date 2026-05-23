@@ -31,7 +31,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
-  <title>{% block title %}secscan{% endblock %}</title>
+  <title>{% block title %}Fathometer · CVE Intelligence{% endblock %}</title>
 
   {# Alpine-Initial-Hide muss vor Stylesheets greifen. #}
   <style>[x-cloak] { display: none !important; }</style>
@@ -123,6 +123,7 @@
   <script defer src="{{ asset_url('js/app.js') }}"></script>
 </head>
 <body class="flex flex-col h-screen overflow-hidden bg-base-100 text-base-content antialiased text-sm">
+  <div class="bg-grid" aria-hidden="true"></div>
 
   {# ------------------------------------------------------------------
      Header (ADR-0016): Logo + Dashboard + Suche links,
@@ -227,5 +228,6 @@
   <div id="modal-host"></div>
 
   {% block scripts %}{% endblock %}
+  {% include "layout/_footer.html" %}
 </body>
 </html>

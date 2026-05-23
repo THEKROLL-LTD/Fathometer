@@ -3,6 +3,9 @@
    Komponenten-Stylesheets werden in späteren Phasen via @import ergänzt. */
 
 @import "./tokens.css";
+@import "./components/topbar.css";
+@import "./components/footer.css";
+@import "./components/profile-menu.css";
 
 /* ── Global Reset ──────────────────────────────────────────── */
 

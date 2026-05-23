@@ -1,0 +1,187 @@
+/* Fathometer — Topbar-Komponente (Phase B).
+   BEM-Selektoren: .topbar, .topbar__brand, .topbar__logo, .topbar__wordmark,
+   .topbar__nav, .topbar__navitem, .topbar__right, .topbar__profile, .topbar__user.
+   Animationen: fathom-sweep (Logo-Nadel), op-pulse (Echo-Dot + Status-Dots).
+   Quelle: docs/design/styles.css §Topbar. */
+
+/* ── Logo ─────────────────────────────────────────────────── */
+
+.topbar__logo {
+  width: 40px;
+  height: 40px;
+  display: block;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.topbar__logo-sweep {
+  transform-origin: 32px 32px;
+  transform-box: view-box;
+  animation: fathom-sweep 4.4s var(--ease-drift) infinite alternate;
+}
+
+@keyframes fathom-sweep {
+  0%   { transform: rotate(-72deg); }
+  100% { transform: rotate( 72deg); }
+}
+
+.topbar__logo-echo {
+  animation: op-pulse 2.4s ease-in-out infinite;
+  transform-origin: 32px 10px;
+  transform-box: view-box;
+}
+
+@keyframes op-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* ── Brand (Logo + Wordmark zusammen) ──────────────────────── */
+
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* ── Wordmark ──────────────────────────────────────────────── */
+
+.topbar__wordmark {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.topbar__wordmark-name {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.topbar__wordmark-sub {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+  line-height: 1;
+}
+
+/* ── Nav ───────────────────────────────────────────────────── */
+
+.topbar__nav {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.topbar__navitem {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  text-decoration: none;
+  display: inline-block;
+  transition: color var(--dur-hover) var(--ease-drift),
+              letter-spacing var(--dur-hover) var(--ease-drift);
+  position: relative;
+}
+
+.topbar__navitem:hover {
+  color: var(--text-primary);
+  letter-spacing: 0.08em;
+}
+
+.topbar__navitem--active {
+  color: var(--text-primary);
+}
+
+.topbar__navitem--active::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -19px;
+  height: 1px;
+  background: var(--accent);
+}
+
+/* ── Right section ─────────────────────────────────────────── */
+
+.topbar__right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+/* ── Status dot (operational pulse) ───────────────────────── */
+
+.topbar__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-operational);
+  box-shadow: 0 0 8px var(--status-operational);
+  animation: op-pulse 2.4s ease-in-out infinite;
+}
+
+/* ── Profile button ────────────────────────────────────────── */
+
+.topbar__profile {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.topbar__user {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  background: none;
+  border: 1px solid transparent;
+  padding: 6px 9px;
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-drift),
+              border-color var(--dur-hover) var(--ease-drift),
+              background var(--dur-hover) var(--ease-drift);
+}
+
+.topbar__user:hover {
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+
+.topbar__user--open {
+  color: var(--text-primary);
+  border-color: var(--border-visible);
+  background: var(--surface-raised);
+}
+
+.topbar__user:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}

@@ -1,69 +1,86 @@
-{# secscan-Header (ADR-0016 / Block-I-Refinement / ADR-0025 / ADR-0031).
+{# Fathometer Topbar (Block W Phase B / ADR-0033).
 
-   Layout-Vertrag:
-     Links: Logo (`s`-Square) + Brand + Top-Level-Nav (Dashboard, Findings).
-     Rechts: Profile-Avatar mit Dropdown.
+   Layout: Brand (Logo + Wordmark) links | Nav + Profile rechts.
+   Markup 1:1 nach docs/design/app.jsx::TopBar portiert.
 
-   Theme ist statisch dark (ADR-0031 — Theme-Toggle ersatzlos entfernt).
+   Active-Highlight:
+     - `request.endpoint` bestimmt welcher Nav-Item aktiv ist.
+     - Dashboard: endpoint == 'dashboard.index' oder Pfad == '/'.
+     - Findings:  endpoint in ('findings.index',) oder Pfad startet mit '/findings'.
+     - Path-basierter Fallback verhindert falsch-positives Dashboard-Highlight
+       auf /findings-Subrouten.
 
-   ADR-0025: dedizierter Findings-Eintrag neben Dashboard. Active-Highlight
-   wird ueber `request.endpoint` getrennt — `dashboard.index` markiert nur
-   das Dashboard, `findings.index` nur die Findings-Seite. Path-basierter
-   Fallback ist explizit so geschnitten dass `/findings` NICHT als
-   Dashboard-Subroute zaehlt.
+   Profile-Dropdown:
+     - <details>/<summary>-Muster fuer reines HTML-Toggle ohne Alpine.
+     - Inhalt via Include '_profile_dropdown.html'.
+     - Avatar-Initial: die ersten zwei Zeichen des Usernamens (uppercase).
 
    Sicherheit:
-     - Autoescape global aktiv; kein `|safe` auf Benutzer-Daten.
-     - Avatar-Initial nimmt `current_user.username[0].upper()` via Jinja
-       (`[:1]` ist Slice, kein `|upper`-Bug).
-     - Dropdown-State lebt im Alpine-`x-data` (lokal, kein localStorage).
+     - Autoescape global aktiv; kein |safe auf Benutzerdaten.
+     - Username-Truncation via [:2] ist ein Slice, kein Filter-Bug.
+     - CSRF-Token fuer Logout ist im eingebundenen _profile_dropdown.html.
 #}
-{% set p = request.path or "/" %}
-{% set _endpoint = request.endpoint or '' %}
-{% set is_findings_active = _endpoint in ('findings.index',) or p.startswith("/findings") %}
-{% set is_dashboard_active = (not is_findings_active) and (
-     _endpoint == 'dashboard.index'
-     or p == "/"
-     or (p.startswith("/dashboard") and not p.startswith("/dashboard/findings"))
+{% from "_macros.html" import fathometer_logo %}
+{% set _p = request.path or "/" %}
+{% set _ep = request.endpoint or "" %}
+{% set _is_findings = _ep in ("findings.index",) or _p.startswith("/findings") %}
+{% set _is_dashboard = (not _is_findings) and (
+     _ep == "dashboard.index"
+     or _p == "/"
+     or (_p.startswith("/dashboard") and not _p.startswith("/dashboard/findings"))
    ) %}
-<header class="navbar bg-base-200 border-b border-base-300 px-4 min-h-14 shrink-0"
-        role="banner">
-  <div class="flex-1 flex items-center gap-2 min-w-0">
-    {# Logo + Brand — Klick fuehrt auf das Dashboard. #}
-    <a href="{{ url_for('dashboard.index') if current_user is defined and current_user.is_authenticated else url_for('health.healthz') }}"
-       class="flex items-center gap-2 text-lg font-semibold tracking-tight hover:opacity-80">
-      <span class="inline-block w-6 h-6 rounded bg-primary text-primary-content
-                   text-center text-sm leading-6 font-bold"
-            aria-hidden="true">s</span>
-      <span>secscan</span>
-    </a>
 
-    {% if current_user is defined and current_user.is_authenticated %}
-      <nav class="flex items-center gap-1 ml-4 text-sm" aria-label="Hauptnavigation">
-        <a href="{{ url_for('dashboard.index') }}"
-           hx-get="{{ url_for('dashboard.index') }}"
-           hx-target="#detail-pane"
-           hx-push-url="true"
-           class="btn btn-ghost btn-sm {% if is_dashboard_active %}btn-active{% endif %}">
-          Dashboard
-        </a>
-        {# ADR-0025: dedizierter Findings-Eintrag neben Dashboard.
-           Full-Page-Nav (kein hx-target), weil die Findings-Seite einen
-           anderen Pane-Container rendert und sauberer Tab-Wechsel
-           gewuenscht ist. #}
-        <a href="{{ url_for('findings.index') }}"
-           class="btn btn-ghost btn-sm {% if is_findings_active %}btn-active{% endif %}">
-          Findings
-        </a>
-        {# ADR-0020: dedizierte Suche-Nav entfernt. Suche ist jetzt Teil der
-           Findings-Filter-Bar (Such-Feld `q`). #}
-      </nav>
-    {% endif %}
+<header class="topbar">
+  {# Brand: Logo + Wordmark-Stack #}
+  <div class="topbar__brand">
+    <a href="{{ url_for('dashboard.index') if current_user is defined and current_user.is_authenticated else url_for('health.healthz') }}"
+       aria-label="Fathometer Dashboard">
+      {{ fathometer_logo() }}
+    </a>
+    <div class="topbar__wordmark">
+      <div class="topbar__wordmark-name">Fathometer</div>
+      <div class="topbar__wordmark-sub">CVE Intelligence</div>
+    </div>
   </div>
 
-  <div class="flex-none flex items-center gap-1">
+  {# Rechte Sektion: Nav + Profile #}
+  <div class="topbar__right">
     {% if current_user is defined and current_user.is_authenticated %}
-      {% include "layout/_profile_dropdown.html" %}
+      <nav class="topbar__nav" aria-label="Main navigation">
+        <a href="{{ url_for('dashboard.index') }}"
+           class="topbar__navitem{% if _is_dashboard %} topbar__navitem--active{% endif %}"
+           {% if _is_dashboard %}aria-current="page"{% endif %}>
+          Dashboard
+        </a>
+        <a href="{{ url_for('findings.index') }}"
+           class="topbar__navitem{% if _is_findings %} topbar__navitem--active{% endif %}"
+           {% if _is_findings %}aria-current="page"{% endif %}>
+          Findings
+        </a>
+      </nav>
+
+      {# Profile-Dropdown via Alpine (konsistent mit bestehendem Alpine-Stack) #}
+      <div class="topbar__profile"
+           x-data="{ profileOpen: false }"
+           @click.outside="profileOpen = false"
+           @keydown.escape.window="profileOpen = false">
+        {# Avatar-Button: max. 2 Initialen aus Username #}
+        {% set _initials = (current_user.username[:2] | upper) if current_user.username else "?" %}
+        <button type="button"
+                class="topbar__user"
+                :class="{ 'topbar__user--open': profileOpen }"
+                @click="profileOpen = !profileOpen"
+                :aria-expanded="profileOpen ? 'true' : 'false'"
+                aria-haspopup="menu"
+                aria-label="Profile menu">
+          {{ _initials }}
+        </button>
+        <div x-show="profileOpen"
+             x-cloak
+             x-transition.opacity.duration.200ms>
+          {% include "layout/_profile_dropdown.html" %}
+        </div>
+      </div>
     {% endif %}
   </div>
 </header>

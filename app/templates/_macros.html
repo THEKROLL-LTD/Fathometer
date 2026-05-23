@@ -1,3 +1,50 @@
+{# fathometer_logo(class="topbar__logo")
+   ─────────────────────────────────────
+   Inline-SVG des Fathometer-Logos (1930s Echolot-Visual-Language).
+   Portiert aus docs/design/app.jsx::FathometerLogo (Block W / ADR-0033).
+
+   SVG-Elemente:
+     - Aussen-Halbkreis-Dial (path A)
+     - Drei Cardinal-Tick-Marks (links, oben, rechts)
+     - Horizontale Wasser-Linie
+     - Seabed-Wave (quadratische Q-Bezier)
+     - Sweep-Needle + Echo-Dot (cyan, animiert via CSS)
+     - Pivot-Circle
+
+   CSS-Animationen sind in topbar.css definiert:
+     .topbar__logo-sweep  → fathom-sweep (Rotation -72° ↔ +72°, 4.4s)
+     .topbar__logo-echo   → op-pulse (opacity 1 ↔ 0.45, 2.4s)
+
+   Parameter:
+     class — CSS-Klasse auf dem <svg>-Element (Default: "topbar__logo").
+             Ermoeglicht Wiederverwendung in Login-Topbar oder anderen Kontexten. #}
+{% macro fathometer_logo(class="topbar__logo") %}
+  <svg viewBox="0 0 64 64" class="{{ class }}" role="img" aria-label="Fathometer">
+    {# Aussen-Halbkreis-Dial (Sweep-Range) #}
+    <path d="M 8 32 A 24 24 0 0 1 56 32"
+          fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" />
+    {# Cardinal Tick-Marks an den drei Dial-Extremen #}
+    <line x1="8"  y1="32" x2="11.5" y2="32" stroke="currentColor" stroke-width="1.25" />
+    <line x1="32" y1="8"  x2="32"   y2="11.5" stroke="currentColor" stroke-width="1.25" />
+    <line x1="56" y1="32" x2="52.5" y2="32" stroke="currentColor" stroke-width="1.25" />
+    {# Wasser-/Tiefenlinie — Hairline ueber den Aequator #}
+    <line x1="2" y1="32" x2="62" y2="32" stroke="currentColor" stroke-width="0.85" opacity="0.55" />
+    {# Seabed-Wave (Sonar-Return-Signatur, untere Halbkugel) #}
+    <path d="M 4 49 Q 12 44 20 49 T 36 49 T 52 49 T 60 49"
+          fill="none" stroke="currentColor" stroke-width="1" opacity="0.45" stroke-linecap="square" />
+    {# Sweep-Nadel-Gruppe — rotiert um den Pivot. Origin via CSS gesetzt. #}
+    <g class="topbar__logo-sweep">
+      <line x1="32" y1="32" x2="32" y2="10"
+            stroke="var(--accent)" stroke-width="1.5" stroke-linecap="square" />
+      {# Echo-Return am Nadel-Tip — pulsiert mit dem Operational-Cadence #}
+      <circle cx="32" cy="10" r="2.6" fill="var(--accent)" class="topbar__logo-echo" />
+    </g>
+    {# Pivot #}
+    <circle cx="32" cy="32" r="1.6" fill="currentColor" />
+  </svg>
+{% endmacro %}
+
+
 {# Wiederverwendbare Jinja-Macros fuer die Triage-UI (Block E).
 
    `quick_copy(value, label=None, classes="")`
