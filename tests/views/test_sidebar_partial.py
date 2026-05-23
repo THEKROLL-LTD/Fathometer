@@ -57,6 +57,7 @@ def _render_server_list(
     alarm_count: int | None = None,
     active_server_id: int | None = None,
     filter_tags: list[str] | None = None,
+    lazy_load_trigger: bool | None = None,
 ) -> str:
     """Rendert `sidebar/_server_list.html` im Flask-App-Kontext.
 
@@ -78,6 +79,8 @@ def _render_server_list(
         ctx["hosts_total"] = hosts_total
     if alarm_count is not None:
         ctx["alarm_count"] = alarm_count
+    if lazy_load_trigger is not None:
+        ctx["lazy_load_trigger"] = lazy_load_trigger
 
     with app.test_request_context("/"):
         from flask import render_template
@@ -90,10 +93,27 @@ def _render_server_list(
 # ---------------------------------------------------------------------------
 
 
-def test_htmx_trigger_is_load_and_60s(app: Flask) -> None:
-    """HTMX-Trigger muss 'load, every 60s [...]' sein (ADR-0030 Phase C)."""
+def test_htmx_trigger_initial_render_has_lazy_load_and_polling(app: Flask) -> None:
+    """Initialer Render: separater Hidden-Trigger feuert `load` und das `<ul>`
+    macht das `every 60s`-Polling (ADR-0030 Phase C, Fix gegen HTMX-Re-Trigger-
+    Loop beim outerHTML-Swap)."""
     html = _render_server_list(app, [])
-    assert 'hx-trigger="load, every 60s [document.visibilityState' in html
+    # Hidden-Lazy-Load-Trigger muss da sein und `load`-Event nutzen.
+    assert 'data-test="sidebar-lazy-load-trigger"' in html
+    assert 'hx-trigger="load"' in html
+    # Das `<ul>` selbst hat NUR `every 60s`-Polling, kein `load`.
+    assert 'hx-trigger="every 60s [document.visibilityState' in html
+    assert 'hx-trigger="load, every 60s' not in html
+
+
+def test_htmx_polling_response_has_no_lazy_load_trigger(app: Flask) -> None:
+    """Polling-Response (lazy_load_trigger=False) darf KEIN Hidden-Trigger
+    enthalten — sonst Re-Trigger-Loop beim outerHTML-Swap."""
+    html = _render_server_list(app, [], lazy_load_trigger=False)
+    assert 'data-test="sidebar-lazy-load-trigger"' not in html
+    assert 'hx-trigger="load"' not in html
+    # Polling-`<ul>` hat trotzdem den `every 60s`-Trigger (re-arm fuer Cadence).
+    assert 'hx-trigger="every 60s [document.visibilityState' in html
 
 
 # ---------------------------------------------------------------------------

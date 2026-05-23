@@ -127,6 +127,10 @@ def sidebar_partial() -> Any:
     ctx["alarm_count"] = sum(
         1 for sid in server_ids if risk_counts.get(sid, {}).get("escalate", 0) > 0
     )
+    # Polling-Response: kein Hidden-Lazy-Load-Trigger ins DOM, sonst Re-Trigger-
+    # Loop beim outerHTML-Swap (HTMX uebernimmt den gesamten Response-Body in
+    # das Swap-Ziel, mehrere Top-Level-Elemente eingeschlossen).
+    ctx["lazy_load_trigger"] = False
 
     return render_template("sidebar/_server_list.html", **ctx)
 

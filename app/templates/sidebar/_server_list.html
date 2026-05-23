@@ -22,12 +22,35 @@
        - `alarm_count`          : int | Undefined
 
    HTMX-Trigger (Phase C, ADR-0030 §Konsequenzen):
-     `load`        — einmaliger Lazy-Load direkt nach Page-Render.
-     `every 60s`   — Polling-Cadence 10 s -> 60 s erhoeht.
+     `every 60s` am `<ul>`  — Polling-Cadence 10 s -> 60 s erhoeht.
+     Separates Hidden-Trigger-Element davor mit `load` fuer den
+     initialen Lazy-Load direkt nach Page-Render. Grund: `load` am
+     `<ul>` selbst kombiniert mit `hx-swap="outerHTML"` erzeugt eine
+     Endlosschleife (HTMX feuert `load` jedes Mal wenn das `<ul>`
+     durch outerHTML-Swap "neu im DOM" landet — Re-Trigger-Loop).
+     Der Hidden-Trigger ist nicht das Swap-Target, sein `load`-Event
+     feuert daher nur einmal pro Page-Render.
 
    Sicherheit: kein `|safe` — Server-/Tag-Namen sind server-seitig
    validiert und werden autoescaped gerendert.
 #}
+{# Hidden-Trigger-Element fuer den initialen Lazy-Load (`load`-Event).
+   Bewusst KEIN Teil des `<ul#server-list>`-Swap-Targets.
+
+   Wird AUSSCHLIESSLICH beim initialen Full-Page-Render gerendert
+   (`lazy_load_trigger` ist im Default-Kontext implizit truthy). Der
+   Polling-Endpoint `sidebar_partial` setzt `lazy_load_trigger=False`,
+   damit beim outerHTML-Swap des `<ul>` NICHT zusaetzlich ein zweiter
+   Trigger ins DOM gelangt (sonst Re-Trigger-Loop). #}
+{% if lazy_load_trigger | default(true) %}
+<span class="hidden"
+      data-test="sidebar-lazy-load-trigger"
+      hx-get="{{ url_for('sidebar_partials.sidebar_partial') }}{% if filter_tags %}?{% for t in filter_tags %}tag={{ t | urlencode }}{% if not loop.last %}&{% endif %}{% endfor %}{% endif %}"
+      hx-trigger="load"
+      hx-target="#server-list"
+      hx-swap="outerHTML"
+      aria-hidden="true"></span>
+{% endif %}
 {# Polling-Attribute sind PRIVAT fuer diesen Container. Ohne
    `hx-disinherit="*"` erben alle `<a hx-get>`-Klicks in den `<li>`-Zeilen
    das `hx-target="this"` und `hx-swap="outerHTML"` der `<ul>` — der
@@ -38,7 +61,7 @@
     role="list"
     class="divide-y divide-base-300 flex-1"
     hx-get="{{ url_for('sidebar_partials.sidebar_partial') }}{% if filter_tags %}?{% for t in filter_tags %}tag={{ t | urlencode }}{% if not loop.last %}&{% endif %}{% endfor %}{% endif %}"
-    hx-trigger="load, every 60s [document.visibilityState === 'visible']"
+    hx-trigger="every 60s [document.visibilityState === 'visible']"
     hx-target="this"
     hx-swap="outerHTML"
     hx-disinherit="*">
