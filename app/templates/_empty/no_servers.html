@@ -1,24 +1,17 @@
-{# Empty-State: Keine Server in der Flotte (Block I, §7a Empty-States).
-
-   Erwartete Variablen: keine.
-
-   Wird sowohl im Sidebar-`<ul>` als auch im Detail-Pane direkt eingebunden.
-   Daher rendern wir kein `<li>`-Wrapper-Element, sondern eine plain Card.
-   Im Sidebar-Kontext landet die Card durch `display:contents`-aequivalent
-   nicht in der Liste — wir wrappen daher selbst in `<li>` falls noetig.
-#}
-<li class="px-3 py-6 text-xs opacity-70 list-none" data-empty="no_servers">
-  <p class="mb-2">Noch kein Server registriert.</p>
-  <p class="mb-2">
-    Im
+{# Empty-State: No servers registered (Block W Phase G).
+   Wird in sidebar/_server_list.html eingebunden wenn sidebar_servers leer.
+   Plain CSS — kein Tailwind/DaisyUI (Sidebar ist bereits im neuen Design). #}
+<li style="list-style:none; padding: 24px 32px; font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); line-height: 1.7;" data-empty="no_servers">
+  <p style="margin: 0 0 8px;">No servers registered yet.</p>
+  <p style="margin: 0 0 8px;">
+    Generate a master key in
     <a href="{{ url_for('servers.list_servers') }}"
        hx-get="{{ url_for('servers.list_servers') }}"
        hx-target="#detail-pane"
        hx-push-url="true"
-       class="link link-primary">Setup</a>
-    einen Master-Key generieren und auf dem Ziel-Host
-    <code class="font-mono">secscan-register.sh</code> ausfuehren:
+       style="color: var(--accent); text-decoration: none;">Setup</a>
+    and run <code style="font-family: var(--font-mono); color: var(--text-secondary);">secscan-register.sh</code> on the target host:
   </p>
-  <pre class="bg-base-300 text-base-content rounded p-2 text-[10px] overflow-x-auto font-mono">SECSCAN_MASTER_KEY="..." \
+  <pre style="margin: 0; padding: 10px 14px; background: var(--surface-raised); border: var(--border); font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); overflow-x: auto; white-space: pre;">SECSCAN_MASTER_KEY="..." \
   ./secscan-register.sh https://secscan.example.com prod-web-01 24</pre>
 </li>

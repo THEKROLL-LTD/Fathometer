@@ -1,0 +1,192 @@
+/* Fathometer — Auth / Login-Page Styles (Phase G).
+   1:1 aus docs/design/styles.css Sektion "Auth (login page)" portiert.
+   Abhaengig von den Design-Tokens in tokens.css. */
+
+/* ── Auth Shell-Variant — kein Sidebar ───────────────────────
+   Ueberschreibt das zweispaltige .app-Grid auf ein einspaltiges
+   Topbar/Main/Footer-Layout. */
+.app--auth {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "topbar"
+    "main"
+    "footer";
+}
+
+.main--auth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  overflow: auto;
+}
+
+/* ── Auth wrapper ─────────────────────────────────────────── */
+.auth {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+/* ── Auth panel (Card) ────────────────────────────────────── */
+.auth__panel {
+  width: 100%;
+  max-width: 440px;
+  padding: 56px 56px 48px;
+  background: var(--surface-raised);
+  border: var(--border);
+  /* Keine box-shadow — DS §4 Verbotsliste. Elevation kommt aus dem
+     Surface-Step gegen den Page-Background. */
+  position: relative;
+}
+
+/* Accent left-bar — DS-kanonischer "this is important"-Marker.
+   Gleiche Pattern wie die action-needed-Card im Dashboard. */
+.auth__panel::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+/* ── Eyebrow ─────────────────────────────────────────────── */
+.auth__eyebrow {
+  margin: 0 0 18px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.auth__prompt {
+  color: var(--accent);
+  letter-spacing: 0;
+}
+
+/* ── Title ───────────────────────────────────────────────── */
+.auth__title {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 36px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+
+/* ── Sub ─────────────────────────────────────────────────── */
+.auth__sub {
+  margin: 0 0 36px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+/* ── Form: vertical stack mit Gap ────────────────────────── */
+.auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* ── Field: Label + Input-Block ──────────────────────────── */
+.auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth__field-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* ── Input: Mono-Style, dark surface ─────────────────────── */
+.auth__input {
+  width: 100%;
+  background: var(--surface-base);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  padding: 12px 14px;
+  outline: none;
+  letter-spacing: 0.02em;
+  transition: border-color var(--dur-hover) var(--ease-drift),
+              background   var(--dur-hover) var(--ease-drift);
+}
+
+.auth__input:hover:not(:focus) { border-color: var(--border-visible); }
+.auth__input:focus              { border-color: var(--accent); background: var(--surface-raised); }
+.auth__input:disabled           { color: var(--text-tertiary); cursor: not-allowed; }
+
+/* ── Status line: Hint / Error ───────────────────────────── */
+.auth__status {
+  margin: 2px 0 -4px;
+  min-height: 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.auth__status--hint  { color: var(--text-tertiary); }
+.auth__status--error { color: var(--status-restricted); }
+.auth__status--error .bracket { color: var(--status-restricted); }
+
+/* ── Submit button ───────────────────────────────────────── */
+.auth__submit {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--accent);
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: background       var(--dur-hover) var(--ease-drift),
+              letter-spacing   var(--dur-hover) var(--ease-drift),
+              color            var(--dur-hover) var(--ease-drift);
+}
+
+.auth__submit:hover {
+  background: rgba(0, 229, 255, 0.08);
+  letter-spacing: 0.18em;
+}
+
+.auth__submit:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.auth__submit:disabled {
+  cursor: progress;
+  color: var(--text-tertiary);
+  border-color: var(--border-visible);
+}
+
+.auth__submit-arrow { transition: transform var(--dur-hover) var(--ease-drift); }
+.auth__submit:hover .auth__submit-arrow { transform: translateX(3px); }
+
+/* ── Topbar auth-variant: kein Nav, kein Profile — nur Brand */
+.topbar--auth {
+  padding: 0 32px;
+}

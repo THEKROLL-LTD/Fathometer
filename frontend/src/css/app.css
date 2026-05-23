@@ -11,6 +11,7 @@
 @import "./components/triage.css";
 @import "./components/severity.css";
 @import "./components/sysline.css";
+@import "./components/auth.css";
 
 /* ── Global Reset ──────────────────────────────────────────── */
 

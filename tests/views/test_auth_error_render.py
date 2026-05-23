@@ -1,0 +1,220 @@
+"""Pure-Unit Template-Smoke-Tests fuer den Error-State in login.html (Block W Phase G).
+
+Prueft:
+- Ohne Fehler: Status-Line zeigt Hint 'enter credentials to proceed.'
+- Mit Flash-Error: Status-Line zeigt '[access denied]'
+- Flash-Message-Text erscheint im Status-Bereich
+
+Render-Pattern:
+  Flask-App via `app`-Fixture (conftest.py, DB-frei).
+  Flash-Messages werden via flask.get_flashed_messages() injiziert —
+  dazu aktivieren wir den Session-Stack im Test-Request-Context.
+  _MOCK_MANIFEST verhindert Manifest-Lookup auf Disk.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+from flask import Flask
+
+# ---------------------------------------------------------------------------
+# Konstanten
+# ---------------------------------------------------------------------------
+
+_MOCK_MANIFEST = {
+    "css/app.css": "css/app.abc123.css",
+    "js/vendor.js": "js/vendor.def456.js",
+    "js/app.js": "js/app.ghi789.js",
+}
+
+
+# ---------------------------------------------------------------------------
+# Hilfsfunktionen
+# ---------------------------------------------------------------------------
+
+
+def _make_login_form(*, errors: dict | None = None) -> MagicMock:
+    """Erstellt einen LoginForm-Mock ohne Form-Errors."""
+    form = MagicMock()
+
+    csrf_field = MagicMock()
+    csrf_field.__str__ = lambda self: (
+        '<input id="csrf_token" name="csrf_token" type="hidden" value="test-csrf-token-value">'
+    )
+    form.csrf_token = csrf_field
+
+    form.errors = errors or {}
+    form.username = MagicMock()
+    form.username.errors = []
+    form.password = MagicMock()
+    form.password.errors = []
+
+    return form
+
+
+def _render_login_with_flash(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    flash_messages: list[tuple[str, str]] | None = None,
+    form: MagicMock | None = None,
+) -> str:
+    """Rendert login.html mit optionalen Flash-Messages im Request-Context.
+
+    Flash-Messages werden in die Session eingelagert, damit
+    get_flashed_messages() sie im Template findet.
+    """
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "_asset_manifest", _MOCK_MANIFEST)
+
+    if form is None:
+        form = _make_login_form()
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            if flash_messages:
+                # Flask speichert Flash-Messages als '_flashes' in der Session.
+                # Format: list[(category, message)]
+                sess["_flashes"] = flash_messages
+
+        with app.test_request_context("/login"):
+            # Flask-Flash-Messages werden aus der Session gelesen.
+            # Im Test-Context brauchen wir die App-Context-Push damit
+            # get_flashed_messages() funktioniert. Wir simulieren das
+            # indem wir die Messages direkt via flask.flash() einfuegen.
+            from flask import flash, render_template
+
+            if flash_messages:
+                for category, message in flash_messages:
+                    flash(message, category)
+
+            html = render_template("login.html", form=form)
+
+    return html
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+def test_login_renders_status_hint_when_no_error(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ohne Flash-Error und ohne form.errors zeigt die Status-Line den Hint-Text.
+
+    Erwarteter Hint: 'enter credentials to proceed.'
+    """
+    html = _render_login_with_flash(app, monkeypatch)
+
+    assert "enter credentials to proceed." in html, (
+        f"Hint-Text 'enter credentials to proceed.' fehlt wenn kein Fehler vorhanden. "
+        f"HTML-Laenge: {len(html)}"
+    )
+    # Im Hint-State darf der Error-Zweig nicht auftreten
+    assert "auth__status--error" not in html, (
+        f"CSS-Klasse 'auth__status--error' erscheint faelschlicherweise ohne Fehler-State. "
+        f"HTML-Laenge: {len(html)}"
+    )
+
+
+def test_login_renders_access_denied_on_flash_error(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mit Flash-Error-Message zeigt die Status-Line den Error-State.
+
+    Template-Logik: wenn _flash_errors nicht leer -> auth__status--error Zweig.
+    Das Template rendert '[' und ']' als separate Spans mit CSS-Klasse 'bracket',
+    der Textinhalt 'access denied' ist separat (kein [access denied] als String).
+    """
+    html = _render_login_with_flash(
+        app,
+        monkeypatch,
+        flash_messages=[("error", "Login fehlgeschlagen.")],
+    )
+
+    assert "auth__status--error" in html, (
+        f"CSS-Klasse 'auth__status--error' fehlt bei Flash-Error. HTML-Laenge: {len(html)}"
+    )
+    assert "access denied" in html, (
+        f"Text 'access denied' fehlt bei Flash-Error. HTML-Laenge: {len(html)}"
+    )
+    # Hint-Text darf im Error-State nicht auftreten
+    assert "enter credentials to proceed." not in html, (
+        f"Hint-Text erscheint faelschlicherweise im Fehler-State. HTML-Laenge: {len(html)}"
+    )
+
+
+def test_login_access_denied_includes_flash_message(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Die Flash-Message-Text wird im Status-Bereich nach 'access denied' gerendert.
+
+    Template-Logik: _flash_errors wird als '· {message}' nach 'access denied' ausgegeben.
+    """
+    flash_msg = "Ungueltige Anmeldedaten."
+    html = _render_login_with_flash(
+        app,
+        monkeypatch,
+        flash_messages=[("error", flash_msg)],
+    )
+
+    assert "access denied" in html, (
+        f"Text 'access denied' fehlt bei Flash-Error. HTML-Laenge: {len(html)}"
+    )
+    assert flash_msg in html, (
+        f"Flash-Message-Text '{flash_msg}' fehlt im Status-Bereich. HTML-Laenge: {len(html)}"
+    )
+
+
+def test_login_renders_access_denied_on_warning_flash(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auch Flash-Kategorie 'warning' triggert den Error-State (auth__status--error).
+
+    Template filtert nach category 'in' ['error', 'warning'].
+    """
+    html = _render_login_with_flash(
+        app,
+        monkeypatch,
+        flash_messages=[("warning", "Account gesperrt.")],
+    )
+
+    assert "auth__status--error" in html, (
+        f"CSS-Klasse 'auth__status--error' fehlt bei Flash-Warning. HTML-Laenge: {len(html)}"
+    )
+    assert "access denied" in html, (
+        f"Text 'access denied' fehlt bei Flash-Warning. HTML-Laenge: {len(html)}"
+    )
+
+
+def test_login_info_flash_does_not_trigger_access_denied(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flash-Kategorie 'info' triggert NICHT den '[access denied]'-Zweig.
+
+    Das Template filtert nur 'error' und 'warning' als Fehlerkategorien.
+    """
+    html = _render_login_with_flash(
+        app,
+        monkeypatch,
+        flash_messages=[("info", "Sitzung abgelaufen.")],
+    )
+
+    # 'info'-Flash soll keinen access-denied-State ausloesen
+    assert "auth__status--error" not in html, (
+        f"CSS-Klasse 'auth__status--error' erscheint faelschlicherweise bei 'info'-Flash. "
+        f"HTML-Laenge: {len(html)}"
+    )
+    # Hint-Text soll erscheinen
+    assert "enter credentials to proceed." in html, (
+        f"Hint-Text fehlt bei 'info'-Flash (kein Fehler-State). HTML-Laenge: {len(html)}"
+    )
