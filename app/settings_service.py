@@ -6,7 +6,6 @@ Zugriff wird sie idempotent mit Defaults aus ARCHITECTURE.md §5 angelegt:
 - `severity_threshold = 'high'`
 - `stale_threshold_h = 48`
 - `stale_trivy_db_threshold_h = 30`
-- `default_theme = 'auto'`
 - `setup_completed_at IS NULL`
 
 `INSERT ... ON CONFLICT (id) DO NOTHING` erzeugt die Zeile race-condition-frei
@@ -48,7 +47,6 @@ def ensure_settings_row(session: Session | None = None) -> Setting:
             severity_threshold=Severity.HIGH,
             stale_threshold_h=48,
             stale_trivy_db_threshold_h=30,
-            default_theme="auto",
             llm_daily_token_cap=1_000_000,
         )
         .on_conflict_do_nothing(index_elements=["id"])

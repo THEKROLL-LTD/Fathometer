@@ -56,14 +56,6 @@
           {% endfor %}
         </div>
 
-        <div class="form-control">
-          {{ form.default_theme.label(class="label label-text") }}
-          {{ form.default_theme(class="select select-bordered w-full") }}
-          {% for err in form.default_theme.errors %}
-            <p class="text-error text-sm mt-1">{{ err }}</p>
-          {% endfor %}
-        </div>
-
         <div class="card-actions justify-end pt-2">
           <button type="submit" class="btn btn-primary">Setup abschliessen</button>
         </div>

@@ -4,7 +4,7 @@ Drei Schritte:
 
 1. `step1` — Admin-Account anlegen.
 2. `step2` — Master-Key generieren, einmalig anzeigen, Notiz bestaetigen.
-3. `step3` — Defaults (Severity-Schwelle, Stale-Threshold, Theme).
+3. `step3` — Defaults (Severity-Schwelle, Stale-Threshold).
 
 Der Wizard ist nur erreichbar solange `settings.setup_completed_at IS NULL`.
 Nach Abschluss redirected `/setup*` immer auf `/login`.
@@ -171,7 +171,6 @@ def step3() -> Any:
         row.severity_threshold = Severity(form.severity_threshold.data)
         row.stale_threshold_h = int(cast(int, form.stale_threshold_h.data))
         row.stale_trivy_db_threshold_h = int(cast(int, form.stale_trivy_db_threshold_h.data))
-        row.default_theme = cast(str, form.default_theme.data)
 
         log_event(
             "setup.defaults_set",
@@ -181,7 +180,6 @@ def step3() -> Any:
                 "severity_threshold": row.severity_threshold.value,
                 "stale_threshold_h": row.stale_threshold_h,
                 "stale_trivy_db_threshold_h": row.stale_trivy_db_threshold_h,
-                "default_theme": row.default_theme,
             },
             session=sess,
         )

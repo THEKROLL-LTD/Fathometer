@@ -47,7 +47,6 @@ def complete_setup(client: FlaskClient) -> None:
             "severity_threshold": "high",
             "stale_threshold_h": "48",
             "stale_trivy_db_threshold_h": "30",
-            "default_theme": "auto",
         },
         follow_redirects=False,
     )

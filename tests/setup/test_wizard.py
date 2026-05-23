@@ -241,7 +241,6 @@ def test_step3_post_completes_setup(db_app: Flask, fresh_client: FlaskClient) ->
             "severity_threshold": "medium",
             "stale_threshold_h": "24",
             "stale_trivy_db_threshold_h": "12",
-            "default_theme": "dark",
         },
         follow_redirects=False,
     )
@@ -256,7 +255,6 @@ def test_step3_post_completes_setup(db_app: Flask, fresh_client: FlaskClient) ->
         assert row.severity_threshold.value == "medium"
         assert row.stale_threshold_h == 24
         assert row.stale_trivy_db_threshold_h == 12
-        assert row.default_theme == "dark"
 
         # Audit: `setup.completed` ist da.
         events = s.execute(
@@ -283,7 +281,6 @@ def test_setup_routes_locked_after_completion(db_app: Flask, fresh_client: Flask
             "severity_threshold": "high",
             "stale_threshold_h": "48",
             "stale_trivy_db_threshold_h": "30",
-            "default_theme": "auto",
         },
     )
     # Sanity-Check.

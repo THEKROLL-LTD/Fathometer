@@ -11,7 +11,8 @@
      - `available_tags`     : list[Tag]
      - `filter_tags`        : list[str]
      - `active_server_id`   : int | None
-     - `theme`              : 'auto'|'light'|'dark' (Context-Processor)
+
+   Theme ist statisch auf "dark" gesetzt (ADR-0031).
 
    Teure Aggregate (Heartbeats, Risk-Counts) sind im initialen Page-Render
    NICHT verfuegbar — sie kommen via HTMX-Lazy-Load vom Polling-Endpoint
@@ -25,32 +26,16 @@
      - Jinja-Autoescape global aktiv (siehe app/__init__.py).
      - Niemals `|safe` auf Client- oder LLM-Daten.
 #}
-<html lang="de" data-theme="{% if theme == 'auto' %}light{% else %}{{ theme }}{% endif %}">
+<html lang="de" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="light dark" />
+  <meta name="color-scheme" content="dark" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>{% block title %}secscan{% endblock %}</title>
 
   {# Alpine-Initial-Hide muss vor Stylesheets greifen. #}
   <style>[x-cloak] { display: none !important; }</style>
-
-  {# No-Flash-Theme-Resolver — gleiche Logik wie base.html. #}
-  <script>
-    (function () {
-      try {
-        var t = {{ theme | tojson }};
-        if (t === "auto") {
-          var prefersDark = window.matchMedia &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches;
-          document.documentElement.setAttribute(
-            "data-theme", prefersDark ? "dark" : "light"
-          );
-        }
-      } catch (e) { /* fail-open */ }
-    })();
-  </script>
 
   {# Tailwind-CDN-Safelist (siehe TD-010):
      Tailwind-CDN-JIT scannt nur den initialen DOM und generiert CSS-Regeln
@@ -94,17 +79,14 @@
     type="text/css"
   />
 
-  {# Theme-Toggle-Logic (Alpine-Komponente + Cookie/Media-Query-Wiring). #}
-  <script defer src="{{ url_for('static', filename='js/theme.js') }}"></script>
-
   {# Wichtige Lade-Reihenfolge (vgl. base.html-Kommentar):
-     Alle App-Skripte die `window.*`-Factories registrieren (themeToggle,
-     bulkAckIds/bulkAckMatch, staleTick, sidebarSearch,
-     sseHighlight, llmProviderForm, ...) MUESSEN vor `alpinejs.cdn.min.js`
-     stehen. Mit `defer` werden Scripts in DOM-Reihenfolge ausgefuehrt;
-     Alpine v3 startet aus defer-Kontext SOFORT (readyState === 'interactive'
-     beim Script-Eval), feuert dann `alpine:init` und scannt den DOM. Sind
-     die Factories zu dem Zeitpunkt noch nicht definiert, gibt es
+     Alle App-Skripte die `window.*`-Factories registrieren (bulkAckIds/
+     bulkAckMatch, staleTick, sidebarSearch, sseHighlight,
+     llmProviderForm, ...) MUESSEN vor `alpinejs.cdn.min.js` stehen.
+     Mit `defer` werden Scripts in DOM-Reihenfolge ausgefuehrt; Alpine v3
+     startet aus defer-Kontext SOFORT (readyState === 'interactive' beim
+     Script-Eval), feuert dann `alpine:init` und scannt den DOM. Sind die
+     Factories zu dem Zeitpunkt noch nicht definiert, gibt es
      `ReferenceError`s und Komponenten wie das Bulk-Ack-Modal werden nicht
      gemounted (Cancel kaputt, x-cloak haengt, etc.). #}
 
@@ -133,7 +115,7 @@
 
   {# ------------------------------------------------------------------
      Header (ADR-0016): Logo + Dashboard + Suche links,
-     Theme-Toggle + Profile-Avatar rechts.
+     Profile-Avatar rechts. Theme statisch dark (ADR-0031).
      ------------------------------------------------------------------ #}
   {% include "layout/_header.html" %}
 

@@ -1,13 +1,14 @@
-"""Tests fuer den Header (ADR-0016 / ADR-0020, `app/templates/layout/_header.html`).
+"""Tests fuer den Header (ADR-0016 / ADR-0020 / ADR-0031, `app/templates/layout/_header.html`).
 
-DoD aus dem Block-I-Addendum §164, aktualisiert fuer Block M (ADR-0020):
+DoD aus dem Block-I-Addendum §164, aktualisiert fuer Block M (ADR-0020)
+und ADR-0031 (Theme-Switcher entfernt):
   - Dashboard-Button auf `/` aktiv.
   - Kein dedizierter Suche-Nav-Anker mehr — Suche ist Teil der Dashboard-
     Filter-Bar (Block M, ADR-0020). `/findings/search` ist 404.
   - Logo-Link fuehrt auf `/` (gleicher Pfad wie Dashboard-Button).
   - Profile-Dropdown enthaelt "Settings", "Audit", "Logout"
     sowie den Avatar mit Initial.
-  - Theme-Toggle-Button vorhanden mit Sun-/Moon-SVG.
+  - Kein Theme-Toggle-Button mehr (ADR-0031).
 """
 
 from __future__ import annotations
@@ -180,34 +181,17 @@ def test_header_logout_form_uses_post_with_csrf(
 
 
 # ---------------------------------------------------------------------------
-# Theme-Toggle
+# Theme-Toggle entfernt (ADR-0031)
 # ---------------------------------------------------------------------------
 
 
-def test_header_theme_toggle_present_with_sun_and_moon(
+def test_header_has_no_theme_toggle(
     logged_in_client: FlaskClient,
 ) -> None:
-    """Der Theme-Toggle ist ein `<button>` mit Alpine-`x-data="themeToggle(...)"`
-    und enthaelt ein Sun- und ein Moon-SVG (Heroicons)."""
+    """Nach ADR-0031 darf kein themeToggle-Alpine-Component im Header sein."""
     resp = logged_in_client.get("/")
     body = resp.get_data(as_text=True)
     header = _header_section(body)
 
-    # `themeToggle`-Alpine-Component.
-    assert "themeToggle" in header, "Theme-Toggle-Alpine-Component fehlt"
-    # Sun-Icon (Path-Daten aus dem Template — Kreis + Strahlen).
-    assert 'cx="12" cy="12" r="4"' in header, "Sun-SVG (Kreis r=4) fehlt"
-    # Moon-Icon (`M21 12.79A9 9 0 ...`).
-    assert "M21 12.79" in header, "Moon-SVG-Path fehlt"
-    # Button mit aria-label.
-    assert "aria-label" in header
-    # `tojson | forceescape`: `"` muss als `&#34;` escaped sein, sonst
-    # bricht der Attribut-Wert vorzeitig auf und Alpine wirft
-    # `resolvedDark is not defined` (siehe Regression in v0.3.0).
-    assert 'x-data="themeToggle(&#34;' in header, (
-        "themeToggle-Argument muss HTML-escaped sein (`| forceescape`), "
-        'sonst schliesst das eingebettete `"` das x-data-Attribut.'
-    )
-    assert 'x-data="themeToggle("' not in header, (
-        'Ungescaptes `"` im x-data-Attribut bricht das Parsing — `| forceescape` fehlt im Template.'
-    )
+    assert "themeToggle" not in header, "themeToggle-Alpine-Component ist noch vorhanden (ADR-0031)"
+    assert "theme.js" not in header, "theme.js wird noch geladen (ADR-0031)"

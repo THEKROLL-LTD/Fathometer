@@ -36,6 +36,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0028](0028-application-group-evaluations-junction.md) | Application-Group-Evaluations als Junction-Tabelle (Block T) | Akzeptiert |
 | [0029](0029-parallel-llm-worker-concurrency.md) | Parallele LLM-Job-Verarbeitung im Worker (Single-Worker, In-Process-Concurrency, Block U) | Akzeptiert |
 | [0030](0030-server-detail-performance.md) | Performance-Tuning UI-Views (Dashboard + Server-Detail + Sidebar-Lazy-Load, Block V) | Akzeptiert |
+| [0031](0031-theme-switcher-removed.md) | Theme-Switcher entfernt, `data-theme="dark"` statisch (Tech-Debt-Removal) | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

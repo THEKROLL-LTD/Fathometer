@@ -11,7 +11,7 @@ Konfiguriert in dieser Reihenfolge:
 5. DB-Engine + Session-Factory.
 6. `flask-wtf` CSRF und `flask-login` LoginManager.
 7. Blueprints (Health, Setup, Auth, Settings).
-8. Theme-Cookie-Handler (light/dark/auto) und Setup-Guard.
+8. Setup-Guard.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
-from flask import Flask, Response, g, redirect, request, url_for
+from flask import Flask, redirect, request, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf import CSRFProtect
@@ -49,9 +49,6 @@ limiter: Limiter = Limiter(
 # CSRF-Schutz auf allen Browser-POSTs — HTMX-Requests muessen das Token im
 # `X-CSRFToken`-Header mitschicken.
 csrf: CSRFProtect = CSRFProtect()
-
-
-_VALID_THEMES: frozenset[str] = frozenset({"light", "dark", "auto"})
 
 
 def _relative_time(value: datetime | None) -> str:
@@ -333,16 +330,6 @@ def create_app() -> Flask:
     register_api_routes()
     app.register_blueprint(api_bp)
 
-    # 8. Theme-Cookie-Handling — leichtgewichtiger Stub fuer Light/Dark/Auto.
-    @app.before_request
-    def _resolve_theme() -> None:
-        raw = request.cookies.get("theme", "auto")
-        g.theme = raw if raw in _VALID_THEMES else "auto"
-
-    @app.context_processor
-    def _inject_theme() -> dict[str, str]:
-        return {"theme": getattr(g, "theme", "auto")}
-
     @app.context_processor
     def _inject_llm_configured() -> dict[str, bool]:
         """`llm_configured` fuer Templates (Server-Detail-Button).
@@ -435,20 +422,6 @@ def create_app() -> Flask:
         except Exception as exc:  # pragma: no cover — DB/Setup-Edge-Case
             log.warning("sidebar_context.unavailable", error=str(exc))
             return {}
-
-    @app.after_request
-    def _persist_theme(response: Response) -> Response:
-        # Normalisierte Theme-Werte zurueckschreiben, falls invalides Cookie kam.
-        raw = request.cookies.get("theme")
-        if raw is not None and raw not in _VALID_THEMES:
-            response.set_cookie(
-                "theme",
-                "auto",
-                max_age=60 * 60 * 24 * 365,
-                httponly=False,
-                samesite="Lax",
-            )
-        return response
 
     # Setup-Guard: solange das Setup nicht abgeschlossen ist, leiten wir
     # alle Browser-Requests auf den Wizard. `is_setup_completed()` liest aus

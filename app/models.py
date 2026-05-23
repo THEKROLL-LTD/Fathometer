@@ -610,8 +610,6 @@ class Setting(Base):
     )
     stale_threshold_h: Mapped[int] = mapped_column(Integer, nullable=False, default=48)
     stale_trivy_db_threshold_h: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
-    default_theme: Mapped[str] = mapped_column(String(8), nullable=False, default="auto")
-
     # Master-Key (Argon2id).
     master_key_hash: Mapped[str | None] = mapped_column(String(255))
 
@@ -663,10 +661,6 @@ class Setting(Base):
 
     __table_args__ = (
         CheckConstraint("id = 1", name="ck_settings_singleton"),
-        CheckConstraint(
-            "default_theme IN ('light', 'dark', 'auto')",
-            name="ck_settings_theme",
-        ),
         # Block P: Mode-Whitelist.
         CheckConstraint(
             "block_p_llm_mode IN ('off', 'observation', 'live')",

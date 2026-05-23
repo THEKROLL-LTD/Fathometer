@@ -4,7 +4,7 @@ Hintergrund: Alpine v3 startet aus dem `defer`-Kontext SOFORT (weil
 `document.readyState === 'interactive'` zum Script-Eval-Zeitpunkt) und
 feuert `alpine:init` synchron. Wenn `alpinejs.cdn.min.js` vor den App-
 Skripten geladen wird, die `window.bulkAckIds`, `window.sidebarSearch`,
-`window.staleTick`, `window.themeToggle`, ...
+`window.staleTick`, ...
 registrieren, dann scannt Alpine den DOM bevor diese Factories existieren.
 Folge: `x-data="bulkAckIds(...)"` und alle anderen Komponenten werden mit
 leerem Scope initialisiert, was sich als Bulk-Ack-Modal-Visibility ohne
@@ -37,7 +37,6 @@ ALPINE_MARKER = "https://cdn.jsdelivr.net/npm/alpinejs@3"
 # App-Shell mit Sidebar.
 FACTORY_SCRIPTS_BY_TEMPLATE = {
     "base_app.html": [
-        "js/theme.js",
         "js/bulk_ack.js",
         "js/stale.js",
         "js/sidebar.js",
@@ -45,7 +44,6 @@ FACTORY_SCRIPTS_BY_TEMPLATE = {
         "js/llm_settings.js",
     ],
     "base.html": [
-        "js/theme.js",
         "js/bulk_ack.js",
         "js/stale.js",
     ],

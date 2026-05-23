@@ -4,6 +4,43 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — ADR-0031: Theme-Switcher entfernt
+
+Operator nutzt seit Beginn ausschließlich das Dark-Theme; der Toggle war
+toter Code mit Maintenance-Overhead. Mit ADR-0031 ist er ersatzlos entfernt.
+
+### Added
+
+- ADR-0031 (`docs/decisions/0031-theme-switcher-removed.md`) — dokumentiert
+  Entscheidung, Konsequenzen und geplante Folge-Arbeit (Option D: npm-Build).
+- Alembic-Migration 0013 (`0013_remove_default_theme.py`) — entfernt
+  `settings.default_theme` und `ck_settings_theme`-Constraint.
+
+### Changed
+
+- `base.html` und `base_app.html`: `<html data-theme="dark">` statisch
+  gesetzt, `color-scheme`-Meta auf `dark` — kein Jinja-Conditional mehr.
+- ARCHITECTURE.md §6, §7, Block A, Block D: Theme-Toggle-Referenzen entfernt.
+- ADR-0016: Cross-Referenz zu ADR-0031 ergänzt (§"Theme-Toggle" abgelöst).
+
+### Removed
+
+- `app/static/js/theme.js` (94 LOC Alpine-Komponente + Cookie-Handling)
+- `_VALID_THEMES`, `_resolve_theme()`, `_inject_theme()`, `_persist_theme()`
+  aus `app/__init__.py`
+- `settings.default_theme`-Spalte + Check-Constraint (via Migration 0013)
+- `THEME_CHOICES`-Konstante und `default_theme`-Feld aus `app/forms.py`
+- `default_theme`-Zuweisung und Audit-Metadata-Eintrag aus `app/views/setup.py`
+- No-Flash-Theme-Resolver-Script und `theme.js`-Include aus Shell-Templates
+- Theme-Toggle-Block (Sun/Moon-SVG) aus `layout/_header.html`
+- Theme-Auswahl-Formblock aus `setup/step3.html`
+- `tests/test_theme_cookie.py` (4 Tests)
+- `default_theme`-Assertions/-Form-Felder aus `tests/setup/test_wizard.py`
+- `test_header_theme_toggle_present_with_sun_and_moon` aus
+  `tests/integration/test_header_navigation_db.py` (ersetzt durch
+  `test_header_has_no_theme_toggle`)
+- `"js/theme.js"`-Einträge aus `tests/views/test_script_load_order.py`
+
 ## [Unreleased] — Block V: Performance-Tuning UI-Views (ADR-0030)
 
 Dashboard `/` und Server-Detail `/servers/<id>` rendern signifikant

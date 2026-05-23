@@ -34,12 +34,6 @@ TAG_NAME_REGEX = re.compile(r"^[a-z0-9][a-z0-9._\-]{0,31}$")
 TAG_COLOR_REGEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9._\-]{3,64}$")
 
-# Theme-Werte aus §7.
-THEME_CHOICES: list[tuple[str, str]] = [
-    ("auto", "Auto (System)"),
-    ("light", "Hell"),
-    ("dark", "Dunkel"),
-]
 SEVERITY_CHOICES: list[tuple[str, str]] = [
     ("critical", "Critical"),
     ("high", "High"),
@@ -87,7 +81,7 @@ class SetupStep2Form(FlaskForm):
 
 
 class SetupStep3Form(FlaskForm):
-    """Defaults setzen (Severity-Schwelle, Stale-Thresholds, Theme)."""
+    """Defaults setzen (Severity-Schwelle, Stale-Thresholds)."""
 
     severity_threshold = SelectField(
         "Severity-Schwelle",
@@ -104,12 +98,6 @@ class SetupStep3Form(FlaskForm):
         "Stale Trivy-DB nach (Stunden)",
         default=30,
         validators=[DataRequired(), NumberRange(min=1, max=720)],
-    )
-    default_theme = SelectField(
-        "Default-Theme",
-        choices=THEME_CHOICES,
-        default="auto",
-        validators=[DataRequired()],
     )
 
 
