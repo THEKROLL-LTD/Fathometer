@@ -16,7 +16,9 @@ Konfiguriert in dieser Reihenfolge:
 
 from __future__ import annotations
 
+import json
 import sys
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -144,6 +146,83 @@ def _humanize_delta(value: datetime | None) -> str:
     return f"{years} year{'' if years == 1 else 's'} ago"
 
 
+# ---------------------------------------------------------------------------
+# Asset-Manifest-Loader (Block W / ADR-0032)
+# ---------------------------------------------------------------------------
+
+# Modul-State: wird beim ersten `_load_asset_manifest()`-Aufruf berechnet und
+# dann einmalig gecacht. Thread-sicher via `_asset_manifest_lock`.
+_asset_manifest: dict[str, str] | None = None
+_asset_manifest_lock = threading.Lock()
+
+
+def _load_asset_manifest() -> dict[str, str]:
+    """Lies ``app/static/dist/manifest.json`` einmalig (lazy, thread-sicher).
+
+    Gibt ein leeres dict zurueck wenn die Datei nicht existiert (Dev-Smoke
+    ohne vorherigen npm-Build). In Production (``SECSCAN_ENV != "dev"``) ist
+    das Fehlen des Manifests ein Indikator fuer einen defekten Build —
+    ``_asset_url`` wirft dort einen ``RuntimeError`` (siehe unten).
+    """
+    global _asset_manifest
+    if _asset_manifest is not None:
+        return _asset_manifest
+    with _asset_manifest_lock:
+        # Double-Checked Locking: nach Acquire nochmals pruefen, damit ein
+        # Konkurrent der den Lock bereits gehalten und befuellt hat, den
+        # naechsten Aufruf kurzschliesst.
+        if _asset_manifest is not None:
+            return _asset_manifest
+        manifest_path = Path(__file__).resolve().parent / "static" / "dist" / "manifest.json"
+        if not manifest_path.exists():
+            _asset_manifest = {}
+            return _asset_manifest
+        try:
+            raw: dict[str, str] = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            raw = {}
+        _asset_manifest = raw
+        return _asset_manifest
+
+
+def _asset_url(filename: str) -> str:
+    """Gibt die gehashte statische URL fuer ein Frontend-Asset zurueck.
+
+    ``filename`` ist ein logischer Build-Name aus dem Manifest:
+    ``"css/app.css"``, ``"js/vendor.js"`` oder ``"js/app.js"``.
+    Das ist keine User-Eingabe — der Parameter kommt ausschliesslich aus
+    Template-Calls (``{{ asset_url('css/app.css') }}``). Ein dict-Key-Lookup
+    ist inhaerent gegen Pfad-Traversal sicher; trotzdem gilt: nur die drei
+    oben genannten logischen Namen sind vordefinierte Build-Outputs.
+
+    Verhalten:
+    - Key gefunden: gibt ``url_for('static', filename='dist/<mapped>')`` zurueck.
+    - Key nicht gefunden, ``SECSCAN_ENV=dev`` oder Manifest leer (kein Build):
+      Fallback auf ``url_for('static', filename='dist/<filename>')``.
+    - Key nicht gefunden und Production-Modus (``SECSCAN_ENV != "dev"``):
+      wirft ``RuntimeError`` — ein fehlendes Mapping signalisiert einen
+      defekten Build und soll nicht lautlos in den 404-Fallback laufen.
+    """
+    import os
+
+    from flask import url_for
+
+    manifest = _load_asset_manifest()
+    mapped = manifest.get(filename)
+    if mapped is not None:
+        return url_for("static", filename=f"dist/{mapped}")
+    # Kein Mapping gefunden.
+    env = os.environ.get("SECSCAN_ENV", "dev")
+    if env != "dev":
+        raise RuntimeError(
+            f"asset_url: kein Mapping fuer '{filename}' im Manifest. "
+            "Bitte 'npm run build' ausfuehren oder den Docker-Build pruefen."
+        )
+    # Dev-Fallback: Pfad ohne Hash (funktioniert nach `npm run build` im Dev-Setup
+    # aber auch wenn das Manifest leer ist, solange die Datei direkt unter dist/ liegt).
+    return url_for("static", filename=f"dist/{filename}")
+
+
 # Pfade, die ohne abgeschlossenes Setup erreichbar bleiben muessen.
 _SETUP_EXEMPT_PREFIXES: tuple[str, ...] = (
     "/setup",
@@ -269,6 +348,12 @@ def create_app() -> Flask:
     from app.services.llm_sanitize import clean_llm_html
 
     app.jinja_env.filters["llm_safe"] = clean_llm_html
+
+    # Block W / ADR-0032: Asset-Manifest-Helper als Jinja-Global.
+    # Templates rufen `{{ asset_url('css/app.css') }}` auf — gibt die
+    # gehashte statische URL zurueck. Kein Filter, weil der Rueckgabewert
+    # ein URL-String ist (keine Template-Ausgabe, keine Sanitization noetig).
+    app.jinja_env.globals["asset_url"] = _asset_url
 
     # 4. Rate-Limiter initialisieren. Defaults: §9.
     limiter.init_app(app)

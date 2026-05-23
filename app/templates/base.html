@@ -29,6 +29,11 @@
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>{% block title %}secscan{% endblock %}</title>
 
+  {# Block W / ADR-0032 — Plain-CSS-Bundle (Design-Tokens + Komponenten).
+     Dual-Stack Phase 1: Tailwind/DaisyUI-CDN bleiben fuer Legacy-Templates.
+     asset_url() liest das esbuild-Manifest und gibt den gehashten Pfad zurueck. #}
+  <link rel="stylesheet" href="{{ asset_url('css/app.css') }}" />
+
   {# Tailwind Play CDN (3.4.x) inkl. DaisyUI-Plugin (4.12.x).
      Pin via expliziter Version-URL; DaisyUI-Plugin haengt sich an die
      globale `tailwind.config`-Hook. #}
@@ -84,6 +89,14 @@
 
   {# HTMX (lazy, aber generell verfuegbar fuer spaetere Blocks). #}
   <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+
+  {# Block W / ADR-0032 — JS-Bundles (Dual-Stack Phase 1: CDN-Tags oben bleiben).
+     vendor.js enthaelt Alpine + HTMX als IIFE; app.js enthaelt App-Module.
+     Beide werden NACH den CDN-Tags geladen — bei Doppel-Load gewinnt die
+     CDN-Version (bereits registriert), das Bundle ist ein No-Op. In Phase 2
+     werden die CDN-Tags entfernt und das Bundle uebernimmt. #}
+  <script defer src="{{ asset_url('js/vendor.js') }}"></script>
+  <script defer src="{{ asset_url('js/app.js') }}"></script>
 </head>
 <body class="min-h-screen bg-base-100 text-base-content antialiased">
   {# Topbar — App-Name links, Nav rechts. Theme ist statisch dark (ADR-0031). #}

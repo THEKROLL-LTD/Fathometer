@@ -71,7 +71,28 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     find /opt/venv -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Runtime-Builder (wird im naechsten Stage flach kopiert)
+# Stage 2 — Frontend-Build (esbuild + lightningcss, Block W / ADR-0032)
+#
+# Produziert app/static/dist/{css,js,fonts}/* und manifest.json.
+# Kein Node im Production-Image — nur die fertigen Static-Files werden
+# via COPY --from=frontend-build in Stage 3 uebernommen.
+# ---------------------------------------------------------------------------
+FROM node:20-alpine AS frontend-build
+
+WORKDIR /repo
+
+# Dependency-Layer zuerst — wird nur bei package-lock.json-Aenderungen invalidiert.
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+RUN cd frontend && npm ci
+
+# Frontend-Quellcode kopieren und bauen.
+# npm run build schreibt nach /repo/app/static/dist/ — esbuild legt
+# das Verzeichnis automatisch an.
+COPY frontend ./frontend
+RUN cd frontend && npm run build
+
+# ---------------------------------------------------------------------------
+# Stage 3 — Runtime-Builder (wird im naechsten Stage flach kopiert)
 #
 # Wir machen alle Modifikationen in diesem Stage, und kopieren das Resultat
 # anschliessend als *eine* Schicht in den final-Stage. Das halbiert den
@@ -135,6 +156,9 @@ COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
 COPY app ./app
+# Block W / ADR-0032: Frontend-Build-Artefakte aus der frontend-build-Stage
+# uebernehmen. Enthaelt manifest.json + css/app.<hash>.css + js/*.js + fonts/*.
+COPY --from=frontend-build /repo/app/static/dist ./app/static/dist
 COPY alembic ./alembic
 COPY alembic.ini ./
 # Block N (ADR-0021): `/agent/*.sh` werden ueber `/agent/files/<name>`

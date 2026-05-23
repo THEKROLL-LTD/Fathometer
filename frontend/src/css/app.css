@@ -1,0 +1,61 @@
+/* Fathometer — App-CSS Foundation.
+   Importiert Design-Tokens, definiert globale Resets und Shell-Layout.
+   Komponenten-Stylesheets werden in späteren Phasen via @import ergänzt. */
+
+@import "./tokens.css";
+
+/* ── Global Reset ──────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 300;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* ── Ambient 80x80 grid lattice (DS §6) ───────────────────── */
+
+.bg-grid {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right,  rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 80px 80px;
+}
+
+/* ── App shell layout ─────────────────────────────────────── */
+
+.app {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: 64px 1fr 28px;
+  grid-template-columns: 480px 1fr;
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar main"
+    "footer footer";
+  height: 100vh;
+}
+
+.topbar  { grid-area: topbar;  border-bottom: var(--hairline); display: flex; align-items: center; padding: 0 32px; gap: 32px; }
+.sidebar { grid-area: sidebar; border-right: var(--hairline); display: flex; flex-direction: column; min-height: 0; }
+.main    { grid-area: main;    overflow: auto; }
+.footer  { grid-area: footer;  border-top: var(--hairline); display: flex; align-items: center; padding: 0 32px; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.04em; gap: 16px; }

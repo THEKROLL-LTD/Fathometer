@@ -11,6 +11,7 @@ __pycache__
 .ruff_cache
 tests
 docs
+frontend/node_modules
 trivy-scan.json
 .env
 .env.*

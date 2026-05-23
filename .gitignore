@@ -27,6 +27,10 @@ htmlcov/
 # Build-Artefakte
 *.log
 
+# Frontend-Build
+frontend/node_modules/
+app/static/dist/
+
 # Playwright-MCP-Output (Snapshots, Konsolen-Logs aus Browser-Sessions)
 .playwright-mcp/
 .DS_Store

@@ -70,6 +70,11 @@
       ],
     };
   </script>
+  {# Block W / ADR-0032 — Plain-CSS-Bundle (Design-Tokens + Komponenten).
+     Dual-Stack Phase 1: Tailwind/DaisyUI-CDN bleiben fuer Legacy-Templates.
+     asset_url() liest das esbuild-Manifest und gibt den gehashten Pfad zurueck. #}
+  <link rel="stylesheet" href="{{ asset_url('css/app.css') }}" />
+
   {# Tailwind + DaisyUI via CDN — siehe ADR-0001. Pins identisch zu base.html. #}
   <script src="https://cdn.tailwindcss.com/3.4.16?plugins=forms,typography"></script>
   <link
@@ -109,6 +114,13 @@
   {# Alpine.js + HTMX zuletzt — siehe Reihenfolgen-Kommentar oben. #}
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.7/dist/cdn.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+
+  {# Block W / ADR-0032 — JS-Bundles (Dual-Stack Phase 1: CDN-Tags oben bleiben).
+     vendor.js enthaelt Alpine + HTMX als IIFE; app.js enthaelt App-Module.
+     Stehen NACH den CDN-Tags — bei Doppel-Load haben CDN-Globals Vorrang.
+     In Phase 2 werden CDN-Tags entfernt und das Bundle uebernimmt allein. #}
+  <script defer src="{{ asset_url('js/vendor.js') }}"></script>
+  <script defer src="{{ asset_url('js/app.js') }}"></script>
 </head>
 <body class="flex flex-col h-screen overflow-hidden bg-base-100 text-base-content antialiased text-sm">
 
