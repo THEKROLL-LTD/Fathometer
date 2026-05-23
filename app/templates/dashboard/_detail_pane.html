@@ -1,13 +1,10 @@
 {# Dashboard-Detail-Pane — die EINZIGE Quelle fuer den Dashboard-Inhalt
    (ADR-0016 / ADR-0017 / ADR-0036).
 
-   Block W Phase D (ADR-0036): KPI-Cards (Tier 1+2+3 aus Block O) ersetzt
-   durch Action-Needed-Card + Nominal-Card.
-
-   Triage-Row, Severity-Strip und Sysline kommen Phase E + F hinzu.
-   Polling-Cadence wird in Phase F auf 60 s + hx-swap="none" umgestellt
-   (ADR-0036). Der bestehende outerHTML-Polling-Wrapper aus Block V
-   bleibt unveraendert bis Phase F.
+   Block W Phase F (ADR-0036): Polling-Cadence auf 60 s umgestellt,
+   hx-swap="none" am Pane-Trigger (nur OOB-Swaps, kein Pane-Reload),
+   hx-preserve="true" auf dem Action-Card-Wrapper (Scan-Beam-Animation
+   laeuft kontinuierlich), Sysline-Include ergaenzt.
 
    Wird von zwei Pfaden konsumiert (ADR-0017):
      1. `dashboard/index.html` (Full-Page-Render) inkludiert dieses Partial
@@ -25,30 +22,38 @@
                                   monitor, noise, unknown (int je Bucket).
      - `severity_counts`        : dict — critical, high, medium, low (int),
                                   max_count (int, fuer Bar-Normalisierung).
+     - `sysline`                : dict — last_scan_ago, epss_feed_status,
+                                  kev_feed_status, worker_status.
 
    Sicherheit: kein `|safe` auf Variablen — alles autoescaped.
 #}
 <div id="dashboard-pane"
      class="max-w-[1600px] mx-auto px-6 py-6 space-y-8"
-     hx-get="{{ request.path }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}"
-     hx-trigger="every 10s [document.visibilityState === 'visible']"
-     hx-target="this"
-     hx-swap="outerHTML"
-     hx-headers='{"HX-Request": "true"}'
+     hx-get="/_partials/dashboard/kpis"
+     hx-trigger="every 60s [document.visibilityState === 'visible']"
+     hx-swap="none"
      hx-disinherit="*">
 
-  <section class="dashboard__eyebrow" id="dashboard-eyebrow">
-    Last refresh <span id="dashboard-last-refresh" data-test="dashboard-last-refresh">--:-- UTC</span>
-  </section>
+  <p class="dashboard__eyebrow" id="dashboard-eyebrow">
+    Dashboard &nbsp;·&nbsp; Fleet overview &nbsp;·&nbsp; last refresh &nbsp;·&nbsp;
+    <span id="dashboard-last-refresh" data-test="dashboard-last-refresh">--:-- UTC</span>
+  </p>
 
   <section class="stats">
+    {# Action-Needed-Card: _action_needed_card.html rendert den Wrapper mit
+       id="action-needed-card" und hx-preserve="true". Die inneren Werte
+       (#action-needed-num/-hosts-total/-sub) werden per OOB-Swap getauscht.
+       Der Wrapper bleibt dank hx-preserve erhalten (Scan-Beam-Animation). #}
     {% include "dashboard/_action_needed_card.html" %}
+
+    {# Nominal-Card: kein hx-preserve noetig (keine kontinuierliche Animation).
+       Wird in der OOB-Response via #nominal-card komplett ersetzt. #}
     {% include "dashboard/_nominal_card.html" %}
   </section>
 
-  {# Phase E: Triage-Row + Severity-Strip. Sysline folgt Phase F. #}
+  {# Triage-Row + Severity-Strip + Sysline — OOB-Targets in Phase F. #}
   {% include "dashboard/_triage_row.html" %}
   {% include "dashboard/_severity_strip.html" %}
-  <div id="sysline"></div>
+  {% include "dashboard/_sysline.html" %}
 
 </div>

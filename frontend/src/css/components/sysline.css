@@ -1,0 +1,29 @@
+/* Sysline — terminal-style system status line at the bottom of the dashboard.
+   1:1 aus docs/design/styles.css §"Last scan / system status terminal line". */
+
+.sysline {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  padding: 14px 0;
+  border-top: var(--hairline);
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.sysline span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sysline b {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.sysline .prompt {
+  color: var(--accent);
+}

@@ -396,6 +396,7 @@ def create_app() -> Flask:
     from app.views.audit_view import audit_bp
     from app.views.auth import auth_bp
     from app.views.dashboard import dashboard_bp
+    from app.views.dashboard_partials import dashboard_partials_bp
     from app.views.findings import findings_bp
     from app.views.llm_settings import llm_settings_bp
     from app.views.server_detail import server_detail_bp
@@ -412,6 +413,7 @@ def create_app() -> Flask:
     app.register_blueprint(findings_bp)
     app.register_blueprint(audit_bp)
     app.register_blueprint(dashboard_bp)
+    app.register_blueprint(dashboard_partials_bp)
     app.register_blueprint(llm_chat_bp)
     app.register_blueprint(sidebar_partials_bp)
     app.register_blueprint(agent_install_bp)

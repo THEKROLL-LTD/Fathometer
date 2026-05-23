@@ -48,6 +48,7 @@ from app.services.risk_engine import yes_band_values
 from app.services.stale_detection import (
     is_stale,
 )
+from app.services.sysline_context import build_sysline_context
 from app.views._sidebar_context import is_hx_request
 
 log = structlog.get_logger(__name__)
@@ -263,6 +264,9 @@ def _build_pane_context(
     # Severity-Counts: eigenstaendiger SELECT (OPEN-Findings GROUP BY severity).
     severity_counts = _load_severity_counts(sess)
 
+    # Phase F (Block W, ADR-0036): Sysline-Context fuer Initial-Render.
+    sysline = build_sysline_context(sess, _now=now)
+
     return {
         "servers": visible,
         "filter": filt,
@@ -276,6 +280,8 @@ def _build_pane_context(
         # Block W Phase E (ADR-0036) — Triage-Row + Severity-Strip.
         "triage_counts": triage_counts,
         "severity_counts": severity_counts,
+        # Block W Phase F (ADR-0036) — Sysline-Context.
+        "sysline": sysline,
     }
 
 

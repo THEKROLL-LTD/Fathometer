@@ -90,6 +90,20 @@ def _build_mock_session_for_pane_context(
     severity_result = MagicMock()
     severity_result.all.return_value = []
 
+    # Phase F: build_sysline_context macht 4 zusaetzliche execute()-Calls.
+    # 1. max(Server.last_scan_at) -> None (kein Scan vorhanden)
+    sysline_last_scan_result = MagicMock()
+    sysline_last_scan_result.scalar.return_value = None
+    # 2. max(FeedPullLog.completed_at) fuer 'epss' -> None (nie erfolgreich)
+    sysline_epss_result = MagicMock()
+    sysline_epss_result.scalar.return_value = None
+    # 3. max(FeedPullLog.completed_at) fuer 'cisa_kev' -> None (nie erfolgreich)
+    sysline_kev_result = MagicMock()
+    sysline_kev_result.scalar.return_value = None
+    # 4. select(Setting).where(id=1) -> None (kein Settings-Row in Unit-Test)
+    sysline_settings_result = MagicMock()
+    sysline_settings_result.scalar_one_or_none.return_value = None
+
     sess = MagicMock()
     sess.execute.side_effect = [
         server_result,  # _load_servers
@@ -98,6 +112,10 @@ def _build_mock_session_for_pane_context(
         active_count_result,  # _load_risk_kpi_counters: aktive-Server-Count
         action_hosts_result,  # _load_action_needed_card_data: hosts_total
         severity_result,  # _load_severity_counts: GROUP BY severity (Phase E)
+        sysline_last_scan_result,  # build_sysline_context: max(last_scan_at)
+        sysline_epss_result,  # build_sysline_context: epss feed max(completed_at)
+        sysline_kev_result,  # build_sysline_context: cisa_kev feed max(completed_at)
+        sysline_settings_result,  # build_sysline_context: Settings-Row
     ]
     return sess
 

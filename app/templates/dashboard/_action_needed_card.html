@@ -21,7 +21,7 @@
    Sicherheit: kein |safe — alle Werte sind serverseitig autoescaped.
 #}
 {% from "_macros.html" import scan_chars %}
-<div class="stat stat--alarm" id="action-needed-card">
+<div class="stat stat--alarm" id="action-needed-card" hx-preserve="true">
   <p class="stat__label">
     <span class="bracket scan-flash" aria-hidden="true">[</span>{{ scan_chars("action needed") }}<span class="bracket scan-flash" aria-hidden="true">]</span>
   </p>
