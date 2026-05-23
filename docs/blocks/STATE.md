@@ -4,27 +4,84 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
-**MVP + UI v2 + ADR-0016 bis ADR-0036 + Block-W-Redesign-Phase-1 implementiert (Addendum: Tailwind/DaisyUI komplett entfernt, Legacy-Shim deckt ungerefactorte Templates ab) — Ziel v0.12.0 (2026-05-23).**
+**MVP + UI v2 + ADR-0016 bis ADR-0036 + Block-W-Redesign-Phase-1 abgeschlossen (inkl. Addendum: Tailwind/DaisyUI komplett raus, Legacy-Shim deckt ungerefactorte Templates ab) — Ziel v0.12.0 (2026-05-24).**
 
-**Block W Addendum 2026-05-23 — Tailwind/DaisyUI komplett raus, Legacy-Shim ergänzt.** Browser-Smoke gegen den Dual-Stack zeigte Cascade-Konflikte (DaisyUI eigene `.footer`/`.stats`/`.stat`/`.toast`/`.alert`-Klassen plus Tailwind-`forms`-Plugin-Override auf `[type='text']`/`[type='password']`) die sich praktisch nicht ohne `!important`-Salat lösen lassen. Statt zu hacken: ADR-0032 Phase 2 vorgezogen. Alle CDN-Tags (Tailwind, DaisyUI, Alpine, HTMX) raus aus base.html + base_app.html; Alpine + HTMX kommen jetzt ausschließlich aus dem esbuild-`vendor.js`-Bundle. Für die noch nicht redesigneten Templates (Settings, Server-Detail, Findings, Audit, Setup-Wizard, Chat, Dashboard-`_card.html`, `_partials/*`, `_empty/*`) liefert `frontend/src/css/components/legacy-shim.css` (~450 Zeilen) Minimal-Styles auf Basis der Fathometer-Design-Tokens — Pages bleiben benutzbar, sind nicht hübsch. Wenn ein zukünftiger Block eine Surface redesigned, wandert das spezifische Styling in eine eigene Komponenten-CSS und der Shim schrumpft. **TD-010 ist final erledigt.** Verification grün: ruff PASS, format PASS (320), mypy PASS (84), pytest 1511 passed / 208 skipped / 0 failures.
+**Block W abgeschlossen 2026-05-24 — Frontend-Redesign Phase 1 (Login + Dashboard + App-Shell) + ADR-0032-Phase-2-Vorziehung.** Branch `feat/block-w-redesign-phase-1`, neun Commits (1 Spec-Foundation + 7 Phase-Commits + 1 Addendum-Commit). Fünf neue ADRs (0032–0036), Migration 0014, neuer Frontend-Build-Stack (esbuild + lightningcss + Plain-CSS + JetBrains-Mono self-hosted).
 
----
+**Commits in Reihenfolge:**
 
-**Block W implementiert 2026-05-23 — Frontend-Redesign Phase 1 (Login + Dashboard + App-Shell).** Branch `feat/block-w-redesign-phase-1` (noch nicht erstellt). Sieben Phasen (A Build-Toolchain + Tokens, B Topbar+Footer+bg-grid, C Sidebar+Group-Migration+Viewport-Lazy, D Action+Nominal-Cards, E Triage+Severity-Strip, F Sysline+OOB-Polling, G Login+Final-Polish). Fünf neue ADRs:
+| Commit | Inhalt |
+|---|---|
+| `63c8017` | docs(block-w): spec foundation (ADR-0032..0036 + block spec + design assets) |
+| `d49311e` | feat(block-w-phase-a): frontend-build-toolchain + asset-manifest |
+| `46f4deb` | feat(block-w-phase-b): topbar + footer + bg-grid + fathometer-logo |
+| `101e27d` | feat(block-w-phase-c): sidebar groups + viewport-lazy + migration 0014 |
+| `f51c21a` | feat(block-w-phase-d): action-card + nominal-card + scan-sync |
+| `c0d0eed` | feat(block-w-phase-e): triage-row + severity-strip + dashboard-kpis |
+| `31878f6` | feat(block-w-phase-f): sysline + OOB-polling + hx-preserve |
+| `ad2cc21` | feat(block-w-phase-g): login rewrite + auth.css + legacy smokes |
+| `d2550ba` | feat(block-w): shell-fix + addendum (Tailwind/DaisyUI raus + Legacy-Shim) |
 
-- **ADR-0032** — Frontend-Build-Toolchain: Plain CSS + esbuild, kein Tailwind/DaisyUI im neuen Design. Löst ADR-0001 partiell ab (Phase 1 dual-Stack, Phase 2 vollständige Migration eliminiert TD-010).
-- **ADR-0033** — Brand-Identity Fathometer (Logo, Wordmark "Fathometer · CVE Intelligence", JetBrains-Mono self-hosted, Color-Reduction-Rule "nur escalate trägt cyan", Easing-Doctrine, Border-Radius-/Box-Shadow-Verbotsliste, Sprach-Policy englisch).
+**Fünf neue ADRs:**
+
+- **ADR-0032** — Frontend-Build-Toolchain: Plain CSS + esbuild + lightningcss, kein Tailwind/DaisyUI. **Phase 2 wurde im Addendum vorgezogen** — löst ADR-0001 final ab (Status: Superseded by ADR-0032), TD-010 final erledigt.
+- **ADR-0033** — Brand-Identity Fathometer (Logo, Wordmark "Fathometer · CVE Intelligence", JetBrains-Mono self-hosted, Color-Reduction "nur escalate trägt cyan", Easing-Doctrine, Border-Radius-/Box-Shadow-Verbotsliste, Sprach-Policy englisch).
 - **ADR-0034** — Host-Group-Datenmodell (1:N, `server_groups`-Tabelle + nullable `servers.group_id`, Migration 0014, Sidebar-Verhalten "Gruppen oben eingeklappt → Ungrouped flach unten", CRUD out-of-Block-W).
-- **ADR-0035** — Daily-Risk-State als Heartbeat-Mapping (4 Zustände abgeleitet aus `Finding.risk_band`, 30 Ticks statt 50, Live-Aggregation erweitert ohne Schema-Change, Viewport-Aware Lazy-Loading via IntersectionObserver + Batch-Endpoint, Polling-Cadence 60 s).
+- **ADR-0035** — Daily-Risk-State als Heartbeat-Mapping (4 Zustände aus `Finding.risk_band`, 30 Ticks statt 50, Live-Aggregation ohne Schema-Change, Viewport-Aware Lazy-Loading via IntersectionObserver + Batch-Endpoint, Polling-Cadence 60 s).
 - **ADR-0036** — Single-Pane Dashboard-Polling mit hx-preserve + OOB-Swaps (Action-Card-Animation-Preservation, ein KPI-Endpoint `/_partials/dashboard/kpis`).
 
-Quelle des Designs: `docs/design/` (React-Mockup mit plain CSS + design-tokens.css + JetBrains-Mono woff2-Assets, vom Operator bereitgestellt). Block W portiert das zu Jinja+Alpine+vanilla-JS, behält die Komponenten-Struktur 1:1.
+**Was die sieben Phasen geliefert haben (12 neue Pure-Unit-Tests Phase A, 45 Phase B, 84 Phase C, 50 Phase D, 24 Phase E, 56 Phase F, 25 Phase G — **~296 neue Tests** über den Block):**
 
-**Out of Scope (Phase 1):** Server-Detail-Redesign, Settings/Findings/Audit/Setup-Wizard-Redesign, Host-Group-CRUD-UI, Add-Host-UI, vollständige Tailwind/DaisyUI-Elimination (Phase 2-Block), Repo-Rename `secscan` → `fathometer` (separater ADR).
+1. **Phase A — Build-Toolchain + Tokens (commit `d49311e`).** Neues `frontend/`-Verzeichnis (`package.json`, `package-lock.json`, `esbuild.config.mjs` mit `bundleAsync` + SHA-256-Content-Hash + Cleanup, `src/css/{tokens,app}.css`, `src/js/{vendor,app}.js`, 3 JetBrains-Mono woff2). `app/__init__.py` Lazy-Cache + `_asset_url`-Jinja-Global mit Production-RuntimeError bei Missing-Key + Dev-Fallback. `base.html` + `base_app.html` ergänzte Bundle-Tags (im Initial-Stand parallel zu CDN, im Addendum-Commit dann CDN-frei). Dockerfile neue `frontend-build`-Stage (node:20-alpine) → `COPY --from=frontend-build` in runtime-builder.
 
-**Migration 0014** legt `server_groups`-Tabelle + `servers.group_id`-Spalte an. Backwards-compatible (alle existierenden Server bekommen `group_id = NULL`, kein Backfill). 0013 ist bereits durch ADR-0031 (Theme-Switcher-Removal) belegt — Down-Revision = `"0013_remove_default_theme"`.
+2. **Phase B — Topbar + Footer + bg-grid + Fathometer-Logo (commit `46f4deb`).** 3 neue CSS-Komponenten (`topbar.css`, `footer.css`, `profile-menu.css`) mit Logo-Animationen (`fathom-sweep`, `op-pulse`), Wordmark-Stack, Profile-Dropdown. `_macros.html::fathometer_logo` (SVG 1:1 aus `app.jsx::FathometerLogo`). `layout/_header.html` + `_profile_dropdown.html` kompletter Rewrite englisch, degraded sauber wenn nicht authentifiziert. `layout/_footer.html` neu mit Version-Link (Doppel-`v`-Bug gefixt via `_ver_tag`-Normalisierung). `_inject_version`-Context-Processor mit Regex-Härtung `^[A-Za-z0-9._-]+$` max 64 Chars, Fallback `"dev"`.
 
-**Phase-1-Dual-Stack** lädt parallel: das neue esbuild-Bundle (Plain-CSS + Design-Tokens + JetBrains-Mono + esbuild-Bundle für Alpine/HTMX + neue JS-Module) **und** Tailwind/DaisyUI-CDN (für Legacy-Templates Settings/Server-Detail/Findings/Audit/Setup die in Phase 1 unangetastet bleiben). TD-010-Safelist und Lint-Test bleiben bis Phase 2.
+3. **Phase C — Sidebar + Migration 0014 + Viewport-Lazy (commit `101e27d`).** Migration `0014_block_w_server_groups` (server_groups + nullable `servers.group_id` FK ON DELETE SET NULL + Index, backwards-compatible). `ServerGroup`-ORM-Klasse mit Relationship `lazy="selectin"`. `sidebar_group_aggregates.group_counts()` als ein LEFT-JOIN-GROUP-BY. `heartbeat_aggregation.DailyStatus.dominant_risk_band` + `_RISK_BAND_RANK`-Reduce, `days=30`-Default. POST `/_partials/sidebar/batch` mit `@login_required` + Pydantic `extra="forbid"` + `max_length=200` + DB-Whitelist + OOB-Response (security-audited APPROVED). Sidebar-Templates kompletter Rewrite (Groups oben eingeklappt + Ungrouped flach unten, 30-Tick-Heartbeat mit 4-Zustand-Mapping). `sidebar_viewport.js` IntersectionObserver `rootMargin=200px` + 60-s-Polling-POST + CSRF-Header. `sidebar_loading_wave.js` Stagger-Reveal. **lightningcss-Build-Fix:** `transform()` → `bundleAsync()` (CSS-Bundle wuchs von 1.2 KB auf 16 KB weil @imports jetzt aufgelöst werden).
+
+4. **Phase D — Action-Card + Nominal-Card (commit `f51c21a`).** `stat-card.css` mit Scan-Beam-Animationen (`@keyframes stat-scan` mit `mix-blend-mode: screen`, `stat-scanlines`, `scan-flash`). `scan_chars`-Macro splittet Text in per-Char-Spans + `visually-hidden`-Volltext für Screenreader. `_action_needed_card.html` (`stat--alarm`) + `_nominal_card.html` (`stat--safe` ohne Cyan per Color-Doctrine). `dashboard_scan_sync.js` Vanilla-JS-Port von `useScanFlashSync` mit debounced 50-ms-Re-Sync auf `htmx:oobAfterSwap`. `dashboard_kpis.py::_load_action_needed_card_data` + `_load_nominal_card_data`. Legacy-Templates gelöscht (`_kpi_cards.html`, `action_required_card.html`); `risk_band_pill.html` bleibt (noch von Findings/Servers genutzt).
+
+5. **Phase E — Triage-Row + Severity-Strip (commit `c0d0eed`).** `triage.css` + `severity.css`. `_triage_row.html` (7 Buckets in Design-Reihenfolge mit `<a>`-Cells, `data-test` pro Bucket, Accent-Klasse nur bei count>0). `_severity_strip.html` (4 Severities mit serverseitig berechnetem `width %` für Bar-Fill). `dashboard_kpis._load_triage_counts` (Dual-Mode: schnell aus `risk_bands_by_server` oder Standalone-GROUP-BY) + `_load_severity_counts` mit `max_count=1`-Schutz gegen Division-by-Zero.
+
+6. **Phase F — Sysline + OOB-Polling (commit `31878f6`).** `sysline_context.build_sysline_context` mit 4 ORM-Queries (max `Server.last_scan_at`, 2× max `FeedPullLog.completed_at` für `epss`/`cisa_kev`, `Settings`-Singleton). `dashboard_partials.dashboard_partials_bp` mit `GET /_partials/dashboard/kpis` (`@login_required`) liefert OOB-Response über 8 Targets — **kein** `#action-needed-card`-Wrapper im Response damit Scan-Beam-Animation durchgehend läuft (via `hx-preserve="true"` auf der Initial-Card). `_detail_pane.html` Polling umgestellt auf `hx-get="/_partials/dashboard/kpis"`, `hx-trigger="every 60s [document.visibilityState === 'visible']"`, `hx-swap="none"`. `dashboard_last_refresh.js` mit `setInterval(30_000)` für `HH:MM UTC`-Anzeige.
+
+7. **Phase G — Login-Rewrite + Final-Polish (commit `ad2cc21`).** `auth.css` mit `.app--auth`-Grid + `.auth__panel` Accent-Left-Bar. `login.html` kompletter Rewrite englisch (`Operator credentials.`, `> authenticate`, `No signup. No reset. No SSO. Internal operators only.`, Submit `authenticate →`, Status-Line mit `[access denied] · <flash>` bei Error). `base.html` `page_content`-Block-Erweiterung damit Login die DaisyUI-Flash-Banner umgehen und das eigene Layout rendern kann (rückwärtskompatibel). `_empty/no_servers.html` englisch + plain CSS. Backend-View `auth_bp.login` unverändert (war kompatibel). Legacy-Surface-Smokes für Settings + Server-Detail (Dual-Stack lebt weiter).
+
+**Addendum-Commit `d2550ba` — Shell-Fix + ADR-0032 Phase 2 vorgezogen (2026-05-24).** Browser-Smoke nach den 7 Phasen-Commits zeigte Cascade-Konflikte: DaisyUI eigene `.footer`/`.stats`/`.stat`/`.toast`/`.alert`-Klassen und Tailwind-`forms`-Plugin-Override auf `[type='text']`/`[type='password']` kollidierten mit dem neuen Plain-CSS. Statt mit `!important` zu hacken, hat der Operator **ADR-0032 Phase 2 vorgezogen**:
+
+- Alle CDN-Tags (Tailwind, DaisyUI, Alpine, HTMX) raus aus `base.html` + `base_app.html`. Alpine + HTMX kommen jetzt ausschließlich aus dem esbuild-`vendor.js`-Bundle.
+- `frontend/src/css/components/legacy-shim.css` (~450 Zeilen) liefert Minimal-Styles für die ~150 häufigsten Tailwind-/DaisyUI-Klassen in noch nicht redesigneten Templates (Settings/Server-Detail/Findings/Audit/Setup/Chat/Dashboard-`_card.html`/`_partials/*`/`_empty/*`). Pages bleiben benutzbar, sind nicht hübsch.
+- Shell-Fixes: `base*.html` Body-Tailwind-Klassen raus, `<div class="app">` als Grid-Wurzel, Topbar/Sidebar/Main/Footer als direkte Grid-Children. `_detail_pane.html` Klassen-Drift gefixt (`.dashboard__eyebrow` → `.eyebrow`), Section-Labels für Triage und Severity ergänzt. `_action_needed_card.html` CTA "triage now" → "open triage queue", `action needed`-Text raus aus `scan_chars` (nur Brackets flashen). `_sysline.html` `.sysline__prompt` → `.prompt`, Separator inline. `login.html` eigenes App-Wrapping raus (kommt jetzt aus `base.html`). CSS-Source-Order: `.app--auth`/`.main--auth`/`.topbar--auth` aus `auth.css` in `app.css` verschoben (musste NACH `.app` stehen). `auth.css` `:-webkit-autofill`-Overrides gegen Chrome-Autofill-White.
+- Animation-Fix: `dashboard_scan_sync.js` re-syncen nur wenn sich die Span-Anzahl ändert (sonst Phase-Reset bei jedem OOB-Tick). `scan-flash`-Keyframe 1:1 zurück auf Design-Original.
+- `test_tailwind_safelist.py` als `pytest.skip` deprecated (Löschung beim nächsten Repo-Cleanup).
+- Doc-Updates: ADR-0001 auf `Superseded by ADR-0032`. ADR-0032 Addendum-Sektion mit Phase-2-Vorziehung und Legacy-Shim. **TD-010 final als ERLEDIGT markiert.** decisions/README.md Status-Zeilen aktualisiert.
+
+**Migration 0014** (server_groups + servers.group_id) wurde am 2026-05-23 vom Operator als db_integration verifiziert: Roundtrip (`downgrade base → upgrade head → downgrade -1 → upgrade head`) clean, alle 5 CHECK/UNIQUE-Probes grün, ON-DELETE-SET-NULL-Semantik korrekt.
+
+**Verifikations-Ergebnisse Endstand (post-Addendum):**
+
+- **Default-`pytest`:** 1713 passed, 6 skipped (5 E2E + 1 deprecated `test_tailwind_safelist.py`), 662 deselected in 40 s. Vom Phase-G-Endstand 1717 auf 1713 → −4 Tests, verursacht durch das ADR-0032-Phase-2-Vorziehen (Tailwind-Safelist-Tests `test_script_load_order.py`-Anpassungen und einige Smoke-Tests die Tailwind-CDN-Verifikation gemacht haben).
+- **Lint/Type-Gates:** `ruff check .` PASS, `ruff format --check .` PASS (320 Files), `mypy app/` PASS (84 Source-Files, no issues).
+- **Über den ganzen Block:** ~296 neue Pure-Unit-Tests + ~30 angepasste Tests (Sidebar-Partial, Tailwind-Safelist-Deprecation, Dashboard-Context-Mock-Erweiterungen).
+
+**Operator-Realbetriebs-Impact:**
+
+- **Bundle statt CDN:** Production-Browser zieht keine externen Assets mehr (kein cdn.tailwindcss.com, kein cdn.jsdelivr.net) — passt zu `docs/operations.md` "keine externen asset calls"-Vorgabe. **Air-Gap-Deployments brauchen die CDN-Domains nicht mehr im Egress-Whitelist** (Phase-1-Dual-Stack-Anforderung ist mit dem Addendum entfallen).
+- **Brand-Identity:** Fathometer-Wordmark sichtbar in Topbar + Footer + `<title>` + Login. `secscan` bleibt nur als Repo-Slug + Code-Identifier (Repo-Rename ist out-of-Scope).
+- **Single-Pane-Polling:** 60-s-Cadence statt 10-s, OOB-Swaps statt Full-Pane-Replace. Scan-Beam-Animation läuft durchgehend (hx-preserve). Dashboard-Render-Kosten pro Tick reduziert auf nur die KPI-Aggregate.
+- **Heartbeat-Bars:** 30 Ticks (statt 50) mit 4-Zustand-Mapping aus `dominant_risk_band`. Viewport-Aware-Lazy-Loading lädt initial nur die ~10 sichtbaren Server statt aller; bei Scroll werden neu sichtbare nachgeladen via Batch-POST.
+- **Operator-Bookmarks:** `/login` rendert neuen englischen Login. Alle existierenden Setup/Settings/Findings/Audit/Server-Detail-Pfade funktionieren weiter (legacy-shim.css deckt sie minimal ab).
+
+**Bewusst weggelassen / Re-Open-Trigger:**
+
+- Server-Detail-Redesign, Settings/Findings/Audit-Redesign — eigene Folge-Blöcke (vermutlich W+1 und W+2).
+- Host-Group-CRUD-UI — kommt mit Server-Detail-Redesign.
+- Add-Host-UI — kommt mit Server-Detail-Redesign.
+- Legacy-Shim-Schrumpfung — wandert pro redesigntem Template in dessen eigene Komponenten-CSS.
+- Repo-Rename `secscan` → `fathometer` (separater ADR notwendig wegen Code-Identifier-Sweep, Package-Name, Container-Image-Name).
+- `test_tailwind_safelist.py` finale Löschung (heute pytest.skip, Cleanup-PR beim nächsten Repo-Touchpoint).
+- TD-014 (Sidebar-Polling-Endpoints Rate-Limit, ~30 Min, security-auditor GELB-1 aus Phase C).
+
+**Tag `v0.12.0` zu setzen** (nach Branch-Merge auf main, gemäß [Tag-only-on-main-after-Merge]).
 
 ---
 
