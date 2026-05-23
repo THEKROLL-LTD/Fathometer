@@ -1,0 +1,48 @@
+/* Triage-Row — 7-Spalten-Grid fuer Risk-Band-Buckets.
+   Tokens aus tokens.css (--hairline, --surface-raised, --text-tertiary,
+   --text-primary, --accent, --dur-hover, --ease-drift). */
+
+.triage {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-top: var(--hairline);
+  border-bottom: var(--hairline);
+  margin-bottom: 80px;
+}
+
+.triage__cell {
+  padding: 28px 16px 28px 18px;
+  border-right: var(--hairline);
+  cursor: pointer;
+  text-decoration: none;
+  display: block;
+  transition: background var(--dur-hover) var(--ease-drift);
+}
+
+.triage__cell:last-child { border-right: none; }
+.triage__cell:first-child { padding-left: 0; }
+.triage__cell:hover { background: var(--surface-raised); }
+
+.triage__cell-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 0 0 14px;
+}
+
+.triage__cell-num {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  color: var(--text-primary);
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.triage__cell-num--zero { color: var(--text-tertiary); }
+
+/* Akzent-Variante: nur escalate und act (wenn count > 0) erhalten cyan.
+   Color-Reduction-Rule (ADR-0033 §3): nur das Eye-Catcher-Signal, kein Wallpaper. */
+.triage__cell--accent .triage__cell-label { color: var(--accent); }

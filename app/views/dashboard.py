@@ -41,6 +41,8 @@ from app.schemas.dashboard_filter import DashboardFilter
 from app.services.dashboard_kpis import (
     _load_action_needed_card_data,
     _load_nominal_card_data,
+    _load_severity_counts,
+    _load_triage_counts,
 )
 from app.services.risk_engine import yes_band_values
 from app.services.stale_detection import (
@@ -250,6 +252,17 @@ def _build_pane_context(
         action_server_count=action_needed_card_data["server_count"],
     )
 
+    # Phase E (Block W, ADR-0036): Triage-Row + Severity-Strip Context-Keys.
+    # Triage-Counts: Ableitung aus risk_bands_by_server ohne extra DB-Roundtrip
+    # (Modus 1 von _load_triage_counts).
+    triage_counts = _load_triage_counts(
+        sess,
+        risk_bands_by_server=risk_bands_by_server,
+        active_server_ids=active_server_ids,
+    )
+    # Severity-Counts: eigenstaendiger SELECT (OPEN-Findings GROUP BY severity).
+    severity_counts = _load_severity_counts(sess)
+
     return {
         "servers": visible,
         "filter": filt,
@@ -257,9 +270,12 @@ def _build_pane_context(
         # Block O (ADR-0022) — behalten fuer Rueckwaerts-Compat mit Tests
         # die noch gegen die alten Context-Keys pruefen.
         "risk_kpis": risk_kpis,
-        # Block W Phase D (ADR-0036) — neue Card-Context-Keys.
+        # Block W Phase D (ADR-0036) — Card-Context-Keys.
         "action_needed_card_data": action_needed_card_data,
         "nominal_card_data": nominal_card_data,
+        # Block W Phase E (ADR-0036) — Triage-Row + Severity-Strip.
+        "triage_counts": triage_counts,
+        "severity_counts": severity_counts,
     }
 
 

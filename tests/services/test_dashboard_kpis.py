@@ -312,3 +312,214 @@ def test_load_nominal_card_data_returns_expected_keys() -> None:
     assert set(result.keys()) == expected_keys, (
         f"Erwartete Keys: {expected_keys}, erhalten: {set(result.keys())}"
     )
+
+
+# ---------------------------------------------------------------------------
+# _load_triage_counts — Phase E
+# ---------------------------------------------------------------------------
+
+
+def _mock_session_with_rows(rows: list) -> MagicMock:
+    """Session deren execute().all() die uebergebenen Zeilen zurueckgibt."""
+    sess = MagicMock()
+    result = MagicMock()
+    result.all.return_value = rows
+    sess.execute.return_value = result
+    return sess
+
+
+def _make_triage_row(risk_band: str | None, cnt: int) -> MagicMock:
+    """Fake-DB-Row mit .risk_band und .cnt Attributen."""
+    row = MagicMock()
+    row.risk_band = risk_band
+    row.cnt = cnt
+    return row
+
+
+def test_load_triage_counts_standalone_mode_returns_7_buckets() -> None:
+    """Standalone-Modus: DB liefert Rows -> output hat genau die 7 Design-Buckets.
+
+    Reihenfolge muss escalate, act, mitigate, pending, monitor, noise, unknown sein.
+    """
+    from app.services.dashboard_kpis import _load_triage_counts
+
+    rows = [
+        _make_triage_row("escalate", 3),
+        _make_triage_row("act", 1),
+        _make_triage_row("mitigate", 5),
+        _make_triage_row("pending", 2),
+        _make_triage_row("monitor", 7),
+        _make_triage_row("noise", 4),
+        _make_triage_row("unknown", 0),
+    ]
+    sess = _mock_session_with_rows(rows)
+
+    result = _load_triage_counts(sess)
+
+    expected_keys = ("escalate", "act", "mitigate", "pending", "monitor", "noise", "unknown")
+    assert list(result.keys()) == list(expected_keys), (
+        f"Erwartete Reihenfolge: {list(expected_keys)}, erhalten: {list(result.keys())}"
+    )
+    assert result["escalate"] == 3, f"Erwartet escalate=3, erhalten: {result['escalate']}"
+    assert result["act"] == 1, f"Erwartet act=1, erhalten: {result['act']}"
+    assert result["mitigate"] == 5, f"Erwartet mitigate=5, erhalten: {result['mitigate']}"
+    assert result["monitor"] == 7, f"Erwartet monitor=7, erhalten: {result['monitor']}"
+
+
+def test_load_triage_counts_missing_bands_default_to_zero() -> None:
+    """Standalone: DB liefert nur escalate=5 -> alle anderen Buckets sind 0."""
+    from app.services.dashboard_kpis import _load_triage_counts
+
+    rows = [_make_triage_row("escalate", 5)]
+    sess = _mock_session_with_rows(rows)
+
+    result = _load_triage_counts(sess)
+
+    assert result["escalate"] == 5, f"Erwartet escalate=5, erhalten: {result['escalate']}"
+    assert result["act"] == 0, f"Erwartet act=0 (fehlend -> default 0), erhalten: {result['act']}"
+    assert result["mitigate"] == 0, f"Erwartet mitigate=0, erhalten: {result['mitigate']}"
+    assert result["pending"] == 0, f"Erwartet pending=0, erhalten: {result['pending']}"
+    assert result["monitor"] == 0, f"Erwartet monitor=0, erhalten: {result['monitor']}"
+    assert result["noise"] == 0, f"Erwartet noise=0, erhalten: {result['noise']}"
+    assert result["unknown"] == 0, f"Erwartet unknown=0, erhalten: {result['unknown']}"
+
+
+def test_load_triage_counts_unknown_risk_band_falls_in_unknown_bucket() -> None:
+    """Standalone: risk_band=None oder unbekannter String -> landet in 'unknown'."""
+    from app.services.dashboard_kpis import _load_triage_counts
+
+    # None-Band: kein kanonischer Bucket-Name -> unknown
+    rows_none = [_make_triage_row(None, 8)]
+    sess_none = _mock_session_with_rows(rows_none)
+    result_none = _load_triage_counts(sess_none)
+
+    assert result_none["unknown"] == 8, (
+        f"risk_band=None muss in 'unknown'-Bucket fallen, erhalten: {result_none['unknown']}"
+    )
+    assert result_none["escalate"] == 0, (
+        f"escalate muss 0 sein wenn nur None-Band vorliegt, erhalten: {result_none['escalate']}"
+    )
+
+    # Unbekannter String-Band -> ebenfalls unknown
+    rows_unknown = [_make_triage_row("future_band_xyz", 3)]
+    sess_unknown = _mock_session_with_rows(rows_unknown)
+    result_unknown = _load_triage_counts(sess_unknown)
+
+    assert result_unknown["unknown"] == 3, (
+        f"Unbekannter Band 'future_band_xyz' muss in 'unknown' landen, "
+        f"erhalten: {result_unknown['unknown']}"
+    )
+
+
+def test_load_triage_counts_derived_mode_no_db_call() -> None:
+    """Abgeleiteter Modus (risk_bands_by_server gesetzt) -> DB wird NICHT aufgerufen."""
+    from app.services.dashboard_kpis import _load_triage_counts
+
+    risk_bands_by_server = {
+        1: {
+            "escalate": 2,
+            "act": 1,
+            "mitigate": 0,
+            "pending": 3,
+            "monitor": 0,
+            "noise": 0,
+            "unknown": 0,
+        },
+        2: {
+            "escalate": 1,
+            "act": 0,
+            "mitigate": 4,
+            "pending": 0,
+            "monitor": 5,
+            "noise": 2,
+            "unknown": 1,
+        },
+    }
+    active_server_ids = {1, 2}
+    sess = MagicMock()  # Kein execute() erwartet
+
+    result = _load_triage_counts(
+        sess,
+        risk_bands_by_server=risk_bands_by_server,
+        active_server_ids=active_server_ids,
+    )
+
+    (
+        sess.execute.assert_not_called(),
+        "execute() wurde aufgerufen obwohl risk_bands_by_server gesetzt war",
+    )
+
+    # Korrekte Summierung aus den Pro-Server-Aggregaten.
+    assert result["escalate"] == 3, f"escalate: 2+1=3, erhalten: {result['escalate']}"
+    assert result["act"] == 1, f"act: 1+0=1, erhalten: {result['act']}"
+    assert result["mitigate"] == 4, f"mitigate: 0+4=4, erhalten: {result['mitigate']}"
+    assert result["pending"] == 3, f"pending: 3+0=3, erhalten: {result['pending']}"
+    assert result["monitor"] == 5, f"monitor: 0+5=5, erhalten: {result['monitor']}"
+    assert result["noise"] == 2, f"noise: 0+2=2, erhalten: {result['noise']}"
+    assert result["unknown"] == 1, f"unknown: 0+1=1, erhalten: {result['unknown']}"
+
+
+# ---------------------------------------------------------------------------
+# _load_severity_counts — Phase E
+# ---------------------------------------------------------------------------
+
+
+def _make_severity_row(severity: str | None, cnt: int) -> MagicMock:
+    """Fake-DB-Row mit .severity und .cnt Attributen."""
+    row = MagicMock()
+    row.severity = severity
+    row.cnt = cnt
+    return row
+
+
+def test_load_severity_counts_basic() -> None:
+    """Basisfall: DB liefert critical=5, high=3 -> output hat critical=5, high=3, medium=0, low=0, max_count=5."""
+    from app.services.dashboard_kpis import _load_severity_counts
+
+    rows = [
+        _make_severity_row("critical", 5),
+        _make_severity_row("high", 3),
+    ]
+    sess = _mock_session_with_rows(rows)
+
+    result = _load_severity_counts(sess)
+
+    assert result["critical"] == 5, f"Erwartet critical=5, erhalten: {result['critical']}"
+    assert result["high"] == 3, f"Erwartet high=3, erhalten: {result['high']}"
+    assert result["medium"] == 0, f"Erwartet medium=0 (fehlend -> 0), erhalten: {result['medium']}"
+    assert result["low"] == 0, f"Erwartet low=0 (fehlend -> 0), erhalten: {result['low']}"
+    assert result["max_count"] == 5, (
+        f"Erwartet max_count=5 (max von critical=5), erhalten: {result['max_count']}"
+    )
+
+
+def test_load_severity_counts_all_zero_max_count_is_1() -> None:
+    """Leere DB (alle Counts 0) -> max_count=1 (Schutz gegen Division-by-Zero im Template)."""
+    from app.services.dashboard_kpis import _load_severity_counts
+
+    sess = _mock_session_with_rows([])  # Keine Findings
+
+    result = _load_severity_counts(sess)
+
+    assert result["critical"] == 0, f"Erwartet critical=0, erhalten: {result['critical']}"
+    assert result["high"] == 0, f"Erwartet high=0, erhalten: {result['high']}"
+    assert result["medium"] == 0, f"Erwartet medium=0, erhalten: {result['medium']}"
+    assert result["low"] == 0, f"Erwartet low=0, erhalten: {result['low']}"
+    assert result["max_count"] == 1, (
+        f"Erwartet max_count=1 bei allen-null (Division-by-Zero-Schutz), "
+        f"erhalten: {result['max_count']}"
+    )
+
+
+def test_load_severity_counts_returns_5_keys() -> None:
+    """Output-Dict hat exakt die erwarteten 5 Keys: critical, high, medium, low, max_count."""
+    from app.services.dashboard_kpis import _load_severity_counts
+
+    sess = _mock_session_with_rows([])
+
+    result = _load_severity_counts(sess)
+
+    expected_keys = {"critical", "high", "medium", "low", "max_count"}
+    assert set(result.keys()) == expected_keys, (
+        f"Erwartete Keys: {expected_keys}, erhalten: {set(result.keys())}"
+    )

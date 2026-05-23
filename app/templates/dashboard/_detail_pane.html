@@ -21,6 +21,10 @@
                                   act, pending.
      - `nominal_card_data`      : dict — monitor_count, hosts_total, monitor,
                                   noise, unknown.
+     - `triage_counts`          : dict — escalate, act, mitigate, pending,
+                                  monitor, noise, unknown (int je Bucket).
+     - `severity_counts`        : dict — critical, high, medium, low (int),
+                                  max_count (int, fuer Bar-Normalisierung).
 
    Sicherheit: kein `|safe` auf Variablen — alles autoescaped.
 #}
@@ -42,9 +46,9 @@
     {% include "dashboard/_nominal_card.html" %}
   </section>
 
-  {# Platzhalter-IDs fuer Phase E (Triage-Row) + Phase F (Severity-Strip, Sysline). #}
-  <div id="triage-row"></div>
-  <div id="severity-strip"></div>
+  {# Phase E: Triage-Row + Severity-Strip. Sysline folgt Phase F. #}
+  {% include "dashboard/_triage_row.html" %}
+  {% include "dashboard/_severity_strip.html" %}
   <div id="sysline"></div>
 
 </div>

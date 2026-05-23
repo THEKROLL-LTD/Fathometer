@@ -1,0 +1,32 @@
+{# Triage-Row — 7 Risk-Band-Buckets als verlinktes Grid.
+   Variablen-Vertrag:
+     triage_counts : dict[str, int] — Schluessel: escalate, act, mitigate,
+                     pending, monitor, noise, unknown. Fehlende Schluessel -> 0.
+
+   Color-Reduction-Rule (ADR-0033 §3): nur escalate und act koennen
+   triage__cell--accent tragen (wenn count > 0). act bekommt dieselbe
+   --accent-Klasse wie escalate — beide signalisieren Handlungsbedarf.
+
+   Links fuehren auf /findings?risk_band=<bucket> (ADR-0022 Risk-Band-Modell).
+   Sicherheit: kein |safe — alle Variablen autoescaped.
+#}
+{% set buckets = [
+  ('escalate', 'escalate', true),
+  ('act',      'act',      true),
+  ('mitigate', 'mitigate', false),
+  ('pending',  'pending',  false),
+  ('monitor',  'monitor',  false),
+  ('noise',    'noise',    false),
+  ('unknown',  'unknown',  false),
+] %}
+<section class="triage" id="triage-row">
+  {% for key, label, accent in buckets %}
+    {% set n = triage_counts.get(key, 0) %}
+    <a class="triage__cell{% if accent and n > 0 %} triage__cell--accent{% endif %}"
+       href="{{ url_for('findings.index', risk_band=key) }}"
+       data-test="triage-cell-{{ key }}">
+      <div class="triage__cell-label">{{ label }}</div>
+      <div class="triage__cell-num{% if n == 0 %} triage__cell-num--zero{% endif %}">{{ n }}</div>
+    </a>
+  {% endfor %}
+</section>

@@ -46,6 +46,8 @@ def _build_mock_session_for_pane_context(
            b. active-Server -> .scalar()            -> hosts_total
       4. _load_action_needed_card_data:
            hosts_total-Query -> .scalar()           -> hosts_total
+      5. _load_severity_counts (Phase E):
+           GROUP-BY-Query -> .all()                 -> [] (leere Severity-Liste)
 
     Wir simulieren alle execute()-Calls in der richtigen Reihenfolge via side_effect.
     """
@@ -84,6 +86,10 @@ def _build_mock_session_for_pane_context(
     action_hosts_result = MagicMock()
     action_hosts_result.scalar.return_value = hosts_total
 
+    # Result fuer _load_severity_counts (Phase E): GROUP-BY severity -> leere Liste.
+    severity_result = MagicMock()
+    severity_result.all.return_value = []
+
     sess = MagicMock()
     sess.execute.side_effect = [
         server_result,  # _load_servers
@@ -91,6 +97,7 @@ def _build_mock_session_for_pane_context(
         findings_result,  # _load_risk_kpi_counters: Findings-Query
         active_count_result,  # _load_risk_kpi_counters: aktive-Server-Count
         action_hosts_result,  # _load_action_needed_card_data: hosts_total
+        severity_result,  # _load_severity_counts: GROUP BY severity (Phase E)
     ]
     return sess
 
@@ -250,3 +257,73 @@ def test_context_still_has_risk_kpis_key() -> None:
         "Key 'risk_kpis' fehlt — wird noch fuer Rueckwaerts-Kompat behalten "
         f"(Kommentar in dashboard.py). Vorhandene Keys: {list(ctx.keys())}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase E — Triage-Row + Severity-Strip Context-Keys
+# ---------------------------------------------------------------------------
+
+
+def test_build_pane_context_includes_triage_counts_key() -> None:
+    """_build_pane_context liefert 'triage_counts'-Key mit genau 7 Buckets (Phase E).
+
+    Erwartet: escalate, act, mitigate, pending, monitor, noise, unknown.
+    """
+    from app.schemas.dashboard_filter import DashboardFilter
+
+    sess = _build_mock_session_for_pane_context()
+    filt = DashboardFilter()
+
+    ctx = _build_pane_context(sess, filt, _now())
+
+    assert "triage_counts" in ctx, (
+        f"Key 'triage_counts' fehlt im Context-Dict (Phase E). Vorhandene Keys: {list(ctx.keys())}"
+    )
+
+    triage = ctx["triage_counts"]
+    assert isinstance(triage, dict), f"triage_counts soll ein dict sein, ist: {type(triage)}"
+
+    expected_buckets = {"escalate", "act", "mitigate", "pending", "monitor", "noise", "unknown"}
+    assert set(triage.keys()) == expected_buckets, (
+        f"triage_counts hat falsche Buckets.\n"
+        f"Erwartet: {expected_buckets}\n"
+        f"Erhalten:  {set(triage.keys())}"
+    )
+
+    for bucket, count in triage.items():
+        assert isinstance(count, int), (
+            f"triage_counts['{bucket}'] soll int sein, ist {type(count)}: {count!r}"
+        )
+
+
+def test_build_pane_context_includes_severity_counts_key() -> None:
+    """_build_pane_context liefert 'severity_counts'-Key mit 4 Severities + max_count (Phase E).
+
+    Erwartet: critical, high, medium, low, max_count.
+    """
+    from app.schemas.dashboard_filter import DashboardFilter
+
+    sess = _build_mock_session_for_pane_context()
+    filt = DashboardFilter()
+
+    ctx = _build_pane_context(sess, filt, _now())
+
+    assert "severity_counts" in ctx, (
+        f"Key 'severity_counts' fehlt im Context-Dict (Phase E). "
+        f"Vorhandene Keys: {list(ctx.keys())}"
+    )
+
+    severity = ctx["severity_counts"]
+    assert isinstance(severity, dict), f"severity_counts soll ein dict sein, ist: {type(severity)}"
+
+    expected_keys = {"critical", "high", "medium", "low", "max_count"}
+    assert set(severity.keys()) == expected_keys, (
+        f"severity_counts hat falsche Keys.\n"
+        f"Erwartet: {expected_keys}\n"
+        f"Erhalten:  {set(severity.keys())}"
+    )
+
+    for key, val in severity.items():
+        assert isinstance(val, int), (
+            f"severity_counts['{key}'] soll int sein, ist {type(val)}: {val!r}"
+        )

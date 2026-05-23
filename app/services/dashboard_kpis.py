@@ -1,14 +1,20 @@
-"""Dashboard-KPI-Service — Phase D Grundstein.
+"""Dashboard-KPI-Service — Phase D Grundstein + Phase E Erweiterung.
 
-Kapselt die Aggregations-Queries fuer die neuen Context-Keys
-`action_needed_card_data` und `nominal_card_data` in
-`app/views/dashboard.py::_build_pane_context`.
+Kapselt die Aggregations-Queries fuer die Context-Keys:
+- `action_needed_card_data` und `nominal_card_data` (Phase D)
+- `triage_counts` und `severity_counts` (Phase E)
 
-Phase E baut darauf auf mit `_load_triage_counts` und
-`_load_severity_counts` (7-Bucket-Triage-Row + Severity-Strip).
+in `app/views/dashboard.py::_build_pane_context`.
 
-Beides sind reine Pure-Function-Wrapper ohne Side-Effects — leicht
+Alle Funktionen sind Pure-Function-Wrapper ohne Side-Effects — leicht
 Unit-testbar mit Mock-Sessions.
+
+Phase-E-Design-Entscheidung:
+  `_load_triage_counts` und `_load_severity_counts` koennen wahlweise
+  aus bereits berechneten `risk_bands_by_server`-Daten abgeleitet werden
+  (kein DB-Roundtrip) oder direkt ueber einen einzigen SELECT auf der DB.
+  `_build_pane_context` nutzt die Ableitung aus vorhandenen Daten;
+  die Standalone-Varianten mit Session sind fuer Pure-Unit-Tests exponiert.
 """
 
 from __future__ import annotations
@@ -16,7 +22,18 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Server
+from app.models import Finding, FindingStatus, Server, Severity
+
+# Deterministische Reihenfolge der 7 Triage-Buckets (Design-Spec Phase E).
+_TRIAGE_BUCKET_ORDER: tuple[str, ...] = (
+    "escalate",
+    "act",
+    "mitigate",
+    "pending",
+    "monitor",
+    "noise",
+    "unknown",
+)
 
 
 def _load_action_needed_card_data(
@@ -144,7 +161,113 @@ def _load_nominal_card_data(
     }
 
 
+def _load_triage_counts(
+    session: Session,
+    *,
+    risk_bands_by_server: dict[int, dict[str, int]] | None = None,
+    active_server_ids: set[int] | None = None,
+) -> dict[str, int]:
+    """Aggregierte OPEN-Finding-Counts pro Triage-Bucket (7 Buckets garantiert).
+
+    Liefert immer alle 7 deterministischen Buckets in der Design-Reihenfolge:
+      escalate · act · mitigate · pending · monitor · noise · unknown
+
+    Fehlende Bands werden mit 0 aufgefuellt.
+
+    Zwei Betriebsmodi:
+    1. **Ableitung** (schnell, kein DB-Roundtrip): wenn `risk_bands_by_server`
+       und `active_server_ids` uebergeben werden, werden die Counts aus den
+       bereits vorliegenden Pro-Server-Aggregaten summiert. Nutzt
+       `_build_pane_context` intern nach `_load_open_aggregates`.
+
+    2. **Standalone** (Pure-Unit-testbar via Mock-Session): wenn keine
+       Vorberechnungen vorliegen, fuehrt die Funktion einen einzigen
+       GROUP-BY-SELECT auf `findings` durch (OPEN-Findings, GROUP BY risk_band).
+       Nutzbar als isolierte Funktion mit einer Fake-Session.
+
+    Argumente:
+      session              — aktive SQLAlchemy-Session (wird in Modus 2 genutzt).
+      risk_bands_by_server — dict[server_id, dict[risk_band_str, count]].
+                             Ergebnis von `_load_open_aggregates`. Optional.
+      active_server_ids    — set[int] aktiver Server. Optional.
+    """
+    base: dict[str, int] = dict.fromkeys(_TRIAGE_BUCKET_ORDER, 0)
+
+    if risk_bands_by_server is not None:
+        # Modus 1: Ableitung aus vorhandenen Pro-Server-Aggregaten.
+        # active_server_ids einschraenken wenn uebergeben (defensive Defaults).
+        filter_ids = active_server_ids  # None == alle
+        for sid, bands in risk_bands_by_server.items():
+            if filter_ids is not None and sid not in filter_ids:
+                continue
+            for bucket in _TRIAGE_BUCKET_ORDER:
+                base[bucket] += bands.get(bucket, 0)
+        return base
+
+    # Modus 2: Standalone-SELECT (ein einziger DB-Roundtrip).
+    stmt = (
+        select(Finding.risk_band, func.count().label("cnt"))
+        .where(Finding.status == FindingStatus.OPEN)
+        .group_by(Finding.risk_band)
+    )
+    for row in session.execute(stmt).all():
+        band = str(row.risk_band) if row.risk_band is not None else "unknown"
+        if band in base:
+            base[band] += int(row.cnt)
+        else:
+            # Unbekannte Bands (z.B. zukuenftige Erweiterungen) landen in
+            # "unknown" damit die 7-Bucket-Garantie nicht bricht.
+            base["unknown"] += int(row.cnt)
+
+    return base
+
+
+def _load_severity_counts(
+    session: Session,
+) -> dict[str, int]:
+    """Aggregierte OPEN-Finding-Counts pro Severity (4 Buckets + max_count).
+
+    Liefert immer alle 5 Keys:
+      critical · high · medium · low · max_count
+
+    `max_count` = max(critical, high, medium, low).
+    Wenn alle Counts 0 sind, wird `max_count=1` gesetzt (Schutz gegen
+    Division-by-Zero im Template bei der Bar-Width-Berechnung).
+
+    Ein einziger GROUP-BY-SELECT (OPEN-Findings, GROUP BY severity).
+    Pure-Unit-testbar mit Fake-Session die `.execute().all()` mockt.
+
+    Argumente:
+      session — aktive SQLAlchemy-Session.
+    """
+    counts: dict[str, int] = {
+        Severity.CRITICAL.value: 0,
+        Severity.HIGH.value: 0,
+        Severity.MEDIUM.value: 0,
+        Severity.LOW.value: 0,
+    }
+
+    stmt = (
+        select(Finding.severity, func.count().label("cnt"))
+        .where(Finding.status == FindingStatus.OPEN)
+        .group_by(Finding.severity)
+    )
+    for row in session.execute(stmt).all():
+        sev = str(row.severity) if row.severity is not None else ""
+        if sev in counts:
+            counts[sev] += int(row.cnt)
+        # UNKNOWN-Severity und andere unerwartete Werte werden ignoriert
+        # (sie erscheinen nicht im Severity-Strip).
+
+    raw_max = max(counts.values())
+    counts["max_count"] = raw_max if raw_max > 0 else 1
+
+    return counts
+
+
 __all__ = [
     "_load_action_needed_card_data",
     "_load_nominal_card_data",
+    "_load_severity_counts",
+    "_load_triage_counts",
 ]

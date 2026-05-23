@@ -1,0 +1,33 @@
+{# Severity-Strip — 4 CVSS-Severity-Items mit max-normalisierten Bars.
+   Variablen-Vertrag:
+     severity_counts : dict mit Schluesseln:
+       critical, high, medium, low  — int (Anzahl offener Findings)
+       max_count                    — int (Max-Wert fuer Bar-Normalisierung;
+                                          0 oder fehlend = alle Bars leer)
+
+   Normalisierung: pct = round(n / max_count * 100) wenn max_count > 0.
+   style="width: {pct}%" wird serverseitig berechnet — kein Client-JS noetig.
+
+   Color-Reduction-Rule (ADR-0033 §3): nur critical traegt --accent (cyan).
+   Sicherheit: kein |safe — alle Variablen autoescaped.
+#}
+{% set items = [
+  ('critical', 'critical', 'severity__item--crit'),
+  ('high',     'high',     ''),
+  ('medium',   'medium',   ''),
+  ('low',      'low',      ''),
+] %}
+{% set max_count = severity_counts.get('max_count', 1) %}
+<section class="severity" id="severity-strip">
+  {% for key, label, mod in items %}
+    {% set n = severity_counts.get(key, 0) %}
+    {% set pct = (n / max_count * 100) | round(0, 'floor') | int if max_count > 0 else 0 %}
+    <div class="severity__item {{ mod }}" data-test="severity-{{ key }}">
+      <div class="severity__item-label">{{ label }}</div>
+      <div class="severity__item-num">{{ n }}</div>
+      <div class="severity__bar">
+        <div class="severity__bar-fill" style="width: {{ pct }}%"></div>
+      </div>
+    </div>
+  {% endfor %}
+</section>
