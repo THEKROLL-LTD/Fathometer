@@ -1,0 +1,53 @@
+{# Server-Pill Listeners (Block X Phase C, ADR-0038 §(3)).
+   Slide-Down-Panel mit Listener-Tabelle (vier Spalten).
+   Variablen-Vertrag:
+     - listeners : list[dict] mit Keys process, addr, port, proto, pid, exposure
+                   (exposure ist "LOOPBACK" oder "PUBLIC EXPOSED" — vom
+                    listener_exposure.classify_exposure() klassifiziert).
+   Sicherheit: alle Werte autoescaped, kein |safe.
+#}
+<div id="server-pill-listeners-panel"
+     class="sd-flyout"
+     x-show="open === 'listeners'"
+     x-cloak
+     x-transition.duration.150ms
+     data-test="pill-listeners-panel">
+  <div class="sd-flyout__head">
+    <span class="sd-flyout__title">Listeners <b>{{ listeners | length }}</b></span>
+    <button type="button" class="sd-flyout__close"
+            @click="open = null"
+            aria-label="Close listeners panel">×</button>
+  </div>
+  <div class="sd-flyout__body">
+    {% if listeners %}
+    <table class="sd-listener-table">
+      <thead>
+        <tr>
+          <th>Process</th>
+          <th>Addr:port</th>
+          <th>Proto</th>
+          <th>Exposure</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for li in listeners %}
+        <tr data-test="pill-listeners-row">
+          <td class="sd-listener-proc">{{ li.process or "?" }}</td>
+          <td>{{ li.addr }}:{{ li.port }}</td>
+          <td>{{ li.proto }}</td>
+          <td>
+            {% if li.exposure == "LOOPBACK" %}
+              <span class="sd-listener-tag">LOOPBACK</span>
+            {% else %}
+              <span class="sd-listener-tag sd-listener-tag--exposed">PUBLIC EXPOSED</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="sd-flyout__empty" data-test="pill-listeners-empty">No listeners in the last snapshot.</p>
+    {% endif %}
+  </div>
+</div>

@@ -1,0 +1,30 @@
+{# Server-Pill Active Services (Block X Phase C, ADR-0038 §(3)).
+   Slide-Down-Panel mit Mono-Liste der systemd-Unit-Namen.
+   Variablen-Vertrag:
+     - services : list[str] — systemd-Unit-Namen, alphabetisch sortiert.
+   Sicherheit: alle Werte autoescaped, kein |safe.
+#}
+<div id="server-pill-services-panel"
+     class="sd-flyout"
+     x-show="open === 'services'"
+     x-cloak
+     x-transition.duration.150ms
+     data-test="pill-services-panel">
+  <div class="sd-flyout__head">
+    <span class="sd-flyout__title">Active services <b>{{ services | length }}</b></span>
+    <button type="button" class="sd-flyout__close"
+            @click="open = null"
+            aria-label="Close services panel">×</button>
+  </div>
+  <div class="sd-flyout__body">
+    {% if services %}
+    <div class="sd-services-list" data-test="pill-services-list">
+      {% for svc in services %}
+        <code>{{ svc }}</code>
+      {% endfor %}
+    </div>
+    {% else %}
+      <p class="sd-flyout__empty" data-test="pill-services-empty">No active services in the last snapshot.</p>
+    {% endif %}
+  </div>
+</div>

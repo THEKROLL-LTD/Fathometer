@@ -56,6 +56,7 @@ from app.services.findings_query import (
     list_findings,
 )
 from app.services.heartbeat_aggregation import DailyStatus, heartbeats_for_servers
+from app.services.listener_exposure import classify_exposure
 from app.services.risk_engine import RISK_BAND_SORT_RANK, RiskBand, no_band_values, yes_band_values
 from app.services.severity_history import (
     DailySeverityCount,
@@ -704,24 +705,51 @@ def _load_action_required_counts(sess: Any, server_id: int) -> dict[str, Any]:
 
 
 def _load_host_snapshot(sess: Any, server_id: int) -> dict[str, Any]:
-    """Liefert die Snapshot-Daten fuer die `host_snapshot`-Sektion (Block O).
+    """Liefert die Snapshot-Daten fuer die Header-Pills (Block X, ADR-0038 §(3)).
 
     Rueckgabe-Keys:
-      - `listeners` : list[ServerListener], sortiert nach (port, proto, addr).
-      - `services`  : list[str], alphabetisch.
-      - `processes` : list[ServerProcess], fuer Args-Tooltip.
+      - ``listeners`` : ``list[dict[str, Any]]``, sortiert nach (port, proto,
+        addr). Jeder Eintrag enthaelt die Schlussel ``process``, ``addr``,
+        ``port``, ``proto``, ``pid`` sowie ``exposure`` —
+        ``"LOOPBACK"`` oder ``"PUBLIC EXPOSED"`` gemaess
+        :func:`app.services.listener_exposure.classify_exposure`. Die
+        Exposure-Eigenschaft ist ein reiner Render-Vertrag (Template-
+        Konvention); sie wird nicht am ORM-Modell persisted und braucht keine
+        Schema-Migration.
+      - ``services``  : ``list[str]``, alphabetisch.
+      - ``processes`` : ``list[ServerProcess]``, fuer den Pid-zu-Args-Lookup
+        in den Panel-Partials.
+
+    Block O: die Host-Snapshot-Sektion war eine eigenstaendige Sektion.
+    Block X: die Daten werden jetzt fuer zwei Header-Pills mit Slide-Down-
+    Panels verwendet (``_partials/server_pill_listeners.html`` und
+    ``_partials/server_pill_services.html``). Die Persistenz-Schicht und die
+    Aggregations-Queries bleiben unveraendert.
     """
-    listeners = list(
+    listeners_orm = list(
         sess.execute(
             select(ServerListener)
             .where(ServerListener.server_id == server_id)
             .order_by(
-                ServerListener.port.asc(), ServerListener.proto.asc(), ServerListener.addr.asc()
+                ServerListener.port.asc(),
+                ServerListener.proto.asc(),
+                ServerListener.addr.asc(),
             )
         )
         .scalars()
         .all()
     )
+    listeners: list[dict[str, Any]] = [
+        {
+            "process": li.process,
+            "addr": li.addr,
+            "port": li.port,
+            "proto": li.proto,
+            "pid": li.pid,
+            "exposure": classify_exposure(li.addr or ""),
+        }
+        for li in listeners_orm
+    ]
     services = list(
         sess.execute(
             select(ServerService.name)

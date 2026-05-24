@@ -137,6 +137,40 @@
           trivy-db <b>{% if server.trivy_db_updated_at %}<time datetime="{{ server.trivy_db_updated_at.isoformat() }}" title="{{ server.trivy_db_updated_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.trivy_db_updated_at | relative_time }}</time>{% else %}unknown{% endif %}</b>
         </span>
       </div>
+      {# Block X Phase C (ADR-0038 §(3)): Host-Snapshot kollabiert in zwei
+         Header-Pills mit Slide-Down-Panels. snapshot_at IS NULL -> disabled. #}
+      {% set _snapshot_at = server.host_state_snapshot_at %}
+      {% set _listeners_list = listeners | default([]) %}
+      {% set _services_list = services | default([]) %}
+      <div class="sd-pills" x-data="serverPillPanels" data-test="server-pills">
+        <button type="button"
+                class="sd-chip"
+                :class="open === 'listeners' ? 'sd-chip--open' : ''"
+                @click="toggle('listeners')"
+                :aria-expanded="open === 'listeners' ? 'true' : 'false'"
+                aria-controls="server-pill-listeners-panel"
+                data-test="pill-listeners"
+                {% if _snapshot_at is none %}disabled title="Update agent to >= 0.3.0 for snapshot"{% endif %}>
+          <span class="sd-chip__caret" aria-hidden="true">&#x203A;</span>
+          Listeners <span class="sd-chip__count">{{ _listeners_list | length }}</span>
+        </button>
+        <button type="button"
+                class="sd-chip"
+                :class="open === 'services' ? 'sd-chip--open' : ''"
+                @click="toggle('services')"
+                :aria-expanded="open === 'services' ? 'true' : 'false'"
+                aria-controls="server-pill-services-panel"
+                data-test="pill-services"
+                {% if _snapshot_at is none %}disabled title="Update agent to >= 0.3.0 for snapshot"{% endif %}>
+          <span class="sd-chip__caret" aria-hidden="true">&#x203A;</span>
+          Active services <span class="sd-chip__count">{{ _services_list | length }}</span>
+        </button>
+
+        {% if _snapshot_at is not none %}
+          {% include "_partials/server_pill_listeners.html" %}
+          {% include "_partials/server_pill_services.html" %}
+        {% endif %}
+      </div>
     </div>
     <div class="flex flex-wrap items-center gap-2 shrink-0">
       {% if llm_configured and is_active %}
@@ -208,9 +242,6 @@
 
   {# =============== 1a-bis. "Was zu tun ist" (Block P / v0.9.3, ADR-0023 §c) =============== #}
   {% include "servers/_action_needed_section.html" %}
-
-  {# =============== 1b. Host-Snapshot (Block O, ADR-0022) =============== #}
-  {% include "_partials/host_snapshot.html" %}
 
   {# =============== 2. HeaderStats =============== #}
   <section class="py-8 flex items-end justify-between gap-8 flex-wrap">

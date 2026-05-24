@@ -1,14 +1,15 @@
 # ruff: noqa: S104
-"""Adversarial: XSS-Payloads im Host-Snapshot (Block O, ADR-0022).
+"""Adversarial: XSS-Payloads im Host-Snapshot (Block O, ADR-0022; Block X ADR-0038 §(3)).
 
 Der Agent ab v0.3.0 sendet einen Snapshot-Block mit Process-`args`,
 Listener-`process`-Namen und Service-Namen. Diese Felder landen via
 `persist_host_state()` in den vier neuen `server_*`-Tabellen und werden
-auf Server-Detail in `_partials/host_snapshot.html` gerendert.
+auf Server-Detail in `_partials/server_pill_listeners.html` und
+`_partials/server_pill_services.html` gerendert (Block X Phase C).
 
 Sicherheits-Invariante: Jinja-Autoescape MUSS jeden `<`, `>` und Attribut-
-Quote escapen — sowohl im Listener-Process-Namen (linke Spalte) als auch
-in den `title`-Tooltip-Attributen (Process-Args). Wir gehen ueber die echte
+Quote escapen — sowohl im Listener-Process-Namen (linke Spalte der
+sd-listener-table) als auch in Service-Namen. Wir gehen ueber die echte
 HTTP-Pipeline (Ingest -> DB -> Render), damit auch ein potenzieller
 Bypass im Loader auffallen wuerde.
 
@@ -117,16 +118,17 @@ def _strip_known_safe_script_tags(body: str) -> str:
 
 
 def test_process_args_with_script_payload_renders_escaped(db_app: Flask) -> None:
-    """Process-`args` `<script>alert(1)</script>` darf im Server-Detail
+    """Process-`args` mit `<script>alert(1)</script>` darf im Server-Detail
     nicht als aktives Skript landen.
 
-    Render-Pfad: `_partials/host_snapshot.html` packt `process.args` als
-    Wert des `title`-Attributs (Tooltip per pid-Lookup). Jinja-Autoescape
-    konvertiert `<` / `>` / `"` zu Entities. Wir verifizieren:
+    Block X Phase C (ADR-0038 §(3)): `process.args` wird in der neuen
+    Listener-Pill-Tabelle nicht mehr gerendert — nur `process` (der Name).
+    Der Payload landet damit nicht im sichtbaren HTML. Wir verifizieren:
+      * Server-Detail rendert erfolgreich (kein 500-Fehler).
       * Kein roher `<script>`-Tag aus dem Payload im HTML.
-      * Mindestens der escaped Marker (`&lt;script` ODER `&#x3C;script` ODER
-        `&#60;script`) ist sichtbar — Beleg dass der Payload zwar persistiert
-        aber durchgehend escaped wurde.
+
+    Hinweis: Der alte Escaper-Marker-Check (`&lt;script`) entfaellt, da
+    `process.args` nicht mehr im Render-Pfad ist (nicht mehr sichtbar).
     """
     create_admin_user(db_app)
     sid, key = register_test_server(db_app, name="srv-snap-xss-args")
@@ -145,9 +147,9 @@ def test_process_args_with_script_payload_renders_escaped(db_app: Flask) -> None
     assert resp.status_code == 200, resp.get_data(as_text=True)[:200]
     body = resp.get_data(as_text=True)
 
-    # Belegen, dass die Snapshot-Sektion ueberhaupt gerendert wurde.
-    assert 'data-test="host-snapshot-section"' in body, (
-        "Host-Snapshot-Sektion fehlt im Server-Detail — Test-Setup defekt."
+    # Belegen, dass der Pills-Container gerendert wurde (Block X Phase C).
+    assert 'data-test="server-pills"' in body, (
+        "Server-Pills-Container fehlt im Server-Detail — Test-Setup defekt."
     )
 
     # Bekannte legitime <script>-Tags (Alpine/htmx-Loader) ausblenden, dann
@@ -158,24 +160,17 @@ def test_process_args_with_script_payload_renders_escaped(db_app: Flask) -> None
     assert not leftover, (
         f"Rohes <script>-Markup im Body nach Entfernen der Loader-Tags: {leftover!r}"
     )
-    # Insbesondere darf der Payload-Text nicht als aktives Skript stehen.
+    # Payload darf nicht als aktives Skript stehen.
     assert "<script>alert(1)</script>" not in stripped, (
         "Process-Args-Payload steht als rohes <script>...</script> im HTML."
     )
-    # Escaper-Marker (eine der Entity-Varianten) muss sichtbar sein als
-    # Beweis dass der Wert durch die Autoescape-Pipeline gegangen ist.
-    assert (
-        "&lt;script&gt;alert(1)&lt;/script&gt;" in body
-        or "&lt;script" in body
-        or "&#x3C;script" in body.lower()
-        or "&#60;script" in body
-    ), "Erwartet escaped <script>-Marker (&lt;script ...) im Tooltip-Attribut."
 
 
 def test_listener_process_with_svg_onload_payload_renders_escaped(db_app: Flask) -> None:
     """Listener-`process` `evil<svg onload=alert(1)>` darf nicht als aktives SVG landen.
 
-    Render-Pfad: linke Spalte der Listener-Liste (`{{ li.process or '?' }}`).
+    Render-Pfad: linke Spalte der sd-listener-table in
+    `_partials/server_pill_listeners.html` (`{{ li.process or '?' }}`).
     Autoescape muss `<svg` zu `&lt;svg` machen — wir verifizieren das.
     """
     create_admin_user(db_app)
@@ -214,12 +209,13 @@ def test_listener_process_with_svg_onload_payload_renders_escaped(db_app: Flask)
 
 
 def test_service_name_with_script_payload_renders_escaped(db_app: Flask) -> None:
-    """Service-Name (alphabetisch in Punkt-getrennter Liste) wird escaped.
+    """Service-Name (Mono-Code-Liste in sd-services-list) wird escaped.
 
     Snapshot-Validator-Notiz: Service-Namen laufen durch
     `_filter_ascii_strings()` mit dem `_PRINTABLE_ASCII_RE`-Pattern und
     Length-Cap 128. `<script>alert(1)</script>` ist reines ASCII (35 Zeichen)
     -> kommt durch. Render-Verteidigung ist Pflicht.
+    Render-Pfad: `_partials/server_pill_services.html` (Block X Phase C).
     """
     create_admin_user(db_app)
     sid, key = register_test_server(db_app, name="srv-snap-xss-svc")
@@ -235,8 +231,8 @@ def test_service_name_with_script_payload_renders_escaped(db_app: Flask) -> None
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
 
-    # Snapshot-Services-Sektion muss vorhanden sein (Service-Liste rendert).
-    assert 'data-test="host-snapshot-services"' in body
+    # Services-Panel muss vorhanden sein (Block X Phase C: sd-flyout via server_pill_services.html).
+    assert 'data-test="pill-services-panel"' in body
 
     stripped = _strip_known_safe_script_tags(body)
     assert "<script>alert(1)</script>" not in stripped, (
