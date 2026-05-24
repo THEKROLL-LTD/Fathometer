@@ -1,0 +1,25 @@
+{# Stub-Partial fuer den Pending-Bucket-Body (ADR-0037 §(2)).
+
+   Wird in Etappe 3 (TICKET-006) durch das vollstaendige Markup ersetzt
+   (Cross-Server-Sammler mit zusaetzlicher Server-Spalte + Pager). Das
+   Stub-Markup liefert nur die strukturellen Hooks fuer Tests.
+
+   Variablen-Vertrag:
+     - `findings`   : list[Finding] (aktuelle Seite, <=20)
+     - `total`      : int
+     - `page`       : int
+     - `per_page`   : int (20)
+     - `filt`       : DashboardFilter
+     - `filter_qs`  : str (kanonischer Filter-Querystring)
+#}
+<div data-test="pending-bucket-findings-table"
+     data-total="{{ total }}"
+     data-page="{{ page }}"
+     data-per-page="{{ per_page }}">
+  <ul>
+    {% for f in findings %}
+      <li data-finding-id="{{ f.id }}"
+          data-server-id="{{ f.server_id }}">{{ f.identifier_key }}</li>
+    {% endfor %}
+  </ul>
+</div>

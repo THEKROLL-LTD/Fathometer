@@ -1,29 +1,33 @@
-"""Findings-Action-Routes (Block E).
+"""Findings-Routen (Block E + ADR-0037 Bucket-View).
 
 ARCHITECTURE.md §6 (Endpoints) und §13 (Audit-Actions).
 
 Routen:
-- `POST /findings/<id>/acknowledge` — Status auf ACKNOWLEDGED, optionaler
-  Comment landet als Note mit `author='system-ack'`.
-- `POST /findings/<id>/reopen` — Status zurueck auf OPEN, optionaler
-  Comment landet als Note mit `author='system-reopen'`.
-- `POST /findings/<id>/notes` — neue Notiz im Thread (`author=<username>`).
-- `POST /findings/<id>/notes/<note_id>/delete` — Soft-Delete einer Notiz
-  (DELETE-Verb wird via Form-Method-Override emuliert, weil HTML-Forms
-  kein DELETE koennen; wir akzeptieren POST).
-- `POST /findings/group/acknowledge` — Bulk-Acknowledge aller OPEN-Findings
-  eines Pakets pro Server. **Ein** Audit-Event mit Liste der betroffenen
-  IDs.
+
+- `GET  /findings`                       — Bucket-View Outer-Page (ADR-0037 §(2)).
+- `GET  /findings/bucket`                — Lazy-Fragment fuer einen Bucket-Body.
+- `GET  /findings/pending`               — Lazy-Fragment fuer Pending-Sammler.
+- `POST /findings/bulk/acknowledge`      — Bulk-Ack mit Bucket+Finding-Mix
+                                          (ADR-0037 §(4)).
+- `POST /findings/<id>/acknowledge`      — Einzel-Acknowledge (Block E).
+- `POST /findings/<id>/reopen`           — Reopen (Block E).
+- `POST /findings/<id>/notes`            — Note hinzufuegen (Block E).
+- `POST /findings/<id>/notes/<note_id>/delete` — Soft-Delete einer Notiz.
+- `POST /findings/group/acknowledge`     — Group-Ack pro Paket (Block E).
+- `GET  /findings/export.csv`            — CSV-Export (ADR-0020, unveraendert).
 
 ADR-0006: Kommentare sind in der gesamten UI optional. Wir nutzen
 `AcknowledgeForm`/`ReopenForm`/`GroupAcknowledgeForm` ohne
-`InputRequired`/`DataRequired` auf den Comment-Feldern.
+`InputRequired`/`DataRequired` auf den Comment-Feldern. Der Bulk-Endpoint
+`POST /findings/bulk/acknowledge` erzwingt ebenfalls keinen Kommentar.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import parse_qsl
 
 import structlog
 from flask import (
@@ -37,8 +41,10 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required
+from flask_wtf.csrf import CSRFError, validate_csrf
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import selectinload
+from werkzeug.datastructures import MultiDict
 from werkzeug.wrappers import Response as WerkzeugResponse
 
 from app.audit import log_event
@@ -65,7 +71,13 @@ from app.services.csv_export import (
     stream_findings_csv,
     stream_findings_csv_cross_server,
 )
-from app.services.findings_query import list_findings_cross_server
+from app.services.findings_bucket_query import (
+    BucketHeader,
+    list_bucket_findings,
+    list_buckets,
+    pending_bucket_header,
+    resolve_bucket_to_finding_ids,
+)
 from app.settings_service import get_settings_row
 
 log = structlog.get_logger(__name__)
@@ -74,19 +86,16 @@ findings_bp = Blueprint("findings", __name__, url_prefix="/findings")
 
 
 # ---------------------------------------------------------------------------
-# Index-Helper (Block Q, ADR-0025 §(5))
+# Index-Helper (ADR-0037, vormals Block Q / ADR-0025 §(5))
 # ---------------------------------------------------------------------------
 
 
 def _filter_is_active(filt: DashboardFilter) -> bool:
-    """ADR-0025 §(5): Filter-Aktiv-Definition fuer den `/findings`-Default-State.
+    """ADR-0037 §Entscheidung: Default-State der Bucket-View bleibt leer.
 
     Im Gegensatz zu `DashboardFilter.is_active` zaehlt hier `status != 'open'`
-    ebenfalls als aktiv (User-explizite Status-Wahl). Die Sortier-Felder
-    (`sort`, `dir`) sind hier NICHT enthalten — die werden separat ueber
-    `_explicit_sort()` ausgewertet (Sort-only-Bookmark zaehlt ebenfalls als
-    User-Intent, aber ueber die Roh-Args, nicht ueber den gefilterten
-    Filter).
+    ebenfalls als aktiv (User-explizite Status-Wahl). Sort/Dir entfallen
+    (ADR-0037 §(5): Sort-Selector wird aus der Bucket-View entfernt).
     """
     return bool(
         filt.q
@@ -99,16 +108,6 @@ def _filter_is_active(filt: DashboardFilter) -> bool:
         or filt.kev_only
         or filt.stale_only
     )
-
-
-def _explicit_sort(args: Any) -> bool:
-    """True wenn `?sort=` oder `?dir=` explizit in der URL-Query stand.
-
-    ADR-0025 §(5): expliziter Sort-Bookmark (`?sort=epss&dir=desc`) zaehlt
-    als User-Intent und triggert den Tabellen-Render auch ohne sonstige
-    Filter.
-    """
-    return ("sort" in args) or ("dir" in args)
 
 
 def _count_open_findings(sess: Any) -> int:
@@ -135,49 +134,87 @@ def _count_active_servers(sess: Any) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Index-Route — Cross-Server-Findings-Tabelle (Block Q, ADR-0025 §(5))
+# Filter-Querystring-Helper (ADR-0037 §(3))
+# ---------------------------------------------------------------------------
+
+
+def _filter_querystring_from_request(args: Any) -> str:
+    """Kanonischer Filter-Querystring fuer Lazy-HTMX-URLs.
+
+    Wir rekonstruieren `DashboardFilter` aus den Request-Args und serialisieren
+    ihn zurueck via `to_query_string()`. Vorteil: Whitelist-Filterung der
+    Felder, deterministische Schluessel-Reihenfolge, `page` taucht nicht auf
+    (ist im Schema nicht definiert).
+    """
+    filt = DashboardFilter.from_request(args)
+    return filt.to_query_string()
+
+
+def _filter_from_querystring(qs: str) -> DashboardFilter:
+    """Rekonstruiert einen `DashboardFilter` aus einem rohen Querystring.
+
+    Wird vom Bulk-Acknowledge-Endpoint benoetigt: jede Bucket-Selektion
+    fuehrt den eigenen Filter-Querystring mit, der serverseitig dieselbe
+    `_apply_bucket_filters`-Klausel ergeben muss wie das Outer-Render der
+    Bucket-Header (ADR-0037 §(3) — Filter-Konsistenz).
+    """
+    pairs = parse_qsl(qs or "", keep_blank_values=False)
+    md: MultiDict[str, str] = MultiDict()
+    for key, value in pairs:
+        md.add(key, value)
+    return DashboardFilter.from_request(md)
+
+
+def _validate_bucket_id(raw: Any, *, allow_zero: bool = False) -> int:
+    """Strikte Int-Validierung fuer Bucket-Routing-Parameter.
+
+    `allow_zero=False` (Default): nur `>= 1`. `allow_zero=True`: `>= 0` —
+    der Wert `0` ist die Service-Convention fuer "kein Server-/Group-Filter"
+    bzw. Pending-Sammler (siehe `findings_bucket_query`).
+    """
+    if raw is None:
+        abort(400, description="Parameter fehlt")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        abort(400, description="Parameter muss eine Ganzzahl sein")
+    minimum = 0 if allow_zero else 1
+    if value < minimum:
+        abort(400, description="Parameter ausserhalb des erlaubten Bereichs")
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Index-Route — Bucket-View Outer-Page (ADR-0037 §(2))
 # ---------------------------------------------------------------------------
 
 
 @findings_bp.get("", strict_slashes=False)
 @login_required
 def index() -> str:
-    """Cross-Server-Findings-Seite mit Filter-Bar und klassischer Pagination.
+    """Cross-Server Bucket-View mit collapsed HTMX-Lazy-Cards.
 
-    ADR-0025 §(5): Default-State leer (kein Filter, keine Tabelle, kein
-    Pager). Erst wenn der User explizit einen Filter oder Sort gewaehlt hat,
-    laedt diese View die Findings via `list_findings_cross_server()`. CSV-
-    Export-Scope ist alle gefilterten Treffer (separater Endpoint
-    `/findings/export.csv`, ohne Pagination).
+    ADR-0037: Default-State ohne Filter rendert nur den Empty-State (keine
+    Buckets). Erst nach Filter-Submit liefert der Service-Layer die Bucket-
+    Header. Bucket-Bodies werden lazy via `/findings/bucket` bzw.
+    `/findings/pending` nachgeladen — die Outer-Page selbst rendert nie
+    Findings-Zeilen.
     """
     sess = get_session()
     filt = DashboardFilter.from_request(request.args)
+    is_filtered = _filter_is_active(filt)
 
-    try:
-        page_raw = int(request.args.get("page", "1"))
-    except ValueError:
-        page_raw = 1
-    page = max(1, page_raw)
-    per_page = 50
-
-    sort = filt.sort
-    dir_ = filt.dir
-
-    is_filtered = _filter_is_active(filt) or _explicit_sort(request.args)
-
-    findings: list[Finding] = []
-    total: int = 0
+    buckets: list[BucketHeader] = []
+    pending_bucket: BucketHeader | None = None
     if is_filtered:
-        findings, total = list_findings_cross_server(
-            sess,
-            filt,
-            limit=per_page,
-            offset=(page - 1) * per_page,
-            sort=sort,
-            dir=dir_,
-        )
+        buckets = list_buckets(sess, filt)
+        pending_bucket = pending_bucket_header(sess, filt)
 
-    total_pages = (total + per_page - 1) // per_page if total > 0 else 0
+    total_buckets = len(buckets) + (1 if pending_bucket is not None else 0)
+    total_findings_in_buckets = sum(b.finding_count for b in buckets) + (
+        pending_bucket.finding_count if pending_bucket is not None else 0
+    )
+    filter_qs = _filter_querystring_from_request(request.args)
 
     available_tags = list(sess.execute(select(Tag).order_by(Tag.name)).scalars().all())
     available_application_groups = list(
@@ -193,11 +230,11 @@ def index() -> str:
         "findings/index.html",
         filt=filt,
         view_filter=filt,  # Alias fuer `sort_header()`-Macro (gemeinsamer Filter-Vertrag).
-        findings=findings,
-        total=total,
-        page=page,
-        per_page=per_page,
-        total_pages=total_pages,
+        buckets=buckets,
+        pending_bucket=pending_bucket,
+        total_buckets=total_buckets,
+        total_findings_in_buckets=total_findings_in_buckets,
+        filter_qs=filter_qs,
         is_filtered=is_filtered,
         total_findings=total_findings,
         visible_servers=visible_servers,
@@ -205,9 +242,318 @@ def index() -> str:
         available_application_groups=available_application_groups,
         bulk_form=BulkActionForm(),
         csrf_form=CSRFOnlyForm(),
-        sort=sort,
-        dir=dir_,
+        # Etappe-3-Backcompat-Stubs — werden in Etappe 3 entfernt, sobald das
+        # Index-Template auf die Bucket-Variablen umgebaut ist.
+        findings=[],
+        total=total_findings_in_buckets,
+        page=1,
+        per_page=20,
+        total_pages=0,
+        sort="risk",
+        dir="desc",
     )
+
+
+# ---------------------------------------------------------------------------
+# Bucket-Fragment — Lazy-Body fuer aufgeklappte Bucket-Cards (ADR-0037 §(2))
+# ---------------------------------------------------------------------------
+
+
+@findings_bp.get("/bucket")
+@login_required
+def bucket_fragment() -> str:
+    """Render-Endpoint fuer den Body eines einzelnen `(server_id, group_id)`-Buckets.
+
+    Pflicht-Query-Params:
+    - `server_id` (>=1) — der Bucket gehoert zu genau einem Server.
+    - `group_id` (>=1) — `group_id=0` markiert Pending und hat einen eigenen
+      Endpoint (`/findings/pending`); hier 400.
+
+    Optional: `page` (>=1, Default 1) und der vollstaendige Filter-Querystring
+    der Outer-Page (`q`, `tags`, `risk_band`, ...). Der Filter muss
+    bit-genau identisch zu dem sein, mit dem `list_buckets()` den Header
+    gerendert hat — sonst laufen Count und Inhalt auseinander.
+
+    `total==0` -> 404 (Cross-ID-Probing-Schutz: ungueltige Bucket-Tuples
+    duerfen keine 200er-Empty-Render-Antwort liefern).
+    """
+    sess = get_session()
+
+    server_id = _validate_bucket_id(request.args.get("server_id"), allow_zero=False)
+    group_id = _validate_bucket_id(request.args.get("group_id"), allow_zero=False)
+
+    try:
+        page_raw = int(request.args.get("page", "1"))
+    except (TypeError, ValueError):
+        page_raw = 1
+    page = max(1, page_raw)
+    per_page = 20
+
+    filt = DashboardFilter.from_request(request.args)
+    findings, total = list_bucket_findings(
+        sess,
+        server_id=server_id,
+        group_id=group_id,
+        filt=filt,
+        page=page,
+        per_page=per_page,
+    )
+
+    if total == 0:
+        abort(404)
+
+    filter_qs = _filter_querystring_from_request(request.args)
+
+    return render_template(
+        "_partials/bucket_findings_table.html",
+        findings=findings,
+        total=total,
+        page=page,
+        per_page=per_page,
+        server_id=server_id,
+        group_id=group_id,
+        filt=filt,
+        filter_qs=filter_qs,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pending-Fragment — Cross-Server-Sammler ohne Group (ADR-0037 §(2))
+# ---------------------------------------------------------------------------
+
+
+@findings_bp.get("/pending")
+@login_required
+def pending_fragment() -> str:
+    """Render-Endpoint fuer den Pending-Bucket-Body.
+
+    Cross-Server-Sammler (`application_group_id IS NULL`); die Server-Spalte
+    bleibt in der Tabelle erhalten (siehe ADR-0037 §(2) — Operator muss
+    erkennen koennen, woher das Finding kommt). `server_id=0` ist die
+    Service-Convention "kein Server-Filter".
+    """
+    sess = get_session()
+
+    try:
+        page_raw = int(request.args.get("page", "1"))
+    except (TypeError, ValueError):
+        page_raw = 1
+    page = max(1, page_raw)
+    per_page = 20
+
+    filt = DashboardFilter.from_request(request.args)
+    findings, total = list_bucket_findings(
+        sess,
+        server_id=0,
+        group_id=0,
+        filt=filt,
+        page=page,
+        per_page=per_page,
+    )
+
+    filter_qs = _filter_querystring_from_request(request.args)
+
+    return render_template(
+        "_partials/pending_bucket_findings_table.html",
+        findings=findings,
+        total=total,
+        page=page,
+        per_page=per_page,
+        filt=filt,
+        filter_qs=filter_qs,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bulk-Acknowledge mit Bucket + Finding-Mix (ADR-0037 §(4))
+# ---------------------------------------------------------------------------
+
+
+def _parse_json_list(raw: str | None) -> list[Any]:
+    """JSON-Liste defensiv parsen; bei Fehler 400.
+
+    Leerer/fehlender Input -> leere Liste. Sonst muss `json.loads(...)` eine
+    Liste liefern. Alles andere ist ein User- oder Frontend-Bug, kein
+    Empty-Default — wir lassen 400 fliegen.
+    """
+    if raw is None or not raw.strip():
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        abort(400, description="JSON-Payload konnte nicht geparst werden")
+    if not isinstance(value, list):
+        abort(400, description="JSON-Payload muss eine Liste sein")
+    return value
+
+
+def _normalize_bucket_selections(raw: list[Any]) -> list[tuple[int, int, str]]:
+    """Validiert die Bucket-Selektions-Tuples aus dem POST-Body.
+
+    Erwartet `[{"server_id": int, "group_id": int, "filter": str}, ...]`.
+    `server_id` und `group_id` muessen Integer >= 0 sein (0 ist erlaubt fuer
+    Pending bzw. Cross-Server-Sammler). `filter` ist ein String (auch leer
+    erlaubt — "kein Filter").
+    """
+    result: list[tuple[int, int, str]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            abort(400, description="Bucket-Selektion hat falsches Format")
+        try:
+            server_id = int(entry.get("server_id"))  # type: ignore[arg-type]
+            group_id = int(entry.get("group_id"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            abort(400, description="Bucket-Selektion erfordert int-IDs")
+        filter_qs_raw = entry.get("filter") or ""
+        if not isinstance(filter_qs_raw, str):
+            abort(400, description="Bucket-Selektion erwartet String-Filter")
+        if server_id < 0 or group_id < 0:
+            abort(400, description="Bucket-IDs muessen >= 0 sein")
+        result.append((server_id, group_id, filter_qs_raw))
+    return result
+
+
+def _normalize_finding_ids(raw: list[Any]) -> list[int]:
+    """Validiert die expliziten Finding-IDs aus dem POST-Body."""
+    result: list[int] = []
+    for entry in raw:
+        try:
+            fid = int(entry)
+        except (TypeError, ValueError):
+            abort(400, description="finding_ids muss eine Liste von Ganzzahlen sein")
+        if fid < 1:
+            abort(400, description="finding_ids muessen >= 1 sein")
+        result.append(fid)
+    return result
+
+
+@findings_bp.post("/bulk/acknowledge")
+@login_required
+def bulk_acknowledge() -> WerkzeugResponse | str:
+    """Bulk-Acknowledge mit Bucket-Selektionen + expliziten Finding-IDs.
+
+    ADR-0037 §(4):
+
+    - `bucket_selections` (JSON-String): Liste von `{server_id, group_id,
+      filter}`. Server resolved via `resolve_bucket_to_finding_ids(...)` zur
+      konkreten ID-Liste. `group_id=0` markiert Pending. Filter wird via
+      `_filter_from_querystring` rekonstruiert — die Service-Logik nutzt
+      denselben `_apply_bucket_filters`-Helper wie der Outer-Render der
+      Bucket-Header, damit Count und Update-Set identisch bleiben.
+    - `finding_ids` (JSON-String): explizite Liste.
+    - `comment` (optional): wird ans Audit-Event gehaengt und (falls nicht
+      leer) pro Finding als `FindingNote` mit `author='system-ack'`
+      gespeichert (analog `group_acknowledge`).
+
+    Idempotent: doppelte IDs aus Bucket+Explicit-Mix werden via `set()`
+    dedupliziert. UPDATE-WHERE filtert zusaetzlich auf `status='OPEN'`, damit
+    bereits acknowledged Findings nicht erneut Audit-getriggert werden.
+
+    Audit: **ein** Event `finding.acknowledged.bulk` mit `metadata={
+    finding_ids, bucket_count, explicit_count, comment?}`.
+    """
+    # CSRF haendisch validieren: der POST-Body ist Form-encoded (HTMX/Form-
+    # Submit), wir akzeptieren das Token im `csrf_token`-Form-Field oder im
+    # `X-CSRFToken`-Header.
+    token = (
+        request.form.get("csrf_token")
+        or request.headers.get("X-CSRFToken")
+        or request.headers.get("X-CSRF-Token")
+    )
+    try:
+        validate_csrf(token)
+    except CSRFError:
+        abort(400, description="CSRF-Token ungueltig oder fehlt")
+
+    raw_buckets = _parse_json_list(request.form.get("bucket_selections"))
+    raw_finding_ids = _parse_json_list(request.form.get("finding_ids"))
+    bucket_selections = _normalize_bucket_selections(raw_buckets)
+    explicit_ids = _normalize_finding_ids(raw_finding_ids)
+
+    comment_raw = (request.form.get("comment") or "").strip()
+    has_comment = bool(comment_raw)
+
+    sess = get_session()
+
+    # Bucket-Selektionen aufloesen.
+    resolved: set[int] = set(explicit_ids)
+    for server_id, group_id, qs in bucket_selections:
+        sub_filt = _filter_from_querystring(qs)
+        bucket_ids = resolve_bucket_to_finding_ids(
+            sess,
+            server_id=server_id,
+            group_id=group_id,
+            filt=sub_filt,
+        )
+        resolved.update(bucket_ids)
+
+    final_ids = sorted(resolved)
+
+    redirect_qs = _filter_querystring_from_request(request.args)
+    redirect_target = url_for("findings.index")
+    if redirect_qs:
+        redirect_target = f"{redirect_target}?{redirect_qs}"
+
+    if not final_ids:
+        flash("Keine offenen Findings ausgewaehlt.", "info")
+        if _is_htmx_request():
+            response = Response("", status=204)
+            response.headers["HX-Redirect"] = redirect_target
+            return response
+        return redirect(redirect_target)
+
+    now = datetime.now(tz=UTC)
+    user_id_value = getattr(current_user, "id", None)
+    user_id_int: int | None = int(user_id_value) if user_id_value is not None else None
+
+    # Idempotenz: nur OPEN-Findings wechseln. So bleibt ein Bucket+Finding-
+    # Overlap (Header selektiert, Member nochmal manuell) ohne Doppel-Audit.
+    sess.execute(
+        update(Finding)
+        .where(Finding.id.in_(final_ids), Finding.status == FindingStatus.OPEN)
+        .values(
+            status=FindingStatus.ACKNOWLEDGED,
+            acknowledged_at=now,
+            acknowledged_by=user_id_int,
+        )
+    )
+
+    if has_comment:
+        # Pro betroffenem Finding eine Note (analog `group_acknowledge`-
+        # Pattern). Author `system-ack` ist Audit-geschuetzt (nicht loeschbar).
+        for fid in final_ids:
+            note = FindingNote(
+                finding_id=fid,
+                author="system-ack",
+                author_user_id=user_id_int,
+                text=comment_raw,
+            )
+            sess.add(note)
+        sess.flush()
+
+    metadata: dict[str, Any] = {
+        "finding_ids": final_ids,
+        "bucket_count": len(bucket_selections),
+        "explicit_count": len(explicit_ids),
+    }
+    if has_comment:
+        metadata["comment"] = comment_raw
+
+    log_event(
+        "finding.acknowledged.bulk",
+        target_type="finding",
+        target_id=None,
+        comment=comment_raw if has_comment else None,
+        metadata=metadata,
+        session=sess,
+    )
+    sess.commit()
+
+    if _is_htmx_request():
+        response = Response("", status=204)
+        response.headers["HX-Redirect"] = redirect_target
+        return response
+    return redirect(redirect_target, code=303)
 
 
 # ---------------------------------------------------------------------------
