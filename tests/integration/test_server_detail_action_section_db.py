@@ -216,12 +216,16 @@ class TestActionNeededSection:
         assert idx_act >= 0
         assert idx_escalate < idx_act, "ESCALATE muss vor ACT stehen"
 
-    def test_escalate_card_shows_group_labels_sublist(self, db_app: Flask) -> None:
-        """ESCALATE-Card hat die Group-Labels in der Sub-Liste."""
+    def test_escalate_card_shows_group_label_in_drilldown_table(self, db_app: Flask) -> None:
+        """ESCALATE-Card zeigt Group-Label in der Drilldown-Tabelle (Phase D2).
+
+        Die Sub-Line der Group-Labels (sublist) entfaellt; Group-Name erscheint
+        stattdessen in der Group-Spalte der workflow-card__drilldown-Tabelle.
+        """
         create_admin_user(db_app)
         sid = _seed_server_with_groups(
             db_app,
-            name="srv-esc-sublist",
+            name="srv-esc-drilldown",
             groups=[
                 {
                     "label": "openssh-server",
@@ -235,11 +239,18 @@ class TestActionNeededSection:
         client = db_app.test_client()
         login(client)
         body = client.get(f"/servers/{sid}").get_data(as_text=True)
-        assert 'data-test="action-card-escalate-distro-patch-sublist"' in body
+        # sublist-Anker existiert nicht mehr (Phase D2-B).
+        assert 'data-test="action-card-escalate-distro-patch-sublist"' not in body
+        # Drilldown-Tabelle und Group-Label sind im DOM.
+        assert 'data-test="action-card-escalate-distro-patch-table"' in body
         assert "openssh-server" in body
 
-    def test_escalate_card_truncates_to_5_with_plus_n_more(self, db_app: Flask) -> None:
-        """Mehr als 5 Group-Labels → erste 5 + ``+N more``-Suffix."""
+    def test_escalate_card_renders_all_groups_in_drilldown_table(self, db_app: Flask) -> None:
+        """Alle Group-Rows erscheinen in der Drilldown-Tabelle (keine Sub-Line-Kuerzung).
+
+        Phase D2-B entfernt die Sub-Line mit ``+N more``-Kuerzung; die Drilldown-Tabelle
+        rendert alle Rows (bis Pagination-Stub bei > 25 greift).
+        """
         create_admin_user(db_app)
         groups = [
             {
@@ -255,15 +266,18 @@ class TestActionNeededSection:
         client = db_app.test_client()
         login(client)
         body = client.get(f"/servers/{sid}").get_data(as_text=True)
-        # 7 - 5 = 2 more
-        assert "+2 more" in body
+        # "+N more"-Suffix gibt es nicht mehr.
+        assert "+2 more" not in body
+        # Alle 7 Group-Labels rendern als Drilldown-Rows.
+        for i in range(7):
+            assert f"grp-{i}" in body
 
-    def test_act_card_does_not_show_group_labels_sublist(self, db_app: Flask) -> None:
-        """ACT-Card hat KEINE Sub-Liste (Visual-Noise) — nur die Group-Tabelle drin."""
+    def test_act_card_drilldown_table_rendered_no_sublist(self, db_app: Flask) -> None:
+        """ACT-Card hat Drilldown-Tabelle, keinen sublist-Anker (Phase D2)."""
         create_admin_user(db_app)
         sid = _seed_server_with_groups(
             db_app,
-            name="srv-act-no-sublist",
+            name="srv-act-drilldown",
             groups=[
                 {
                     "label": "act-pkg",
@@ -279,7 +293,9 @@ class TestActionNeededSection:
         body = client.get(f"/servers/{sid}").get_data(as_text=True)
         # Die Card selbst existiert.
         assert 'data-test="action-card-act-distro-patch"' in body
-        # Sub-Liste darf NICHT im DOM sein.
+        # Drilldown-Tabelle ist im DOM.
+        assert 'data-test="action-card-act-distro-patch-table"' in body
+        # sublist-Anker existiert nicht mehr (Phase D2-B).
         assert 'data-test="action-card-act-distro-patch-sublist"' not in body
 
     def test_details_collapsed_by_default(self, db_app: Flask) -> None:

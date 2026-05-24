@@ -473,6 +473,35 @@
 }
 .workflow-card__pager button:hover { color: var(--text-primary); border-color: var(--border-visible); }
 
+/* Alias: workflow-card__drilldown entspricht dem design-seitigen workflow-table. */
+.workflow-card__drilldown { width: 100%; border-collapse: collapse; border-top: var(--hairline); }
+.workflow-card__drilldown th {
+  text-align: left; padding: 12px 0 10px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--text-tertiary); font-weight: 400;
+  border-bottom: var(--hairline);
+}
+.workflow-card__drilldown td {
+  padding: 14px 16px 14px 0; border-bottom: var(--hairline);
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--text-secondary); vertical-align: top; line-height: 1.6;
+}
+.workflow-card__drilldown tr:last-child td { border-bottom: 0; }
+.workflow-card__drilldown tr:hover td { background: var(--surface-hover); }
+
+/* Pagination-Stub (disabled, Folge-PR liefert echte Navigation). */
+.workflow-card__pagination {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px 0 0;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary);
+}
+.workflow-card__pagination-info { color: var(--text-secondary); }
+.workflow-card__pagination-btn {
+  background: transparent; color: var(--text-tertiary);
+  border: var(--hairline); padding: 2px 8px;
+  cursor: not-allowed; opacity: 0.6; font-family: var(--font-mono);
+}
+
 /* ─────────────────────────────────────────────────────────────
    5) HeaderStats
    ───────────────────────────────────────────────────────────── */

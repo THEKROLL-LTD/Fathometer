@@ -50,17 +50,6 @@
             <div class="min-w-0 flex-1">
               <div class="text-sm font-medium truncate"
                    data-test="action-card-{{ card.id }}-action">{{ action_label }}</div>
-              {% if card.show_labels %}
-                {%- set labels = card.groups | map(attribute='group') | map(attribute='label') | list -%}
-                <div class="text-xs opacity-70 font-mono truncate mt-0.5"
-                     data-test="action-card-{{ card.id }}-sublist">
-                  {%- if labels | length > 5 -%}
-                    {{ labels[:5] | join(', ') }} +{{ labels | length - 5 }} more
-                  {%- else -%}
-                    {{ labels | join(', ') }}
-                  {%- endif -%}
-                </div>
-              {% endif %}
             </div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
@@ -72,7 +61,7 @@
         </summary>
 
         <div class="border-t border-base-300 px-5 py-3 overflow-x-auto">
-          <table class="table table-xs w-full"
+          <table class="workflow-card__drilldown"
                  data-test="action-card-{{ card.id }}-table">
             <thead>
               <tr>
@@ -106,6 +95,16 @@
               {% endfor %}
             </tbody>
           </table>
+          {% if card.groups | length > 25 %}
+            {%- set _total_pages = ((card.groups | length) // 25) + (1 if (card.groups | length) % 25 else 0) -%}
+            <div class="workflow-card__pagination"
+                 data-test="action-card-{{ card.id }}-pagination"
+                 aria-label="Pagination">
+              <span class="workflow-card__pagination-info">Seite 1 von {{ _total_pages }}</span>
+              <button type="button" class="workflow-card__pagination-btn" disabled aria-label="Previous page">&#8249;</button>
+              <button type="button" class="workflow-card__pagination-btn" disabled aria-label="Next page">&#8250;</button>
+            </div>
+          {% endif %}
         </div>
       </details>
     {% endfor %}
