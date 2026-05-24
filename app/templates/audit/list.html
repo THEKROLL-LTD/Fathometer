@@ -68,8 +68,13 @@
     </div>
   </header>
 
-  {# ---- Filter-Form -------------------------------------------------------- #}
+  {# ---- Filter-Form --------------------------------------------------------
+       HTMX-Submit: gleiche Filter-Logik, aber kein Full-Reload — Sidebar
+       bleibt stehen. `href`-Reset und Pagination unten haben analog `hx-get`. #}
   <form method="get" action="{{ url_for('audit.list_events') }}"
+        hx-get="{{ url_for('audit.list_events') }}"
+        hx-target="#detail-pane"
+        hx-push-url="true"
         class="card bg-base-200 shadow-sm">
     <div class="card-body p-4 flex flex-wrap items-end gap-3 text-sm">
       <label class="form-control">
@@ -119,6 +124,9 @@
       <div class="flex items-center gap-2">
         <button type="submit" class="btn btn-sm btn-primary">filtern</button>
         <a href="{{ url_for('audit.list_events') }}"
+           hx-get="{{ url_for('audit.list_events') }}"
+           hx-target="#detail-pane"
+           hx-push-url="true"
            class="link link-hover text-xs opacity-70">zuruecksetzen</a>
       </div>
     </div>
@@ -197,10 +205,16 @@
       {% if filter.tag       %}{% set _ = parts.append('tag='       ~ filter.tag) %}{% endif %}
       {% set base_qs = parts | join('&') %}
 
+      {# Pagination — HTMX-Pane-Swap statt Full-Reload. #}
+      {% set prev_url = url_for('audit.list_events') ~ '?' ~ base_qs ~ ('&' if base_qs else '') ~ 'page=' ~ (page - 1) %}
+      {% set next_url = url_for('audit.list_events') ~ '?' ~ base_qs ~ ('&' if base_qs else '') ~ 'page=' ~ (page + 1) %}
       <div class="join">
         {% if page > 1 %}
           <a class="join-item btn btn-sm"
-             href="{{ url_for('audit.list_events') }}?{{ base_qs }}{% if base_qs %}&{% endif %}page={{ page - 1 }}"
+             href="{{ prev_url }}"
+             hx-get="{{ prev_url }}"
+             hx-target="#detail-pane"
+             hx-push-url="true"
              aria-label="vorherige Seite">←</a>
         {% else %}
           <span class="join-item btn btn-sm btn-disabled">←</span>
@@ -208,7 +222,10 @@
         <span class="join-item btn btn-sm btn-disabled">{{ page }} / {{ pages }}</span>
         {% if page < pages %}
           <a class="join-item btn btn-sm"
-             href="{{ url_for('audit.list_events') }}?{{ base_qs }}{% if base_qs %}&{% endif %}page={{ page + 1 }}"
+             href="{{ next_url }}"
+             hx-get="{{ next_url }}"
+             hx-target="#detail-pane"
+             hx-push-url="true"
              aria-label="naechste Seite">→</a>
         {% else %}
           <span class="join-item btn btn-sm btn-disabled">→</span>

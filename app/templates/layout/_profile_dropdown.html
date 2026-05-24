@@ -22,8 +22,11 @@
     <div class="profile-menu__name">{{ current_user.username }}</div>
   </div>
 
-  {# Settings #}
+  {# Settings — HTMX-Pane-Swap; href bleibt fuer Right-Click + No-JS. #}
   <a href="{{ url_for('settings.settings_index') }}"
+     hx-get="{{ url_for('settings.settings_index') }}"
+     hx-target="#detail-pane"
+     hx-push-url="true"
      class="profile-menu__item"
      role="menuitem"
      @click="profileOpen = false">
@@ -37,8 +40,11 @@
     <span>Settings</span>
   </a>
 
-  {# Audit #}
+  {# Audit — HTMX-Pane-Swap; href bleibt fuer Right-Click + No-JS. #}
   <a href="{{ url_for('audit.list_events') }}"
+     hx-get="{{ url_for('audit.list_events') }}"
+     hx-target="#detail-pane"
+     hx-push-url="true"
      class="profile-menu__item"
      role="menuitem"
      @click="profileOpen = false">
