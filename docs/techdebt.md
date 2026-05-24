@@ -671,6 +671,31 @@ Querverweis: Block W Phase C Security-Audit.
 
 ---
 
+## TD-015 — Orphaned `_render_tag_editor`-Helper nach Block X / Phase B6
+
+**Was:** `app/views/server_detail.py` enthaelt einen `_render_tag_editor`-
+Helper-Funktion. Nach Block X / Phase B6 ist der Tag-Editor-Akkordeon aus
+`detail.html` entfernt und `_tag_editor.html` wird ausschliesslich von
+`servers/settings.html` included. Der Helper in `server_detail.py` hat
+keinen Aufrufer mehr.
+
+**Warum:** Der backend-implementer hat den Helper bewusst stehen gelassen
+("Cleanup nach B6") um einen sauberen Split-Commit zu gewaehrleisten.
+
+**Loesung:** `_render_tag_editor` aus `app/views/server_detail.py` entfernen
+sobald `_tag_editor.html` und das Settings-Sub-View stabil sind (d.h. nach
+erfolgreichem Block-X-Abschluss + Review). Keine Auswirkung auf Laufzeit,
+da der Helper nie aufgerufen wird.
+
+**Aufwand:** < 5 Min. (Funktion loeschen + ggf. zugehoerige `add_tag`/
+`remove_tag`-Routen aus `server_detail.py` pruefen ob ebenfalls orphaned).
+
+**Wann:** Cleanup-PR nach Block X / v0.13.0-Merge auf main. Kein Blocker.
+
+Querverweis: Block X Phase B6, ADR-0038 §(2).
+
+---
+
 ## Konventionen fuer neue Eintraege
 
 - ID: `TD-NNN`, fortlaufend.

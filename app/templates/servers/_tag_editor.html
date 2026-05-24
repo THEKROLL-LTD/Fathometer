@@ -1,15 +1,14 @@
-{# Inline-Tag-Editor fuer den Server-Detail-Header.
+{# Inline-Tag-Editor fuer das Server-Settings-Sub-View.
 
-   Wird auch direkt von den HTMX-Routes zurueckgegeben — siehe
-   `app/views/server_detail.py:_render_tag_editor`. Der Server-Endpoint
-   liefert immer das ganze `#tag-editor-wrap`-Div, weil HTMX
-   `hx-swap="outerHTML"` darauf zielt.
+   Wird von `app/templates/servers/settings.html` included.
+   HTMX-Routes aus `app/views/server_settings.py:_render_tag_editor`
+   liefern das ganze `#tag-editor-wrap`-Div (HTMX `hx-swap="outerHTML"`).
 
    Variablen:
      - `server`         : Server (eager-loaded tag_links.tag)
      - `available_tags` : list[Tag] — vollstaendige Tag-Liste
-     - `add_form`       : CSRFOnlyForm
-     - `remove_form`    : CSRFOnlyForm
+     - `add_form`       : CSRFOnlyForm  (entspricht tag_add_form im Settings-Kontext)
+     - `remove_form`    : CSRFOnlyForm  (entspricht tag_remove_form im Settings-Kontext)
 
    Sicherheit:
      - CSRF-Token via `csrf_token()` (Flask-WTF) im X-CSRFToken-Header
@@ -23,8 +22,8 @@
     {% if server.tag_links %}
       {% for link in server.tag_links %}
         <form method="post"
-              action="{{ url_for('server_detail.remove_tag', server_id=server.id, tag_id=link.tag.id) }}"
-              hx-post="{{ url_for('server_detail.remove_tag', server_id=server.id, tag_id=link.tag.id) }}"
+              action="{{ url_for('server_settings.remove_tag', server_id=server.id, tag_id=link.tag.id) }}"
+              hx-post="{{ url_for('server_settings.remove_tag', server_id=server.id, tag_id=link.tag.id) }}"
               hx-target="#tag-editor-wrap"
               hx-swap="outerHTML"
               hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'
@@ -50,8 +49,8 @@
      vorgeschlagen. Submit triggert HTMX-Post und ersetzt das Wrap. #}
   {% set assigned_ids = server.tag_links | map(attribute='tag.id') | list %}
   <form method="post"
-        action="{{ url_for('server_detail.add_tag', server_id=server.id) }}"
-        hx-post="{{ url_for('server_detail.add_tag', server_id=server.id) }}"
+        action="{{ url_for('server_settings.add_tag', server_id=server.id) }}"
+        hx-post="{{ url_for('server_settings.add_tag', server_id=server.id) }}"
         hx-target="#tag-editor-wrap"
         hx-swap="outerHTML"
         hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'

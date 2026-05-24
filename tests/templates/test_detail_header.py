@@ -1,4 +1,4 @@
-"""Pure-Unit-Tests fuer den Header-Abschnitt von servers/detail.html (Block X Phase A).
+"""Pure-Unit-Tests fuer den Header-Abschnitt von servers/detail.html (Block X Phase A+B).
 
 Prueft:
   1. OS-Zeile enthaelt kein 'letzter scan' mehr (Phase A Task A1).
@@ -9,8 +9,8 @@ Prueft:
   5. <time>-Elemente mit datetime- und title-Attributen korrekt gerendert.
   6. Altes <dl class="grid grid-cols-2 md:grid-cols-4"> und KEV-/Intervall-Labels
      sind aus dem Template entfernt (Phase A Task A2).
-  7. Hashtag-Zeile (tag_links-Loop) ist in Phase A noch vorhanden (Phase B
-     entfernt sie erst).
+  7. Hashtag-Zeile und Tag-Editor-Akkordeon sind in Phase B entfernt;
+     Zahnrad-Settings-Button ist im Header vorhanden (Phase B Task B6).
 
 Render-Strategie:
   - Sysline-Tests 2-5: `render_template_string` mit dem verbatim-Markup aus
@@ -384,39 +384,62 @@ def test_dl_meta_grid_removed(app: Flask) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 7 — Hashtag-Zeile ist in Phase A noch vorhanden
+# Test 7 — Phase B: Hashtag-Zeile + Akkordeon entfernt; Zahnrad-Button vorhanden
 # ---------------------------------------------------------------------------
 
 
-def test_hashtag_zeile_still_renders_in_phase_a(app: Flask) -> None:
-    """Phase A entfernt die Tag-Hashtag-Zeile NICHT (das ist erst Phase B).
+def test_phase_b_hashtag_removed_and_settings_gear_present(app: Flask) -> None:
+    """Phase B (Block X, ADR-0038 §2): Hashtag-Zeile und Tag-Editor-Akkordeon
+    sind aus detail.html entfernt. Zahnrad-Settings-Button ist im Header.
 
-    Prueft, dass das tag_links-Loop-Markup noch im Template-Source vorhanden
-    ist. Sichert: Implementer hat in Phase A nicht versehentlich Phase-B-
-    Markup mit entfernt.
+    Negativ-Checks (muessen FEHLEN):
+    - '#{{ link.tag.name }}' — Hashtag-Link-Markup der alten Hashtag-Zeile.
+    - 'font-mono text-xs mt-2 flex flex-wrap gap-x-3 gap-y-1' — Klassen
+      der Hashtag-<p> (spezifisch genug; kein False-Positive).
+    - 'tagEditorOpen' — Alpine-State der zum Akkordeon gehoert.
+    - 'tag-editor-body' — ID des Akkordeon-Body-Div.
 
-    Geprueft werden:
-    - Das server.tag_links-Conditional im Source.
-    - Der Hashtag-Link-Loop (#{{ link.tag.name }}).
-    - Die font-mono text-xs mt-2 flex flex-wrap-Klassen der Hashtag-<p>.
+    Positiv-Checks (muessen VORHANDEN sein):
+    - 'data-test="server-settings-link"' — Zahnrad-Settings-Button.
+    - 'server_settings.show' — url_for-Aufruf fuer den Settings-Link.
     """
     source = _load_template_source()
 
-    assert _TAG_LINKS_LOOP_MARKER in source, (
-        f"'{_TAG_LINKS_LOOP_MARKER}' fehlt im Template-Source. "
-        "Die Hashtag-Zeile wird erst in Phase B entfernt — "
-        "Phase A darf dieses Markup nicht anfassen. "
+    # Hashtag-Zeile-Markup darf nicht mehr vorhanden sein.
+    assert _TAG_LINK_HASH_MARKER not in source, (
+        f"'{_TAG_LINK_HASH_MARKER}' ist noch im Template-Source. "
+        "Phase B (ADR-0038 §2) soll die Hashtag-Zeile aus detail.html entfernt haben. "
         f"Template-Pfad: {_TEMPLATE_PATH}"
     )
 
-    assert _TAG_LINK_HASH_MARKER in source, (
-        f"'{_TAG_LINK_HASH_MARKER}' fehlt im Template-Source. "
-        "Das Hashtag-Link-Markup soll in Phase A noch vorhanden sein. "
+    assert _TAG_LINKS_MARKER not in source, (
+        f"'{_TAG_LINKS_MARKER}' ist noch im Template-Source. "
+        "Die spezifischen CSS-Klassen der Hashtag-<p> sollen in Phase B verschwunden sein. "
         f"Template-Pfad: {_TEMPLATE_PATH}"
     )
 
-    assert _TAG_LINKS_MARKER in source, (
-        f"'font-mono text-xs mt-2 flex flex-wrap'-Klassen der Hashtag-<p> "
-        f"fehlen im Template-Source. Phase A entfernt die Hashtag-Zeile nicht. "
+    # Tag-Editor-Akkordeon-State und Body-ID duerfen nicht mehr vorhanden sein.
+    assert "tagEditorOpen" not in source, (
+        "'tagEditorOpen' Alpine-State ist noch im Template-Source. "
+        "Phase B entfernt das Tag-Editor-Akkordeon mitsamt dem Alpine-State. "
+        f"Template-Pfad: {_TEMPLATE_PATH}"
+    )
+
+    assert "tag-editor-body" not in source, (
+        "'tag-editor-body' ID ist noch im Template-Source. "
+        "Das Akkordeon-Div soll in Phase B ersatzlos entfernt worden sein. "
+        f"Template-Pfad: {_TEMPLATE_PATH}"
+    )
+
+    # Zahnrad-Settings-Button muss im Header vorhanden sein.
+    assert 'data-test="server-settings-link"' in source, (
+        "'data-test=\"server-settings-link\"' fehlt im Template-Source. "
+        "Phase B (ADR-0038 §2) soll einen Zahnrad-Settings-Button im Header eingefuegt haben. "
+        f"Template-Pfad: {_TEMPLATE_PATH}"
+    )
+
+    assert "server_settings.show" in source, (
+        "'server_settings.show' fehlt im Template-Source. "
+        "Der Zahnrad-Settings-Button muss auf die Settings-Sub-View zeigen. "
         f"Template-Pfad: {_TEMPLATE_PATH}"
     )

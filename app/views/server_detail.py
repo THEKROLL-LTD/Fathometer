@@ -23,17 +23,13 @@ from __future__ import annotations
 from typing import Any
 
 import structlog
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, render_template, request
 from flask_login import login_required
 from sqlalchemy import func, nulls_last, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
-from werkzeug.wrappers import Response as WerkzeugResponse
 
-from app.audit import log_event
 from app.db import get_session
 from app.forms import (
-    TAG_NAME_REGEX,
     AcknowledgeForm,
     BulkActionForm,
     CSRFOnlyForm,
@@ -774,98 +770,6 @@ def _quick_counts_for_server(sess: Any, server_id: int) -> dict[str, int]:
         "medium_open": int(row.medium_open or 0),
         "low_open": int(row.low_open or 0),
     }
-
-
-@server_detail_bp.post("/<int:server_id>/tags/add")
-@login_required
-def add_tag(server_id: int) -> WerkzeugResponse | str:
-    form = CSRFOnlyForm()
-    if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
-        return redirect(url_for("server_detail.show", server_id=server_id))
-
-    server = _load_server_with_tags(server_id)
-    if server is None:
-        abort(404)
-
-    raw_name = (request.form.get("tag_name") or "").strip().lower()
-    if not raw_name or not TAG_NAME_REGEX.match(raw_name):
-        flash("Ungueltiger Tag-Name.", "error")
-        return _redirect_or_partial(server)
-
-    sess = get_session()
-    tag = sess.execute(select(Tag).where(Tag.name == raw_name)).scalar_one_or_none()
-    if tag is None:
-        flash(
-            f"Tag '{raw_name}' existiert nicht. Lege ihn zuerst unter Settings an.",
-            "error",
-        )
-        return _redirect_or_partial(server)
-
-    # Schon vorhanden? Idempotent behandeln, kein Fehler.
-    existing = sess.execute(
-        select(ServerTag).where(ServerTag.server_id == server.id, ServerTag.tag_id == tag.id)
-    ).scalar_one_or_none()
-    if existing is None:
-        sess.add(ServerTag(server_id=server.id, tag_id=tag.id))
-        try:
-            log_event(
-                "server.tag.added",
-                target_type="server",
-                target_id=server.id,
-                metadata={"tag_id": tag.id, "tag_name": tag.name},
-                session=sess,
-            )
-            sess.commit()
-        except IntegrityError:
-            sess.rollback()
-            log.warning("server_detail.tag_add_race", server_id=server.id, tag_id=tag.id)
-
-    server = _load_server_with_tags(server_id)
-    if server is None:  # pragma: no cover — race with retire/delete
-        abort(404)
-    return _redirect_or_partial(server)
-
-
-@server_detail_bp.post("/<int:server_id>/tags/<int:tag_id>/remove")
-@login_required
-def remove_tag(server_id: int, tag_id: int) -> WerkzeugResponse | str:
-    form = CSRFOnlyForm()
-    if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
-        return redirect(url_for("server_detail.show", server_id=server_id))
-
-    server = _load_server_with_tags(server_id)
-    if server is None:
-        abort(404)
-
-    sess = get_session()
-    link = sess.execute(
-        select(ServerTag).where(ServerTag.server_id == server_id, ServerTag.tag_id == tag_id)
-    ).scalar_one_or_none()
-    if link is not None:
-        tag_name = link.tag.name if link.tag is not None else str(tag_id)
-        sess.delete(link)
-        log_event(
-            "server.tag.removed",
-            target_type="server",
-            target_id=server.id,
-            metadata={"tag_id": tag_id, "tag_name": tag_name},
-            session=sess,
-        )
-        sess.commit()
-
-    server = _load_server_with_tags(server_id)
-    if server is None:  # pragma: no cover
-        abort(404)
-    return _redirect_or_partial(server)
-
-
-def _redirect_or_partial(server: Server) -> WerkzeugResponse | str:
-    """HTMX-Requests bekommen das Fragment, normale Browser einen Redirect."""
-    if request.headers.get("HX-Request") == "true":
-        return _render_tag_editor(server)
-    return redirect(url_for("server_detail.show", server_id=server.id))
 
 
 __all__ = ["server_detail_bp"]

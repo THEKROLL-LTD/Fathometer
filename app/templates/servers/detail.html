@@ -1,20 +1,20 @@
 {# Server-Detail `/servers/<id>` — komplettes Redesign (Block K, ADR-0018).
 
-   Sektions-Reihenfolge (siehe ADR-0018 §Entscheidung):
-     1. Header              — Hostname, Status-Pill-Reihe, OS-Zeile,
-                              Hashtag-Tags, KI-Bewertung-Button.
-     2. Tag-Editor          — Akkordeon, default zugeklappt.
-     3. HeaderStats         — Total + Tendenz links, 4 KPI-Sparklines rechts.
-     4. Lebenszeichen       — HeartbeatLarge (Quickinfos wandern in die
-                              Header-Sysline ab Block X / ADR-0038).
-     5. Severity-Trend      — Stacked-Bar-Chart + Range-Toggle + Legende.
-     6. Triage Queue        — eingebunden via `servers/_findings_section.html`.
+   Sektions-Reihenfolge (Block X / ADR-0038):
+     1. Header       — Hostname, Status-Pill-Reihe, OS-Zeile, Sysline,
+                       KI-Bewertung-Button, Zahnrad-Settings-Button.
+     2. HeaderStats  — Total + Tendenz links, 4 KPI-Sparklines rechts.
+     3. Lebenszeichen — HeartbeatLarge.
+     4. Severity-Trend — Stacked-Bar-Chart + Range-Toggle + Legende.
+     5. Triage Queue — eingebunden via `servers/_findings_section.html`.
+
+   Hinweis Block X: Tag-Editor und Tag-Hashtag-Zeile sind in die
+   Settings-Sub-View (`/servers/<id>/settings/`) ausgelagert (ADR-0038 §2).
+   `add_form`/`remove_form` werden von diesem Template nicht mehr benoetigt
+   — sie stehen ausschliesslich ueber `server_settings.show` bereit.
 
    Variablen-Vertrag (gesetzt in `app/views/server_detail.py:show`):
      - `server`         : Server (mit eager-loaded tag_links.tag)
-     - `available_tags` : list[Tag] — fuer den Add-Tag-Selector
-     - `add_form`       : CSRFOnlyForm
-     - `remove_form`    : CSRFOnlyForm
      - `view_filter`    : FindingsViewFilter
      - `findings`/`groups`/`diff` : View-Modus-abhaengig
      - `tendency`        : Tendency-Enum (Block K)
@@ -45,7 +45,7 @@
 {% set total_findings = counts.open if counts else (findings | length) %}
 
 <div class="px-6 py-6 max-w-[1600px] divide-y divide-base-content/10"
-     x-data="{ tagEditorOpen: false, trendRange: '50T' }">
+     x-data="{ trendRange: '50T' }">
 
   {# =============== 1. Header =============== #}
   <header class="flex items-start justify-between gap-4 flex-wrap pb-8">
@@ -137,22 +137,6 @@
           trivy-db <b>{% if server.trivy_db_updated_at %}<time datetime="{{ server.trivy_db_updated_at.isoformat() }}" title="{{ server.trivy_db_updated_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.trivy_db_updated_at | relative_time }}</time>{% else %}unknown{% endif %}</b>
         </span>
       </div>
-      {% if server.tag_links %}
-      <p class="font-mono text-xs mt-2 flex flex-wrap gap-x-3 gap-y-1">
-        {# Tag-Color kommt aus dem Server-eigenen Tag-Modell (kein User-Input,
-           der die Color setzt — Color wird nur via Settings-UI gepflegt).
-           Inline-Style ist hier defensible: Tailwind kann beliebige Hex-Werte
-           nicht jitten, und wir vermeiden so eine Custom-CSS-Datei. #}
-        {% for link in server.tag_links %}
-          {% if link.tag %}
-          <a href="{{ url_for('dashboard.index') }}?tags={{ link.tag.name }}"
-             class="opacity-70 hover:opacity-100 transition-opacity"
-             style="color: {{ link.tag.color }}"
-             title="Dashboard nach #{{ link.tag.name }} filtern">#{{ link.tag.name }}</a>
-          {% endif %}
-        {% endfor %}
-      </p>
-      {% endif %}
     </div>
     <div class="flex flex-wrap items-center gap-2 shrink-0">
       {% if llm_configured and is_active %}
@@ -209,6 +193,16 @@
           KI-Bewertung (Provider fehlt)
         </a>
       {% endif %}
+      <a href="{{ url_for('server_settings.show', server_id=server.id) }}"
+         class="btn btn-sm btn-ghost"
+         title="Server-Einstellungen (Tags, Gruppe, Scan-Intervall)"
+         data-test="server-settings-link"
+         aria-label="Server-Einstellungen">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path>
+        </svg>
+      </a>
     </div>
   </header>
 
@@ -218,25 +212,7 @@
   {# =============== 1b. Host-Snapshot (Block O, ADR-0022) =============== #}
   {% include "_partials/host_snapshot.html" %}
 
-  {# =============== 2. Tag-Editor (Akkordeon) =============== #}
-  <section class="py-4">
-    <button type="button"
-            class="flex items-center gap-2 text-xs uppercase tracking-[0.12em] font-mono opacity-65 hover:opacity-100 transition-opacity"
-            @click="tagEditorOpen = !tagEditorOpen"
-            :aria-expanded="tagEditorOpen ? 'true' : 'false'"
-            aria-controls="tag-editor-body">
-      <span x-text="tagEditorOpen ? '▾' : '▸'" class="text-xs"></span>
-      Tags verwalten
-      {% if server.tag_links %}
-        <span class="opacity-50 normal-case tracking-normal text-[11px]">· {{ server.tag_links | length }}</span>
-      {% endif %}
-    </button>
-    <div id="tag-editor-body" x-show="tagEditorOpen" x-cloak class="mt-3">
-      {% include "servers/_tag_editor.html" %}
-    </div>
-  </section>
-
-  {# =============== 3. HeaderStats =============== #}
+  {# =============== 2. HeaderStats =============== #}
   <section class="py-8 flex items-end justify-between gap-8 flex-wrap">
     <div class="min-w-0">
       <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Findings · offen · gesamt</div>

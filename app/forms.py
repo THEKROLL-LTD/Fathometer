@@ -7,6 +7,8 @@ ueber `Flask-WTF` (CSRFProtect ist in `create_app()` aktiviert).
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from flask_wtf import FlaskForm
 from wtforms import (
@@ -26,6 +28,9 @@ from wtforms.validators import (
     ValidationError,
 )
 from wtforms.validators import Optional as OptionalValidator
+
+if TYPE_CHECKING:
+    from app.models import ServerGroup
 
 # Aus ARCHITECTURE.md §10:
 #   Tag-Namen: `^[a-z0-9][a-z0-9._\-]{0,31}$`
@@ -371,6 +376,44 @@ class GroupAcknowledgeForm(FlaskForm):
     )
 
 
+class ServerGroupForm(FlaskForm):
+    """Server-Group-Selector — single-select aus existierenden server_groups oder NULL.
+
+    Block X (ADR-0038): setzt `server.group_id` auf eine existierende Group oder NULL
+    ("— keine —"). Validation erfolgt zusaetzlich per Whitelist im View-Handler.
+    """
+
+    group_id = SelectField(
+        "Group",
+        coerce=lambda v: int(v) if v not in (None, "", "none") else None,
+        validators=[OptionalValidator()],
+    )
+
+    def __init__(
+        self,
+        *args: object,
+        available_groups: Sequence[ServerGroup] | None = None,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        choices: list[tuple[str, str]] = [("none", "— keine —")]
+        if available_groups:
+            choices.extend((str(g.id), g.name) for g in available_groups)
+        self.group_id.choices = choices
+
+
+class ServerScanIntervalForm(FlaskForm):
+    """Expected-Scan-Interval-Editor — Stunden 1..168 (1 Woche max).
+
+    Block X (ADR-0038): setzt `server.expected_scan_interval_h`.
+    """
+
+    scan_interval_h = IntegerField(
+        "Scan-Intervall (h)",
+        validators=[DataRequired(), NumberRange(min=1, max=168)],
+    )
+
+
 __all__ = [
     "NOTE_TEXT_MAX_LEN",
     "TAG_COLOR_REGEX",
@@ -385,6 +428,8 @@ __all__ = [
     "MasterKeyRotateForm",
     "NoteForm",
     "ReopenForm",
+    "ServerGroupForm",
+    "ServerScanIntervalForm",
     "SetupStep1Form",
     "SetupStep2Form",
     "SetupStep3Form",

@@ -69,6 +69,8 @@ KNOWN_ACTIONS: list[str] = [
     "server.registered",
     "server.revoked",
     "server.retired",
+    "server.group_changed",
+    "server.scan_interval_changed",
     "server.tag.added",
     "server.tag.removed",
     "key.rotated.master",
