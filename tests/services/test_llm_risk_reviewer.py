@@ -249,8 +249,9 @@ async def test_pass1_drops_malicious_path_pattern() -> None:
     reviewer = LLMRiskReviewer(client=_MockClient(payload))
     result, _meta = await reviewer.pass1_detect_groups([f1])
     grp = result.groups[0]
-    # Wildcards und Forbidden gestripped:
-    assert grp.path_prefixes == ["/var/lib/rancher/"]
+    # Wildcards und Forbidden gestripped; Leading-Slash auf relativ
+    # normalisiert (Bugfix 2026-05-24).
+    assert grp.path_prefixes == ["var/lib/rancher/"]
     assert grp.pkg_name_exact == ["real-pkg"]
     assert grp.pkg_name_glob == ["real-*"]
     assert grp.pkg_purl_pattern == ["pkg:deb/"]
@@ -273,7 +274,8 @@ async def test_pass1_drops_non_ascii_pattern() -> None:
     }
     reviewer = LLMRiskReviewer(client=_MockClient(payload))
     result, _meta = await reviewer.pass1_detect_groups([f1])
-    assert result.groups[0].path_prefixes == ["/valid/path/"]
+    # Leading-Slash bei der Persistierung gestrippt (Bugfix 2026-05-24).
+    assert result.groups[0].path_prefixes == ["valid/path/"]
 
 
 @pytest.mark.asyncio

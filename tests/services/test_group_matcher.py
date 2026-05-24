@@ -349,3 +349,118 @@ def test_affinity_sort_secondary_key_is_package_name() -> None:
     ]
     sorted_ = affinity_sort_for_pass1(findings)
     assert [f.id for f in sorted_] == [2, 1]
+
+
+# ---------------------------------------------------------------------------
+# Bugfix 2026-05-24: Slash-insensitive Path-Prefix-Match.
+# ---------------------------------------------------------------------------
+
+
+def _bare_group(label: str, *, path_prefixes: list[str]) -> ApplicationGroup:
+    """Pure-In-Memory-Group ohne DB — fuer Matcher-Unit-Tests."""
+    return ApplicationGroup(
+        id=hash(label) & 0xFFFF,
+        label=label,
+        explanation=f"{label} group",
+        path_prefixes=path_prefixes,
+        pkg_name_exact=[],
+        pkg_name_glob=[],
+        pkg_purl_pattern=[],
+        source="llm",
+    )
+
+
+def _stuff_matcher(groups: list[ApplicationGroup]) -> GroupMatcher:
+    """Singleton mit gegebenen Groups bestuecken (kein DB-Reload noetig)."""
+    GroupMatcher._reset_for_tests()
+    m = GroupMatcher.get()
+    # Hand-bestuecken — `reload()` braucht eine echte Session.
+    m._groups = groups  # type: ignore[attr-defined]
+    m._loaded = True  # type: ignore[attr-defined]
+    return m
+
+
+def test_matcher_slash_insensitive_absolute_prefix_relative_target() -> None:
+    """Legacy-Group mit Leading-Slash-Prefix muss relative Trivy-Targets matchen."""
+    grp = _bare_group("adminlte-master", path_prefixes=["/AdminLTE-master/"])
+    matcher = _stuff_matcher([grp])
+    try:
+        f = _bare_finding(1, target_path="AdminLTE-master/node_modules/vite/package.json")
+        hit = matcher.match(f)
+        assert hit is not None
+        assert hit.label == "adminlte-master"
+    finally:
+        GroupMatcher._reset_for_tests()
+
+
+def test_matcher_slash_insensitive_relative_prefix_absolute_target() -> None:
+    """Neue normalisierte Group (ohne Leading-Slash) matched auch Targets mit Leading-Slash."""
+    grp = _bare_group("k3s", path_prefixes=["var/lib/rancher/k3s/"])
+    matcher = _stuff_matcher([grp])
+    try:
+        f = _bare_finding(1, target_path="/var/lib/rancher/k3s/data/server")
+        hit = matcher.match(f)
+        assert hit is not None
+        assert hit.label == "k3s"
+    finally:
+        GroupMatcher._reset_for_tests()
+
+
+def test_matcher_longest_match_wins_with_mixed_slash_styles() -> None:
+    """Wenn zwei Groups matchen, gewinnt die mit dem laengeren normalisierten Prefix —
+    auch wenn die Prefixes unterschiedliche Slash-Stile haben."""
+    short = _bare_group("var-lib", path_prefixes=["/var/lib/"])
+    long_ = _bare_group("k3s", path_prefixes=["var/lib/rancher/k3s/"])
+    matcher = _stuff_matcher([short, long_])
+    try:
+        f = _bare_finding(1, target_path="var/lib/rancher/k3s/data/server")
+        hit = matcher.match(f)
+        assert hit is not None
+        assert hit.label == "k3s"
+    finally:
+        GroupMatcher._reset_for_tests()
+
+
+def test_matcher_does_not_match_partial_segment() -> None:
+    """`AdminLTE-master/` darf nicht `AdminLTE-master-old/` matchen (Prefix-Kollision)."""
+    grp = _bare_group("adminlte-master", path_prefixes=["AdminLTE-master/"])
+    matcher = _stuff_matcher([grp])
+    try:
+        # Trailing-Slash im Prefix zwingt das nachfolgende `/`-Segment.
+        f = _bare_finding(1, target_path="AdminLTE-master-old/node_modules/x.json")
+        assert matcher.match(f) is None
+    finally:
+        GroupMatcher._reset_for_tests()
+
+
+# ---------------------------------------------------------------------------
+# Bugfix 2026-05-24: _sanitize_path_prefix normalisiert Leading-Slash.
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_strips_leading_slash() -> None:
+    from app.services.llm_risk_reviewer import _sanitize_path_prefix
+
+    assert _sanitize_path_prefix("/AdminLTE-master/") == "AdminLTE-master/"
+    assert _sanitize_path_prefix("/var/lib/rancher/k3s/") == "var/lib/rancher/k3s/"
+
+
+def test_sanitize_accepts_relative_path_unchanged() -> None:
+    from app.services.llm_risk_reviewer import _sanitize_path_prefix
+
+    assert _sanitize_path_prefix("AdminLTE-master/") == "AdminLTE-master/"
+
+
+def test_sanitize_rejects_root_slash() -> None:
+    """`/` allein → nach Strip leer → reject."""
+    from app.services.llm_risk_reviewer import _sanitize_path_prefix
+
+    assert _sanitize_path_prefix("/") is None
+    assert _sanitize_path_prefix("///") is None
+
+
+def test_sanitize_rejects_non_ascii_after_strip() -> None:
+    from app.services.llm_risk_reviewer import _sanitize_path_prefix
+
+    assert _sanitize_path_prefix("/öäü/path/") is None
+    assert _sanitize_path_prefix("öäü/path/") is None

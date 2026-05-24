@@ -349,18 +349,36 @@ def _is_ascii_no_nul(s: str) -> bool:
 
 
 def _sanitize_path_prefix(s: str) -> str | None:
+    """Validiert und normalisiert einen LLM-emittierten Path-Prefix.
+
+    Akzeptiert sowohl absolute (``/AdminLTE-master/``) als auch relative
+    (``AdminLTE-master/``) Form vom LLM — der PASS1-Prompt verlangt zwar
+    explizit „absolute path prefixes" mit Leading-Slash, in der Praxis liefert
+    Trivy aber bei ``rootfs /``-Scans Pfade RELATIV zur Scan-Root (siehe
+    ``agent/secscan-agent.sh::SCAN_PATH``-Default ``"/"`` plus Trivy-Konvention
+    Pfade ohne Leading-Slash zu reporten).
+
+    Bugfix 2026-05-24: persistiere immer in normalisierter relativer Form
+    (``lstrip("/")``), damit der Matcher in ``group_matcher.py`` deterministisch
+    gegen Trivys Output vergleichen kann. Forbidden-Set und Min-/Max-Laenge
+    werden NACH der Normalisierung geprueft, damit ``"/"`` allein nicht durch
+    Strip zur leeren Zeichenkette wird und trotzdem als forbidden gilt.
+    """
     if not isinstance(s, str):
         return None
     stripped = s.strip()
     if stripped in _FORBIDDEN_PATTERNS:
         return None
-    if not stripped.startswith("/"):
-        return None
-    if not (_PATH_PREFIX_MIN <= len(stripped) <= _PATH_PREFIX_MAX):
-        return None
     if not _is_ascii_no_nul(stripped):
         return None
-    return stripped
+    normalized = stripped.lstrip("/")
+    # Nach dem Strip nochmal pruefen — ein reines ``"/"`` oder ``"////"`` wird
+    # zu leer.
+    if not normalized or normalized in _FORBIDDEN_PATTERNS:
+        return None
+    if not (_PATH_PREFIX_MIN <= len(normalized) <= _PATH_PREFIX_MAX):
+        return None
+    return normalized
 
 
 def _sanitize_pkg_name(s: str) -> str | None:

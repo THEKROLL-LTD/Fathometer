@@ -87,7 +87,6 @@
   {% if _total_pending > 0 %}
     <section class="mt-6" data-test="pending-grouping-section">
       <header class="flex items-center gap-2 mb-2">
-        <span class="loading loading-spinner loading-xs opacity-60" aria-hidden="true"></span>
         <h3 class="text-sm font-mono uppercase tracking-[0.12em] opacity-65">
           Pending grouping
         </h3>
@@ -96,8 +95,7 @@
         </span>
       </header>
       <p class="text-xs opacity-60 mb-2">
-        These findings have not been assigned to an application group yet.
-        The risk reviewer worker will pick them up shortly.
+        These findings have not been assigned to an application group.
       </p>
       <div class="space-y-1">
         {% for band, count in pending_grouping_counts.items() if count > 0 %}

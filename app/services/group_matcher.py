@@ -84,13 +84,24 @@ class GroupMatcher:
             groups = list(self._groups)
 
         # 1) path_prefixes — laengster Match gewinnt.
-        target = finding.target_path or ""
+        # Bugfix 2026-05-24: Slash-insensitive vergleichen. Trivys
+        # ``Result.Target``/``PkgPath`` sind bei ``rootfs /``-Scans relativ und
+        # tragen keinen Leading-Slash (``AdminLTE-master/...``), waehrend
+        # LLM-emittierte Prefixes laut PASS1-Prompt mit ``/`` beginnen
+        # (``/AdminLTE-master/``). Der Pass1-Validator normalisiert seit
+        # demselben Commit beim Persistieren auf relative Form — der ``lstrip``
+        # hier ist defensive Forward-Compat gegen Legacy-Rows in der
+        # ``application_groups``-Library.
+        target_norm = (finding.target_path or "").lstrip("/")
         best: tuple[int, ApplicationGroup] | None = None
-        if target:
+        if target_norm:
             for grp in groups:
                 for prefix in grp.path_prefixes or []:
-                    if prefix and target.startswith(prefix):
-                        candidate = (len(prefix), grp)
+                    if not prefix:
+                        continue
+                    prefix_norm = prefix.lstrip("/")
+                    if prefix_norm and target_norm.startswith(prefix_norm):
+                        candidate = (len(prefix_norm), grp)
                         if best is None or candidate[0] > best[0]:
                             best = candidate
         if best is not None:
