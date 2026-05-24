@@ -52,8 +52,8 @@
       {% endif %}
       <div class="host__beat-tick {{ tick_cls }}"
            data-day="{{ cell.day.isoformat() }}"
-           data-band="{{ band or 'none' }}"
-           title="{{ cell.day.isoformat() }}{% if band %} · {{ band }}{% endif %}{% if not cell.had_scan %} · no scan{% endif %}"
+           data-band="{{ band or '' }}"
+           data-had-scan="{{ '1' if cell.had_scan else '0' }}"
            tabindex="-1"
            aria-hidden="true"></div>
     {% endfor %}

@@ -377,6 +377,50 @@ details[open] > .hostgroup__header .hostgroup__chevron {
   100% { opacity: 1; transform: scaleY(1.00); }
 }
 
+/* ── Heartbeat-Tooltip-Overlay ────────────────────────────────
+   Custom-Tooltip statt nativer Browser-Tooltip.
+   Pro Hover zur Laufzeit gebaut (sidebar_heartbeat_tip.js) und ins
+   .host__beat-Parent eingehängt. Kein Pflicht-Markup im Template. */
+.heartbeat-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  background: var(--surface-elevated);
+  border: var(--border);
+  padding: 7px 10px 8px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+  animation: heartbeat-tip-in 200ms var(--ease-materialize) both;
+}
+.heartbeat-tip__date {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+.heartbeat-tip__state {
+  margin-top: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.heartbeat-tip__state--alarm   { color: var(--accent); }
+.heartbeat-tip__state--warn    { color: var(--text-primary); }
+.heartbeat-tip__state--ok      { color: var(--text-secondary); }
+.heartbeat-tip__state--unknown { color: var(--text-tertiary); }
+.heartbeat-tip__hint {
+  margin-top: 3px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+@keyframes heartbeat-tip-in {
+  from { opacity: 0; transform: translate(-50%, 4px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
 /* ── Scrollbar ────────────────────────────────────────────── */
 
 .sidebar__list::-webkit-scrollbar { width: 6px; }
