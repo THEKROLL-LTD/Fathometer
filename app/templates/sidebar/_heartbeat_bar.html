@@ -2,14 +2,22 @@
    Mapping: dominant_risk_band → CSS-Klasse (ADR-0035 §Frontend-Mapping).
    Genau 30 Cells. Skeleton-Pfad mit host__beat__probe-Scan-Animation.
 
-   Erwartete Variable:
-     - `cells` : list[DailyStatus] — älteste zuerst.
-                 Jedes Element hat:
-                   - day                : date
-                   - dominant_risk_band : RiskBand | None (NEU, ADR-0035)
-                   - max_severity       : Severity | None  (bleibt für Compat.)
-                   - had_scan           : bool
-                 Leer beim initialen Page-Render → Skeleton-Pfad.
+   Single-Source-Partial fuer Initial-Render UND HTMX-OOB-Batch-Response
+   (CLAUDE.md §HTMX-OOB-Single-Source-Pattern). Das Outer-Element traegt
+   immer `id="sidebar-host-<id>-heartbeat"` als Swap-Anker; der `oob_swap`-
+   Flag ergaenzt `hx-swap-oob` nur im OOB-Pfad. Niemals separates OOB-
+   Markup hier hineinkopieren — beide Pfade includieren genau dieses File.
+
+   Erwartete Variablen:
+     - `server`   : Server — Pflicht (fuer ID-Konstruktion).
+     - `cells`    : list[DailyStatus] — älteste zuerst. Jedes Element hat:
+                      - day                : date
+                      - dominant_risk_band : RiskBand | None (str | None, KEIN Enum)
+                      - max_severity       : Severity | None  (bleibt für Compat.)
+                      - had_scan           : bool
+                    Leer beim initialen Page-Render → Skeleton-Pfad.
+     - `oob_swap` : bool — Default False; auf True setzen wenn dieses Partial
+                    als HTMX-OOB-Fragment ausgeliefert wird.
 
    Color-Reduction-Rule (ADR-0033 §3, ADR-0035 §2):
      escalate           → beat--alarm    (cyan)
@@ -21,13 +29,16 @@
 
    Sicherheit: kein |safe — alle Werte sind Enum-Strings aus dem Backend.
 #}
+{% set oob_swap = oob_swap | default(false) %}
 {% if cells %}
   <div class="host__beat"
+       id="sidebar-host-{{ server.id }}-heartbeat"
+       {% if oob_swap %}hx-swap-oob="outerHTML:#sidebar-host-{{ server.id }}-heartbeat"{% endif %}
        role="img"
        aria-label="30-day heartbeat">
     {% for cell in cells %}
       {# dominant_risk_band auf CSS-Klasse mappen #}
-      {% set band = cell.dominant_risk_band.value if cell.dominant_risk_band else None %}
+      {% set band = cell.dominant_risk_band %}
       {% if band == 'escalate' %}
         {% set tick_cls = 'beat--alarm' %}
       {% elif band in ('act', 'mitigate') %}
@@ -51,6 +62,8 @@
   {# Skeleton-Pfad: 30 dim Ticks + Scan-Probe-Beam (ADR-0035 §4, DS §1).
      Genau 30 Cells — identische Abmessungen wie Live-Cells (kein Layout-Reflow). #}
   <div class="host__beat host__beat--skel"
+       id="sidebar-host-{{ server.id }}-heartbeat"
+       {% if oob_swap %}hx-swap-oob="outerHTML:#sidebar-host-{{ server.id }}-heartbeat"{% endif %}
        role="presentation"
        aria-busy="true"
        aria-label="loading heartbeat"

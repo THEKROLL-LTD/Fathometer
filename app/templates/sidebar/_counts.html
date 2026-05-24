@@ -1,0 +1,49 @@
+{# Sidebar-Counts (escalate/act) — Single-Source-Partial
+   (CLAUDE.md §HTMX-OOB-Single-Source-Pattern).
+
+   Wird sowohl im Initial-Render (oob_swap=false) als auch im Batch-OOB-Pfad
+   (oob_swap=true) verwendet. Niemals separates OOB-Markup duplizieren —
+   beide Pfade includieren genau dieses File.
+
+   Erwartete Variablen:
+     - `server`     : Server (Pflicht, fuer ID-Konstruktion).
+     - `risk`       : dict[str, int] — {'escalate': n, 'act': m} oder {}.
+     - `is_loading` : bool — Skeleton-Pfad (vom Caller berechnet).
+     - `oob_swap`   : bool — Default False.
+
+   Sicherheit: Autoescape — alle Werte sind Ints aus dem Backend.
+#}
+{% set oob_swap = oob_swap | default(false) %}
+{% set has_escalate = risk and risk.get('escalate', 0) > 0 %}
+{% set has_act = risk and risk.get('act', 0) > 0 %}
+<span id="sidebar-host-{{ server.id }}-counts"
+      class="host__counts"
+      {% if oob_swap %}hx-swap-oob="outerHTML:#sidebar-host-{{ server.id }}-counts"{% endif %}>
+  {# Escalate-Count #}
+  <span class="host__count {{ 'host__count--crit' if has_escalate else 'host__count--zero' }}"
+        data-test="sidebar-row-escalate-{{ server.id }}">
+    {% if is_loading %}
+      <span class="stat-skel stat-skel--right" aria-label="escalate count loading">
+        <span class="stat-skel__dash" style="width: 18px;"></span>
+      </span>
+    {% elif has_escalate %}
+      {{ risk['escalate'] }}
+    {% else %}
+      —
+    {% endif %}
+  </span>
+
+  {# Act-Count #}
+  <span class="host__count {{ '' if has_act else 'host__count--zero' }}"
+        data-test="sidebar-row-act-{{ server.id }}">
+    {% if is_loading %}
+      <span class="stat-skel stat-skel--right" aria-label="act count loading">
+        <span class="stat-skel__dash" style="width: 14px;"></span>
+      </span>
+    {% elif has_act %}
+      {{ risk['act'] }}
+    {% else %}
+      —
+    {% endif %}
+  </span>
+</span>

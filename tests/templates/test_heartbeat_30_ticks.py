@@ -21,19 +21,22 @@ from flask import Flask
 def _make_cell(
     day: date, dominant_risk_band: str | None = None, had_scan: bool = True
 ) -> MagicMock:
-    """Minimal-Mock eines DailyStatus-Objekts."""
+    """Minimal-Mock eines DailyStatus-Objekts.
+
+    `dominant_risk_band` ist im echten Code `str | None` (RiskBand = str),
+    KEIN Enum. Der Mock setzt das Attribut direkt als String."""
     cell = MagicMock()
     cell.day = day
     cell.had_scan = had_scan
-    # dominant_risk_band kann ein Enum-Objekt oder None sein.
-    # Das Template macht: band = cell.dominant_risk_band.value if cell.dominant_risk_band else None
-    if dominant_risk_band is None:
-        cell.dominant_risk_band = None
-    else:
-        rb_mock = MagicMock()
-        rb_mock.value = dominant_risk_band
-        cell.dominant_risk_band = rb_mock
+    cell.dominant_risk_band = dominant_risk_band
     return cell
+
+
+def _make_server(server_id: int = 1) -> MagicMock:
+    """Minimal-Mock eines Server-Objekts (nur `.id` wird im Template gelesen)."""
+    srv = MagicMock()
+    srv.id = server_id
+    return srv
 
 
 def _render_heartbeat_bar(app: Flask, cells: list | None) -> str:
@@ -44,7 +47,7 @@ def _render_heartbeat_bar(app: Flask, cells: list | None) -> str:
     from flask import render_template
 
     with app.test_request_context("/"):
-        return render_template("sidebar/_heartbeat_bar.html", cells=cells)
+        return render_template("sidebar/_heartbeat_bar.html", cells=cells, server=_make_server())
 
 
 BASE_DATE = date(2026, 5, 15)

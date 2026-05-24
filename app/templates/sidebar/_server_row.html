@@ -43,34 +43,8 @@
 
     <span class="host__name">{{ server.name }}</span>
 
-    {# Escalate-Count #}
-    <span class="host__count {{ 'host__count--crit' if has_escalate else 'host__count--zero' }}"
-          data-test="sidebar-row-escalate-{{ server.id }}">
-      {% if is_loading %}
-        <span class="stat-skel stat-skel--right" aria-label="escalate count loading">
-          <span class="stat-skel__dash" style="width: 18px;"></span>
-        </span>
-      {% elif has_escalate %}
-        {{ risk['escalate'] }}
-      {% else %}
-        —
-      {% endif %}
-    </span>
-
-    {# Act-Count #}
-    {% set has_act = risk and risk.get('act', 0) > 0 %}
-    <span class="host__count {{ '' if has_act else 'host__count--zero' }}"
-          data-test="sidebar-row-act-{{ server.id }}">
-      {% if is_loading %}
-        <span class="stat-skel stat-skel--right" aria-label="act count loading">
-          <span class="stat-skel__dash" style="width: 14px;"></span>
-        </span>
-      {% elif has_act %}
-        {{ risk['act'] }}
-      {% else %}
-        —
-      {% endif %}
-    </span>
+    {# Escalate-/Act-Counts via Single-Source-Partial (CLAUDE.md §HTMX-OOB-Single-Source-Pattern) #}
+    {% include "sidebar/_counts.html" with context %}
   </a>
 
   {# OS-Subline: os · kernel · arch #}
