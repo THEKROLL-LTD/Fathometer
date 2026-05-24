@@ -21,14 +21,20 @@
 #}
 
 {# Hidden-Trigger für initialen Lazy-Load (nur beim Full-Page-Render).
-   Polling-Endpoint setzt lazy_load_trigger=False damit kein Re-Trigger-Loop entsteht. #}
+   Polling-Endpoint setzt lazy_load_trigger=False damit kein Re-Trigger-Loop entsteht.
+
+   Minimum-Display-Duration für den Skeleton-Pfad (TICKET-005 Smoke-Befund):
+   swap:700ms verzögert den DOM-Swap nach Response-Empfang, damit die
+   Skeleton-Probe-Beam-Animation eine sichtbare Schleife macht statt zu
+   flashen. Gilt NUR für den Initial-Lazy-Load, NICHT für das 60-s-Polling
+   am #server-list (das swapt sofort, hat ja keine Skeletons mehr). #}
 {% if lazy_load_trigger | default(true) %}
 <span class="sr-only"
       data-test="sidebar-lazy-load-trigger"
       hx-get="{{ url_for('sidebar_partials.sidebar_partial') }}{% if filter_tags %}?{% for t in filter_tags %}tag={{ t | urlencode }}{% if not loop.last %}&{% endif %}{% endfor %}{% endif %}"
       hx-trigger="load"
       hx-target="#server-list"
-      hx-swap="outerHTML"
+      hx-swap="outerHTML swap:700ms"
       aria-hidden="true"></span>
 {% endif %}
 

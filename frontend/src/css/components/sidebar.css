@@ -244,6 +244,11 @@ details[open] > .hostgroup__header .hostgroup__chevron {
 
 /* ── Escalate / Act Counts ────────────────────────────────── */
 
+/* Single-Source-Wrapper aus _counts.html: behält den OOB-Swap-Anker
+   im DOM, ist aber selbst kein Grid-Item — die beiden inneren
+   host__count-Spans werden direkte Grid-Children von .host__top. */
+.host__counts { display: contents; }
+
 .host__count {
   font-family: var(--font-mono);
   font-size: 12px;
