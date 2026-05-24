@@ -1,69 +1,66 @@
-{# Schlanke Findings-Tabelle fuer das Drill-down innerhalb einer
-   Application-Group-Card (Block P, ADR-0023).
+{# Findings-Stack fuer das Drill-down innerhalb einer Application-Group-Card
+   (Block X Phase G, ADR-0038 §7 — umbau von <table> zu <details>-Stack).
 
    Bewusst minimaler Subset des Block-K-`_view_list.html`-Markups: kein
-   Bulk-Select (Selection ist Section-weit auf Server-Detail-Ebene), keine
-   Mode-Toggle/Sort-Header (Sortierung kommt vom Backend), keine Modals
-   pro Zeile (Detail-Modals leben weiterhin in der Section-Hauptansicht
-   oder dem Dashboard).
+   Bulk-Select, keine Mode-Toggle/Sort-Header, keine Modals pro Zeile.
 
    Variablen-Vertrag:
      - `findings` : list[Finding] — Findings dieser Group, Default-Sort-
                     Reihenfolge bereits vom Backend.
 
-   Wir rendern Worst-Finding-Anker `id="finding-{{f.id}}"`, damit der
+   Sicherheit: `f.risk_band_reason` NIEMALS mit |safe ausgeben — LLM-Output,
+   Jinja-Autoescape ist Pflicht (ADR-0038 §G4).
+
+   Worst-Finding-Anker `id="finding-{{f.id}}"` bleibt erhalten, damit der
    Worst-Finding-Link in der Card auf die Zeile springt.
 #}
 {% from "_macros.html" import severity_badge, kev_badge, status_badge,
                               cvss_pill, epss_pill, package_cell, quick_copy %}
 
 {% if findings %}
-<div class="overflow-x-auto rounded-box bg-base-100/40 border border-base-300">
-  <table class="table table-xs align-middle w-full">
-    <thead class="border-b border-base-300">
-      <tr>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">CVE / Titel</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Paket</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">EPSS</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">CVSS</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Status</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Severity</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for f in findings %}
-        <tr id="finding-{{ f.id }}"
-            class="hover {% if f.is_kev %}bg-error/5{% endif %}"
-            data-test="group-finding-row-{{ f.id }}">
-          <td>
-            <div class="flex items-center gap-2 flex-wrap min-w-0">
-              <span class="font-mono text-xs font-semibold">{{ f.identifier_key }}</span>
-              {{ kev_badge(f.is_kev, size='xs') }}
-              {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
-            </div>
-            {% if f.title %}
-              <div class="text-xs opacity-60 truncate max-w-[44ch] mt-0.5"
-                   title="{{ f.title }}">{{ f.title }}</div>
-            {% endif %}
-          </td>
-          <td class="max-w-[24ch]">
-            <div class="flex items-center gap-1 min-w-0">
-              {{ package_cell(f.package_name, f.finding_class) }}
-            </div>
-            {% if f.installed_version %}
-              <div class="font-mono text-[10px] opacity-50">
-                {{ f.installed_version }}{% if f.fixed_version %} → <span class="text-success">{{ f.fixed_version }}</span>{% endif %}
-              </div>
-            {% endif %}
-          </td>
-          <td>{{ epss_pill(f.epss_score) }}</td>
-          <td>{{ cvss_pill(f.cvss_v3_score) }}</td>
-          <td>{{ status_badge(f.status) }}</td>
-          <td>{{ severity_badge(f.severity) }}</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="sd-findings-stack">
+  {% for f in findings %}
+    <details class="sd-finding"
+             id="finding-{{ f.id }}"
+             data-test="group-finding-row-{{ f.id }}">
+      <summary class="sd-finding__summary">
+        <span class="sd-finding__cve">
+          <span class="sd-finding__cve-id">{{ f.identifier_key }}</span>
+          {{ kev_badge(f.is_kev, size='xs') }}
+          {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+          {% if f.title %}
+            <span class="sd-finding__title" title="{{ f.title }}">{{ f.title }}</span>
+          {% endif %}
+        </span>
+        <span class="sd-finding__pkg">
+          {{ package_cell(f.package_name, f.finding_class) }}
+          {% if f.installed_version %}
+            <span class="sd-finding__pkg-diff">
+              <span class="sd-finding__pkg-from">{{ f.installed_version }}</span>
+              {% if f.fixed_version %}
+                <span class="sd-finding__pkg-arrow">→</span>
+                <span class="sd-finding__pkg-to">{{ f.fixed_version }}</span>
+              {% endif %}
+            </span>
+          {% endif %}
+        </span>
+        <span class="sd-finding__metrics">
+          {{ epss_pill(f.epss_score) }}
+          {{ cvss_pill(f.cvss_v3_score) }}
+          {{ status_badge(f.status) }}
+          {{ severity_badge(f.severity, size='xs') }}
+        </span>
+      </summary>
+      {%- if f.risk_band_reason -%}
+        <div class="sd-finding__body">
+          <div class="sd-finding__reason">
+            <div class="sd-finding__reason-eyebrow">KI-Bewertung</div>
+            <p class="sd-finding__reason-text">{{ f.risk_band_reason }}</p>
+          </div>
+        </div>
+      {%- endif -%}
+    </details>
+  {% endfor %}
 </div>
 {% else %}
   <p class="text-xs opacity-60 italic">Keine Findings in dieser Group.</p>

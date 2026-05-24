@@ -94,6 +94,10 @@
   z-index: 0;
 }
 .sd-status-pill > * { position: relative; z-index: 1; }
+/* Phase G1 — color modifiers. --alert traegt Accent-Color, --update neutral. */
+.sd-status-pill--alert { color: var(--accent); border-left-color: var(--accent); }
+.sd-status-pill--update { color: var(--text-tertiary); border-left-color: var(--text-tertiary); }
+.sd-status-pill__sub { font-size: 10px; letter-spacing: 0.06em; opacity: 0.7; }
 
 .sd-status-flag {
   display: inline-flex;
@@ -967,10 +971,41 @@
 .sd-cap--accent   { color: var(--accent); border-color: var(--accent); }
 .sd-cap--neutral  { color: var(--text-secondary); border-color: var(--border-subtle); }
 
+/* Phase G3 — Findings-Stack (ersetzt <table>) */
+.sd-findings-stack { display: flex; flex-direction: column; }
+
+/* sd-finding__metrics — rechts-buendige Kapsel-Gruppe in der Summary-Row */
+.sd-finding__metrics {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 /* KI-Bewertung Body */
 .sd-finding__body {
   padding: 0 16px 18px 58px;
   animation: sd-flyout-in 240ms var(--ease-materialize);
+}
+/* Phase G3 — KI-Bewertung Reason-Block (BEM-Sub statt .sd-ai-*-Aliasse) */
+.sd-finding__reason { margin: 0; }
+.sd-finding__reason-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 6px;
+}
+.sd-finding__reason-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 78ch;
+  letter-spacing: 0.01em;
 }
 .sd-ai-eyebrow {
   font-family: var(--font-mono);

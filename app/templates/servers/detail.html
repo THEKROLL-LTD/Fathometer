@@ -69,25 +69,35 @@
            Liste bleibt unangetastet (anderer Kontext). #}
         {% if server.revoked_at %}
           <span class="badge badge-sm badge-error font-mono"
-                title="Widerrufen am {{ server.revoked_at.strftime('%Y-%m-%d %H:%M') }}">
+                title="Revoked on {{ server.revoked_at.strftime('%Y-%m-%d %H:%M') }}">
             revoked
           </span>
         {% elif server.retired_at %}
           <span class="badge badge-sm badge-ghost font-mono"
-                title="Stillgelegt am {{ server.retired_at.strftime('%Y-%m-%d %H:%M') }}">
+                title="Decommissioned on {{ server.retired_at.strftime('%Y-%m-%d %H:%M') }}">
             retired
           </span>
         {% endif %}
-        {% if scan_stale %}
-          <span class="badge badge-sm badge-warning font-mono"
-                title="Letzter Scan aelter als erwarteter Interval ({{ server.expected_scan_interval_h }}h).">
+        {# Phase G2: kombinierte stale-Pill wenn beide stale, sonst einzeln.
+           Outdated-Pills (Block N) bleiben unten unangetastet — verschiedene
+           Operator-Aktionen, ADR-0038 §9b. #}
+        {% if scan_stale and db_stale %}
+          <span class="sd-status-flag"
+                title="Last scan and Trivy DB are both stale. Scan threshold: {{ server.expected_scan_interval_h }}h. DB threshold: 7 days."
+                data-test="pill-stale-combined">
             stale
           </span>
-        {% endif %}
-        {% if db_stale %}
-          <span class="badge badge-sm badge-warning font-mono"
-                title="Trivy-DB veraltet (Schwelle: 7 Tage).">
-            db veraltet
+        {% elif scan_stale %}
+          <span class="sd-status-flag"
+                title="Last scan older than expected interval ({{ server.expected_scan_interval_h }}h)."
+                data-test="pill-scan-stale">
+            stale
+          </span>
+        {% elif db_stale %}
+          <span class="sd-status-flag"
+                title="Trivy DB stale (threshold: 7 days)."
+                data-test="pill-db-stale">
+            db stale
           </span>
         {% endif %}
         {# Block N (ADR-0021): drei Outdated-Pills. `is_agent_outdated` etc.
