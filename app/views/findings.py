@@ -229,7 +229,10 @@ def index() -> str:
     return render_template(
         "findings/index.html",
         filt=filt,
-        view_filter=filt,  # Alias fuer `sort_header()`-Macro (gemeinsamer Filter-Vertrag).
+        # `view_filter`-Alias wird vom CSV-Export-Link im Index-Template
+        # benoetigt (`view_filter.to_query_string()`); ansonsten teilen sich
+        # `filt` und `view_filter` denselben `DashboardFilter`-Vertrag.
+        view_filter=filt,
         buckets=buckets,
         pending_bucket=pending_bucket,
         total_buckets=total_buckets,
@@ -242,15 +245,6 @@ def index() -> str:
         available_application_groups=available_application_groups,
         bulk_form=BulkActionForm(),
         csrf_form=CSRFOnlyForm(),
-        # Etappe-3-Backcompat-Stubs — werden in Etappe 3 entfernt, sobald das
-        # Index-Template auf die Bucket-Variablen umgebaut ist.
-        findings=[],
-        total=total_findings_in_buckets,
-        page=1,
-        per_page=20,
-        total_pages=0,
-        sort="risk",
-        dir="desc",
     )
 
 

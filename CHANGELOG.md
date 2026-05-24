@@ -4,6 +4,37 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — TICKET-006: Findings Cross-Server Bucket-View (ADR-0037)
+
+### Findings-Seite
+
+- `/findings` rendert eine Cross-Server Bucket-View nach `(Server, ApplicationGroup)` mit collapsed HTMX-Lazy-Cards (ADR-0037, ersetzt ADR-0025 §(5)).
+- Bulk-Acknowledge unterstuetzt Bucket-Header-Selektion (ganzer Bucket auf einen Klick) plus Mix mit Einzel-Finding-IDs.
+- Pending-Bucket (Findings ohne Group-Zuordnung) als Cross-Server-Sammler am Ende der Liste mit Server-Spalte.
+- Header-Counter zeigt "X Gruppen · Y Findings" statt "X Treffer · Seite N von M".
+
+### Added
+
+- `app/services/findings_bucket_query.py` — `BucketHeader`-Dataclass, `list_buckets()`, `pending_bucket_header()`, `list_bucket_findings()`, `resolve_bucket_to_finding_ids()`. Gemeinsamer `_apply_bucket_filters`-Helper fuer alle vier Public-Funktionen (Single-Source).
+- Routes `GET /findings/bucket`, `GET /findings/pending`, `POST /findings/bulk/acknowledge`.
+- Templates `_partials/bucket_card.html`, `_partials/pending_bucket_card.html`, `_partials/bucket_findings_table.html`, `_partials/pending_bucket_findings_table.html`, `_partials/bucket_bulk_ack_modal.html`.
+- Alpine-Komponente `bucketBulkSelection` in `app/static/js/bucket_bulk_ack.js`.
+- 55+ neue Pure-Unit-Tests (14 Service, 22 View, 19 Template).
+- ADR-0037 (`docs/decisions/0037-findings-cross-server-bucket-view.md`).
+
+### Changed
+
+- `app/views/findings.py::index()` rendert Bucket-Liste via `list_buckets` statt flacher Tabelle via `list_findings_cross_server`.
+- `app/templates/findings/index.html` umgebaut auf Bucket-View. Sort-Hidden-Inputs (`sort`/`dir`) entfernt.
+- ARCHITECTURE.md §7 (`/findings`-Beschreibung).
+
+### Removed
+
+- Outer-Pagination auf `/findings` (Bucket-Header werden alle gerendert).
+- Sort-Selector auf `/findings` (`?sort=`/`?dir=` werden ignoriert; Spec-fixe Sortierung).
+- `_explicit_sort()`-Helper in `app/views/findings.py` (Sort-Bookmark-Trigger entfaellt).
+- Backcompat-Stubs in `findings.index()`-Render-Context (Etappe-3-Temporaer).
+
 ## [Unreleased] — ADR-0031: Theme-Switcher entfernt
 
 Operator nutzt seit Beginn ausschließlich das Dark-Theme; der Toggle war

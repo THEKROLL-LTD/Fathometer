@@ -16,7 +16,6 @@ reine Funktions-Tests gegen den Views-Layer.
 
 from __future__ import annotations
 
-import contextlib
 import json
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -736,16 +735,15 @@ def test_filter_querystring_from_request_excludes_page(app: Flask) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Backcompat-Suppression (Etappe 2 noch): index() stellt Stub-Vars bereit
-# (`findings=[]`, `page=1`, etc.) — wir pruefen NICHT auf deren Inhalt;
-# der Test dient nur als Reminder dass die Stubs noch da sind und nicht
-# crashen.
+# Etappe 4 (ADR-0037): Backcompat-Stubs (`findings=[]`, `page=1`, `per_page`,
+# `total_pages`, `sort`, `dir`) wurden aus dem Render-Context entfernt — das
+# neue `findings/index.html`-Template referenziert sie nicht mehr. Falls ein
+# zukuenftiger Test sie wieder als Context-Var braucht, ist das ein Smell
+# (Template-Drift) und sollte erst per ADR begruendet werden.
 # ---------------------------------------------------------------------------
 
 
-def test_index_context_contains_backcompat_stubs(
-    app: Flask, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_index_context_has_no_legacy_stubs(app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.views.findings.list_buckets", MagicMock(return_value=[]))
     monkeypatch.setattr("app.views.findings.pending_bucket_header", MagicMock(return_value=None))
     mock_sess = MagicMock()
@@ -757,16 +755,13 @@ def test_index_context_contains_backcompat_stubs(
     from app.views.findings import index
 
     inner = _call_inner(index)
-    # Form-Konstruktoren brauchen einen App-Context mit SECRET_KEY — der
-    # ist via `app` Fixture vorhanden.
-    with (
-        app.test_request_context("/findings"),
-        contextlib.suppress(Exception),
-    ):
+    with app.test_request_context("/findings"):
         inner()
 
-    # Wenn der Render durchgegangen ist, MUSS er die Backcompat-Keys haben.
-    if "ctx" in captured:
-        ctx = captured["ctx"]
-        for key in ("findings", "page", "per_page", "total_pages", "sort", "dir"):
-            assert key in ctx, f"Backcompat-Stub `{key}` fehlt im Context"
+    assert "ctx" in captured, "render_template wurde nicht aufgerufen"
+    ctx = captured["ctx"]
+    for key in ("findings", "page", "per_page", "total_pages", "sort", "dir"):
+        assert key not in ctx, (
+            f"Legacy-Stub `{key}` ist wieder im Context aufgetaucht — "
+            "ADR-0037 hat die Outer-Pagination und den Sort-Selector entfernt."
+        )

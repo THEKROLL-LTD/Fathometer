@@ -223,15 +223,19 @@ Der Dashboard-Pane (`#dashboard-pane`) und die Sidebar-Server-Liste (`#server-li
 
 Die alte Server-Karten-Grid-Variante des Dashboards (Block D/I) ist mit ADR-0017 in die Sidebar-Server-Liste gewandert; mit ADR-0020 fielen zusätzlich die separate „Aufmerksamkeit nötig"-Sektion und die globale Suche-View (`/findings/search`) weg; mit ADR-0025 wandert die Cross-Server-Findings-Tabelle auf eine eigene Seite.
 
-**`/findings` (Block Q, ADR-0025)** ist die dedizierte Cross-Server-Triage-Surface. Layout:
+**`/findings` (Block Q, ADR-0025 + ADR-0037)** ist die dedizierte Cross-Server-Triage-Surface. Seit ADR-0037 (TICKET-006) ist die Sicht eine Bucket-View nach `(Server, ApplicationGroup)` statt einer flachen Findings-Tabelle.
 
-- **Header** — Eyebrow `FINDINGS` + Title `Findings`; rechts ein Counter `{{ total }} Treffer · Seite N von M` sobald ein Filter aktiv ist und Treffer vorliegen.
-- **Filter-Bar als `<form method="get">`** mit `q` (Volltext, Server-/CVE-/Paket-/Titel-Substring), `tag`, `risk_band`, `application_group`, `action_required`, `severity`-Threshold, `status` (Default `offen`), `kev_only`, `stale_only`. **Expliziter Submit-Button „Anwenden"**; keine `hx-trigger`-Auto-Submits auf den Feldern. Enter im Such-Input submittet das Formular.
-- **Default-State leer.** Ohne aktiven Filter und ohne expliziten `?sort=`/`?dir=`-Param rendert die Seite einen Empty-State-Block mit dem Hinweis „Filter setzen oder suchen — die Tabelle bleibt sonst leer." plus den globalen Countern `total_findings` (alle OPEN-Findings) und `visible_servers` (aktive Server). Erst nach Submit wird die Findings-Query ausgeführt.
-- **Tabelle** mit Bulk-Select-Spalte ganz links, gefolgt von `Risk` (Default-Sort DESC nach `RISK_BAND_SORT_RANK`), `Group` (Application-Group-Label, leer bei Findings ohne `application_group_id`), Server (mit Tag-Pills), CVE/Titel, Paket+Location, EPSS, `Status`, `CVSS-Severity`, `Erstmals` — alle Spalten sortierbar via `sort_header()`-Macro. **Keine Heartbeat-Spalte** (die lebt auf Dashboard/Sidebar).
-- **Pagination klassisch nummeriert.** Page-Size fix 50 Findings/Seite. URL-Param `?page=N` (1-basiert). Pager unter der Tabelle: `« vorherige · Seite N von M · nächste »`. Kein Endless-Scroll, kein HTMX-Append.
-- **CSV-Export-Button** rechts in der Filter-Section-Toolbar. Export-Scope = aktive Filter, **alle** Seiten (ignoriert `page`).
-- **Bulk-Ack-Button** erscheint sobald `selection > 0` und nutzt den Block-F-Endpoint `POST /api/findings/bulk-acknowledge` mit `finding_ids`-Flavor.
+Layout:
+
+- **Header** — Eyebrow `FINDINGS` + Title `Findings`; rechts ein Counter `{{ total_buckets }} Gruppen · {{ total_findings_in_buckets }} Findings` sobald ein Filter aktiv ist und Treffer vorliegen.
+- **Filter-Bar als `<form method="get">`** mit `q`, `tag`, `risk_band`, `application_group`, `action_required`, `severity`-Threshold, `status` (Default `offen`), `kev_only`, `stale_only`. Expliziter Submit-Button „Anwenden"; keine `hx-trigger`-Auto-Submits.
+- **Default-State leer.** Ohne aktiven Filter rendert die Seite einen Empty-State-Block. `?sort=`/`?dir=` werden seit ADR-0037 serverseitig ignoriert (Sort-Selector entfällt — Spec-fixe Sortierung).
+- **Bucket-Header eager, Bucket-Body HTMX-Lazy.** Pro `(server_id, application_group_id)`-Tupel mit mindestens einem Match rendert die Seite eine Card mit Risk-Pille, Server-Link, Group-Label, Findings-Count und einer Bulk-Header-Checkbox. Bucket-Sortierung: Risk-Band-Rank desc (escalate → noise → pending; Pending-Buckets ranken als Rank-40), Tiebreak Server-Name asc, Group-Label asc. Bucket-Body wird per HTMX vom Endpoint `GET /findings/bucket?server_id=N&group_id=N&page=N` nachgeladen (20 Findings/Seite + Sub-Pager).
+- **Pending-Bucket** (Findings ohne Group-Zuordnung, cross-server) erscheint als letzter Eintrag in der Liste. Body-URL `GET /findings/pending?page=N` mit Server-Spalte in den Zeilen.
+- **Bulk-Acknowledge** mit Bucket+Finding-Mix. Bucket-Header-Checkbox markiert die ganze `(server_id, group_id)`-Junction (cross-server-deduplizierend, weil Filter mitgegeben wird); Finding-Checkboxen innerhalb eines aufgeklappten Buckets sind unabhängig wählbar. Submit per `POST /findings/bulk/acknowledge` mit `bucket_selections` (JSON) + `finding_ids` (JSON) + optionalem Comment. Server-side dedupliziert; idempotent (nur OPEN-Findings werden geändert).
+- **CSV-Export** bleibt unverändert flach (`/findings/export.csv` nutzt weiter `stream_findings_csv_cross_server`).
+
+Outer-Pagination entfällt (ADR-0037): Bucket-Header werden alle gerendert die zum Filter passen. Sub-Pagination wirkt nur innerhalb eines aufgeklappten Buckets.
 
 **`/servers/{id}` (Server-Detail)** ist die Triage-Hauptansicht. Header mit Server-Info (Name, Tags-Bearbeiten-Knopf, OS+Kernel, Trivy-DB-Stand, Last-Seen) und einer **Status-Pill-Reihe nur für auffällige Zustände** (revoked/retired plus stale, db veraltet, agent-/trivy-outdated, action_required). Aktive Server ohne Auffälligkeit zeigen keine Status-Pille (ADR-0025: die früher gerenderte grüne `active`-Badge ist entfallen — Pills sollen Aufmerksamkeit signalisieren, nicht Hintergrund-Rauschen sein).
 

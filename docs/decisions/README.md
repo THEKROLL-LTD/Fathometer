@@ -30,7 +30,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0022](0022-risk-based-prioritization.md) | Risk-basierte Priorisierung: Pre-Triage-Engine, Host-Snapshot, Vendor-Severity, UI-Redesign (Block O) | Akzeptiert (§Audit-Events teilweise abgelöst durch 0027) |
 | [0023](0023-llm-risk-reviewer-and-application-grouping.md) | LLM-Risk-Reviewer mit Application-Grouping (Two-Pass) und asynchroner Job-Queue (Block P) | Akzeptiert |
 | [0024](0024-external-epss-kev-enrichment.md) | Externe EPSS-/KEV-Anreicherung | Akzeptiert |
-| [0025](0025-server-detail-and-findings-slim-down.md) | Server-Detail- und Dashboard-Entschlackung, dedizierte Findings-Seite (Block Q) | Akzeptiert |
+| [0025](0025-server-detail-and-findings-slim-down.md) | Server-Detail- und Dashboard-Entschlackung, dedizierte Findings-Seite (Block Q) | Teilweise abgelöst durch 0037 (Cross-Server-Findings-Bucket-View) |
 | [0026](0026-async-scan-ingest.md) | Asynchroner Scan-Ingest mit `scan_ingest_jobs`-Queue (Block R) | Akzeptiert |
 | [0027](0027-no-per-finding-risk-band-audit.md) | Keine per-Finding-`risk_band`-Audit-Events | Akzeptiert |
 | [0028](0028-application-group-evaluations-junction.md) | Application-Group-Evaluations als Junction-Tabelle (Block T) | Akzeptiert |
@@ -42,6 +42,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0034](0034-host-group-data-model.md) | Host-Group-Datenmodell (1:N, nullable, ohne Default-Group, Block W) | Akzeptiert |
 | [0035](0035-daily-risk-state-heartbeat-mapping.md) | Daily-Risk-State als Heartbeat-Mapping + Viewport-Lazy-Loading (Block W) | Akzeptiert |
 | [0036](0036-single-pane-polling-hx-preserve.md) | Single-Pane Dashboard-Polling mit hx-preserve + OOB-Swaps (Block W) | Akzeptiert |
+| [0037](0037-findings-cross-server-bucket-view.md) | `/findings`: Cross-Server Bucket-View nach (Server, ApplicationGroup) — ersetzt ADR-0025 §(5) | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 
