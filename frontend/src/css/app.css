@@ -12,6 +12,7 @@
 @import "./components/severity.css";
 @import "./components/sysline.css";
 @import "./components/auth.css";
+@import "./components/server-detail.css";
 
 /* Legacy-Shim als LETZTER Import — die Tailwind-Utility-Klassen darin
    sollen die niedrigste Cascade-Prioritaet haben (gleiche Specificity

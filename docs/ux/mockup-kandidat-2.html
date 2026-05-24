@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<title>SecScan – Server-Detail – Mockup Kandidat 2</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link
+  href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css"
+  rel="stylesheet"
+  type="text/css"
+/>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .sparkline { display:inline-flex; align-items:flex-end; gap:1px; height:14px; }
+  .sparkline > span { width:3px; background:currentColor; border-radius:1px; opacity:0.7; }
+  .row-item { cursor:pointer; transition: background-color 80ms; }
+  .row-item:hover { background-color: hsl(var(--b3) / 0.6); }
+  .row-item.selected { background-color: hsl(var(--p) / 0.15); border-left: 3px solid hsl(var(--p)); padding-left: 9px !important; }
+  .chat-bubble-launcher { box-shadow: 0 8px 24px hsl(var(--p) / 0.4); }
+  .pane-fade { animation: fade 120ms ease-out; }
+  @keyframes fade { from { opacity:0; transform: translateY(2px); } to { opacity:1; transform: none; } }
+  .scrollable { overflow-y:auto; }
+  .scrollable::-webkit-scrollbar { width:8px; }
+  .scrollable::-webkit-scrollbar-thumb { background: hsl(var(--bc) / 0.15); border-radius:4px; }
+</style>
+</head>
+<body class="bg-base-100 text-base-content h-screen overflow-hidden">
+
+<!-- Mockup-Hinweis -->
+<div class="bg-warning/10 border-b border-warning/30 text-xs px-4 py-1.5 text-warning-content/80">
+  Mockup-Kontext: Globaler Header ist in der echten App vorhanden, hier aber nicht abgebildet. Linke Server-Liste ist symbolisch dargestellt um das <b>1/3 zu 2/3</b>-Verhältnis erlebbar zu machen.
+</div>
+
+<!-- =================== GLOBALES 1/3 + 2/3 LAYOUT =================== -->
+<div class="grid" style="grid-template-columns: 1fr 2fr; height: calc(100vh - 28px);">
+
+  <!-- ============ SERVER-LISTE LINKS (symbolisch, 1/3) ============ -->
+  <aside id="server-list" class="border-r border-base-300 bg-base-200/40 scrollable">
+    <div class="sticky top-0 bg-base-200/95 backdrop-blur border-b border-base-300 px-3 py-2 flex items-center gap-2 z-10">
+      <span class="text-xs uppercase opacity-50 tracking-wide">Server</span>
+      <span class="badge badge-ghost badge-sm">26</span>
+      <input type="text" placeholder="Filter…" class="input input-xs input-bordered ml-auto w-32 opacity-60" disabled />
+    </div>
+
+    <div class="px-2 pt-2">
+
+      <!-- Gruppe: prod (symbolisch, da Group-Feature noch nicht existiert) -->
+      <div class="px-2 py-1 text-[10px] uppercase opacity-40 tracking-wider">Prod (Mock-Group)</div>
+
+      <div class="server-row group/sl px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-success shrink-0"></span>
+        <span class="truncate">srv-prod-edge-02</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">4</span>
+      </div>
+
+      <!-- AKTUELL AUSGEWÄHLTER SERVER -->
+      <div class="server-row server-row-active px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 bg-primary/15 border-l-2 border-l-primary font-medium">
+        <span class="w-2 h-2 rounded-full bg-success shrink-0"></span>
+        <span class="truncate">srv-prod-edge-01</span>
+        <span class="ml-auto badge badge-error badge-sm">12</span>
+      </div>
+
+      <div class="server-row px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-success shrink-0"></span>
+        <span class="truncate">srv-prod-db-01</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">2</span>
+      </div>
+
+      <div class="server-row px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-success shrink-0"></span>
+        <span class="truncate">srv-prod-db-02</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">2</span>
+      </div>
+
+      <div class="server-row px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-warning shrink-0" title="kein Heartbeat"></span>
+        <span class="truncate opacity-80">srv-prod-worker-03</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">?</span>
+      </div>
+
+      <div class="server-row px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-success shrink-0"></span>
+        <span class="truncate">srv-prod-mail-01</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">7</span>
+      </div>
+
+      <div class="px-2 pt-3 pb-1 text-[10px] uppercase opacity-40 tracking-wider">Staging (Mock-Group)</div>
+
+      <div class="server-row px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-success shrink-0"></span>
+        <span class="truncate">srv-stg-edge-01</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">3</span>
+      </div>
+
+      <div class="server-row px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-success shrink-0"></span>
+        <span class="truncate">srv-stg-db-01</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">1</span>
+      </div>
+
+      <div class="server-row px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-error shrink-0" title="offline"></span>
+        <span class="truncate opacity-60 line-through">srv-stg-worker-01</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">–</span>
+      </div>
+
+      <div class="px-2 pt-3 pb-1 text-[10px] uppercase opacity-40 tracking-wider">Dev (Mock-Group)</div>
+
+      <div class="server-row px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-success shrink-0"></span>
+        <span class="truncate">srv-dev-01</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">9</span>
+      </div>
+
+      <div class="server-row px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-success shrink-0"></span>
+        <span class="truncate">srv-dev-02</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">9</span>
+      </div>
+
+      <div class="server-row px-2 py-1.5 rounded cursor-pointer text-sm flex items-center gap-2 hover:bg-base-300/60">
+        <span class="w-2 h-2 rounded-full bg-success shrink-0"></span>
+        <span class="truncate">srv-dev-build</span>
+        <span class="ml-auto opacity-60 text-xs font-mono">15</span>
+      </div>
+
+      <div class="px-2 py-3 text-xs opacity-50 text-center">… 14 weitere Server</div>
+
+      <div class="px-2 pt-3 pb-4">
+        <button class="btn btn-ghost btn-xs w-full" disabled>+ Server hinzufügen (in /settings/servers/)</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ DETAIL-PANE (2/3) ============ -->
+  <div id="detail-shell" class="flex flex-col overflow-hidden">
+
+<!-- =================== STICKY HEADER =================== -->
+<header class="sticky top-0 z-30 bg-base-100/95 backdrop-blur border-b border-base-300">
+  <div class="px-5 pt-4 pb-3">
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <div class="h-2.5 w-2.5 rounded-full bg-success" title="online"></div>
+          <h1 class="text-xl font-semibold tracking-tight">srv-prod-edge-01</h1>
+          <span class="badge badge-ghost badge-sm">prod</span>
+          <span class="badge badge-ghost badge-sm">edge</span>
+        </div>
+        <div class="text-sm opacity-70 mt-0.5">
+          Ubuntu 22.04.5 LTS · 5.15.0-177-generic · aarch64 · letzter Scan vor 10h
+        </div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button class="btn btn-ghost btn-sm gap-2" onclick="alert('→ navigiert zu /servers/srv-prod-edge-01/settings\n\n(Tags, Gruppen, Scan-Intervall, Notification-Channel)')">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9 1.65 1.65 0 0 0 4.27 7.18l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+          Server-Einstellungen
+        </button>
+      </div>
+    </div>
+
+    <!-- Schlanker Stat-Bar -->
+    <div class="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+      <div class="flex items-center gap-1.5">
+        <span class="opacity-60">Findings</span>
+        <span class="font-medium">12 offen</span>
+        <span class="opacity-40">/ 319 gesamt</span>
+      </div>
+      <div class="flex items-center gap-1.5 text-success">
+        <span class="opacity-60">Lebenszeichen</span>
+        <span class="sparkline" id="sparkline-heartbeat"></span>
+        <span class="opacity-60">50d</span>
+      </div>
+      <div class="flex items-center gap-1.5 text-warning">
+        <span class="opacity-60">Severity-Trend</span>
+        <span class="sparkline" id="sparkline-trend"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sub-Nav (Mode-Switcher) -->
+  <nav class="px-5 flex gap-1" role="tablist">
+    <button class="mode-tab tab-active" data-mode="findings">
+      Findings <span class="badge badge-sm ml-1">319</span>
+    </button>
+    <button class="mode-tab" data-mode="listeners">
+      Listeners &amp; Services <span class="badge badge-sm ml-1">9</span>
+    </button>
+    <button class="mode-tab" data-mode="snapshot">
+      Host Snapshot
+    </button>
+  </nav>
+</header>
+
+<style>
+  .mode-tab {
+    padding: 0.5rem 0.9rem;
+    font-size: 0.875rem;
+    color: hsl(var(--bc) / 0.65);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 80ms, border-color 80ms;
+  }
+  .mode-tab:hover { color: hsl(var(--bc) / 0.9); }
+  .mode-tab.tab-active {
+    color: hsl(var(--bc));
+    border-bottom-color: hsl(var(--p));
+    font-weight: 500;
+  }
+</style>
+
+<!-- =================== INNER MASTER/DETAIL (innerhalb 2/3-Pane) =================== -->
+<main class="grid gap-0 border-b border-base-300 flex-1 min-h-0" style="grid-template-columns: minmax(340px, 1fr) minmax(0, 1.4fr);">
+
+  <!-- ============ LEFT PANE ============ -->
+  <aside class="border-r border-base-300 scrollable" id="left-pane">
+
+    <!-- FINDINGS MODE -->
+    <div data-pane="findings" class="pane-fade">
+
+      <!-- ===== Was zu tun ist ===== -->
+      <section class="border-b border-base-300">
+        <div class="px-3 py-2 bg-primary/10 border-b border-primary/20 flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span class="text-xs font-semibold uppercase tracking-wide">Was zu tun ist</span>
+          <span class="badge badge-primary badge-sm ml-auto">4</span>
+        </div>
+
+        <div class="row-item flex items-start gap-3 px-3 py-2.5 border-b border-base-300/50" onclick="applyFilterNew()">
+          <span class="w-2 h-2 rounded-full bg-error mt-1.5 shrink-0"></span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium">3 neue Critical-Findings</div>
+            <div class="text-xs opacity-60">seit Scan vor 10h · openssl-libs · linux-kernel</div>
+          </div>
+          <span class="text-xs opacity-40 self-center">→</span>
+        </div>
+
+        <div class="row-item flex items-start gap-3 px-3 py-2.5 border-b border-base-300/50" onclick="jumpToListener('l-mystery')">
+          <span class="w-2 h-2 rounded-full bg-warning mt-1.5 shrink-0"></span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium">Unbekannter Listener auf Port 47218</div>
+            <div class="text-xs opacity-60">/tmp/.x-helper · kein Paket-Match · seit 3d</div>
+          </div>
+          <span class="text-xs opacity-40 self-center">→</span>
+        </div>
+
+        <div class="row-item flex items-start gap-3 px-3 py-2.5 border-b border-base-300/50" onclick="openChat('group','openssl-libs','Quick-Win · durch 3.0.2-0ubuntu1.19 vollständig behebbar')">
+          <span class="w-2 h-2 rounded-full bg-success mt-1.5 shrink-0"></span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium">Quick-Win: openssl-libs</div>
+            <div class="text-xs opacity-60">14 Findings durch ein Paket-Upgrade behebbar</div>
+          </div>
+          <span class="text-xs opacity-40 self-center">🤖</span>
+        </div>
+
+        <div class="row-item flex items-start gap-3 px-3 py-2.5" onclick="alert('Mockup: würde zur Defer-Liste filtern')">
+          <span class="w-2 h-2 rounded-full bg-info mt-1.5 shrink-0"></span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium">2 deferierte Findings — Frist erreicht</div>
+            <div class="text-xs opacity-60">Re-Triage fällig (CVE-2024-2961, CVE-2023-46218)</div>
+          </div>
+          <span class="text-xs opacity-40 self-center">→</span>
+        </div>
+      </section>
+
+      <!-- ===== Findings-Header + Filter ===== -->
+      <div class="sticky top-0 bg-base-100/95 backdrop-blur border-b border-base-300 px-3 py-2 flex items-center gap-2 z-10">
+        <span class="text-xs font-semibold uppercase tracking-wide opacity-70">Findings</span>
+        <div class="ml-auto flex gap-1" id="findings-view-toggle">
+          <button class="btn btn-xs btn-active" data-view="offen" onclick="setFindingsView('offen')">Offen <span class="opacity-60 ml-0.5">12</span></button>
+          <button class="btn btn-xs btn-ghost" data-view="alle" onclick="setFindingsView('alle')">Alle <span class="opacity-60 ml-0.5">319</span></button>
+        </div>
+      </div>
+
+      <!-- ===== Default-View: Offene Findings flach, nach Severity ===== -->
+      <div data-findings-view="offen">
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-9143')">
+          <span class="badge badge-error badge-xs shrink-0">crit</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-9143</span>
+          <span class="opacity-70 text-xs truncate">openssl-libs · BN_GF2m_poly2arr OOB</span>
+          <span class="badge badge-ghost badge-xs">neu</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-9143','openssl-libs · critical')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-6119')">
+          <span class="badge badge-error badge-xs shrink-0">crit</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-6119</span>
+          <span class="opacity-70 text-xs truncate">openssl-libs · X.509 GENERAL_NAME confusion</span>
+          <span class="badge badge-ghost badge-xs">neu</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-6119','openssl-libs · critical')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-5535')">
+          <span class="badge badge-error badge-xs shrink-0">crit</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-5535</span>
+          <span class="opacity-70 text-xs truncate">openssl-libs · SSL_select_next_proto overread</span>
+          <span class="badge badge-ghost badge-xs">neu</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-5535','openssl-libs · critical')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-4741')">
+          <span class="badge badge-warning badge-xs shrink-0">high</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-4741</span>
+          <span class="opacity-70 text-xs truncate">openssl-libs · SSL_free_buffers UAF</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-4741','openssl-libs · high')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-9143')">
+          <span class="badge badge-warning badge-xs shrink-0">high</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-12797</span>
+          <span class="opacity-70 text-xs truncate">openssl-libs · RFC7250 handshake bypass</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-12797','openssl-libs · high')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-9143')">
+          <span class="badge badge-warning badge-xs shrink-0">high</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-2511</span>
+          <span class="opacity-70 text-xs truncate">openssl-libs · session-cache memory growth</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-2511','openssl-libs · high')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-9143')">
+          <span class="badge badge-warning badge-xs shrink-0">high</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-26935</span>
+          <span class="opacity-70 text-xs truncate">linux-kernel · net/sched UAF</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-26935','linux-kernel · high')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-9143')">
+          <span class="badge badge-warning badge-xs shrink-0">high</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-26925</span>
+          <span class="opacity-70 text-xs truncate">linux-kernel · netfilter race condition</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-26925','linux-kernel · high')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-9143')">
+          <span class="badge badge-warning badge-xs shrink-0">high</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-2961</span>
+          <span class="opacity-70 text-xs truncate">glibc · iconv ISO-2022-CN-EXT OOB</span>
+          <span class="badge badge-info badge-xs">defer abgelaufen</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-2961','glibc · high')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-9143')">
+          <span class="badge badge-warning badge-xs shrink-0">high</span>
+          <span class="font-mono text-xs shrink-0">CVE-2023-46218</span>
+          <span class="opacity-70 text-xs truncate">curl · cookie mixed case host match</span>
+          <span class="badge badge-info badge-xs">defer abgelaufen</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2023-46218','curl · high')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-9143')">
+          <span class="badge badge-warning badge-xs shrink-0">high</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-22195</span>
+          <span class="opacity-70 text-xs truncate">nginx · ngx_http_mp4_module integer overflow</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-22195','nginx · high')">🤖</button>
+        </div>
+        <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-b border-base-300" onclick="selectFinding(this, 'cve-2024-9999')">
+          <span class="badge badge-info badge-xs shrink-0">med</span>
+          <span class="font-mono text-xs shrink-0">CVE-2024-9999</span>
+          <span class="opacity-70 text-xs truncate">curl · cookie injection malformed URL</span>
+          <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" onclick="event.stopPropagation(); openChat('finding','CVE-2024-9999','curl · medium')">🤖</button>
+        </div>
+        <div class="px-3 py-3 text-xs opacity-50 text-center border-b border-base-300">
+          12 offene Findings · 307 weitere abgeschlossen / vertraut / verschoben — über „Alle" einsehbar
+        </div>
+      </div>
+
+      <!-- ===== Voll-View: gruppiert (hinter Toggle) ===== -->
+      <div data-findings-view="alle" class="hidden">
+
+      <!-- Application Group: openssl-libs -->
+      <details class="group/g border-b border-base-300">
+        <summary class="list-none cursor-pointer px-3 py-2.5 hover:bg-base-200/50 flex items-center gap-2">
+          <span class="opacity-50 group-open/g:rotate-90 transition-transform inline-block">▸</span>
+          <span class="font-medium">openssl-libs</span>
+          <span class="opacity-50 text-xs">14 Findings</span>
+          <span class="ml-auto flex gap-1">
+            <span class="badge badge-error badge-sm">3</span>
+            <span class="badge badge-warning badge-sm">8</span>
+            <span class="badge badge-sm">3</span>
+          </span>
+          <button class="btn btn-ghost btn-xs btn-circle" title="KI über diese Gruppe fragen"
+                  onclick="event.preventDefault(); event.stopPropagation(); openChat('group', 'openssl-libs', '14 Findings · 3 critical · 8 high')">
+            🤖
+          </button>
+        </summary>
+        <div>
+          <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-t border-base-300" style="padding-left:12px;" onclick="selectFinding(this, 'cve-2024-9143')">
+            <span class="badge badge-error badge-xs shrink-0">crit</span>
+            <span class="font-mono text-xs shrink-0">CVE-2024-9143</span>
+            <span class="opacity-70 text-xs truncate">BN_GF2m_poly2arr OOB memory access</span>
+            <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0" title="KI zu diesem CVE"
+                    onclick="event.stopPropagation(); openChat('finding', 'CVE-2024-9143', 'openssl-libs · critical')">🤖</button>
+          </div>
+          <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-t border-base-300" style="padding-left:12px;" onclick="selectFinding(this, 'cve-2024-6119')">
+            <span class="badge badge-error badge-xs shrink-0">crit</span>
+            <span class="font-mono text-xs shrink-0">CVE-2024-6119</span>
+            <span class="opacity-70 text-xs truncate">Type confusion in X.509 GENERAL_NAME</span>
+            <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0"
+                    onclick="event.stopPropagation(); openChat('finding', 'CVE-2024-6119', 'openssl-libs · critical')">🤖</button>
+          </div>
+          <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-t border-base-300" style="padding-left:12px;" onclick="selectFinding(this, 'cve-2024-5535')">
+            <span class="badge badge-error badge-xs shrink-0">crit</span>
+            <span class="font-mono text-xs shrink-0">CVE-2024-5535</span>
+            <span class="opacity-70 text-xs truncate">SSL_select_next_proto buffer overread</span>
+            <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0"
+                    onclick="event.stopPropagation(); openChat('finding', 'CVE-2024-5535', 'openssl-libs · critical')">🤖</button>
+          </div>
+          <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-t border-base-300" style="padding-left:12px;" onclick="selectFinding(this, 'cve-2024-4741')">
+            <span class="badge badge-warning badge-xs shrink-0">high</span>
+            <span class="font-mono text-xs shrink-0">CVE-2024-4741</span>
+            <span class="opacity-70 text-xs truncate">Use-after-free in SSL_free_buffers</span>
+            <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0"
+                    onclick="event.stopPropagation(); openChat('finding', 'CVE-2024-4741', 'openssl-libs · high')">🤖</button>
+          </div>
+          <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-t border-base-300 opacity-60" style="padding-left:12px;" onclick="selectFinding(this, 'cve-more')">
+            <span class="opacity-60 text-xs">… 10 weitere Findings</span>
+          </div>
+        </div>
+      </details>
+
+      <!-- Application Group: linux-kernel -->
+      <details class="group/g border-b border-base-300">
+        <summary class="list-none cursor-pointer px-3 py-2.5 hover:bg-base-200/50 flex items-center gap-2">
+          <span class="opacity-50 group-open/g:rotate-90 transition-transform inline-block">▸</span>
+          <span class="font-medium">linux-kernel</span>
+          <span class="opacity-50 text-xs">8 Findings</span>
+          <span class="ml-auto flex gap-1">
+            <span class="badge badge-error badge-sm">1</span>
+            <span class="badge badge-warning badge-sm">5</span>
+            <span class="badge badge-sm">2</span>
+          </span>
+          <button class="btn btn-ghost btn-xs btn-circle"
+                  onclick="event.preventDefault(); event.stopPropagation(); openChat('group', 'linux-kernel', '8 Findings · 1 critical · 5 high')">🤖</button>
+        </summary>
+      </details>
+
+      <!-- Application Group: glibc -->
+      <details class="group/g border-b border-base-300">
+        <summary class="list-none cursor-pointer px-3 py-2.5 hover:bg-base-200/50 flex items-center gap-2">
+          <span class="opacity-50 group-open/g:rotate-90 transition-transform inline-block">▸</span>
+          <span class="font-medium">glibc</span>
+          <span class="opacity-50 text-xs">6 Findings</span>
+          <span class="ml-auto flex gap-1">
+            <span class="badge badge-warning badge-sm">2</span>
+            <span class="badge badge-sm">4</span>
+          </span>
+          <button class="btn btn-ghost btn-xs btn-circle"
+                  onclick="event.preventDefault(); event.stopPropagation(); openChat('group', 'glibc', '6 Findings · 2 high')">🤖</button>
+        </summary>
+      </details>
+
+      <!-- Application Group: nginx -->
+      <details class="group/g border-b border-base-300">
+        <summary class="list-none cursor-pointer px-3 py-2.5 hover:bg-base-200/50 flex items-center gap-2">
+          <span class="opacity-50 group-open/g:rotate-90 transition-transform inline-block">▸</span>
+          <span class="font-medium">nginx</span>
+          <span class="opacity-50 text-xs">4 Findings</span>
+          <span class="ml-auto flex gap-1">
+            <span class="badge badge-warning badge-sm">1</span>
+            <span class="badge badge-sm">3</span>
+          </span>
+          <button class="btn btn-ghost btn-xs btn-circle"
+                  onclick="event.preventDefault(); event.stopPropagation(); openChat('group', 'nginx', '4 Findings · 1 high')">🤖</button>
+        </summary>
+      </details>
+
+      <!-- Mehr Gruppen indicator -->
+      <div class="px-3 py-3 text-xs opacity-50 text-center border-b border-base-300">
+        … 18 weitere Application-Groups
+      </div>
+
+      <!-- Ungroup section -->
+      <details class="group/g border-b border-base-300">
+        <summary class="list-none cursor-pointer px-3 py-2.5 hover:bg-base-200/50 flex items-center gap-2 bg-base-200/30">
+          <span class="opacity-50 group-open/g:rotate-90 transition-transform inline-block">▸</span>
+          <span class="font-medium italic opacity-80">Ohne Gruppe</span>
+          <span class="opacity-50 text-xs">3 Findings</span>
+          <span class="ml-auto flex gap-1">
+            <span class="badge badge-warning badge-sm">1</span>
+            <span class="badge badge-sm">2</span>
+          </span>
+        </summary>
+        <div>
+          <div class="row-item flex items-center gap-2 px-3 py-2 text-sm border-t border-base-300" style="padding-left:12px;" onclick="selectFinding(this, 'cve-2024-9999')">
+            <span class="badge badge-warning badge-xs shrink-0">high</span>
+            <span class="font-mono text-xs shrink-0">CVE-2024-9999</span>
+            <span class="opacity-70 text-xs truncate">curl: cookie injection with malformed URL</span>
+            <button class="btn btn-ghost btn-xs btn-circle ml-auto shrink-0"
+                    onclick="event.stopPropagation(); openChat('finding', 'CVE-2024-9999', 'curl · high · ungruppiert')">🤖</button>
+          </div>
+        </div>
+      </details>
+
+      </div> <!-- /data-findings-view="alle" -->
+    </div>
+
+    <!-- LISTENERS MODE -->
+    <div data-pane="listeners" class="pane-fade hidden">
+      <div class="sticky top-0 bg-base-100/95 backdrop-blur border-b border-base-300 px-3 py-2 flex gap-1 z-10">
+        <button class="btn btn-xs btn-active">Alle</button>
+        <button class="btn btn-xs btn-ghost">TCP</button>
+        <button class="btn btn-xs btn-ghost">UDP</button>
+        <button class="btn btn-xs btn-ghost">Öffentlich</button>
+        <div class="ml-auto opacity-50 text-xs self-center">9 Listener</div>
+      </div>
+
+      <div class="row-item flex items-center gap-3 px-3 py-2.5 text-sm border-b border-base-300" onclick="selectListener(this, 'l-22')">
+        <div class="font-mono text-xs w-16 shrink-0"><span class="badge badge-ghost badge-sm">tcp</span> 22</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">sshd</div>
+          <div class="opacity-60 text-xs truncate">0.0.0.0:22 · /usr/sbin/sshd · openssh-server</div>
+        </div>
+        <span class="badge badge-warning badge-sm">öffentlich</span>
+        <button class="btn btn-ghost btn-xs btn-circle"
+                onclick="event.stopPropagation(); openChat('listener', 'sshd :22', 'openssh-server · öffentlich')">🤖</button>
+      </div>
+
+      <div class="row-item flex items-center gap-3 px-3 py-2.5 text-sm border-b border-base-300" onclick="selectListener(this, 'l-80')">
+        <div class="font-mono text-xs w-16 shrink-0"><span class="badge badge-ghost badge-sm">tcp</span> 80</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">nginx</div>
+          <div class="opacity-60 text-xs truncate">0.0.0.0:80 · /usr/sbin/nginx · nginx-core</div>
+        </div>
+        <span class="badge badge-warning badge-sm">öffentlich</span>
+        <button class="btn btn-ghost btn-xs btn-circle"
+                onclick="event.stopPropagation(); openChat('listener', 'nginx :80', 'nginx-core · öffentlich')">🤖</button>
+      </div>
+
+      <div class="row-item flex items-center gap-3 px-3 py-2.5 text-sm border-b border-base-300" onclick="selectListener(this, 'l-443')">
+        <div class="font-mono text-xs w-16 shrink-0"><span class="badge badge-ghost badge-sm">tcp</span> 443</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">nginx</div>
+          <div class="opacity-60 text-xs truncate">0.0.0.0:443 · /usr/sbin/nginx · nginx-core</div>
+        </div>
+        <span class="badge badge-warning badge-sm">öffentlich</span>
+        <button class="btn btn-ghost btn-xs btn-circle"
+                onclick="event.stopPropagation(); openChat('listener', 'nginx :443', 'nginx-core · öffentlich')">🤖</button>
+      </div>
+
+      <div class="row-item flex items-center gap-3 px-3 py-2.5 text-sm border-b border-base-300" onclick="selectListener(this, 'l-5432')">
+        <div class="font-mono text-xs w-16 shrink-0"><span class="badge badge-ghost badge-sm">tcp</span> 5432</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">postgres</div>
+          <div class="opacity-60 text-xs truncate">127.0.0.1:5432 · postgresql-17</div>
+        </div>
+        <span class="badge badge-success badge-sm">lokal</span>
+        <button class="btn btn-ghost btn-xs btn-circle"
+                onclick="event.stopPropagation(); openChat('listener', 'postgres :5432', 'lokal gebunden')">🤖</button>
+      </div>
+
+      <div class="row-item flex items-center gap-3 px-3 py-2.5 text-sm border-b border-base-300" onclick="selectListener(this, 'l-9090')">
+        <div class="font-mono text-xs w-16 shrink-0"><span class="badge badge-ghost badge-sm">tcp</span> 9090</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">node_exporter</div>
+          <div class="opacity-60 text-xs truncate">0.0.0.0:9090 · prometheus-node-exporter</div>
+        </div>
+        <span class="badge badge-warning badge-sm">öffentlich</span>
+        <button class="btn btn-ghost btn-xs btn-circle"
+                onclick="event.stopPropagation(); openChat('listener', 'node_exporter :9090', 'prometheus-node-exporter · öffentlich')">🤖</button>
+      </div>
+
+      <div class="row-item flex items-center gap-3 px-3 py-2.5 text-sm border-b border-base-300" onclick="selectListener(this, 'l-3478')">
+        <div class="font-mono text-xs w-16 shrink-0"><span class="badge badge-ghost badge-sm">udp</span> 3478</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">coturn</div>
+          <div class="opacity-60 text-xs truncate">0.0.0.0:3478 · coturn</div>
+        </div>
+        <span class="badge badge-warning badge-sm">öffentlich</span>
+        <button class="btn btn-ghost btn-xs btn-circle"
+                onclick="event.stopPropagation(); openChat('listener', 'coturn :3478', 'coturn UDP · öffentlich')">🤖</button>
+      </div>
+
+      <div class="row-item flex items-center gap-3 px-3 py-2.5 text-sm border-b border-base-300" onclick="selectListener(this, 'l-mystery')">
+        <div class="font-mono text-xs w-16 shrink-0"><span class="badge badge-ghost badge-sm">tcp</span> 47218</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">— (unbekannt)</div>
+          <div class="opacity-60 text-xs truncate">0.0.0.0:47218 · PID 11342 · kein Paket-Match</div>
+        </div>
+        <span class="badge badge-error badge-sm">unbekannt</span>
+        <button class="btn btn-ghost btn-xs btn-circle"
+                onclick="event.stopPropagation(); openChat('listener', ':47218 (unbekannt)', 'PID 11342 · kein Paket-Match · ist das normal?')">🤖</button>
+      </div>
+    </div>
+
+    <!-- SNAPSHOT MODE -->
+    <div data-pane="snapshot" class="pane-fade hidden p-4 space-y-4 text-sm">
+      <div>
+        <div class="text-xs uppercase opacity-50 mb-1 tracking-wide">System</div>
+        <div class="bg-base-200/50 rounded p-3 space-y-1 font-mono text-xs">
+          <div><span class="opacity-60">Distribution:</span> Ubuntu 22.04.5 LTS (Jammy)</div>
+          <div><span class="opacity-60">Kernel:</span> 5.15.0-177-generic</div>
+          <div><span class="opacity-60">Architektur:</span> aarch64</div>
+          <div><span class="opacity-60">Hostname:</span> srv-prod-edge-01.example.net</div>
+          <div><span class="opacity-60">Uptime:</span> 47 Tage</div>
+          <div><span class="opacity-60">Boot ID:</span> 7c4f…b9e2</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-xs uppercase opacity-50 mb-1 tracking-wide">Agent</div>
+        <div class="bg-base-200/50 rounded p-3 space-y-1 font-mono text-xs">
+          <div><span class="opacity-60">Agent-Version:</span> 0.4.2</div>
+          <div><span class="opacity-60">Trivy-Version:</span> 0.55.1</div>
+          <div><span class="opacity-60">Erwartetes Scan-Intervall:</span> 24h (toleranz: ±2h)</div>
+          <div><span class="opacity-60">Letzter Scan:</span> 2026-05-22 23:14 (vor 10h)</div>
+          <div><span class="opacity-60">Vorletzter Scan:</span> 2026-05-21 22:58 (vor 1d 11h)</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-xs uppercase opacity-50 mb-1 tracking-wide">Pakete (Top 8 nach Findings)</div>
+        <div class="bg-base-200/50 rounded p-3 space-y-1 font-mono text-xs">
+          <div>openssl-libs 3.0.2-0ubuntu1.18 → 14 findings</div>
+          <div>linux-image-5.15.0-177 → 8 findings</div>
+          <div>libc6 (glibc) 2.35-0ubuntu3.10 → 6 findings</div>
+          <div>nginx-core 1.18.0-6ubuntu14.6 → 4 findings</div>
+          <div>libssh2-1 1.10.0-3 → 3 findings</div>
+          <div>libxml2 2.9.13+dfsg-1ubuntu0.6 → 3 findings</div>
+          <div>… 24 weitere Pakete mit Findings</div>
+        </div>
+      </div>
+      <div class="text-xs opacity-50 italic">Snapshot wird beim Scan generiert. Sind Werte unerwartet? Über das KI-Icon nachfragen.</div>
+    </div>
+  </aside>
+
+  <!-- ============ RIGHT PANE ============ -->
+  <section class="scrollable" id="right-pane">
+    <div class="h-full flex items-center justify-center text-center opacity-60 px-8" id="empty-state">
+      <div>
+        <div class="text-5xl mb-3 opacity-40">←</div>
+        <div class="font-medium">Wähle ein Element links</div>
+        <div class="text-sm mt-1 opacity-70">Finding, Listener oder Host-Snapshot-Block</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Footer-Hinweis -->
+<div class="px-5 py-2 text-xs opacity-50 shrink-0 border-t border-base-300">
+  Mockup-Status: Server-Liste links symbolisch (1/3) · Detail-Pane rechts (2/3) · interner Master/Detail klickbar · Inhalte sind Mock-Daten.
+</div>
+
+  </div> <!-- /#detail-shell (2/3-Pane) -->
+</div> <!-- /grid (1/3 + 2/3) -->
+
+<!-- =================== CHAT LAUNCHER + PANEL =================== -->
+<button id="chat-launcher" class="chat-bubble-launcher fixed bottom-6 right-6 btn btn-primary btn-circle btn-lg z-40" onclick="toggleChat()" title="KI fragen (Server-Scope)">
+  <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+  </svg>
+</button>
+
+<div id="chat-panel" class="fixed bottom-6 right-6 w-[420px] max-w-[calc(100vw-3rem)] h-[600px] max-h-[calc(100vh-3rem)] bg-base-200 border border-base-300 rounded-lg shadow-2xl z-40 hidden flex-col">
+  <!-- Header -->
+  <div class="p-3 border-b border-base-300 flex items-center gap-3">
+    <div class="w-9 h-9 rounded-full bg-primary/20 flex items-center justify-center text-primary text-lg">🤖</div>
+    <div class="flex-1 min-w-0">
+      <div class="font-semibold text-sm">KI-Assistent</div>
+      <div class="text-xs opacity-60 truncate" id="chat-scope-line">Scope: Server srv-prod-edge-01</div>
+    </div>
+    <button class="btn btn-ghost btn-sm btn-circle" onclick="toggleChat()" title="Schließen">✕</button>
+  </div>
+
+  <!-- Scope chip rail -->
+  <div id="chat-scope-chips" class="px-3 py-2 border-b border-base-300 flex flex-wrap gap-1 text-xs"></div>
+
+  <!-- History -->
+  <div class="flex-1 overflow-y-auto p-3 space-y-3 text-sm scrollable" id="chat-history">
+    <div class="opacity-60">Wie kann ich helfen?</div>
+    <div class="opacity-60 text-xs">Tipp: Du kannst auch über einzelne Gruppen, CVEs oder Listener fragen – nutze das <span class="badge badge-sm">🤖</span>-Icon an der jeweiligen Stelle, dann wechselt der Scope hier.</div>
+    <div class="flex flex-wrap gap-1" id="quick-prompts"></div>
+  </div>
+
+  <!-- Input -->
+  <div class="border-t border-base-300 p-2 flex gap-1">
+    <textarea class="textarea textarea-sm flex-1 resize-none" rows="1" placeholder="Frage stellen…"></textarea>
+    <button class="btn btn-sm btn-primary self-end">↵</button>
+  </div>
+</div>
+
+<!-- =================== SCRIPT =================== -->
+<script>
+  // ----- Sparklines -----
+  function renderSparkline(id, values, color) {
+    const max = Math.max(...values);
+    const el = document.getElementById(id);
+    el.innerHTML = values.map(v => {
+      const h = Math.max(2, (v / max) * 14);
+      return `<span style="height:${h}px"></span>`;
+    }).join('');
+  }
+  renderSparkline('sparkline-heartbeat', [10,10,10,10,9,10,10,10,10,10,10,10,8,10,10,10,10,10,10,10,10,9,10,10,10,10,10,10,10,10]);
+  renderSparkline('sparkline-trend',     [4,4,5,5,5,6,6,7,7,7,8,8,9,9,10,10,11,11,12,12,11,11,12,12,12,12,12,12,12,12]);
+
+  // ----- Mode tabs -----
+  const tabs = document.querySelectorAll('.mode-tab');
+  const panes = document.querySelectorAll('[data-pane]');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('tab-active'));
+      tab.classList.add('tab-active');
+      const mode = tab.dataset.mode;
+      panes.forEach(p => {
+        p.classList.toggle('hidden', p.dataset.pane !== mode);
+      });
+      // Right pane: empty state
+      document.getElementById('right-pane').innerHTML = emptyStateHtml(mode);
+    });
+  });
+
+  function emptyStateHtml(mode) {
+    const hint = mode === 'findings'
+      ? 'Finding links auswählen'
+      : mode === 'listeners'
+        ? 'Listener links auswählen'
+        : 'Host-Snapshot ist links direkt sichtbar – kein Detail-Pane nötig';
+    return `
+      <div class="h-full flex items-center justify-center text-center opacity-60 px-8">
+        <div>
+          <div class="text-5xl mb-3 opacity-40">←</div>
+          <div class="font-medium">${hint}</div>
+        </div>
+      </div>`;
+  }
+
+  // ----- Master-list selection -----
+  function clearSelection() {
+    document.querySelectorAll('.row-item.selected').forEach(el => el.classList.remove('selected'));
+  }
+
+  function selectFinding(el, id) {
+    clearSelection();
+    el.classList.add('selected');
+    document.getElementById('right-pane').innerHTML = findingDetailHtml(id);
+  }
+
+  function selectListener(el, id) {
+    clearSelection();
+    el.classList.add('selected');
+    document.getElementById('right-pane').innerHTML = listenerDetailHtml(id);
+  }
+
+  // ----- Finding detail templates -----
+  function findingDetailHtml(id) {
+    const data = FINDINGS[id] || FINDINGS['cve-2024-9143'];
+    return `
+      <div class="p-5 space-y-5 pane-fade">
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="badge badge-error">critical</span>
+            <span class="font-mono text-sm">${data.cve}</span>
+            <span class="text-xs opacity-60">CVSS ${data.cvss}</span>
+            <span class="ml-auto flex gap-1">
+              <button class="btn btn-sm btn-ghost gap-1" onclick="openChat('finding','${data.cve}','${data.scope_hint}')">
+                🤖 KI zu diesem CVE
+              </button>
+            </span>
+          </div>
+          <h2 class="text-lg font-semibold mt-2">${data.title}</h2>
+          <div class="text-xs opacity-70 mt-0.5">Paket: <span class="font-mono">${data.package}</span> · betroffen: <span class="font-mono">${data.affected}</span> · behoben in: <span class="font-mono text-success">${data.fixed}</span></div>
+        </div>
+
+        <div>
+          <div class="text-xs uppercase opacity-50 mb-1 tracking-wide">Beschreibung</div>
+          <p class="text-sm leading-relaxed">${data.description}</p>
+        </div>
+
+        <div>
+          <div class="text-xs uppercase opacity-50 mb-1 tracking-wide">Status &amp; Triage</div>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-sm btn-success btn-outline">Als gefixt markieren</button>
+            <button class="btn btn-sm btn-warning btn-outline">Vertrauen (Trust)</button>
+            <button class="btn btn-sm btn-info btn-outline">Verschieben (Defer)</button>
+            <button class="btn btn-sm btn-ghost">Notiz hinzufügen</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="text-xs uppercase opacity-50 mb-1 tracking-wide">Referenzen</div>
+          <ul class="text-sm space-y-1">
+            ${data.refs.map(r => `<li><a class="link link-hover opacity-80">↗ ${r}</a></li>`).join('')}
+          </ul>
+        </div>
+      </div>`;
+  }
+
+  const FINDINGS = {
+    'cve-2024-9143': {
+      cve: 'CVE-2024-9143', cvss: '7.5', title: 'OOB memory access in BN_GF2m_poly2arr',
+      package: 'openssl-libs', affected: '3.0.2-0ubuntu1.18', fixed: '3.0.2-0ubuntu1.19',
+      description: 'Bei der Verarbeitung speziell konstruierter X.509-Zertifikate mit binären elliptischen Kurven kann es zu einem Out-of-Bounds Memory-Zugriff in der Funktion BN_GF2m_poly2arr() kommen. Ein Angreifer kann das nutzen um den Prozess zum Absturz zu bringen oder potenziell Speicher auszulesen.',
+      refs: ['nvd.nist.gov/vuln/detail/CVE-2024-9143', 'openssl.org/news/secadv/20241016.txt'],
+      scope_hint: 'openssl-libs · critical'
+    },
+    'cve-2024-6119': {
+      cve: 'CVE-2024-6119', cvss: '7.5', title: 'Type confusion in X.509 GENERAL_NAME',
+      package: 'openssl-libs', affected: '3.0.2-0ubuntu1.18', fixed: '3.0.2-0ubuntu1.17',
+      description: 'TLS-Clients können beim Aufbau einer Verbindung mit einem maliciously gestalteten X.509-Zertifikat in einen Type-Confusion-Zustand kommen, was zu einem Application-Crash führt.',
+      refs: ['nvd.nist.gov/vuln/detail/CVE-2024-6119'],
+      scope_hint: 'openssl-libs · critical'
+    },
+    'cve-2024-5535': {
+      cve: 'CVE-2024-5535', cvss: '9.1', title: 'SSL_select_next_proto buffer overread',
+      package: 'openssl-libs', affected: '3.0.2-0ubuntu1.18', fixed: '3.0.2-0ubuntu1.16',
+      description: 'Aufruf von SSL_select_next_proto mit leerem Supported-Client-Protokoll-Buffer kann zu einem Buffer-Overread oder zur Rückgabe eines Pointers in nicht initialisierten Speicher führen.',
+      refs: ['nvd.nist.gov/vuln/detail/CVE-2024-5535'],
+      scope_hint: 'openssl-libs · critical'
+    },
+    'cve-2024-4741': {
+      cve: 'CVE-2024-4741', cvss: '7.0', title: 'Use-after-free in SSL_free_buffers',
+      package: 'openssl-libs', affected: '3.0.2-0ubuntu1.18', fixed: '3.0.2-0ubuntu1.15',
+      description: 'Wenn eine Anwendung SSL_free_buffers nach dem Lesen von TLS-Daten aufruft, kann es zu Use-after-Free kommen.',
+      refs: ['nvd.nist.gov/vuln/detail/CVE-2024-4741'],
+      scope_hint: 'openssl-libs · high'
+    },
+    'cve-2024-9999': {
+      cve: 'CVE-2024-9999', cvss: '6.5', title: 'curl: cookie injection with malformed URL',
+      package: 'curl', affected: '7.81.0-1ubuntu1.16', fixed: '7.81.0-1ubuntu1.18',
+      description: 'curl kann beim Aufruf mit speziell gestalteter URL ungültige Cookie-Daten an einen Host senden, was zu Cross-Site-Information-Leak führen kann.',
+      refs: ['nvd.nist.gov/vuln/detail/CVE-2024-9999'],
+      scope_hint: 'curl · high · ungruppiert'
+    },
+    'cve-more': {
+      cve: '— Sammeldetail —', cvss: 'n/a', title: 'Weitere 10 openssl-libs-Findings',
+      package: 'openssl-libs', affected: 'diverse', fixed: 'diverse',
+      description: '(Mockup: hier würde ein Sammel- oder Folge-Detail erscheinen.)',
+      refs: [], scope_hint: 'openssl-libs · mehrere'
+    }
+  };
+
+  // ----- Listener detail templates -----
+  function listenerDetailHtml(id) {
+    const data = LISTENERS[id] || LISTENERS['l-22'];
+    return `
+      <div class="p-5 space-y-5 pane-fade">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="badge ${data.exposureBadge}">${data.exposure}</span>
+          <span class="font-mono text-sm">${data.proto} ${data.bind}</span>
+          <span class="ml-auto">
+            <button class="btn btn-sm btn-ghost gap-1" onclick="openChat('listener','${data.title}','${data.scope_hint}')">
+              🤖 KI zu diesem Listener
+            </button>
+          </span>
+        </div>
+        <h2 class="text-lg font-semibold">${data.title}</h2>
+        <div class="bg-base-200/50 rounded p-3 space-y-1 font-mono text-xs">
+          <div><span class="opacity-60">Prozess:</span> ${data.process}</div>
+          <div><span class="opacity-60">PID:</span> ${data.pid}</div>
+          <div><span class="opacity-60">Paket:</span> ${data.pkg}</div>
+          <div><span class="opacity-60">Started:</span> ${data.started}</div>
+          <div><span class="opacity-60">CmdLine:</span> ${data.cmd}</div>
+        </div>
+        ${data.note ? `<div class="alert alert-warning text-sm">${data.note}</div>` : ''}
+      </div>`;
+  }
+
+  const LISTENERS = {
+    'l-22': { exposure:'öffentlich', exposureBadge:'badge-warning', proto:'TCP', bind:'0.0.0.0:22', title:'sshd', process:'/usr/sbin/sshd -D', pid:'1234', pkg:'openssh-server 1:8.9p1-3ubuntu0.10', started:'2026-04-06 09:12', cmd:'/usr/sbin/sshd -D', scope_hint:'openssh-server · öffentlich' },
+    'l-80': { exposure:'öffentlich', exposureBadge:'badge-warning', proto:'TCP', bind:'0.0.0.0:80', title:'nginx (http)', process:'nginx: worker', pid:'2871', pkg:'nginx-core 1.18.0-6ubuntu14.6', started:'2026-05-22 09:00', cmd:'nginx: worker process', scope_hint:'nginx-core :80' },
+    'l-443': { exposure:'öffentlich', exposureBadge:'badge-warning', proto:'TCP', bind:'0.0.0.0:443', title:'nginx (https)', process:'nginx: worker', pid:'2872', pkg:'nginx-core 1.18.0-6ubuntu14.6', started:'2026-05-22 09:00', cmd:'nginx: worker process', scope_hint:'nginx-core :443' },
+    'l-5432': { exposure:'lokal', exposureBadge:'badge-success', proto:'TCP', bind:'127.0.0.1:5432', title:'postgres', process:'postgres: main', pid:'998', pkg:'postgresql-17 17.1-1.pgdg22.04+1', started:'2026-04-06 09:11', cmd:'/usr/lib/postgresql/17/bin/postgres -D /var/lib/postgresql/17/main', scope_hint:'postgres :5432 lokal' },
+    'l-9090': { exposure:'öffentlich', exposureBadge:'badge-warning', proto:'TCP', bind:'0.0.0.0:9090', title:'prometheus-node-exporter', process:'node_exporter', pid:'1455', pkg:'prometheus-node-exporter 1.6.1-1', started:'2026-04-06 09:13', cmd:'/usr/bin/node_exporter --collector.systemd', scope_hint:'node_exporter :9090 öffentlich', note:'Öffentlich erreichbar — typischerweise hinter Firewall/IP-Allowlist. Über das 🤖-Icon kannst du fragen wie das normalerweise abgesichert wird.' },
+    'l-3478': { exposure:'öffentlich', exposureBadge:'badge-warning', proto:'UDP', bind:'0.0.0.0:3478', title:'coturn', process:'turnserver', pid:'1810', pkg:'coturn 4.5.2-3.1build2', started:'2026-04-06 09:14', cmd:'/usr/bin/turnserver -c /etc/turnserver.conf', scope_hint:'coturn UDP :3478' },
+    'l-mystery': { exposure:'unbekannt', exposureBadge:'badge-error', proto:'TCP', bind:'0.0.0.0:47218', title:'— (kein Paket-Match)', process:'unbekannt', pid:'11342', pkg:'— nicht über dpkg installiert', started:'2026-05-20 03:42', cmd:'/tmp/.x-helper', scope_hint:':47218 unbekannter Prozess · /tmp/.x-helper · sehr verdächtig', note:'Listener gehört zu keinem installierten Paket. Klick auf 🤖 oben rechts um Einschätzung zu bekommen.' }
+  };
+
+  // ----- Chat -----
+  const QUICK_PROMPTS = {
+    server: ['Was hat sich seit letztem Scan geändert?', 'Welche Patches als Erstes?', 'Größte Angriffsfläche?'],
+    group: ['Wie kritisch ist diese Gruppe in meinem Setup?', 'Patch-Pfad für diese Gruppe?', 'Wer nutzt das auf meinem Server?'],
+    finding: ['Ist das in meinem Kontext exploitable?', 'Workaround ohne Update?', 'Wie patche ich das sicher?'],
+    listener: ['Was macht dieser Listener?', 'Gehört das hierher?', 'Ist das gefährlich/üblich?', 'Indizien für Malware?']
+  };
+
+  function openChat(scope, target, hint) {
+    const panel = document.getElementById('chat-panel');
+    panel.classList.remove('hidden');
+    panel.classList.add('flex');
+    const label = ({ server:'Server', group:'Application-Group', finding:'Finding', listener:'Listener' })[scope];
+    document.getElementById('chat-scope-line').textContent = `Scope: ${label} – ${target}`;
+    const chips = document.getElementById('chat-scope-chips');
+    chips.innerHTML = `
+      <span class="badge badge-primary badge-sm">${label}</span>
+      <span class="opacity-70">${target}</span>
+      ${hint ? `<span class="opacity-50">· ${hint}</span>` : ''}
+    `;
+    const qp = document.getElementById('quick-prompts');
+    qp.innerHTML = QUICK_PROMPTS[scope].map(p => `<button class="btn btn-xs btn-outline">${p}</button>`).join('');
+  }
+
+  function toggleChat() {
+    const panel = document.getElementById('chat-panel');
+    if (panel.classList.contains('hidden')) {
+      openChat('server', 'srv-prod-edge-01', 'alle Server-Details im Kontext');
+    } else {
+      panel.classList.add('hidden');
+      panel.classList.remove('flex');
+    }
+  }
+
+  // ----- Findings view toggle (Offen / Alle) -----
+  function setFindingsView(view) {
+    document.querySelectorAll('#findings-view-toggle [data-view]').forEach(b => {
+      const active = b.dataset.view === view;
+      b.classList.toggle('btn-active', active);
+      b.classList.toggle('btn-ghost', !active);
+    });
+    document.querySelectorAll('[data-findings-view]').forEach(p => {
+      p.classList.toggle('hidden', p.dataset.findingsView !== view);
+    });
+  }
+
+  // ----- Action-Panel-Aktionen -----
+  function applyFilterNew() {
+    // Mockup-Stub: würde Filter „Neu seit letztem Scan" anwenden;
+    // hier zeigen wir einfach die offene Liste und scrollen zu den 3 neuen oben
+    setFindingsView('offen');
+    document.getElementById('left-pane').scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function jumpToListener(id) {
+    // Mode-Switch nach Listeners + Selektion + Detail
+    document.querySelectorAll('.mode-tab').forEach(t => t.classList.toggle('tab-active', t.dataset.mode === 'listeners'));
+    document.querySelectorAll('[data-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== 'listeners'));
+    // Selektion
+    const row = document.querySelector(`[data-pane="listeners"] .row-item[onclick*="${id}"]`);
+    if (row) {
+      clearSelection();
+      row.classList.add('selected');
+      document.getElementById('right-pane').innerHTML = listenerDetailHtml(id);
+      row.scrollIntoView({ block: 'center' });
+    }
+  }
+</script>
+
+</body>
+</html>

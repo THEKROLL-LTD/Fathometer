@@ -6,6 +6,8 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 **MVP + UI v2 + ADR-0016 bis ADR-0036 + Block-W-Redesign-Phase-1 abgeschlossen (inkl. Addendum: Tailwind/DaisyUI komplett raus, Legacy-Shim deckt ungerefactorte Templates ab) — Ziel v0.12.0 (2026-05-24).**
 
+**Block X bereitsteht (Spec) — Server-Detail Content-Refactor + Style-Adoption (ADR-0038).** Inhalts-/Sektions-Umbau plus Styling-Übernahme aus dem Claude-Design-Output in einem Block (Design liegt fertig vor in `docs/design/ServerDetail.jsx` / `ServerSettings.jsx` / `server-detail.css`). Acht Phasen (A0–G): A0 portiert die `sd-*`-CSS-Foundation + JS-Helper (scan-flash sync, Alpine-Pill-Panels); A bringt Quickinfos in Header-Sysline; B die neue Settings-Sub-View (Tags + Group + Scan-Intervall); C kollabiert Host-Snapshot zu zwei Header-Pills mit Listener-Exposure-Klassifizierung (LOOPBACK / PUBLIC EXPOSED via `127.0.0.0/8 + ::1`); D den Workflow-Card-Drilldown (Group · Worst Finding · Reason); E zieht Heartbeat 30/4 + Severity-Trend ohne 50T + Skeleton-States (ADR-0035-Re-Anchor + Pattern aus Block W); F den Risk-Band-Top-Level-Accordion in der Triage-Queue (alle collapsed außer ESCALATE); G die Action-Needed-Pill mit Scan-Flash + verschärfter Render-Condition (`escalate+act > 0`), Per-Finding-AI-Reason inline, Bulk-Ack-Noise-Shortcut, Pill-Stratten. Spec: [`X-server-detail-content-refactor.md`](X-server-detail-content-refactor.md). Branch (geplant): `feat/block-x-server-detail-content`. Zielversion: v0.13.0. **Implementation noch nicht gestartet — wartet auf User-Anweisung.**
+
 **Block W abgeschlossen 2026-05-24 — Frontend-Redesign Phase 1 (Login + Dashboard + App-Shell) + ADR-0032-Phase-2-Vorziehung.** Branch `feat/block-w-redesign-phase-1`, neun Commits (1 Spec-Foundation + 7 Phase-Commits + 1 Addendum-Commit). Fünf neue ADRs (0032–0036), Migration 0014, neuer Frontend-Build-Stack (esbuild + lightningcss + Plain-CSS + JetBrains-Mono self-hosted).
 
 **Commits in Reihenfolge:**
@@ -703,6 +705,8 @@ moderater Slack. Tag `v0.4.0` zu setzen.
 | T | [T-eval-junction.md](T-eval-junction.md) | completed 2026-05-22 — **v0.11.x** (ADR-0028 Application-Group-Evaluations als Junction, behebt Cross-Server-Last-Write-Wins) |
 | U | [U-worker-concurrency.md](U-worker-concurrency.md) | completed 2026-05-23 — **v0.11.0** (ADR-0029 Parallele LLM-Job-Verarbeitung, In-Process-Concurrency) |
 | V | [V-ui-performance.md](V-ui-performance.md) | completed 2026-05-23 — **v0.12.0** (ADR-0030 Performance-Tuning UI-Views — Dashboard + Server-Detail + Sidebar-Lazy-Load) |
+| W | [W-redesign-phase-1.md](W-redesign-phase-1.md) | completed 2026-05-24 — **v0.12.0** (ADR-0032..0036 Frontend-Redesign Phase 1 + Tailwind/DaisyUI-Out, Legacy-Shim) |
+| X | [X-server-detail-content-refactor.md](X-server-detail-content-refactor.md) | **pending** — **v0.13.0** (ADR-0038 Server-Detail Content-Refactor + Style-Adoption, Design vorhanden in `docs/design/`) |
 
 ## Aktive Blocker
 
