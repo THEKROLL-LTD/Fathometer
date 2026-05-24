@@ -159,6 +159,32 @@ def _extract_trivy_db_meta(envelope: Envelope) -> tuple[str | None, datetime | N
 _TARGET_MAX_LEN = 160  # bleibt mit pkg_name unter 256.
 
 
+def _effective_target_path(vuln: TrivyVulnerability, result: TrivyResult) -> str | None:
+    """Bevorzugt ``Vulnerability.PkgPath`` ueber ``Result.Target``.
+
+    Trivy liefert den per-Finding-Pfad an unterschiedlichen Stellen je
+    Analyzer-Familie:
+
+    * File-Level-Analyzer (``gobinary``, ``jar``, ``pyinstaller``, alle
+      ``os-pkgs``-Typen) tragen den Pfad bzw. den Hostnamen im
+      ``Result.Target``-Feld; ``Vulnerability.PkgPath`` ist hier meist leer.
+    * Walker-Analyzer fuer Sprach-Paketmanager (``node-pkg``, ``python-pkg``,
+      ``gemspec``, ``cargo``, ...) aggregieren alle Funde eines Oekosystems
+      in einem einzigen ``Result`` und setzen ``Result.Target`` nur auf den
+      Oekosystem-Namen (z.B. ``"Node.js"``). Die echte Per-Paket-Location
+      steht dann ausschliesslich in ``Vulnerability.PkgPath``.
+
+    Diese Funktion bevorzugt ``PkgPath`` wann immer Trivy ihn liefert, ohne
+    Type-Listen zu pflegen — ``PkgPath`` ist per Konstruktion praeziser als
+    ``Target``. Fehlt ``PkgPath``, fallen wir auf ``Result.Target`` zurueck
+    (alter Standard).
+    """
+    pkg_path = (vuln.pkg_path or "").strip()
+    if pkg_path:
+        return pkg_path
+    return result.target
+
+
 def _extract_cause_fields(vuln: TrivyVulnerability, result: TrivyResult) -> dict[str, Any]:
     """Block N (ADR-0021): zieht die fuenf Ursachen-Felder pro Finding.
 
@@ -169,7 +195,7 @@ def _extract_cause_fields(vuln: TrivyVulnerability, result: TrivyResult) -> dict
     """
     return {
         "package_purl": vuln.package_purl,
-        "target_path": result.target,
+        "target_path": _effective_target_path(vuln, result),
         "result_type": result.type_,
         "severity_source": vuln.severity_source,
         "vendor_ids": vuln.vendor_ids,
@@ -220,7 +246,13 @@ def _build_finding_row(
     cvss_score, cvss_vector = vuln.best_cvss_v3()
     attack_vector_str = vuln.attack_vector_from_cvss()
     severity = _SEVERITY_MAP[vuln.severity]
-    pkg_disamb = _disambiguated_package_name(vuln.pkg_name, target, finding_class)
+    # ADR-0011-Erweiterung (Bugfix 2026-05-24): Disambiguator nutzt denselben
+    # bevorzugten Per-Finding-Pfad wie `target_path`, damit `Result.Target=
+    # "Node.js"` nicht alle `vite`-Findings derselben Server-Row auf denselben
+    # `package_name="vite@Node.js"` kollabiert (UNIQUE-Constraint-Kollision)
+    # und die DB-Spalte mit dem Disambiguator drift-frei bleibt.
+    effective_target = _effective_target_path(vuln, result) or target
+    pkg_disamb = _disambiguated_package_name(vuln.pkg_name, effective_target, finding_class)
     cause = _extract_cause_fields(vuln, result)
 
     return {

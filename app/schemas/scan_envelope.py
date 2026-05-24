@@ -341,6 +341,15 @@ class TrivyVulnerability(BaseModel):
     vulnerability_id: str = Field(alias="VulnerabilityID", max_length=64)
     pkg_name: str = Field(alias="PkgName", min_length=1, max_length=MAX_PKG_NAME_LENGTH)
     pkg_id: str | None = Field(default=None, alias="PkgID", max_length=512)
+    # Per-Vuln-Dateipfad. Trivy liefert diesen Wert vor allem fuer
+    # `lang-pkgs`-Walker-Analyzer (`node-pkg`, `python-pkg`, ...), bei denen
+    # `Result.Target` nur den Oekosystem-Namen (`"Node.js"`, `"Python"`) traegt
+    # und die echte Per-Paket-Location als `Vulnerability.PkgPath` mitgeliefert
+    # wird (z.B. `AdminLTE-master/node_modules/vite/package.json`,
+    # `usr/lib/python3/dist-packages/.../METADATA`). Der Ingest bevorzugt diesen
+    # Wert ueber `Result.Target` und reicht ihn als `target_path` an Pass1
+    # (Group-Detection) und Pass2 (Risk-Bewertung) weiter.
+    pkg_path: str | None = Field(default=None, alias="PkgPath", max_length=512)
     installed_version: str | None = Field(
         default=None, alias="InstalledVersion", max_length=MAX_VERSION_LENGTH
     )
@@ -424,6 +433,14 @@ class TrivyVulnerability(BaseModel):
     @field_validator("title", "description")
     @classmethod
     def _scrub_display_text(cls, v: str | None) -> str | None:
+        v = _no_nul_bytes(v)
+        return _strip_control_chars(v)
+
+    @field_validator("pkg_path")
+    @classmethod
+    def _validate_pkg_path(cls, v: str | None) -> str | None:
+        # Pfade duerfen breiteren Zeichensatz haben (Unicode-Verzeichnisnamen),
+        # aber NUL und Control-Chars wuerden Display und LLM-Prompts brechen.
         v = _no_nul_bytes(v)
         return _strip_control_chars(v)
 

@@ -190,3 +190,32 @@ def test_host_trivy_version_optional_none() -> None:
         }
     )
     assert block.trivy_version is None
+
+
+# ---------------------------------------------------------------------------
+# Bugfix 2026-05-24 (ADR-0023 Nachtrag): PkgPath wird validiert und akzeptiert.
+# ---------------------------------------------------------------------------
+
+
+def test_pkg_path_accepted_with_filesystem_chars() -> None:
+    """Pfade duerfen Slash, Punkt, Bindestrich, Unterstrich enthalten."""
+    vuln = TrivyVulnerability.model_validate(
+        _minimal_vuln(PkgPath="AdminLTE-master/node_modules/vite/package.json")
+    )
+    assert vuln.pkg_path == "AdminLTE-master/node_modules/vite/package.json"
+
+
+def test_pkg_path_default_none() -> None:
+    vuln = TrivyVulnerability.model_validate(_minimal_vuln())
+    assert vuln.pkg_path is None
+
+
+def test_pkg_path_nul_byte_rejected() -> None:
+    with pytest.raises(ValidationError):
+        TrivyVulnerability.model_validate(_minimal_vuln(PkgPath="opt/app\x00/main"))
+
+
+def test_pkg_path_max_length_512_reject() -> None:
+    long_path = "opt/" + ("a" * 600)
+    with pytest.raises(ValidationError):
+        TrivyVulnerability.model_validate(_minimal_vuln(PkgPath=long_path))

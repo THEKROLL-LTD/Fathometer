@@ -63,3 +63,12 @@ class TestPass2PromptMarkers:
     def test_investigate_action_type_forbidden_marker_present(self) -> None:
         # "NEVER use action_type "investigate" (pre-triage-only)."
         assert "investigate" in PASS2_SYSTEM_PROMPT
+
+    def test_path_classification_markers_present(self) -> None:
+        # Bugfix 2026-05-24 (ADR-0023 Nachtrag): Pass2 bekommt pro Finding
+        # einen `path=` und muss diesen klassifizieren.
+        assert "PROJECT-LOCAL" in PASS2_SYSTEM_PROMPT
+        assert "SYSTEM-BASELINE" in PASS2_SYSTEM_PROMPT
+        assert "ECOSYSTEM-ONLY" in PASS2_SYSTEM_PROMPT
+        assert "path=" in PASS2_SYSTEM_PROMPT
+        assert "path=n/a" in PASS2_SYSTEM_PROMPT

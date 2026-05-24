@@ -455,6 +455,53 @@ async def test_pass2_accepts_null_worst_finding() -> None:
     assert result.evaluations[0].worst_finding_id is None
 
 
+# ---------------------------------------------------------------------------
+# Bugfix 2026-05-24 (ADR-0023 Nachtrag): Pass2 rendert `path=` pro Finding.
+# ---------------------------------------------------------------------------
+
+
+def test_pass2_prompt_renders_path_for_each_finding() -> None:
+    """`_render_pass2_prompt` muss `path=<target_path>` pro Finding-Zeile
+    schreiben damit das LLM PROJECT-LOCAL/SYSTEM-BASELINE/ECOSYSTEM-ONLY
+    klassifizieren kann."""
+    server = _make_server()
+    f_proj = _make_finding(
+        1, package_name="vite", target_path="AdminLTE-master/node_modules/vite/package.json"
+    )
+    f_sys = _make_finding(
+        2, package_name="urllib3", target_path="usr/lib/python3/dist-packages/urllib3"
+    )
+    grp = _make_group("adminlte-master", [1, 2])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f_proj, f_sys])])
+    assert "path=AdminLTE-master/node_modules/vite/package.json" in prompt
+    assert "path=usr/lib/python3/dist-packages/urllib3" in prompt
+
+
+def test_pass2_prompt_renders_path_n_a_when_target_path_missing() -> None:
+    """Fehlender `target_path` muss explizit als `path=n/a` markiert werden,
+    damit das LLM nicht auf eine leere Stelle reagiert."""
+    server = _make_server()
+    f1 = _make_finding(1, package_name="openssl", target_path=None)
+    grp = _make_group("openssl", [1])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f1])])
+    assert "path=n/a" in prompt
+
+
+def test_pass2_prompt_truncates_long_paths() -> None:
+    """Sehr lange Pfade duerfen den Token-Budget nicht sprengen → Cap 128."""
+    server = _make_server()
+    long_path = "opt/foo/" + ("a" * 400)
+    f1 = _make_finding(1, package_name="x", target_path=long_path)
+    grp = _make_group("x", [1])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f1])])
+    # 128-Cap → der Pfad steht maximal einmal, abgeschnitten
+    assert long_path not in prompt
+    assert "path=opt/foo/" + ("a" * (128 - len("opt/foo/"))) in prompt
+
+
 @pytest.mark.asyncio
 async def test_invalid_json_response_raises() -> None:
     """Wenn die LLM-Response gar kein JSON ist, kommt InvalidResponse."""

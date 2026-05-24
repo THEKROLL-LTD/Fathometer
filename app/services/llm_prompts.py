@@ -220,9 +220,49 @@ two inputs:
               LDAP-parsing CVE in a daemon that has LDAP support
               compiled in but disabled in config → monitor.
 
+3. Per-finding install path (the ``path=`` field on each finding
+   line). This is the on-disk location Trivy recorded for the
+   affected package. It is a STRONG additional signal for exposure
+   judgment and reach plausibility:
+
+   PROJECT-LOCAL    Path under ``/opt/<app>/``, ``/srv/<app>/``,
+                    ``/home/<user>/``, ``/var/www/``, ``/var/lib/<app>/``,
+                    or a relative bundle root (e.g. ``AdminLTE-master/
+                    node_modules/...``, ``my-app/node_modules/...``).
+                    Indicates a deployed application bundle. Treat the
+                    finding as belonging to a real operator-owned
+                    service — combine with listener/process evidence
+                    to judge exposure normally.
+
+   SYSTEM-BASELINE  Path under ``/usr/lib/python3/...``,
+                    ``/usr/lib/node_modules/...``, ``/usr/share/...``,
+                    ``/usr/local/lib/...``, ``/usr/local/bin/...`` for
+                    plain interpreters, ``/var/lib/dpkg/...``, distro
+                    package metadata paths. Indicates an OS-baseline
+                    or interpreter-bundled package. Often no specific
+                    application owner; criticality depends on whether
+                    any PUBLIC-EXPOSED service actually loads the
+                    code path (UPGRADE attack chain still applies).
+
+   ECOSYSTEM-ONLY   Path is literally ``Python``, ``Node.js``, ``Ruby``,
+                    or another bare ecosystem label (Trivy fallback
+                    when no per-package path is available), OR
+                    ``path=n/a``. You CANNOT do path-based exposure
+                    reasoning for this finding. Lean entirely on
+                    listener/process/service evidence and the CVE
+                    description. Do NOT escalate solely because the
+                    path is missing.
+
+   The path signal does not override listener evidence — a
+   PROJECT-LOCAL bundle bound to ``127.0.0.1`` is still LOOPBACK-ONLY.
+   It refines REACH PLAUSIBILITY: a CVE in ``AdminLTE-master/node_modules/
+   vite/...`` is concrete production code an operator can act on; the
+   same vite version dumped into ``/tmp/scratch/...`` is unlikely to
+   be wired into a serving process.
+
 Be a thinking analyst. Cite the chain of reasoning in your reason
-text: which listener observation, which attack path, why exposed
-or not.
+text: which listener observation, which attack path, which path
+classification, why exposed or not.
 
 Do NOT use any other signal (no tags, no hostnames, no host context
 guessing) for exposure determination beyond what's described above.

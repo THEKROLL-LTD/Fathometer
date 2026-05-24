@@ -911,3 +911,48 @@ System-Prompt-Anweisung explizit: „Be a thinking analyst. Cite the chain of re
 - `app/services/llm_risk_reviewer.py::_validate_pass2_response()` — Reason-Cap von 200 zurück auf 256 Chars (war in Iteration 5 verkürzt, wird zurückgenommen).
 - `tests/services/test_llm_prompts.py` — Anti-Regression-Test ergänzt um die neuen Marker `PUBLIC-EXPOSED`, `LOOPBACK-ONLY`, `NO-LISTENER`, `Be a thinking analyst`.
 - `docs/blocks/P-evidence/prompt-pass2-final.md` — Iteration 6 als finaler Stand mit der neuen Listener-Klassifikation, alte Iteration 5 als Historie.
+
+## Nachtrag 2026-05-24 — `Vulnerability.PkgPath` bevorzugen + Pass2-Pfad-Reasoning
+
+**Hintergrund.** Dev-Beobachtung (Ticket-006-Phase): ein Agent-Upload mit AdminLTE-Webprojekt erzeugt 380 Findings, von denen Pass1 nur eine einzige Group (`adminlte-master`) findet. 191 Findings bleiben ungroupiert, Pass2 läuft entsprechend nur einmal. Ursache liegt nicht im LLM-Reasoning sondern im Ingest:
+
+- Trivys `Result.Target` ist nur bei File-Level-Analyzern (`gobinary`, `jar`, `pyinstaller`, alle OS-Distro-Typen) ein echter Pfad. Bei Walker-Analyzern für Sprach-Paketmanager (`node-pkg`, `python-pkg`, `gemspec`, `cargo`, `composer`, …) aggregiert Trivy alle Funde eines Ökosystems in einem einzigen Result und setzt `Result.Target` auf das Ökosystem-Label (`"Node.js"`, `"Python"`).
+- Die echte Per-Paket-Location steht in diesem Fall ausschließlich in `Vulnerability.PkgPath` (z. B. `AdminLTE-master/node_modules/vite/package.json`).
+- Unser Ingest las bisher nur `Result.Target` und schrieb diesen Wert nach `findings.target_path`. Für alle `node-pkg`/`python-pkg`-Findings landete damit `target_path="Node.js"` bzw. `"Python"` — und der Pass1-System-Prompt (Rules 4-6) kann ohne Pfad-Info keine Owner-Application ableiten. Das LLM hat in seinen Reasoning-Logs explizit notiert: „we have no path info … so they go to ungrouped."
+
+**Entscheidung.** Der Ingest bevorzugt `Vulnerability.PkgPath` über `Result.Target`, sowohl für die DB-Spalte `target_path` als auch für den `@target`-Disambiguator aus ADR-0011. Pass2 reicht den Per-Finding-Pfad zusätzlich an das LLM weiter, weil die Pfad-Klassifikation (`PROJECT-LOCAL`/`SYSTEM-BASELINE`/`ECOSYSTEM-ONLY`) ein eigenes starkes Exposure-Signal ist neben Listener und Attack-Chain.
+
+Konkretes Mapping pro Finding:
+
+```python
+target_path = vuln.pkg_path.strip() or result.target
+```
+
+Kein Trivy-Type-Switch nötig — `PkgPath` ist per Konstruktion präziser als `Target`, fehlt nur dort wo `Target` schon der korrekte Pfad ist. Backward-kompatibel für gobinary/jar/os-pkgs (deren `PkgPath` leer ist → Fallback greift unverändert).
+
+**Pass2-Erweiterung.** `_render_pass2_prompt` schreibt pro Finding-Zeile `path=<gecapptes target_path bis 128 Chars>` (bzw. `path=n/a` wenn nichts vorhanden). `PASS2_SYSTEM_PROMPT` führt das als drittes Exposure-Signal neben Listener und Attack-Chain ein, mit drei Klassen:
+
+| Klasse | Kriterium | Bedeutung |
+|--------|-----------|-----------|
+| `PROJECT-LOCAL` | Pfad unter `/opt/<app>/`, `/srv/<app>/`, `/home/<user>/`, `/var/www/`, `/var/lib/<app>/`, oder relativer Bundle-Root (`AdminLTE-master/node_modules/...`) | Operator-eigener Application-Deploy — Listener-Evidenz greift normal |
+| `SYSTEM-BASELINE` | Pfad unter `/usr/lib/python3/...`, `/usr/lib/node_modules/...`, `/usr/share/...`, `/usr/local/lib/...`, Distro-Metadata | OS-Baseline; meist kein Owner-App, Reach hängt von UPGRADE-Chain ab |
+| `ECOSYSTEM-ONLY` | `path=Python`/`Node.js`/… oder `path=n/a` | Kein Pfad-Reasoning möglich → ausschließlich Listener/Prozess/Service-Evidenz |
+
+Die Klassifikation **überschreibt nicht** die Listener-Evidenz (`PROJECT-LOCAL` an `127.0.0.1` bleibt `LOOPBACK-ONLY`); sie verfeinert nur die Reach-Plausibilität.
+
+**Ungroupierte Findings bleiben out-of-scope für Pass2.** Pass2 läuft per `application_group`, nicht per Finding. Findings ohne Owner-App bekommen weiterhin keine Risk-Bewertung — das ist beabsichtigt: nach dem Path-Fix sollte „ungrouped" der seltene Rest sein, und für diesen Rest fehlt schlicht das gruppen-aggregierte Kontext-Signal das Pass2 brauchen würde. Falls die ungrouped-Rate empirisch hoch bleibt, ist die Antwort ein besserer Pass1-Prompt (Fallback-Regel pro `package_name` für language-pkgs ohne Bundle-Pfad), nicht ein per-Finding-Pass2.
+
+**Code-Touchpoints für diesen Nachtrag:**
+
+- `app/schemas/scan_envelope.py::TrivyVulnerability` — neues Feld `pkg_path: str | None = Field(default=None, alias="PkgPath", max_length=512)` mit eigenem Validator (NUL-Bytes und Control-Chars stripp/reject, kein ASCII-Zwang weil Unicode-Pfade möglich sind).
+- `app/services/findings_ingest.py::_effective_target_path()` — neue Helper-Funktion: `vuln.pkg_path.strip() or result.target`.
+- `app/services/findings_ingest.py::_extract_cause_fields()` — verwendet `_effective_target_path()` statt direkt `result.target`.
+- `app/services/findings_ingest.py::_build_finding_row()` — Disambiguator-Argument ebenfalls auf `_effective_target_path()` umgestellt, damit `package_name` und `target_path` konsistent denselben Pfad sehen.
+- `app/services/llm_risk_reviewer.py::_render_pass2_prompt()` — pro Finding-Zeile `path=<…|n/a>` mit 128-Char-Cap.
+- `app/services/llm_prompts.py::PASS2_SYSTEM_PROMPT` — neuer Abschnitt „3. Per-finding install path" mit `PROJECT-LOCAL`/`SYSTEM-BASELINE`/`ECOSYSTEM-ONLY`-Klassifikation.
+- `tests/schemas/test_envelope_cause_fields.py` — `PkgPath`-Validator-Tests (accept Slash/Punkt, default None, NUL/512-Reject).
+- `tests/services/test_findings_ingest_cause_mapping.py` — Pfad-Precedence-Tests: node-pkg/python-pkg nehmen PkgPath, gobinary fällt auf Result.Target zurück, Whitespace-PkgPath wird wie leer behandelt, Disambiguator verhindert UNIQUE-Kollision bei zwei PkgPaths desselben Pakets.
+- `tests/services/test_llm_risk_reviewer.py` — Pass2-Render-Tests: `path=` pro Finding, `path=n/a` für fehlende Pfade, 128-Char-Truncation.
+- `tests/services/test_llm_prompts.py` — Anti-Regression-Marker `PROJECT-LOCAL`/`SYSTEM-BASELINE`/`ECOSYSTEM-ONLY`/`path=`/`path=n/a` in PASS2_SYSTEM_PROMPT.
+
+Keine Migration nötig: `findings.target_path` existiert schon, der Wert wird beim nächsten Scan-Ingest pro Server überschrieben (Quelle-der-Wahrheit-Semantik des aktuellen Scans).

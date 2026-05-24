@@ -896,9 +896,18 @@ class LLMRiskReviewer:
                 epss_str = f" epss={f.epss_score:.2f}" if f.epss_score is not None else " epss=n/a"
                 fix_str = f" fix={f.fixed_version}" if f.fixed_version else " fix=none"
                 kev_str = " kev=yes" if f.is_kev else " kev=no"
+                # Bugfix 2026-05-24 (ADR-0023 Nachtrag): Per-Finding-Pfad mit
+                # in den Prompt — siehe PASS2_SYSTEM_PROMPT-Block "Path-based
+                # exposure judgment". Pfad wird auf 128 Chars gecappt (Token-
+                # Budget); fehlt er, kommt der Marker `path=n/a` statt einer
+                # leeren Stelle, damit das Modell explizit signalisiert wird
+                # dass Pfad-Reasoning nicht moeglich ist.
+                path_raw = (f.target_path or "").strip()
+                path_str = f" path={path_raw[:128]}" if path_raw else " path=n/a"
                 lines.append(
                     f"      {f.id} {f.identifier_key} {f.package_name} "
-                    f"sev={f.severity.value}{cvss_str}{epss_str}{fix_str}{kev_str} "
+                    f"sev={f.severity.value}{cvss_str}{epss_str}{fix_str}{kev_str}"
+                    f"{path_str} "
                     f"{vendor_str}"
                 )
             if len(fs) > 32:
