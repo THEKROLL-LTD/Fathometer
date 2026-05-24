@@ -112,6 +112,16 @@ Erlaubte Form:
 
 **Subagent-Pflicht:** Implementer-/Test-Writer-Prompts enthalten den Satz: „Jeder `pytest`-Bash-Aufruf hat ein `timeout`-Argument ≤ 120000 ms (Default-Suite) bzw. ≤ 60000 ms (fokussierter Sub-Lauf). Keine pytest-Aufrufe ohne Timeout."
 
+## HTMX-OOB-Single-Source-Pattern
+
+**Pflicht für jeden HTMX-OOB-Endpoint** (Polling-Partials, Batch-Updates, Out-of-Band-Swap-Responses):
+
+1. **Ein Partial, beide Pfade.** Initial-Render und OOB-Response includieren dasselbe Jinja-Partial. OOB-spezifische Attribute (`hx-swap-oob="outerHTML:#…"`, `id="…"`-Anker) werden via Conditional-Flag (`{% if oob_swap %}…{% endif %}`) am Outer-Element gesetzt, der Rest des Markups ist identisch. **Niemals** zwei separate Templates mit „kopiertem" Markup — das ist garantierter Drift.
+2. **ID-Konvention.** OOB-Targets bekommen IDs vom Schema `<feature>-<entity>-<id>-<slot>` (z. B. `sidebar-host-42-heartbeat`, `sidebar-host-42-counts`). Initial-Render setzt diese IDs immer, OOB-Response targetet via `outerHTML:#<id>`.
+3. **Drift-Regression-Test ist Pflicht.** Pro OOB-Endpoint ein Pure-Unit-Test der Initial-Render und OOB-Render mit identischen Test-Fixtures rendert und strukturell vergleicht (gleiche IDs, gleiches Klassen-Set pro Cell, gleiche `data-*`-Keys). Verhindert dass zukünftige Implementer einen Pfad anfassen ohne den anderen.
+
+**Begründung:** Block-W-Heartbeat-Bug (2026-05-24) — `sidebar/_heartbeat_bar.html` und `_partials/sidebar_batch_oob.html` hatten zwei verschiedene CSS-Klassen-Schemata (`host__beat-tick beat--alarm` vs. `host__beat__cell host__beat__cell--alarm`) und der OOB-Pfad targetete IDs die im Initial-Render gar nicht existierten. Der Per-Row-Viewport-Update-Pfad war damit ~2 Wochen tot ohne dass es jemand gemerkt hat. Single-Source-Partial hätte das von vornherein verhindert.
+
 ## Out of Scope — wörtlich aus ARCHITECTURE §17
 
 - Notifications jeglicher Art (Email, Discord, Webhooks)
