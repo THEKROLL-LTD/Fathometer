@@ -79,6 +79,9 @@
     {% set n = triage_counts.get(key, 0) %}
     <a class="triage__cell{% if accent and n > 0 %} triage__cell--accent{% endif %}"
        href="{{ url_for('findings.index', risk_band=key) }}"
+       hx-get="{{ url_for('findings.index', risk_band=key) }}"
+       hx-target="#detail-pane"
+       hx-push-url="true"
        data-test="triage-cell-{{ key }}">
       <div class="triage__cell-label">{{ label }}</div>
       <div class="triage__cell-num{% if n == 0 %} triage__cell-num--zero{% endif %}">{{ n }}</div>

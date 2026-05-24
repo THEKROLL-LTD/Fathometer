@@ -46,13 +46,24 @@
   {# Rechte Sektion: Nav + Profile #}
   <div class="topbar__right">
     {% if current_user is defined and current_user.is_authenticated %}
+      {# HTMX-Pane-Swap statt Full-Page-Load. `href` bleibt fuer Right-Click-
+         in-neuem-Tab + No-JS-Fallback drin; HTMX uebernimmt den Default-Klick.
+         Active-State synct topbar_nav_sync.js via htmx:pushedIntoHistory. #}
       <nav class="topbar__nav" aria-label="Main navigation">
         <a href="{{ url_for('dashboard.index') }}"
+           hx-get="{{ url_for('dashboard.index') }}"
+           hx-target="#detail-pane"
+           hx-push-url="true"
+           data-nav="dashboard"
            class="topbar__navitem{% if _is_dashboard %} topbar__navitem--active{% endif %}"
            {% if _is_dashboard %}aria-current="page"{% endif %}>
           Dashboard
         </a>
         <a href="{{ url_for('findings.index') }}"
+           hx-get="{{ url_for('findings.index') }}"
+           hx-target="#detail-pane"
+           hx-push-url="true"
+           data-nav="findings"
            class="topbar__navitem{% if _is_findings %} topbar__navitem--active{% endif %}"
            {% if _is_findings %}aria-current="page"{% endif %}>
           Findings

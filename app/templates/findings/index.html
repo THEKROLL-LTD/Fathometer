@@ -29,7 +29,9 @@
 
    Sicherheit: kein `|safe`. Alle Variablen autoescaped.
 #}
-{% extends "base_app.html" %}
+{# HX-Request-Pfad: nur `_partial_shell.html`-Wrapper rendern (Pane-Swap),
+   sonst die volle `base_app.html`-Shell (Direkt-Aufruf / Reload). #}
+{% extends "_partial_shell.html" if hx_partial else "base_app.html" %}
 
 {% block title %}Findings · secscan{% endblock %}
 

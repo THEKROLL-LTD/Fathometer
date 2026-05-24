@@ -2,6 +2,8 @@
 import './sidebar_viewport.js';
 import './sidebar_loading_wave.js';
 import './sidebar_heartbeat_tip.js';
+// Topbar-Nav-Active-State an HTMX-Pane-Swaps koppeln.
+import './topbar_nav_sync.js';
 // Phase D: Scan-Beam-Sync fuer die Action-Needed-Card (ADR-0036).
 import './dashboard_scan_sync.js';
 // Phase F: Last-Refresh-Eyebrow-Ticker (ADR-0036).

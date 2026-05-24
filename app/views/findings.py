@@ -228,6 +228,7 @@ def index() -> str:
 
     return render_template(
         "findings/index.html",
+        hx_partial=_is_htmx_request(),
         filt=filt,
         # `view_filter`-Alias wird vom CSV-Export-Link im Index-Template
         # benoetigt (`view_filter.to_query_string()`); ansonsten teilen sich
