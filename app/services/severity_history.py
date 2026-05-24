@@ -23,6 +23,7 @@ Vier Public Entry-Points:
 - `count_kev_events_50d()` — Anzahl distincter Findings, die in den letzten
   50 Tagen entweder neu als KEV markiert oder neu mit `is_kev=True`
   ingestet wurden. Speist die Meta-Zeile in der Lebenszeichen-Sektion.
+  (deprecated, Block X / ADR-0038)
 - `daily_severity_counts_fleet()` — Flotten-weite Daily-OPEN-Counts fuer
   die Dashboard-KPI-Sparklines.
 
@@ -38,6 +39,7 @@ Performance-Profil (Phase E, ADR-0030 Befund 3):
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
@@ -805,7 +807,18 @@ def count_kev_events_50d(
         OR (first_seen_at >= now - 50d AND is_kev = TRUE)
 
     Eine einzige SELECT-Query, ORM-basiert (kein `text()`).
+
+    .. deprecated:: Block X (2026-05-24)
+       Der KEV-Ereignisse-50T-Tile auf der Server-Detail-View entfaellt
+       mit ADR-0038. Finaler Removal in einem Cleanup-PR sobald keine
+       Konsumenten mehr existieren.
     """
+    warnings.warn(
+        "count_kev_events_50d ist ab Block X deprecated (ADR-0038). "
+        "Finaler Removal folgt in einem Cleanup-PR.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     current = _resolve_now(now)
     window_start = current - timedelta(days=50)
 

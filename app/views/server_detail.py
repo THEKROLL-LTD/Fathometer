@@ -63,7 +63,6 @@ from app.services.heartbeat_aggregation import DailyStatus, heartbeats_for_serve
 from app.services.risk_engine import RISK_BAND_SORT_RANK, RiskBand, no_band_values, yes_band_values
 from app.services.severity_history import (
     DailySeverityCount,
-    count_kev_events_50d,
     daily_severity_counts_for_server,
     severity_snapshots_for_server,
 )
@@ -510,7 +509,6 @@ def show(server_id: int) -> Any:
         sess, server.id, days=50
     )
     tendency: Tendency = tendency_from_counts(trend_data)
-    kev_events_50d: int = count_kev_events_50d(sess, server.id)
     heartbeat_cells: list[DailyStatus] = heartbeats_for_servers(sess, [server.id], days=50)[
         server.id
     ]
@@ -562,7 +560,6 @@ def show(server_id: int) -> Any:
         tendency=tendency,
         sparklines=sparklines,
         trend_data=trend_data,
-        kev_events_50d=kev_events_50d,
         heartbeat_cells=heartbeat_cells,
         quick_counts=quick_counts,
         action_required=action_required,

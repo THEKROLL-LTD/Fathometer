@@ -5,7 +5,8 @@
                               Hashtag-Tags, KI-Bewertung-Button.
      2. Tag-Editor          — Akkordeon, default zugeklappt.
      3. HeaderStats         — Total + Tendenz links, 4 KPI-Sparklines rechts.
-     4. Lebenszeichen       — HeartbeatLarge + 4-Spalten-Meta-Grid.
+     4. Lebenszeichen       — HeartbeatLarge (Quickinfos wandern in die
+                              Header-Sysline ab Block X / ADR-0038).
      5. Severity-Trend      — Stacked-Bar-Chart + Range-Toggle + Legende.
      6. Triage Queue        — eingebunden via `servers/_findings_section.html`.
 
@@ -19,7 +20,6 @@
      - `tendency`        : Tendency-Enum (Block K)
      - `sparklines`      : dict[str, list[int]] mit Keys kev/critical/high/medium/low (Block K)
      - `trend_data`      : list[DailySeverityCount] (Block K)
-     - `kev_events_50d`  : int (Block K)
      - `heartbeat_cells` : list[DailyStatus] (Block K)
      - `quick_counts`    : dict mit kev_open/critical_open/high_open/medium_open/total_open (Block K)
      - `ack_form`/`reopen_form`/`note_form`/`bulk_form`/`csrf_form` im Flat-Modus
@@ -123,11 +123,20 @@
         {% if server.architecture %}
           {% if server.os_pretty_name or server.kernel_version %}<span class="opacity-30 mx-2">·</span>{% endif %}{{ server.architecture }}
         {% endif %}
-        {% if server.last_scan_at %}
-          {% if server.os_pretty_name or server.kernel_version or server.architecture %}<span class="opacity-30 mx-2">·</span>{% endif %}
-          <span title="{{ server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">letzter scan {{ server.last_scan_at | relative_time }}</span>
-        {% endif %}
       </p>
+      <div class="sd-sysline">
+        <span class="sd-sysline__seg">
+          <span class="sd-sysline__prompt">&gt;</span> expected interval <b>{{ server.expected_scan_interval_h }} h</b>
+        </span>
+        <span class="sd-sysline__sep">&middot;</span>
+        <span class="sd-sysline__seg">
+          last scan <b>{% if server.last_scan_at %}<time datetime="{{ server.last_scan_at.isoformat() }}" title="{{ server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.last_scan_at | relative_time }}</time>{% else %}never{% endif %}</b>
+        </span>
+        <span class="sd-sysline__sep">&middot;</span>
+        <span class="sd-sysline__seg">
+          trivy-db <b>{% if server.trivy_db_updated_at %}<time datetime="{{ server.trivy_db_updated_at.isoformat() }}" title="{{ server.trivy_db_updated_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.trivy_db_updated_at | relative_time }}</time>{% else %}unknown{% endif %}</b>
+        </span>
+      </div>
       {% if server.tag_links %}
       <p class="font-mono text-xs mt-2 flex flex-wrap gap-x-3 gap-y-1">
         {# Tag-Color kommt aus dem Server-eigenen Tag-Modell (kein User-Input,
@@ -281,34 +290,6 @@
         <span>–{{ (heartbeat_cells | default([])) | length }}T</span><span>heute</span>
       </div>
     </div>
-    <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-2">
-      <div>
-        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Erwarteter Intervall</div>
-        <dd class="font-mono mt-1">{{ server.expected_scan_interval_h }} h</dd>
-      </div>
-      <div>
-        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Letzter Scan</div>
-        <dd class="font-mono mt-1">
-          {% if server.last_scan_at %}
-            <time datetime="{{ server.last_scan_at.isoformat() }}"
-                  title="{{ server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.last_scan_at | relative_time }}</time>
-          {% else %}<span class="opacity-60">noch nie</span>{% endif %}
-        </dd>
-      </div>
-      <div>
-        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Trivy-DB</div>
-        <dd class="font-mono mt-1">
-          {% if server.trivy_db_updated_at %}
-            <time datetime="{{ server.trivy_db_updated_at.isoformat() }}"
-                  title="{{ server.trivy_db_updated_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.trivy_db_updated_at | relative_time }}</time>
-          {% else %}<span class="opacity-60">unbekannt</span>{% endif %}
-        </dd>
-      </div>
-      <div>
-        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">KEV-Ereignisse · 50T</div>
-        <dd class="font-mono mt-1 {% if kev_events_50d and kev_events_50d > 0 %}text-error{% endif %}">{{ kev_events_50d | default(0) }}</dd>
-      </div>
-    </dl>
   </section>
 
   {# =============== 5. Severity-Trend =============== #}

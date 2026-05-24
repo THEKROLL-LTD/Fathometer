@@ -10,6 +10,10 @@ Die Funktion baut genau eine `select(...)`-Query und ruft
    geprueft).
 4. Der Rueckgabewert ist `int(scalar or 0)` — auch wenn die Query `None`
    liefert, ist das Ergebnis 0.
+
+Hinweis: `count_kev_events_50d` ist ab Block X deprecated (ADR-0038).
+Die Tests bleiben erhalten, solange die Funktion existiert — der
+DeprecationWarning wird per Modul-Marker unterdrueckt.
 """
 
 from __future__ import annotations
@@ -18,9 +22,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.services.severity_history import count_kev_events_50d
+
+# count_kev_events_50d ist deprecated (Block X, ADR-0038) — Warnung
+# unterdrücken damit die bestehenden Pure-Unit-Tests weiterlaufen.
+pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 FIXED_NOW = datetime(2026, 5, 15, 12, 0, 0, tzinfo=UTC)
 EXPECTED_CUTOFF = FIXED_NOW - timedelta(days=50)
