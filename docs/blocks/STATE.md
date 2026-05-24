@@ -83,6 +83,44 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 **Tag `v0.12.0` zu setzen** (nach Branch-Merge auf main, gemäß [Tag-only-on-main-after-Merge]).
 
+**Post-W-Bugfix 2026-05-24 — TICKET-005 Heartbeat-Bar Template-Bug, OOB-Drift, Hover-Overlay.** Branch `fix/block-w-heartbeat-tooltip`, zwei Commits:
+
+| Commit | Inhalt |
+|---|---|
+| `c8cc4fd` | fix(block-w): heartbeat dominant_risk_band template bug + oob drift |
+| `ac3692f` | feat(block-w): heartbeat hover overlay |
+
+Drei Defekte aus Block W Phase C (`101e27d`) bereinigt:
+
+1. **Template-Bug:** `_heartbeat_bar.html:30` resolved `cell.dominant_risk_band.value` auf einem plain `str` zu `Undefined`, jeder Mapping-Branch fiel in den `else`-Zweig — alle 30 Cells uniform grau, obwohl Aggregation auf rke2-sv-0 ~4246 OPEN-Findings mit `risk_band='escalate'` zählt. Fix: `.value` raus. Mock-Test-Helper `_make_cell` setzte einen MagicMock mit `.value`-Attribut und hat den Bug damit ~2 Wochen verschleiert — Helper jetzt direkt auf String, alle 7 `_to_*`-Mapping-Tests verifizieren nun das echte Verhalten.
+2. **OOB-Drift:** `_partials/sidebar_batch_oob.html` rendete eigenes `host__beat__cell--*`-Klassen-Schema und IDs die im Initial-Render gar nicht existierten — Per-Row-Viewport-OOB-Update-Pfad war seit Block-W-Merge tot. Fix via neuem Single-Source-Pattern: `_heartbeat_bar.html` + neues `_counts.html` werden in beiden Pfaden includiert, OOB-Conditional via `oob_swap`-Flag. `host__beat__cell`-Schema komplett aus dem Repo entfernt.
+3. **Hover-Tooltip:** Browser-Native `title="…"` durch Design-konformes `.heartbeat-tip`-Overlay ersetzt (Custom-DIV mit Datum + State-Label + optionaler "no scan"-Hint). `_heartbeat_bar.html` Live-Cells haben jetzt `data-day`/`data-band`/`data-had-scan` (statt `title=`); `frontend/src/css/components/sidebar.css` enthält neuen `.heartbeat-tip`-Stack inkl. `@keyframes heartbeat-tip-in`; `frontend/src/js/sidebar_heartbeat_tip.js` mit Event-Delegation, WeakMap-Cleanup, `textContent`-only (XSS-Defense).
+
+**Neue Pure-Unit-Tests (25 total):**
+- `tests/templates/test_sidebar_heartbeat_drift.py` (7 Tests) — Initial-vs-OOB-Render strukturell vergleichen.
+- `tests/templates/test_heartbeat_ids_present.py` (5 Tests) — ID-Anker + OOB-Conditional-Flag.
+- `tests/templates/test_heartbeat_tooltip_data_attrs.py` (12 Tests) — `title=` raus, neue `data-*` gesetzt, Skeleton unangetastet.
+- `tests/templates/test_heartbeat_30_ticks.py` — `_make_cell`-Helper umgestellt (direkter String statt `.value`-Mock).
+
+**CLAUDE.md §HTMX-OOB-Single-Source-Pattern** ist mit diesem Ticket etabliert und hier sein erster Anwendungsfall (Defekt 2 war der Auslöser).
+
+**Verifikations-Endstand:**
+- Default-`pytest`: 1813 passed, 6 skipped, 662 deselected in ~40 s.
+- `ruff check . && ruff format --check .` PASS (328 Files), `mypy app/` PASS (85 Source-Files).
+- `cd frontend && npm run build` PASS, neue Asset-Hashes im `app/static/dist/manifest.json`.
+
+**Operator-Smoke offen** (8 Punkte aus TICKET-005 §Schritt 6, vom User abzuhaken vor Merge auf `main`):
+1. Sidebar lädt — letzte 2–3 Cells für rke2-sv-0 sind cyan (`beat--alarm`).
+2. Hover über cyan-Cell zeigt Overlay mit Datum + `ESCALATE`-Label in cyan, keine Hint-Zeile (`had_scan=true`).
+3. Hover über graue Cell ohne Scan zeigt Datum + `NOMINAL` + Hint-Zeile "no scan".
+4. Hover-Animation läuft (200 ms fade-in mit Y-translate).
+5. Kein nativer Browser-Tooltip mehr.
+6. Nach 60 s Polling-Tick: Heartbeat-Bar wird via OOB-Batch korrekt aktualisiert.
+7. IntersectionObserver-Scroll: Skeleton für neu sichtbare Rows, Live-Daten kommen via Batch-POST nach.
+8. Keine Console-Errors.
+
+**Branch-Merge auf `main`** direkt nach Operator-OK (Pattern wie TICKET-004); kein eigener Tag (Bugfix-Release läuft mit `v0.12.0` mit).
+
 ---
 
 **Block U abgeschlossen 2026-05-23 — Parallele LLM-Job-Verarbeitung im einzigen Worker-Prozess.** Branch `feat/block-u-worker-concurrency`, sieben Phasen in Reihenfolge A → B → D → C → F → G → E (alle pro Phase vom `reviewer`-Subagent APPROVED). Einzelner Block-Abschluss-Commit auf User-Wunsch (statt sieben Phase-Commits — Option 2 aus der Workflow-Frage). ADR-0029 ist die Quelle der Wahrheit; CLAUDE.md/ARCHITECTURE.md unverändert.
