@@ -1,80 +1,55 @@
-{# Stacked-Bar-Chart fuer den Severity-Trend (Block K, ADR-0018).
+{# Block X Phase E (ADR-0038 §5): Severity-Trend auf sd-trend-Klassen.
 
    Variablen-Vertrag:
-     - `days_data` : list[DailySeverityCount] — aelteste zuerst. Felder:
-                     `day`, `critical`, `high`, `medium`, `low`, `kev`.
+     - days_data : list[DailySeverityCount] — aelteste zuerst. Felder:
+                   day, critical, high, medium, low, kev.
+     - skel      : bool (optional) — Skeleton-State mit --skel-Modifier.
 
-   Layout: SVG, viewBox 50x100, preserveAspectRatio="none" — der Container
-   skaliert auf 100% Breite/Hoehe. Pro Tag eine gestapelte Saeule
-   (critical -> high -> medium -> low, von unten nach oben). KEV-Tage
-   bekommen einen roten Dot oberhalb der Saeule.
+   Sicherheit: numerische Werte, kein User-Input. Kein |safe.
 
-   Inline-SVG, keine Chart-Library — ADR-0001.
+   CSS-Klassen: sd-trend-frame/sd-trend-chart/sd-trend-col/sd-trend-seg--*
+   aus frontend/src/css/components/server-detail.css (Phase A0).
+   sd-trend-col ist ein flex-column-reverse-Container; Segmente werden
+   bottom-up gestapelt: critical zuerst -> high -> medium -> low.
 #}
+{%- set _is_skel = skel | default(false) -%}
 {%- set n = days_data | length -%}
-{# SVG-Groesse via Attribut statt `w-full h-full`-Klasse: Tailwind-CDN
-   registriert `h-full` nicht zuverlaessig bei HTMX-nachgeladenen Subtrees
-   (TD-010). Attribut-Sizing ist immun gegen den Race. #}
-<div class="w-full" style="height: 220px;">
-  <svg viewBox="0 0 50 100" preserveAspectRatio="none"
-       width="100%" height="220" class="block"
-       role="img"
-       aria-label="Severity Trend ueber {{ n }} Tage">
-    {%- if n > 0 -%}
-      {%- set slot_w = 50.0 / n -%}
-      {%- set gap = slot_w * 0.2 -%}
-      {%- set bar_w = slot_w - gap -%}
-      {%- if bar_w < 0.1 -%}{% set bar_w = 0.1 %}{%- endif -%}
-      {# Maximum aller Tagessummen — gegen 1 geclampt damit /0 unmoeglich. #}
+<div class="sd-trend-frame sd-skel-frame"
+     data-test="severity-trend-frame">
+  <div class="sd-trend-chart">
+    {%- if _is_skel -%}
+      {%- for _ in range(30) -%}
+        <div class="sd-trend-col sd-trend-col--skel" aria-hidden="true"></div>
+      {%- endfor -%}
+    {%- elif n > 0 -%}
       {%- set ns = namespace(vmax=1) -%}
       {%- for d in days_data -%}
         {%- set total = d.critical + d.high + d.medium + d.low -%}
-        {%- if total > ns.vmax -%}{% set ns.vmax = total %}{%- endif -%}
+        {%- if total > ns.vmax -%}{%- set ns.vmax = total -%}{%- endif -%}
       {%- endfor -%}
-      {%- set scale = (100.0 - 6.0) / ns.vmax -%}
       {%- for d in days_data -%}
         {%- set total = d.critical + d.high + d.medium + d.low -%}
-        {%- set x = loop.index0 * slot_w + gap / 2.0 -%}
-        {%- if total > 0 -%}
-          {# Stack von unten (y=98) nach oben: low -> medium -> high -> critical. #}
-          {%- set ystate = namespace(y=98.0) -%}
-          {%- if d.low and d.low > 0 -%}
-            {%- set hgt = d.low * scale -%}
-            {%- set ystate.y = ystate.y - hgt -%}
-            <rect x="{{ '%.3f' | format(x) }}" y="{{ '%.3f' | format(ystate.y) }}" width="{{ '%.3f' | format(bar_w) }}" height="{{ '%.3f' | format(hgt) }}" fill="#38bdf8" />
+        {%- set crit_pct = (d.critical * 100.0 / ns.vmax) if d.critical else 0 -%}
+        {%- set high_pct = (d.high * 100.0 / ns.vmax) if d.high else 0 -%}
+        {%- set med_pct  = (d.medium * 100.0 / ns.vmax) if d.medium else 0 -%}
+        {%- set low_pct  = (d.low * 100.0 / ns.vmax) if d.low else 0 -%}
+        <div class="sd-trend-col"
+             data-day="{{ d.day.isoformat() }}"
+             title="{{ d.day.isoformat() }} · crit {{ d.critical }} · high {{ d.high }} · med {{ d.medium }} · low {{ d.low }}{% if d.kev %} · {{ d.kev }} KEV{% endif %}">
+          {%- if d.critical -%}
+            <span class="sd-trend-seg--critical" style="height: {{ '%.2f' | format(crit_pct) }}%;"></span>
           {%- endif -%}
-          {%- if d.medium and d.medium > 0 -%}
-            {%- set hgt = d.medium * scale -%}
-            {%- set ystate.y = ystate.y - hgt -%}
-            <rect x="{{ '%.3f' | format(x) }}" y="{{ '%.3f' | format(ystate.y) }}" width="{{ '%.3f' | format(bar_w) }}" height="{{ '%.3f' | format(hgt) }}" fill="#14b8a6" />
+          {%- if d.high -%}
+            <span class="sd-trend-seg--high" style="height: {{ '%.2f' | format(high_pct) }}%;"></span>
           {%- endif -%}
-          {%- if d.high and d.high > 0 -%}
-            {%- set hgt = d.high * scale -%}
-            {%- set ystate.y = ystate.y - hgt -%}
-            <rect x="{{ '%.3f' | format(x) }}" y="{{ '%.3f' | format(ystate.y) }}" width="{{ '%.3f' | format(bar_w) }}" height="{{ '%.3f' | format(hgt) }}" fill="#f59e0b" />
+          {%- if d.medium -%}
+            <span class="sd-trend-seg--medium" style="height: {{ '%.2f' | format(med_pct) }}%;"></span>
           {%- endif -%}
-          {%- if d.critical and d.critical > 0 -%}
-            {%- set hgt = d.critical * scale -%}
-            {%- set ystate.y = ystate.y - hgt -%}
-            <rect x="{{ '%.3f' | format(x) }}" y="{{ '%.3f' | format(ystate.y) }}" width="{{ '%.3f' | format(bar_w) }}" height="{{ '%.3f' | format(hgt) }}" fill="#ef4444" />
+          {%- if d.low -%}
+            <span class="sd-trend-seg--low" style="height: {{ '%.2f' | format(low_pct) }}%;"></span>
           {%- endif -%}
-        {%- endif -%}
-        {%- if d.kev and d.kev > 0 -%}
-          {%- set cx = (loop.index0 + 0.5) * slot_w -%}
-          {%- set r = (slot_w * 0.45) -%}
-          {%- if r < 0.6 -%}{% set r = 0.6 %}{%- endif -%}
-          {# Dot oberhalb der hoechsten Stack-Position; bei leeren Tagen am Boden. #}
-          {%- if total > 0 -%}
-            {%- set cy_raw = ystate.y - r - 0.5 -%}
-            {%- set cy = cy_raw if cy_raw > (r + 1) else (r + 1) -%}
-          {%- else -%}
-            {%- set cy = r + 1 -%}
-          {%- endif -%}
-          <circle cx="{{ '%.3f' | format(cx) }}" cy="{{ '%.3f' | format(cy) }}" r="{{ '%.3f' | format(r) }}" fill="#ef4444">
-            <title>{{ d.day.isoformat() }} · {{ d.kev }} neue KEV</title>
-          </circle>
-        {%- endif -%}
+        </div>
       {%- endfor -%}
     {%- endif -%}
-  </svg>
+  </div>
 </div>

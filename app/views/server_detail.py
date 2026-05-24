@@ -501,12 +501,12 @@ def show(server_id: int) -> Any:
     # Aggregation per `generate_series` + FILTER-Aggregate. Query-Count steigt
     # um 2, CPU-Last sinkt drastisch (keine 1.4M-Python-Iterationen mehr).
     sess = get_session()
-    sparklines: dict[str, list[int]] = severity_snapshots_for_server(sess, server.id, days=50)
+    sparklines: dict[str, list[int]] = severity_snapshots_for_server(sess, server.id, days=30)
     trend_data: list[DailySeverityCount] = daily_severity_counts_for_server(
-        sess, server.id, days=50
+        sess, server.id, days=30
     )
     tendency: Tendency = tendency_from_counts(trend_data)
-    heartbeat_cells: list[DailyStatus] = heartbeats_for_servers(sess, [server.id], days=50)[
+    heartbeat_cells: list[DailyStatus] = heartbeats_for_servers(sess, [server.id], days=30)[
         server.id
     ]
     quick_counts = _quick_counts_for_server(sess, server.id)

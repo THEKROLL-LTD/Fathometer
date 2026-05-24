@@ -44,8 +44,8 @@
    nicht aus `findings | length`. #}
 {% set total_findings = counts.open if counts else (findings | length) %}
 
-<div class="px-6 py-6 max-w-[1600px] divide-y divide-base-content/10"
-     x-data="{ trendRange: '50T' }">
+<div class="sd-detail-root px-6 py-6 max-w-[1600px] divide-y divide-base-content/10"
+     x-data="{ trendRange: '30T' }">
 
   {# =============== 1. Header =============== #}
   <header class="flex items-start justify-between gap-4 flex-wrap pb-8">
@@ -256,7 +256,7 @@
         {% endif %}
       </div>
     </div>
-    <div class="flex flex-wrap gap-3">
+    <div class="sd-tiles">
       {% with label='KEV', value=quick_counts.kev_open | default(0), tone='error', sparkline=sparklines.kev | default([]), kev_indicator=true %}
         {% include "servers/_kpi_card.html" %}
       {% endwith %}
@@ -273,33 +273,28 @@
   </section>
 
   {# =============== 4. Lebenszeichen =============== #}
+  {# Block X Phase E (ADR-0038 §5 + ADR-0035): 30 Ticks / 4 Risk-Bands.
+     Legende ist Teil des _heartbeat_large.html-Partials.
+     Empty-State bei host_state_snapshot_at IS NULL (nie gescannt). #}
   <section class="py-8 space-y-4">
-    <div class="flex items-end justify-between gap-3 flex-wrap">
-      <div>
-        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Lebenszeichen · 50 Tage</div>
-        <h3 class="font-mono text-base font-medium mt-1">Taegliche scans · max-severity pro Tag</h3>
-      </div>
-      <div class="flex flex-wrap items-center gap-3 text-[10px] uppercase tracking-wider font-mono opacity-60">
-        <span><span class="inline-block w-2 h-2 rounded-sm bg-error align-[1px] mr-1.5"></span>crit</span>
-        <span><span class="inline-block w-2 h-2 rounded-sm bg-warning align-[1px] mr-1.5"></span>high</span>
-        <span><span class="inline-block w-2 h-2 rounded-sm bg-accent align-[1px] mr-1.5"></span>medium</span>
-        <span><span class="inline-block w-2 h-2 rounded-sm bg-info align-[1px] mr-1.5"></span>low</span>
-        <span><span class="inline-block w-2 h-2 rounded-sm bg-success/60 align-[1px] mr-1.5"></span>clean</span>
-        <span><span class="inline-block w-2 h-2 rounded-sm bg-base-content/20 align-[1px] mr-1.5"></span>kein scan</span>
-        <span><span class="inline-block w-2 h-2 rounded-full bg-error align-[1px] mr-1.5"></span>kev</span>
-      </div>
+    <div>
+      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Lebenszeichen · 30 Tage</div>
+      <h3 class="font-mono text-base font-medium mt-1">Taegliche Risk-Band-Zustaende</h3>
     </div>
-    <div class="rounded-box bg-base-200/40 border border-base-300 px-5 py-6">
+    {% if server.host_state_snapshot_at is none %}
+      <div class="sd-heartbeat-frame sd-heartbeat-frame--empty" data-test="heartbeat-empty">
+        <p class="sd-empty">— never scanned</p>
+      </div>
+    {% else %}
       {% with cells=heartbeat_cells | default([]) %}
         {% include "servers/_heartbeat_large.html" %}
       {% endwith %}
-      <div class="flex justify-between mt-2 text-[10px] uppercase tracking-wider font-mono opacity-60">
-        <span>–{{ (heartbeat_cells | default([])) | length }}T</span><span>heute</span>
-      </div>
-    </div>
+    {% endif %}
   </section>
 
   {# =============== 5. Severity-Trend =============== #}
+  {# Block X Phase E (ADR-0038 §5): Range-Toggle 24h/7T/30T, kein 50T.
+     Default: 30T (trendRange im x-data oben). sd-trend-Klassen (Phase A0). #}
   <section class="py-8 space-y-3">
     <div class="flex items-end justify-between gap-3 flex-wrap">
       <div>
@@ -309,46 +304,53 @@
           <span x-text="trendRange === '24h' ? '24 h' : trendRange.replace('T',' Tage')"></span>
         </h3>
       </div>
-      <div class="join" role="group" aria-label="Zeit-Range">
-        {% for range_value in ['24h', '7T', '30T', '50T'] %}
+      <div class="sd-trend-range" role="group" aria-label="Zeit-Range">
+        {% for range_value in ['24h', '7T', '30T'] %}
           <button type="button"
                   @click="trendRange = '{{ range_value }}'"
-                  :class="'join-item btn btn-xs ' + (trendRange === '{{ range_value }}' ? 'btn-active' : 'btn-ghost')"
+                  :class="trendRange === '{{ range_value }}' ? 'active' : ''"
                   :aria-pressed="trendRange === '{{ range_value }}' ? 'true' : 'false'">
             {{ range_value }}
           </button>
         {% endfor %}
       </div>
     </div>
-    <div class="rounded-box bg-base-200/40 border border-base-300 px-5 py-6">
-      {# Server-side rendert immer das volle 50T-Slice — der Range-Toggle ist
-         eine pure Frontend-Visualisierung ueber das Alpine `trendRange`-State,
-         die per CSS `display: none` Bars ausserhalb des Slice ausblendet.
-         Fuer das MVP ist das ausreichend; eine vollwertige Re-Render-Logik
-         steht im Re-Open-Trigger der ADR. #}
-      {% with days_data=trend_data | default([]) %}
-        {% include "servers/_stacked_bar_chart.html" %}
-      {% endwith %}
-      <div class="flex justify-between mt-1 text-[10px] uppercase tracking-wider font-mono opacity-60">
-        <span x-text="trendRange === '24h' ? 'vor 24 h' : '–' + (({'24h':1,'7T':7,'30T':30,'50T':50})[trendRange] - 1) + 'T'"></span>
-        <span>heute</span>
-      </div>
-    </div>
+    {% with days_data=trend_data | default([]) %}
+      {% include "servers/_stacked_bar_chart.html" %}
+    {% endwith %}
     {% if trend_data %}
       {% set t_critical = trend_data | sum(attribute='critical') %}
       {% set t_high = trend_data | sum(attribute='high') %}
       {% set t_medium = trend_data | sum(attribute='medium') %}
       {% set t_low = trend_data | sum(attribute='low') %}
       {% set t_sum = t_critical + t_high + t_medium + t_low %}
-      <div class="flex items-center justify-between gap-3 flex-wrap text-xs pt-1">
-        <div class="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono">
-          <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-error align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">Critical</span><span class="font-semibold">{{ t_critical }}</span><span class="opacity-50 ml-1.5">{% if t_sum %}{{ '%.1f' | format(t_critical * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span></span>
-          <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-warning align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">High</span><span class="font-semibold">{{ t_high }}</span><span class="opacity-50 ml-1.5">{% if t_sum %}{{ '%.1f' | format(t_high * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span></span>
-          <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">Medium</span><span class="font-semibold">{{ t_medium }}</span><span class="opacity-50 ml-1.5">{% if t_sum %}{{ '%.1f' | format(t_medium * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span></span>
-          <span><span class="inline-block w-2.5 h-2.5 rounded-sm bg-info align-[1px] mr-1.5"></span><span class="uppercase opacity-60 mr-1.5">Low</span><span class="font-semibold">{{ t_low }}</span><span class="opacity-50 ml-1.5">{% if t_sum %}{{ '%.1f' | format(t_low * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span></span>
-        </div>
-        <div class="opacity-40 font-mono text-[11px]">σ kumulativ · roh-totals nicht entdupliziert</div>
+      <div class="sd-trend-legend">
+        <span class="sd-trend-legend__item">
+          <span class="sd-legend-swatch sd-legend-swatch--escalate"><span class="sd-legend-swatch__dot"></span></span>
+          <span class="uppercase">Critical</span>
+          <span class="sd-trend-legend__count">{{ t_critical }}</span>
+          <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_critical * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
+        </span>
+        <span class="sd-trend-legend__item">
+          <span class="sd-legend-swatch sd-legend-swatch--act"><span class="sd-legend-swatch__dot"></span></span>
+          <span class="uppercase">High</span>
+          <span class="sd-trend-legend__count">{{ t_high }}</span>
+          <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_high * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
+        </span>
+        <span class="sd-trend-legend__item">
+          <span class="sd-legend-swatch sd-legend-swatch--nominal"><span class="sd-legend-swatch__dot"></span></span>
+          <span class="uppercase">Medium</span>
+          <span class="sd-trend-legend__count">{{ t_medium }}</span>
+          <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_medium * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
+        </span>
+        <span class="sd-trend-legend__item">
+          <span class="sd-legend-swatch sd-legend-swatch--unknown"><span class="sd-legend-swatch__dot"></span></span>
+          <span class="uppercase">Low</span>
+          <span class="sd-trend-legend__count">{{ t_low }}</span>
+          <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_low * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
+        </span>
       </div>
+      <div class="opacity-40 font-mono text-[11px]">σ kumulativ · roh-totals nicht entdupliziert</div>
     {% endif %}
   </section>
 

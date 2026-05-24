@@ -1018,6 +1018,22 @@
 .sd-tile--skel .sd-tile__num { color: var(--text-ghost); }
 .sd-tile--skel .sd-spark__bar { background: var(--border-subtle); opacity: 0.55; }
 
+/* Empty-State: host_state_snapshot_at IS NULL */
+.sd-heartbeat-frame--empty {
+  border: var(--hairline);
+  padding: 22px;
+  display: flex;
+  align-items: center;
+}
+.sd-empty {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--text-ghost);
+  opacity: 0.7;
+  margin: 0;
+}
+
 /* ─────────────────────────────────────────────────────────────
    9) Server Settings (separate View)
    ───────────────────────────────────────────────────────────── */
