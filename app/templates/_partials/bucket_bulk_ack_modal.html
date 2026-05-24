@@ -1,0 +1,80 @@
+{# Bucket-Bulk-Ack-Modal (ADR-0037 §(4), TICKET-006 Etappe 3).
+
+   Posted Form-POST an `/findings/bulk/acknowledge` mit:
+     - `bucket_selections` (JSON-String): Liste von {server_id, group_id, filter}.
+     - `finding_ids`       (JSON-String): explizite Liste von Finding-IDs.
+     - `comment`           (optional): Audit-Notiz.
+
+   Erwartet, dass es INNERHALB eines Containers mit
+   `x-data="bucketBulkSelection()"` (siehe `static/js/bucket_bulk_ack.js`)
+   eingebettet ist. Greift auf `modalOpen`, `bucketSelections`, `findingIds`,
+   `submitting`, `total`, `openModal()`, `closeModal()`, `onSubmit($event)`
+   zu.
+
+   ADR-0006: Comment-Feld ist optional. Keine `required`-Attribute, kein
+   client-seitiges "bitte ausfuellen"-Lock.
+
+   Sicherheit:
+     - CSRF-Token via Hidden-Input (flask-wtf serverseitig validiert).
+     - Modal-Backdrop ist ein eigenes `<form method="dialog">` damit das
+       Escape-Press-Verhalten dem nativen `<dialog>` entspricht.
+#}
+<dialog class="modal"
+        x-show="modalOpen"
+        x-cloak
+        :class="{'modal-open': modalOpen}"
+        @keydown.escape.window="closeModal()"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bucket-bulk-ack-title"
+        data-test="bucket-bulk-ack-modal">
+  <div class="modal-box max-w-lg" @click.stop>
+    <h3 id="bucket-bulk-ack-title" class="text-lg font-semibold">
+      Ausgewaehlte Buckets/Findings abhaken
+    </h3>
+    <form method="post"
+          action="{{ url_for('findings.bulk_acknowledge') }}"
+          @submit="onSubmit($event)"
+          data-test="bucket-bulk-ack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="bucket_selections"
+             :value="JSON.stringify(bucketSelections)"
+             data-test="bucket-bulk-ack-buckets">
+      <input type="hidden" name="finding_ids"
+             :value="JSON.stringify(findingIds)"
+             data-test="bucket-bulk-ack-findings">
+      <div class="mt-3 space-y-3 text-sm">
+        <p>
+          <span class="font-semibold" x-text="bucketSelections.length"></span> Bucket(s)
+          und
+          <span class="font-semibold" x-text="findingIds.length"></span> einzelne Finding(s)
+          werden auf <span class="badge badge-info badge-sm">acknowledged</span> gesetzt.
+        </p>
+        <p class="text-xs opacity-60">
+          Bucket-Selektion wird serverseitig zu Findings aufgeloest. Nur OPEN-Findings werden geaendert.
+        </p>
+        <label class="form-control">
+          <span class="label-text text-xs opacity-70 pb-1">Kommentar (optional)</span>
+          <textarea name="comment"
+                    class="textarea textarea-bordered textarea-sm"
+                    rows="2"
+                    maxlength="8192"
+                    placeholder="Kurze Notiz fuer den Audit-Log..."
+                    data-test="bucket-bulk-ack-comment"></textarea>
+        </label>
+      </div>
+      <div class="modal-action">
+        <button type="button" class="btn btn-sm btn-ghost"
+                @click="closeModal()"
+                :disabled="submitting"
+                data-test="bucket-bulk-ack-cancel">Abbrechen</button>
+        <button type="submit" class="btn btn-sm btn-primary"
+                :disabled="submitting || total === 0"
+                data-test="bucket-bulk-ack-confirm">Bestaetigen</button>
+      </div>
+    </form>
+  </div>
+  <form method="dialog" class="modal-backdrop" @click="closeModal()">
+    <button type="button" aria-label="Schliessen">close</button>
+  </form>
+</dialog>

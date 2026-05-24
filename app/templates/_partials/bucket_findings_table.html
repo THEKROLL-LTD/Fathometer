@@ -1,29 +1,137 @@
-{# Stub-Partial fuer den Bucket-Body (ADR-0037 §(2)).
+{# Bucket-Body: Findings-Tabelle innerhalb einer aufgeklappten Bucket-Card
+   (ADR-0037 §(2), TICKET-006 Etappe 3).
 
-   Wird in Etappe 3 (TICKET-006) durch das vollstaendige Markup ersetzt
-   (Findings-Tabelle ohne Server/Group-Spalten + Pager). Das Stub-Markup
-   liefert nur die strukturellen Hooks, die die View-Tests und das Outer-
-   Template heute schon erwarten.
+   Render-Vertrag:
+     - `findings`  : list[Finding] — Findings dieser Seite (<=`per_page`).
+                     Sortierung kommt vom Service (`list_bucket_findings`):
+                     KEV desc, EPSS desc nulls last, CVSS desc nulls last,
+                     first_seen_at asc, identifier_key asc als Tiebreak.
+     - `total`     : int — Gesamt-Treffer im Bucket (vor Pagination).
+     - `page`      : int — aktuelle Seite (>=1).
+     - `per_page`  : int — Seitengroesse (Default 20).
+     - `server_id` : int — Bucket-Server (>=1).
+     - `group_id`  : int — Bucket-Group (>=1; 0 ist Pending, separates Partial).
+     - `filter_qs` : str — kanonischer Filter-Querystring.
 
-   Variablen-Vertrag:
-     - `findings`   : list[Finding] (aktuelle Seite, <=20)
-     - `total`      : int
-     - `page`       : int
-     - `per_page`   : int (20)
-     - `server_id`  : int
-     - `group_id`   : int
-     - `filt`       : DashboardFilter
-     - `filter_qs`  : str (kanonischer Filter-Querystring)
+   Spalten (ohne Server, ohne Group — beide stehen im Card-Header):
+     Checkbox | CVE/Titel | Paket | EPSS | CVSS | Status | Severity | Erstmals.
+
+   Pager-Verhalten: Buttons triggern `hx-get` auf `findings.bucket_fragment`
+   mit neuem `page=`-Wert; das Target ist der umschliessende Lazy-Slot
+   (`[data-test='bucket-findings-lazy-slot']`), der durch das frisch
+   gerenderte Partial ersetzt wird (`hx-swap="innerHTML"`).
+
+   Bulk-Selektion: jede Zeile traegt `data-bulk-finding-id` und ruft
+   `toggleFinding(...)` im Alpine-Scope `bucketBulkSelection()`. Der
+   `@click.stop` auf der `<td>` verhindert dass das Klicken der Checkbox
+   andere Zeilen-Klick-Handler triggert.
 #}
-<div data-test="bucket-findings-table"
+{% from "_macros.html" import severity_badge, kev_badge, status_badge,
+                              cvss_pill, epss_pill, package_cell, quick_copy %}
+
+{% if findings %}
+<div class="overflow-x-auto rounded-box bg-base-100/40 border border-base-300"
+     data-test="bucket-findings-table"
      data-server-id="{{ server_id }}"
      data-group-id="{{ group_id }}"
      data-total="{{ total }}"
      data-page="{{ page }}"
      data-per-page="{{ per_page }}">
-  <ul>
-    {% for f in findings %}
-      <li data-finding-id="{{ f.id }}">{{ f.identifier_key }}</li>
-    {% endfor %}
-  </ul>
+  <table class="table table-xs align-middle w-full">
+    <thead class="border-b border-base-300">
+      <tr>
+        <th class="w-8 pr-0"></th>
+        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">CVE / Titel</th>
+        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Paket</th>
+        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">EPSS</th>
+        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">CVSS</th>
+        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Status</th>
+        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Severity</th>
+        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Erstmals</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in findings %}
+        <tr id="finding-{{ f.id }}"
+            class="hover {% if f.is_kev %}bg-error/5{% endif %}"
+            data-test="bucket-finding-row-{{ f.id }}">
+          <td class="pr-0" @click.stop>
+            <input type="checkbox"
+                   class="checkbox checkbox-sm"
+                   data-bulk-finding-id="{{ f.id }}"
+                   value="{{ f.id }}"
+                   @change="toggleFinding({{ f.id }}, $event.target.checked)"
+                   aria-label="Finding {{ f.identifier_key }} fuer Bulk auswaehlen">
+          </td>
+          <td>
+            <div class="flex items-center gap-2 flex-wrap min-w-0">
+              <span class="font-mono text-xs font-semibold">{{ f.identifier_key }}</span>
+              {{ kev_badge(f.is_kev, size='xs') }}
+              {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+            </div>
+            {% if f.title %}
+              <div class="text-xs opacity-60 truncate max-w-[44ch] mt-0.5"
+                   title="{{ f.title }}">{{ f.title }}</div>
+            {% endif %}
+          </td>
+          <td class="max-w-[24ch]">
+            <div class="flex items-center gap-1 min-w-0">
+              {{ package_cell(f.package_name, f.finding_class) }}
+            </div>
+            {% if f.installed_version %}
+              <div class="font-mono text-[10px] opacity-50">
+                {{ f.installed_version }}{% if f.fixed_version %} → <span class="text-success">{{ f.fixed_version }}</span>{% endif %}
+              </div>
+            {% endif %}
+          </td>
+          <td>{{ epss_pill(f.epss_score) }}</td>
+          <td>{{ cvss_pill(f.cvss_v3_score) }}</td>
+          <td>{{ status_badge(f.status) }}</td>
+          <td>{{ severity_badge(f.severity) }}</td>
+          <td class="text-xs whitespace-nowrap">
+            <time datetime="{{ f.first_seen_at.isoformat() }}"
+                  title="{{ f.first_seen_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+              {{ f.first_seen_at.strftime('%Y-%m-%d') }}
+            </time>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
+
+{# Sub-Pager. Der Lazy-Slot wird durch das neu gerenderte Partial ersetzt
+   (innerHTML), die Pager-Buttons sind dann eine frische Kopie. #}
+{%- set _total_pages = (total + per_page - 1) // per_page if per_page > 0 else 0 -%}
+{% if _total_pages > 1 %}
+  <nav class="flex items-center justify-between gap-3 mt-2 px-2 font-mono text-xs"
+       aria-label="Bucket-Pagination"
+       data-test="bucket-pager">
+    {% if page > 1 %}
+      <button type="button"
+              class="btn btn-xs btn-ghost"
+              hx-get="{{ url_for('findings.bucket_fragment', group_id=group_id, server_id=server_id, page=page-1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
+              hx-target="closest [data-test='bucket-findings-lazy-slot']"
+              hx-swap="innerHTML"
+              data-test="bucket-pager-prev">« vorherige</button>
+    {% else %}
+      <span class="btn btn-xs btn-ghost btn-disabled" aria-disabled="true">« vorherige</span>
+    {% endif %}
+    <span class="opacity-65">Seite {{ page }} von {{ _total_pages }}</span>
+    {% if page < _total_pages %}
+      <button type="button"
+              class="btn btn-xs btn-ghost"
+              hx-get="{{ url_for('findings.bucket_fragment', group_id=group_id, server_id=server_id, page=page+1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
+              hx-target="closest [data-test='bucket-findings-lazy-slot']"
+              hx-swap="innerHTML"
+              data-test="bucket-pager-next">naechste »</button>
+    {% else %}
+      <span class="btn btn-xs btn-ghost btn-disabled" aria-disabled="true">naechste »</span>
+    {% endif %}
+  </nav>
+{% endif %}
+{% else %}
+  <p class="text-xs opacity-60 italic px-3 py-2" data-test="bucket-findings-empty">
+    Keine Findings in diesem Bucket.
+  </p>
+{% endif %}

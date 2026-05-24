@@ -1,0 +1,54 @@
+{# Pending-Bucket-Card (Cross-Server-Sammler ohne Group) fuer `/findings`
+   (ADR-0037 §(2), TICKET-006 Etappe 3).
+
+   Render-Vertrag:
+     - `bucket`    : BucketHeader fuer den Pending-Sammler. `server_id == 0`
+                     und `group_id == 0` per Service-Convention
+                     (`findings_bucket_query.pending_bucket_header()`).
+     - `filter_qs` : str — kanonischer Filter-Querystring der Outer-Page.
+
+   Im Header steht "cross-server" statt eines Server-Namens und das Group-
+   Label ist serverseitig "(ohne Group)". Der HTMX-Lazy-Slot ruft den
+   `findings.pending_fragment`-Endpoint auf, der die Tabelle MIT zusaetzlicher
+   Server-Spalte rendert (Operator muss erkennen koennen, woher das Finding
+   kommt).
+
+   Sicherheit/Conventions: analog `bucket_card.html`.
+#}
+<details class="card bg-base-200/40 rounded-box p-3 mb-3"
+         data-test="pending-bucket-card">
+  <summary class="cursor-pointer select-none flex items-center gap-3 flex-wrap">
+    <input type="checkbox"
+           class="checkbox checkbox-sm"
+           data-bucket-server="0"
+           data-bucket-group="0"
+           data-bucket-filter="{{ filter_qs }}"
+           data-bucket-count="{{ bucket.finding_count }}"
+           @click.stop
+           @change="toggleBucket(0, 0, $event.target.dataset.bucketFilter, $event.target.checked)"
+           aria-label="Pending-Bucket fuer Bulk auswaehlen"
+           data-test="pending-bucket-checkbox">
+    {% with band_value='pending', as_link=false, compact=true, show_count=false %}
+      {% include "_partials/risk_band_pill.html" %}
+    {% endwith %}
+    <span class="font-mono text-sm opacity-65" data-test="pending-bucket-cross-server">
+      cross-server
+    </span>
+    <span class="font-mono text-sm" data-test="pending-bucket-group-label">
+      {{ bucket.group_label }}
+    </span>
+    <span class="badge badge-ghost badge-sm ml-auto" data-test="pending-bucket-finding-count">
+      {{ bucket.finding_count }} {% if bucket.finding_count == 1 %}finding{% else %}findings{% endif %}
+    </span>
+  </summary>
+  <div class="mt-3"
+       hx-get="{{ url_for('findings.pending_fragment', page=1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
+       hx-trigger="toggle once from:closest details"
+       hx-swap="innerHTML"
+       data-test="pending-bucket-findings-lazy-slot">
+    <div class="opacity-60 text-xs italic px-3 py-2">
+      <span class="loading loading-spinner loading-xs align-middle mr-1"></span>
+      Lade Findings...
+    </div>
+  </div>
+</details>
