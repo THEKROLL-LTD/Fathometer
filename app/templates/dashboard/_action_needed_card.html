@@ -38,7 +38,11 @@
     <b>{{ action_needed_card_data.act }}</b> act &nbsp;·&nbsp;
     <b>{{ action_needed_card_data.pending }}</b> pending
   </p>
-  <a class="stat__cta" href="{{ url_for('findings.index', risk_band='escalate') }}">
+  <a class="stat__cta"
+     href="{{ url_for('findings.index', risk_band='escalate') }}"
+     hx-get="{{ url_for('findings.index', risk_band='escalate') }}"
+     hx-target="#detail-pane"
+     hx-push-url="true">
     <span class="stat__cta-text">{{ scan_chars("open triage queue") }}</span>
     <span class="stat__cta-arrow scan-flash" aria-hidden="true">→</span>
   </a>
