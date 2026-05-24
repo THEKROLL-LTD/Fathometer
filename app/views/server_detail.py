@@ -325,6 +325,104 @@ def _build_action_sections(
     return result
 
 
+# Sechs Top-Level-Slots fuer den Risk-Band-Accordion in der Triage-Queue
+# (ADR-0038 §6). Reihenfolge per Operator-Dringlichkeit; Pending-Grouping-
+# Block haengt unter PENDING. Spec verlangt sechs Slots ohne "unknown" —
+# unknown-Risk-Findings sind sehr selten und werden im Pending-Block
+# subsumiert (wenn application_group_id IS NULL) oder rendern in der
+# nominalen Group-Card mit risk_band='unknown'.
+_RISK_BAND_SECTION_ORDER: tuple[str, ...] = (
+    "escalate",
+    "act",
+    "mitigate",
+    "pending",
+    "monitor",
+    "noise",
+)
+
+
+def _build_risk_band_sections(
+    application_groups: list[dict[str, Any]],
+    pending_grouping_counts: dict[str, int],
+) -> list[dict[str, Any]]:
+    """Gruppiert Application-Group-Card-Entries in sechs Risk-Band-Slots.
+
+    Pro Slot:
+      - ``band``          : str — ``escalate``/``act``/.../``noise``.
+      - ``groups``        : list[dict] — Card-Entries (``group``,
+                            ``evaluation``, ``count``, ``worst_finding``).
+                            Bereits sortiert vom
+                            ``_load_application_groups_for_server``-Loader
+                            (RISK_BAND_SORT_RANK DESC).
+      - ``pending_count`` : int — nur bei ``band == 'pending'``: Anzahl
+                            Findings ohne ``application_group_id``
+                            (Summe ueber ``pending_grouping_counts``).
+                            Bei anderen Slots: 0.
+      - ``total_count``   : int — Summe ``count`` ueber ``groups`` plus
+                            ``pending_count``. Wird im Header der
+                            ``<details>``-Summary angezeigt.
+      - ``is_empty``      : bool — True wenn ``groups`` leer UND
+                            ``pending_count == 0``. Im Template entscheidet
+                            das ueber Render-Visibility.
+      - ``default_open``  : bool — True nur fuer den ersten nicht-leeren
+                            Slot, mit Praeferenz auf ESCALATE wenn nicht
+                            leer (Spec §F4 Default-Expanded-Logik).
+
+    Rueckgabe: list[dict] in fester ``_RISK_BAND_SECTION_ORDER``-
+    Reihenfolge. Leere Slots werden NICHT herausgefiltert — das Template
+    entscheidet ob es leere Slots rendert oder ausblendet.
+    """
+    # Card-Entries pro Band sammeln.
+    by_band: dict[str, list[dict[str, Any]]] = {b: [] for b in _RISK_BAND_SECTION_ORDER}
+    for entry in application_groups:
+        ev = entry.get("evaluation")
+        # Junction-Row fehlt: Card rankt als 'pending' im UI (Block T).
+        band_str: str
+        if ev is None:
+            band_str = "pending"
+        else:
+            band_str = ev.risk_band if ev.risk_band in by_band else "pending"
+        by_band[band_str].append(entry)
+
+    # Pending-Grouping (Findings ohne application_group_id) komplett in den
+    # PENDING-Slot. Summe ueber alle Bands (escalate/act/mitigate/pending/
+    # monitor/noise/unknown — auch wenn die Findings nominell andere
+    # risk_bands tragen, sind sie "noch nicht gruppiert" und gehoeren laut
+    # Spec §F1 als Block in den PENDING-Slot).
+    pending_count = sum(int(c) for c in pending_grouping_counts.values())
+
+    # Default-Open-Logik: ESCALATE wenn nicht-leer; sonst erster nicht-leerer.
+    escalate_nonempty = bool(by_band["escalate"])
+    default_open_band: str | None = None
+    if escalate_nonempty:
+        default_open_band = "escalate"
+    else:
+        for b in _RISK_BAND_SECTION_ORDER:
+            slot_groups = by_band[b]
+            slot_pending = pending_count if b == "pending" else 0
+            if slot_groups or slot_pending > 0:
+                default_open_band = b
+                break
+
+    result: list[dict[str, Any]] = []
+    for b in _RISK_BAND_SECTION_ORDER:
+        groups = by_band[b]
+        slot_pending = pending_count if b == "pending" else 0
+        total = sum(int(g.get("count", 0)) for g in groups) + slot_pending
+        is_empty = not groups and slot_pending == 0
+        result.append(
+            {
+                "band": b,
+                "groups": groups,
+                "pending_count": slot_pending,
+                "total_count": total,
+                "is_empty": is_empty,
+                "default_open": b == default_open_band,
+            }
+        )
+    return result
+
+
 def _load_pending_grouping_counts(sess: Any, server_id: int) -> dict[str, int]:
     """Liefert pro Risk-Band die Anzahl OPEN-Findings ohne Application-Group.
 
@@ -436,6 +534,7 @@ def _render_findings_section(
     # Fallback/Sort-Ueberschreibung haelt.
     application_groups = _load_application_groups_for_server(sess, server.id)
     pending_grouping_counts: dict[str, int] = _load_pending_grouping_counts(sess, server.id)
+    risk_band_sections = _build_risk_band_sections(application_groups, pending_grouping_counts)
 
     ctx = {
         "server": server,
@@ -444,6 +543,7 @@ def _render_findings_section(
         "findings": findings_list,
         "application_groups": application_groups,
         "pending_grouping_counts": pending_grouping_counts,
+        "risk_band_sections": risk_band_sections,
     }
     if flat_mode:
         ctx.update(
