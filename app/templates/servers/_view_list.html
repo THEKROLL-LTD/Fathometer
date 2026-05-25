@@ -43,7 +43,7 @@
          return this.selected.length > 0 && !this.allSelected;
        }
      }"
-     x-effect="window.__detailSelected = selected">
+     x-effect="window.__detailSelected = selected; window.dispatchEvent(new CustomEvent('detail-selection-changed', { detail: { count: selected.length } }))">
 <div class="sd-list-table-wrap">
   <table class="sd-list-table">
     <thead class="border-b border-base-300">

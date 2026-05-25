@@ -18,23 +18,29 @@
 #}
 {% from "_macros.html" import sort_header, bulk_ack_modal %}
 {%- set _open_total = (quick_counts.total_open if quick_counts else 0) -%}
-<section class="sd-section" id="findings-section">
+<section class="sd-section" id="findings-section"
+         x-data="{ selectionCount: (window.__detailSelected || []).length }"
+         @detail-selection-changed.window="selectionCount = $event.detail.count">
   <p class="sd-eyebrow">Triage queue · findings</p>
   <div class="sd-queue-head">
     <h2 class="sd-h3 sd-queue-h3">{{ _open_total }} offen · sortiert nach Risk-Band</h2>
   </div>
 
   <div class="sd-queue-toolbar">
-    {# Auswahl-Ack-Button — Alpine bulkAckIds-Pattern, Selection via window.__detailSelected #}
+    {# Auswahl-Ack-Button — Alpine bulkAckIds liest IDs zum Submit-Zeitpunkt aus
+       window.__detailSelected. Reaktivitaet des Disabled-Checks haengt am
+       selectionCount aus dem Section-Scope, der via 'detail-selection-changed'-
+       Custom-Event aus den Checkbox-Handlern aktualisiert wird (Alpine kann
+       window-Properties nicht direkt observen). #}
     <div x-data="bulkAckIds(() => (window.__detailSelected || []))" class="inline-flex">
       <button type="button"
-              :disabled="(window.__detailSelected || []).length === 0"
-              :title="(window.__detailSelected || []).length === 0 ? 'Erst Findings auswaehlen' : 'Auswahl abhaken'"
+              :disabled="selectionCount === 0"
+              :title="selectionCount === 0 ? 'Erst Findings auswaehlen' : 'Auswahl abhaken'"
               @click="openModal()"
               data-test="bulk-ack-toolbar">
         Auswahl ack
-        <span x-show="(window.__detailSelected || []).length > 0"
-              x-text="'(' + (window.__detailSelected || []).length + ')'"></span>
+        <span x-show="selectionCount > 0"
+              x-text="'(' + selectionCount + ')'"></span>
       </button>
       {{ bulk_ack_modal(id='bulk-ack-modal-toolbar', title='Ausgewaehlte Findings abhaken') }}
     </div>

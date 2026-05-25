@@ -50,7 +50,10 @@
                    const cur = window.__detailSelected || [];
                    window.__detailSelected = $event.target.checked
                      ? [...cur, {{ f.id }}]
-                     : cur.filter(id => id !== {{ f.id }})
+                     : cur.filter(id => id !== {{ f.id }});
+                   window.dispatchEvent(new CustomEvent('detail-selection-changed', {
+                     detail: { count: window.__detailSelected.length }
+                   }));
                  ">
           <div class="sd-finding__cve">
             <span class="sd-finding__cve-id">
