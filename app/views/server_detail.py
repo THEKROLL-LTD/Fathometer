@@ -341,86 +341,83 @@ _RISK_BAND_SECTION_ORDER: tuple[str, ...] = (
 )
 
 
-def _build_risk_band_sections(
-    application_groups: list[dict[str, Any]],
-    pending_grouping_counts: dict[str, int],
-) -> list[dict[str, Any]]:
-    """Gruppiert Application-Group-Card-Entries in sechs Risk-Band-Slots.
+# Severity-Sort-Rang (klein = wichtig). Kein DB-Index notwendig — Python-Sort.
+_SEVERITY_SORT_RANK: dict[Severity, int] = {
+    Severity.CRITICAL: 0,
+    Severity.HIGH: 1,
+    Severity.MEDIUM: 2,
+    Severity.LOW: 3,
+    Severity.UNKNOWN: 4,
+}
 
-    Pro Slot:
-      - ``band``          : str — ``escalate``/``act``/.../``noise``.
-      - ``groups``        : list[dict] — Card-Entries (``group``,
-                            ``evaluation``, ``count``, ``worst_finding``).
-                            Bereits sortiert vom
-                            ``_load_application_groups_for_server``-Loader
-                            (RISK_BAND_SORT_RANK DESC).
-      - ``pending_count`` : int — nur bei ``band == 'pending'``: Anzahl
-                            Findings ohne ``application_group_id``
-                            (Summe ueber ``pending_grouping_counts``).
-                            Bei anderen Slots: 0.
-      - ``total_count``   : int — Summe ``count`` ueber ``groups`` plus
-                            ``pending_count``. Wird im Header der
-                            ``<details>``-Summary angezeigt.
-      - ``is_empty``      : bool — True wenn ``groups`` leer UND
-                            ``pending_count == 0``. Im Template entscheidet
-                            das ueber Render-Visibility.
-      - ``default_open``  : bool — True nur fuer den ersten nicht-leeren
-                            Slot, mit Praeferenz auf ESCALATE wenn nicht
-                            leer (Spec §F4 Default-Expanded-Logik).
 
-    Rueckgabe: list[dict] in fester ``_RISK_BAND_SECTION_ORDER``-
-    Reihenfolge. Leere Slots werden NICHT herausgefiltert — das Template
-    entscheidet ob es leere Slots rendert oder ausblendet.
+def _assemble_risk_band_sections(rows: list[Any]) -> list[dict[str, Any]]:
+    """Pure-Funktion: klassifiziert + sortiert + assembled die Sektionen.
+
+    ``rows`` ist eine Liste mit Items die mindestens diese Attribute haben:
+    ``risk_band: str | None``, ``is_kev: bool``, ``severity: Severity``,
+    ``epss_score: float | None``. Real-Finding-Objekte aus dem Loader
+    passen. Mocks in Pure-Unit-Tests (SimpleNamespace etc.) ebenso.
+
+    Sortier-Reihenfolge pro Band (primary first): is_kev DESC, severity ASC
+    (CRITICAL=0), epss_score DESC NULLS LAST.
+
+    Findings die kein ``risk_band`` haben (NULL) oder einen unbekannten Wert
+    tragen, landen in den PENDING-Slot.
+
+    Returns: list[dict] in fester ``_RISK_BAND_SECTION_ORDER``-Reihenfolge.
     """
-    # Card-Entries pro Band sammeln.
-    by_band: dict[str, list[dict[str, Any]]] = {b: [] for b in _RISK_BAND_SECTION_ORDER}
-    for entry in application_groups:
-        ev = entry.get("evaluation")
-        # Junction-Row fehlt: Card rankt als 'pending' im UI (Block T).
-        band_str: str
-        if ev is None:
-            band_str = "pending"
-        else:
-            band_str = ev.risk_band if ev.risk_band in by_band else "pending"
-        by_band[band_str].append(entry)
+    by_band: dict[str, list[Any]] = {b: [] for b in _RISK_BAND_SECTION_ORDER}
+    for f in rows:
+        band_str = f.risk_band if f.risk_band in by_band else "pending"
+        by_band[band_str].append(f)
 
-    # Pending-Grouping (Findings ohne application_group_id) komplett in den
-    # PENDING-Slot. Summe ueber alle Bands (escalate/act/mitigate/pending/
-    # monitor/noise/unknown — auch wenn die Findings nominell andere
-    # risk_bands tragen, sind sie "noch nicht gruppiert" und gehoeren laut
-    # Spec §F1 als Block in den PENDING-Slot).
-    pending_count = sum(int(c) for c in pending_grouping_counts.values())
+    # Stable-sort: zuletzt angewendeter Key dominiert. Reihenfolge umgekehrt
+    # zu Sortier-Wichtigkeit: erst EPSS, dann Severity, dann KEV als Top-Key.
+    for band, lst in by_band.items():
+        lst.sort(key=lambda f: -(f.epss_score or 0.0))
+        lst.sort(key=lambda f: _SEVERITY_SORT_RANK.get(f.severity, 99))
+        lst.sort(key=lambda f: 0 if f.is_kev else 1)
+        by_band[band] = lst
 
-    # Default-Open-Logik: ESCALATE wenn nicht-leer; sonst erster nicht-leerer.
-    escalate_nonempty = bool(by_band["escalate"])
     default_open_band: str | None = None
-    if escalate_nonempty:
+    if by_band["escalate"]:
         default_open_band = "escalate"
     else:
         for b in _RISK_BAND_SECTION_ORDER:
-            slot_groups = by_band[b]
-            slot_pending = pending_count if b == "pending" else 0
-            if slot_groups or slot_pending > 0:
+            if by_band[b]:
                 default_open_band = b
                 break
 
-    result: list[dict[str, Any]] = []
-    for b in _RISK_BAND_SECTION_ORDER:
-        groups = by_band[b]
-        slot_pending = pending_count if b == "pending" else 0
-        total = sum(int(g.get("count", 0)) for g in groups) + slot_pending
-        is_empty = not groups and slot_pending == 0
-        result.append(
-            {
-                "band": b,
-                "groups": groups,
-                "pending_count": slot_pending,
-                "total_count": total,
-                "is_empty": is_empty,
-                "default_open": b == default_open_band,
-            }
-        )
-    return result
+    return [
+        {
+            "band": b,
+            "findings": by_band[b],
+            "total_count": len(by_band[b]),
+            "is_empty": len(by_band[b]) == 0,
+            "default_open": b == default_open_band,
+        }
+        for b in _RISK_BAND_SECTION_ORDER
+    ]
+
+
+def _build_risk_band_sections(
+    sess: Any,
+    server_id: int,
+) -> list[dict[str, Any]]:
+    """Laedt OPEN-Findings + delegiert an die Pure-Funktion.
+
+    ADR-0038 Re-Implementation (2026-05-25): die Triage-Queue rendert
+    Findings direkt unter jedem ``<details class="sd-band">``-Slot — keine
+    Application-Group-Zwischenebene mehr. Group-Sicht lebt ausschliesslich
+    in den Operator-Workflows oben.
+    """
+    stmt = select(Finding).where(
+        Finding.server_id == server_id,
+        Finding.status == FindingStatus.OPEN,
+    )
+    rows = list(sess.execute(stmt).scalars().all())
+    return _assemble_risk_band_sections(rows)
 
 
 def _load_pending_grouping_counts(sess: Any, server_id: int) -> dict[str, int]:
@@ -534,7 +531,7 @@ def _render_findings_section(
     # Fallback/Sort-Ueberschreibung haelt.
     application_groups = _load_application_groups_for_server(sess, server.id)
     pending_grouping_counts: dict[str, int] = _load_pending_grouping_counts(sess, server.id)
-    risk_band_sections = _build_risk_band_sections(application_groups, pending_grouping_counts)
+    risk_band_sections = _build_risk_band_sections(sess, server.id)
 
     ctx = {
         "server": server,

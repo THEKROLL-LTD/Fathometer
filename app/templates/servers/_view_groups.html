@@ -19,4 +19,7 @@
       {% include "_partials/risk_band_section.html" %}
     {% endfor %}
   </div>
+  <div class="sd-queue-footer" data-test="findings-total-footer">
+    {{ total_findings_count | default(0) }} Findings gesamt
+  </div>
 {% endif %}

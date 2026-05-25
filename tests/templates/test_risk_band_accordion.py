@@ -49,8 +49,7 @@ def _make_empty_slot(band: str, *, default_open: bool = False) -> dict[str, Any]
     """Erstellt einen leeren Slot-Dict (is_empty=True)."""
     return {
         "band": band,
-        "groups": [],
-        "pending_count": 0,
+        "findings": [],
         "total_count": 0,
         "is_empty": True,
         "default_open": default_open,
@@ -62,22 +61,19 @@ def _make_nonempty_slot(
     *,
     count: int = 3,
     default_open: bool = False,
-    pending_count: int = 0,
 ) -> dict[str, Any]:
-    """Erstellt einen nicht-leeren Slot-Dict (is_empty=False, groups=[]).
+    """Erstellt einen nicht-leeren Slot-Dict (is_empty=False, findings=[]).
 
-    groups=[] intentional: die Card-Includes in risk_band_section.html
-    werden nur getriggert wenn section.groups nicht leer ist. Fuer Tests
-    die die Accordion-Logik (open/close) pruefen sind leere groups ausreichend.
-    Der Slot gilt als nicht-leer wenn total_count > 0 oder pending_count > 0
-    (Entscheidung liegt im Template: ``{% if not section.is_empty %}``).
+    findings=[] intentional: die Finding-Rendering-Schleife in
+    risk_band_section.html ueberspringt eine leere Liste, das Accordion-
+    Markup (summary, chev, count) wird trotzdem ueber ``not section.is_empty``
+    getriggert. Fuer Tests die Accordion-Logik (open/close) pruefen reicht
+    das.
     """
-    total = count + pending_count
     return {
         "band": band,
-        "groups": [],
-        "pending_count": pending_count,
-        "total_count": total,
+        "findings": [],
+        "total_count": count,
         "is_empty": False,
         "default_open": default_open,
     }
@@ -257,64 +253,7 @@ def test_empty_slots_not_rendered(app: Flask) -> None:
 
 
 # ===========================================================================
-# Test 5 — Pending-Grouping-Subblock present wenn pending_count > 0
-# ===========================================================================
-
-
-def test_pending_grouping_subblock_in_pending_slot(app: Flask) -> None:
-    """PENDING-Slot mit pending_count=5 und pending_grouping_counts mit
-    escalate=3 und act=2 -> data-test='pending-grouping-section' im Output
-    + data-test='pending-band-escalate' + data-test='pending-band-act'."""
-    section = {
-        "band": "pending",
-        "groups": [],
-        "pending_count": 5,
-        "total_count": 5,
-        "is_empty": False,
-        "default_open": True,
-    }
-    pgc = {"escalate": 3, "act": 2}
-    html = _render_section_partial(app, section=section, pending_grouping_counts=pgc)
-
-    assert 'data-test="pending-grouping-section"' in html, (
-        f"'pending-grouping-section' fehlt im PENDING-Slot. HTML: {html!r}"
-    )
-    assert 'data-test="pending-band-escalate"' in html, (
-        f"'pending-band-escalate' fehlt. HTML: {html!r}"
-    )
-    assert 'data-test="pending-band-act"' in html, f"'pending-band-act' fehlt. HTML: {html!r}"
-
-
-# ===========================================================================
-# Test 6 — Pending-Grouping-Subblock abwesend wenn pending_count == 0
-# ===========================================================================
-
-
-def test_pending_grouping_subblock_absent_when_pending_count_zero(app: Flask) -> None:
-    """PENDING-Slot mit pending_count=0 aber groups nicht leer ->
-    KEIN data-test='pending-grouping-section' im Output."""
-    # Wir simulieren einen "groups nicht leer"-Slot ohne echte Card-Includes:
-    # Das Template prueft ``section.pending_count > 0``, nicht groups.
-    # Also: pending_count=0 genuegt fuer den Test.
-    section = {
-        "band": "pending",
-        "groups": [],
-        "pending_count": 0,
-        "total_count": 2,
-        "is_empty": False,
-        "default_open": False,
-    }
-    pgc: dict[str, int] = {}
-    html = _render_section_partial(app, section=section, pending_grouping_counts=pgc)
-
-    assert 'data-test="pending-grouping-section"' not in html, (
-        f"'pending-grouping-section' darf bei pending_count=0 NICHT gerendert werden. "
-        f"HTML: {html!r}"
-    )
-
-
-# ===========================================================================
-# Test 7 — Empty-State wenn alle Slots leer
+# Test 5 — Empty-State wenn alle Slots leer
 # ===========================================================================
 
 
@@ -332,9 +271,7 @@ def test_empty_state_when_all_slots_empty(app: Flask) -> None:
         f"'sd-empty-block'-Wrapper fehlt im Empty-State. "
         f"Track F: sd-empty-block ersetzt DaisyUI card bg-base-200. HTML: {html!r}"
     )
-    assert "sd-empty" in html, (
-        f"'sd-empty'-Klasse fehlt im Empty-State. HTML: {html!r}"
-    )
+    assert "sd-empty" in html, f"'sd-empty'-Klasse fehlt im Empty-State. HTML: {html!r}"
     # Text-Inhalt: Schluessel-Substring genuegt (kein Punkt am Ende im neuen Markup).
     assert "Keine offenen Findings" in html, (
         f"Empty-State-Text 'Keine offenen Findings' fehlt. HTML: {html!r}"

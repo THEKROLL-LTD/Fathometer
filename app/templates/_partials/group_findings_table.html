@@ -84,8 +84,9 @@
         </span>
 
         {# Severity #}
-        <span class="sd-cap {% if f.severity in ('CRITICAL', 'HIGH') %}sd-cap--accent{% else %}sd-cap--neutral{% endif %}">
-          {{ f.severity or '—' }}
+        {%- set _sev_str = (f.severity.value if f.severity is not string else f.severity) | lower -%}
+        <span class="sd-cap {% if _sev_str in ('critical', 'high') %}sd-cap--accent{% else %}sd-cap--neutral{% endif %}">
+          {{ _sev_str | upper if _sev_str else '—' }}
         </span>
       </summary>
 

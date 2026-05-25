@@ -1,12 +1,18 @@
-{# Risk-Band-Top-Level-Accordion-Slot fuer die Triage-Queue.
-   Umgebaut von .sd-risk-band-section auf .sd-band (Design-treu, ADR-0038 §6).
+{# Risk-Band-Slot fuer die Triage-Queue (ADR-0038 Re-Implementation,
+   2026-05-25). Direkt-Rendering der Findings — KEIN Application-Group-
+   Zwischenlayer mehr (Group-Sicht lebt in den Operator-Workflows).
 
-   Variablen-Vertrag:
-     - section : dict mit Keys `band`, `groups`, `pending_count`,
-                 `total_count`, `is_empty`, `default_open`
-     - server  : Server-ORM
-     - pending_grouping_counts : dict[str, int]
+   Variablen-Vertrag (durchgereicht aus _view_groups.html):
+     - section : dict mit Keys `band`, `findings`, `total_count`,
+                 `is_empty`, `default_open` — siehe
+                 `_build_risk_band_sections()` in app/views/server_detail.py.
+     - server  : Server-ORM.
+
+   Sicherheit: f.identifier_key, f.package_name, f.installed_version,
+   f.fixed_version, f.title, f.risk_band_reason sind alle escaped via
+   Jinja-Autoescape — niemals `|safe` auf LLM-Output (ADR-0038 §G4).
 #}
+{% from "_macros.html" import kev_badge %}
 {%- if not section.is_empty -%}
 <details class="sd-band"
          data-test="risk-band-{{ section.band }}"
@@ -15,62 +21,80 @@
     <span class="sd-band__chev" aria-hidden="true">›</span>
     <span class="sd-badge sd-badge--{{ section.band }}">{{ section.band | upper }}</span>
     <span aria-hidden="true"></span>
-    <span class="sd-band__count"><b>{{ section.total_count }}</b> findings</span>
+    <span class="sd-band__count"><b>{{ section.total_count }}</b>findings</span>
   </summary>
-
   <div class="sd-band__body">
-    {%- if section.groups -%}
-      <div data-test="band-groups">
-        {%- for entry in section.groups -%}
-          {%- set _grp = entry.group -%}
-          {%- set _ev = entry.evaluation -%}
-          {%- set _count = entry.count -%}
-          {%- set _wf = entry.worst_finding -%}
-          {%- if _ev is none -%}
-            {% with group=_grp, count=_count %}
-              {% include "_partials/group_evaluating_card.html" %}
-            {% endwith %}
-          {%- else -%}
-            {% with group=_grp,
-                    evaluation=_ev,
-                    count=_count,
-                    worst_finding=_wf,
-                    server=server %}
-              {% include "_partials/application_group_card.html" %}
-            {% endwith %}
-          {%- endif -%}
-        {%- endfor -%}
-      </div>
-    {%- endif -%}
-
-    {# PENDING-Slot: Findings ohne Application-Group-Zuweisung #}
-    {%- if section.band == 'pending' and section.pending_count > 0 -%}
-      <section class="sd-band__pending" data-test="pending-grouping-section">
-        <header>
-          <h3 class="sd-eyebrow">Pending grouping</h3>
-          <span class="sd-band__pending-count">
-            {{ section.pending_count }} {% if section.pending_count == 1 %}finding{% else %}findings{% endif %}
+    <div class="sd-findings-head" aria-hidden="true">
+      <span></span>
+      <span>CVE / Titel</span>
+      <span>Paket</span>
+      <span class="sd-findings-head__right">EPSS</span>
+      <span class="sd-findings-head__right">CVSS</span>
+      <span class="sd-findings-head__right">Severity</span>
+    </div>
+    {%- for f in section.findings -%}
+      {%- set _sev_str = (f.severity.value if f.severity is not string else f.severity) | lower -%}
+      {%- set _is_top_sev = _sev_str in ('critical', 'high') -%}
+      <details class="sd-finding"
+               id="finding-{{ f.id }}"
+               data-test="band-finding-{{ f.id }}">
+        <summary class="sd-finding__summary">
+          <input type="checkbox"
+                 class="sd-checkbox"
+                 value="{{ f.id }}"
+                 aria-label="Finding {{ f.identifier_key }} auswaehlen"
+                 data-bulk-id="true"
+                 x-data
+                 :checked="(window.__detailSelected || []).includes({{ f.id }})"
+                 @change="
+                   const cur = window.__detailSelected || [];
+                   window.__detailSelected = $event.target.checked
+                     ? [...cur, {{ f.id }}]
+                     : cur.filter(id => id !== {{ f.id }})
+                 ">
+          <div class="sd-finding__cve">
+            <span class="sd-finding__cve-id">
+              {{ f.identifier_key }}
+              {{ kev_badge(f.is_kev, size='xs') }}
+            </span>
+            {% if f.title %}
+              <span class="sd-finding__title" title="{{ f.title }}">{{ f.title }}</span>
+            {% endif %}
+          </div>
+          <div class="sd-finding__pkg">
+            <span class="sd-finding__pkg-name">{{ f.package_name }}</span>
+            {% if f.installed_version %}
+              <span class="sd-finding__pkg-diff">
+                <span class="sd-finding__pkg-from">{{ f.installed_version }}</span>
+                {% if f.fixed_version %}
+                  <span class="sd-finding__pkg-arrow">→</span>
+                  <span class="sd-finding__pkg-to">{{ f.fixed_version }}</span>
+                {% endif %}
+              </span>
+            {% endif %}
+          </div>
+          <span class="sd-cap sd-cap--neutral">
+            {%- if f.epss_score is not none -%}
+              {{ "%.3f" | format(f.epss_score) }}
+            {%- else -%}—{%- endif -%}
           </span>
-        </header>
-        <p class="sd-empty">These findings have not been assigned to an application group.</p>
-        <div data-test="pending-bands">
-          {%- for band, count in pending_grouping_counts.items() if count > 0 -%}
-            <details class="sd-pending-band" data-test="pending-band-{{ band }}">
-              <summary>
-                <span class="sd-badge sd-badge--{{ band }}">{{ band | upper }}</span>
-                <span class="sd-band__count">{{ count }} findings</span>
-              </summary>
-              <div hx-get="{{ url_for('server_detail.pending_findings_fragment', server_id=server.id) }}?risk_band={{ band }}"
-                   hx-trigger="toggle once from:closest details, click once from:closest summary"
-                   hx-swap="innerHTML"
-                   data-test="pending-band-lazy-slot">
-                <p class="sd-empty">Lade Findings…</p>
-              </div>
-            </details>
-          {%- endfor -%}
-        </div>
-      </section>
-    {%- endif -%}
+          <span class="sd-cap sd-cap--neutral">
+            {%- if f.cvss_v3_score is not none -%}
+              {{ "%.1f" | format(f.cvss_v3_score) }}
+            {%- else -%}—{%- endif -%}
+          </span>
+          <span class="sd-cap {% if _is_top_sev %}sd-cap--accent{% else %}sd-cap--neutral{% endif %}">
+            {{ _sev_str | upper if _sev_str else '—' }}
+          </span>
+        </summary>
+        {%- if f.risk_band_reason -%}
+          <div class="sd-finding__body">
+            <p class="sd-ai-eyebrow">KI-Bewertung</p>
+            <p class="sd-ai-text">{{ f.risk_band_reason }}</p>
+          </div>
+        {%- endif -%}
+      </details>
+    {%- endfor -%}
   </div>
 </details>
 {%- endif -%}
