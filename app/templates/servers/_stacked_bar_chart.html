@@ -1,27 +1,26 @@
-{# Block X Track E (ADR-0038 §5): Severity-Trend auf sd-trend-Klassen.
-   Range-Toggle (24h / 7T / 30T) und Axis-Labels sind IN diesem Frame.
+{# Severity-Trend Stacked-Bar-Chart mit Range-Toggle (24h / 7T / 30T).
 
    Variablen-Vertrag:
      - days_data : list[DailySeverityCount] — aelteste zuerst. Felder:
                    day, critical, high, medium, low, kev.
      - skel      : bool (optional) — Skeleton-State mit --skel-Modifier.
 
-   Alpine-Scope: trendRange-Variable kommt vom aeusseren .server-detail-Wrapper
-   (x-data definiert in detail.html). Keine eigene x-data noetig.
+   Alpine-Scope:
+     - trendRange (string) erbt vom aeusseren .server-detail-Wrapper.
+     - trendChart-Scope (lokal) berechnet pro Range:
+         * trendStart  : Index ab dem Cols sichtbar sind (slice from-end).
+         * trendVmax   : max(total) ueber sichtbare Tage — pro Range neu,
+                         damit Balken den Frame fuellen.
+         * colVisible/colHeight: getriggert pro Col via Inline-:style.
 
    Sicherheit: numerische Werte, kein User-Input. Kein |safe.
-
-   CSS-Klassen: sd-trend-frame/sd-trend-head/sd-trend-range/sd-trend-chart/
-   sd-trend-col/sd-trend-seg/sd-trend-seg--*/sd-trend-axis
-   aus frontend/src/css/components/server-detail.css.
-
-   Segmente: sd-trend-col ist flex-column-reverse (bottom-up).
-   Render-Reihenfolge: low, medium, high, critical (kommen dann unten raus).
-   style="flex: N" teilt die Spaltenhoehe proportional auf.
-   Spaltenhoehe = prozentualer Anteil am vmax (ueber alle 30 Tage).
 #}
 {%- set _is_skel = skel | default(false) -%}
-{%- set n = days_data | length -%}
+{%- set _n = days_data | length -%}
+{%- set _ns = namespace(totals=[]) -%}
+{%- for d in days_data -%}
+  {%- set _ns.totals = _ns.totals + [d.critical + d.high + d.medium + d.low] -%}
+{%- endfor -%}
 <div class="sd-trend-frame{% if _is_skel %} sd-skel-frame{% endif %}"
      data-test="severity-trend-frame">
 
@@ -37,26 +36,36 @@
     </div>
   </div>
 
-  <div class="sd-trend-chart" role="img" aria-label="Severity-Verlauf">
+  <div class="sd-trend-chart"
+       role="img"
+       aria-label="Severity-Verlauf"
+       x-data="{
+         trendTotals: {{ _ns.totals | tojson }},
+         trendCount() { return ({'24h': 1, '7T': 7, '30T': 30})[this.trendRange] || 30; },
+         trendStart() { return Math.max(0, this.trendTotals.length - this.trendCount()); },
+         trendVmax() {
+           const slice = this.trendTotals.slice(this.trendStart());
+           return Math.max(1, ...slice);
+         },
+         colStyle(i) {
+           if (i < this.trendStart()) return 'display:none;';
+           const total = this.trendTotals[i] || 0;
+           const h = (total / this.trendVmax()) * 100;
+           return 'height:' + h.toFixed(2) + '%;';
+         }
+       }">
     {%- if _is_skel -%}
       {%- for _ in range(30) -%}
         <div class="sd-trend-col sd-trend-col--skel" aria-hidden="true"></div>
       {%- endfor -%}
-    {%- elif n > 0 -%}
-      {%- set ns = namespace(vmax=1) -%}
+    {%- elif _n > 0 -%}
       {%- for d in days_data -%}
-        {%- set total = d.critical + d.high + d.medium + d.low -%}
-        {%- if total > ns.vmax -%}{%- set ns.vmax = total -%}{%- endif -%}
-      {%- endfor -%}
-      {%- for d in days_data -%}
-        {%- set total = d.critical + d.high + d.medium + d.low -%}
-        {%- set h = ((total * 100.0 / ns.vmax) if ns.vmax > 0 else 4) -%}
+        {%- set _idx = loop.index0 -%}
         <div class="sd-trend-col"
              data-day="{{ d.day.isoformat() }}"
-             title="{{ d.day.isoformat() }} · crit {{ d.critical }} · high {{ d.high }} · med {{ d.medium }} · low {{ d.low }}{% if d.kev %} · {{ d.kev }} KEV{% endif %}"
-             style="height: {{ '%.2f' | format(h | float) }}%;">
-          {# bottom-up: column-reverse dreht die Render-Reihenfolge um,
-             daher low zuerst -> landet unten in der Spalte. #}
+             :style="colStyle({{ _idx }})"
+             title="{{ d.day.isoformat() }} · crit {{ d.critical }} · high {{ d.high }} · med {{ d.medium }} · low {{ d.low }}{% if d.kev %} · {{ d.kev }} KEV{% endif %}">
+          {# bottom-up via flex-column-reverse — low zuerst -> landet unten. #}
           {%- if d.low -%}
             <span class="sd-trend-seg sd-trend-seg--low"      style="flex: {{ d.low }};"></span>
           {%- endif -%}
