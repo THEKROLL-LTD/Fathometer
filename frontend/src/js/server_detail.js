@@ -293,49 +293,11 @@ export function setupServerDetailHeartbeatTip(rootEl) {
 // Alpine.data-Registration laeuft beim Modul-Load (kein DOM-Zugriff).
 registerPillPanels();
 
-// ── Chart-Loading-Animation (Min-Display) ─────────────────────────
-
-// Minimum-Sichtbarkeitsdauer der Skel-Scan-Animation auf Heartbeat- und
-// Severity-Trend-Frame nach dem initialen Render. Analog zum Sidebar-
-// Stagger-Reveal (sidebar_loading_wave.js): selbst bei sofortigem
-// Server-Render bekommt der Operator einen visuellen Anker dass die
-// Charts aktualisiert wurden. Wert auf 700 ms — uebersteigt die
-// skel-scan-Animation (1.8s loop, aber sichtbarer Peak < 700 ms).
-var SD_CHART_LOADING_MS = 700;
-var SD_CHART_FRAME_SELECTOR =
-  '.sd-heartbeat-frame:not(.sd-heartbeat-frame--empty), .sd-trend-frame';
-
-/**
- * Setzt temporaer die sd-skel-frame-Klasse auf Heartbeat + Severity-Trend
- * Frames damit die Scan-Animation kurz sichtbar ist, auch wenn die echten
- * Daten schon serverseitig gerendert sind.
- *
- * @param {HTMLElement} rootEl
- */
-export function setupChartLoadingAnimation(rootEl) {
-  if (!rootEl) return;
-  var frames = rootEl.querySelectorAll(SD_CHART_FRAME_SELECTOR);
-  if (frames.length === 0) return;
-
-  frames.forEach(function (frame) {
-    // Falls Server schon im Skel-Mode rendert (initial-Load mit skel=true):
-    // nichts zu tun, der Server-Pfad raumt selbst auf.
-    if (frame.classList.contains('sd-skel-frame--initial')) return;
-    frame.classList.add('sd-skel-frame', 'sd-skel-frame--initial');
-  });
-
-  setTimeout(function () {
-    frames.forEach(function (frame) {
-      frame.classList.remove('sd-skel-frame', 'sd-skel-frame--initial');
-    });
-  }, SD_CHART_LOADING_MS);
-}
-
 // ── Oeffentlicher Init-Hook ───────────────────────────────────────
 
 /**
  * Wird vom app.js htmx:afterSettle-Hook aufgerufen (und beim initialen
- * DOMContentLoaded falls .sd-detail-root bereits vorhanden ist).
+ * DOMContentLoaded falls .server-detail bereits vorhanden ist).
  *
  * @param {HTMLElement} rootEl
  */
@@ -343,5 +305,4 @@ export function initServerDetailModule(rootEl) {
   if (!rootEl) return;
   setupScanFlashSync(rootEl);
   setupServerDetailHeartbeatTip(rootEl);
-  setupChartLoadingAnimation(rootEl);
 }
