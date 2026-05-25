@@ -11,16 +11,17 @@
      - `note_form`              : NoteForm
      - `bulk_form`              : BulkActionForm
      - `csrf_form`              : CSRFOnlyForm
-     - `total_findings`         : int — offene Findings (Triage-Queue-Anzahl)
+     - `quick_counts`           : dict[str,int] (total_open + per-severity)
      - `total_findings_count`   : int — Gesamt-Findings (alle Status)
      - `noise_total`            : int
      - `noise_findings`         : list[Finding]
 #}
 {% from "_macros.html" import sort_header, bulk_ack_modal %}
+{%- set _open_total = (quick_counts.total_open if quick_counts else 0) -%}
 <section class="sd-section" id="findings-section">
   <p class="sd-eyebrow">Triage queue · findings</p>
   <div class="sd-queue-head">
-    <h2 class="sd-h3 sd-queue-h3">{{ total_findings | default(0) }} offen · sortiert nach Risk-Band</h2>
+    <h2 class="sd-h3 sd-queue-h3">{{ _open_total }} offen · sortiert nach Risk-Band</h2>
     <span class="sd-queue-meta">{{ total_findings_count | default(0) }} Findings gesamt</span>
   </div>
 
