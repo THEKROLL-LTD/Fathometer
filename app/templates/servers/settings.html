@@ -41,6 +41,9 @@
   <div class="sd-settings-head">
     <a class="sd-back"
        href="{{ url_for('server_detail.show', server_id=server.id) }}"
+       hx-get="{{ url_for('server_detail.show', server_id=server.id) }}"
+       hx-target="#detail-pane"
+       hx-push-url="true"
        aria-label="Zurück zur Server-Detail-Ansicht">
       <span class="sd-back__arrow" aria-hidden="true">&#x2190;</span>
       <span>Zurück</span>

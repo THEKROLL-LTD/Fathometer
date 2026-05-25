@@ -193,6 +193,9 @@
       {% endif %}
       <a class="sd-icon-button"
          href="{{ url_for('server_settings.show', server_id=server.id) }}"
+         hx-get="{{ url_for('server_settings.show', server_id=server.id) }}"
+         hx-target="#detail-pane"
+         hx-push-url="true"
          title="Server-Einstellungen (Tags, Gruppe, Scan-Intervall)"
          aria-label="Einstellungen"
          data-test="server-settings-link">

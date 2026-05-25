@@ -611,7 +611,7 @@
   min-width: 12px;
   max-width: 18px;
   padding: 0;
-  border: 1px solid var(--text-tertiary);
+  border: 2px solid var(--text-secondary);
   background: transparent;
   cursor: pointer;
   transition: transform var(--dur-hover) var(--ease-drift),
