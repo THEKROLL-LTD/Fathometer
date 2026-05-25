@@ -1,53 +1,59 @@
-{# Server-Pill Listeners (Block X Phase C, ADR-0038 §(3)).
+{# Server-Pill Listeners (Block X Re-Implementation, Track D).
    Slide-Down-Panel mit Listener-Tabelle (vier Spalten).
    Variablen-Vertrag:
      - listeners : list[dict] mit Keys process, addr, port, proto, pid, exposure
                    (exposure ist "LOOPBACK" oder "PUBLIC EXPOSED" — vom
                     listener_exposure.classify_exposure() klassifiziert).
+   Alpine-Kontext: open / toggle(k) liegt auf dem umschliessenden .server-detail-Wrapper.
    Sicherheit: alle Werte autoescaped, kein |safe.
 #}
-<div id="server-pill-listeners-panel"
-     class="sd-flyout"
+{%- set _listeners = listeners | default([]) -%}
+<div class="sd-flyout"
+     id="sd-flyout-listeners"
+     role="region"
+     aria-label="Listeners and services"
      x-show="open === 'listeners'"
      x-cloak
      x-transition.duration.150ms
-     data-test="pill-listeners-panel">
+     data-test="server-pill-listeners-panel">
   <div class="sd-flyout__head">
-    <span class="sd-flyout__title">Listeners <b>{{ listeners | length }}</b></span>
-    <button type="button" class="sd-flyout__close"
+    <span class="sd-flyout__title">
+      <b>{{ _listeners | length }}</b> open listeners · process · addr:port · proto
+    </span>
+    <button type="button"
+            class="sd-flyout__close"
             @click="open = null"
-            aria-label="Close listeners panel">×</button>
+            aria-label="Schließen">×</button>
   </div>
   <div class="sd-flyout__body">
-    {% if listeners %}
-    <table class="sd-listener-table">
-      <thead>
-        <tr>
-          <th>Process</th>
-          <th>Addr:port</th>
-          <th>Proto</th>
-          <th>Exposure</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for li in listeners %}
-        <tr data-test="pill-listeners-row">
-          <td class="sd-listener-proc">{{ li.process or "?" }}</td>
-          <td>{{ li.addr }}:{{ li.port }}</td>
-          <td>{{ li.proto }}</td>
-          <td>
-            {% if li.exposure == "LOOPBACK" %}
-              <span class="sd-listener-tag">LOOPBACK</span>
-            {% else %}
-              <span class="sd-listener-tag sd-listener-tag--exposed">PUBLIC EXPOSED</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    {% if _listeners %}
+      <table class="sd-listener-table">
+        <thead>
+          <tr>
+            <th>Process</th>
+            <th>Addr:port</th>
+            <th>Proto</th>
+            <th>Exposure</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in _listeners %}
+            <tr data-test="pill-listeners-row">
+              <td class="sd-listener-proc">{{ l.process | default('—') }}</td>
+              <td>{{ l.addr | default('—') }}{% if l.port %}:{{ l.port }}{% endif %}</td>
+              <td>{{ l.proto | default('—') }}</td>
+              <td>
+                {%- set _exposed = (l.exposure | default('')) == 'PUBLIC EXPOSED' -%}
+                <span class="sd-listener-tag{% if _exposed %} sd-listener-tag--exposed{% endif %}">
+                  {{ 'public-exposed' if _exposed else 'loopback' }}
+                </span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     {% else %}
-      <p class="sd-flyout__empty" data-test="pill-listeners-empty">No listeners in the last snapshot.</p>
+      <p class="sd-flyout__empty" data-test="pill-listeners-empty">— Keine offenen Listener auf diesem Host</p>
     {% endif %}
   </div>
 </div>

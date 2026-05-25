@@ -155,11 +155,17 @@ def test_range_toggle_has_three_buttons_no_50t() -> None:
 
 
 def test_range_toggle_uses_sd_trend_range_class() -> None:
-    """detail.html Range-Toggle-Container hat ``class="sd-trend-range"``."""
-    source = _load_detail_source()
+    """Range-Toggle-Container hat ``class="sd-trend-range"``.
 
-    assert 'class="sd-trend-range"' in source, (
-        "'class=\"sd-trend-range\"' fehlt in detail.html. "
+    Track E hat den Range-Toggle in _stacked_bar_chart.html integriert
+    (nicht mehr direkt in detail.html). Der Test prueft den Partial-Source.
+    """
+    # Track E: Toggle ist jetzt Teil des Partials, nicht von detail.html.
+    partial_source = _load_partial_source()
+
+    assert 'class="sd-trend-range"' in partial_source, (
+        "'class=\"sd-trend-range\"' fehlt in _stacked_bar_chart.html. "
+        "Track E hat den Range-Toggle in das Partial integriert. "
         "Range-Toggle-Container soll sd-trend-range-Klasse verwenden."
     )
 

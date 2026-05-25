@@ -659,6 +659,7 @@ def show(server_id: int) -> Any:
         trend_data=trend_data,
         heartbeat_cells=heartbeat_cells,
         quick_counts=quick_counts,
+        total_findings_count=quick_counts["total_all"],
         action_required=action_required,
         listeners=snapshot_ctx["listeners"],
         services=snapshot_ctx["services"],
@@ -879,9 +880,13 @@ def _quick_counts_for_server(sess: Any, server_id: int) -> dict[str, int]:
 
     Eine einzige aggregierte Query mit `FILTER (WHERE …)`-Clauses,
     Server-scoped (keine Tag-Filterung).
+
+    `total_all` enthaelt alle Findings unabhaengig vom Status (fuer den
+    HeaderStats-Eyebrow "von N Findings gesamt").
     """
     is_open = Finding.status == FindingStatus.OPEN
     stmt = select(
+        func.count().label("total_all"),
         func.count().filter(is_open).label("total_open"),
         func.count().filter(is_open, Finding.is_kev.is_(True)).label("kev_open"),
         func.count().filter(is_open, Finding.severity == Severity.CRITICAL).label("critical_open"),
@@ -891,6 +896,7 @@ def _quick_counts_for_server(sess: Any, server_id: int) -> dict[str, int]:
     ).where(Finding.server_id == server_id)
     row = sess.execute(stmt).one()
     return {
+        "total_all": int(row.total_all or 0),
         "total_open": int(row.total_open or 0),
         "kev_open": int(row.kev_open or 0),
         "critical_open": int(row.critical_open or 0),

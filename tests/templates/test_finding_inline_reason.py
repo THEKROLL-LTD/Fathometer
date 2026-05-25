@@ -148,7 +148,10 @@ def test_inline_reason_rendered_when_risk_band_reason_set(
     app: Flask, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Render mit f.risk_band_reason='vendor (redhat) severity HIGH':
-    Output enthaelt KI-Bewertung-Eyebrow + Reason-Text + sd-finding__reason-Klasse.
+    Output enthaelt KI-Bewertung-Eyebrow + Reason-Text + sd-finding__body-Klasse.
+
+    Track G hat das Reason-Markup auf sd-finding__body / sd-ai-eyebrow / sd-ai-text
+    umgestellt (kein sd-finding__reason mehr).
     """
     reason_text = "vendor (redhat) severity HIGH"
     finding = _make_finding(risk_band_reason=reason_text)
@@ -158,11 +161,14 @@ def test_inline_reason_rendered_when_risk_band_reason_set(
         f"'KI-Bewertung'-Eyebrow fehlt bei gesetztem risk_band_reason. HTML: {html!r}"
     )
     assert reason_text in html, f"Reason-Text '{reason_text}' fehlt im Output. HTML: {html!r}"
-    assert "sd-finding__reason" in html, (
-        f"'sd-finding__reason'-Klasse fehlt bei gesetztem risk_band_reason. HTML: {html!r}"
-    )
+    # Track G: sd-finding__body ist der Wrapper fuer den Reason-Block.
     assert "sd-finding__body" in html, (
         f"'sd-finding__body'-Klasse fehlt bei gesetztem risk_band_reason. HTML: {html!r}"
+    )
+    # Track G: sd-ai-text enthaelt den Reason-Text (kein sd-finding__reason mehr).
+    assert "sd-ai-text" in html, (
+        f"'sd-ai-text'-Klasse fehlt bei gesetztem risk_band_reason. "
+        f"Track G: Reason steht in <p class='sd-ai-text'> (nicht sd-finding__reason). HTML: {html!r}"
     )
 
 

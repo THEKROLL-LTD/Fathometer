@@ -1,14 +1,14 @@
 {# Server-Settings-Sub-View `/servers/<id>/settings/`.
 
-   Block X (ADR-0038, Phase B): Tag-Editor + Group-Selector +
-   Scan-Interval-Editor in einer dedizierten Sub-View; kein Tag-Editor
-   mehr im Server-Detail-Header.
+   Block X (ADR-0038, Track F): Single-Save-Refactor.
 
-   Sektions-Reihenfolge:
-     1. Head    — Zurueck-Link, zentrierter Titel.
-     2. Tags    — heutiger Tag-Editor via `_tag_editor.html`.
-     3. Gruppe  — Single-Select aus existierenden server_groups oder "— keine —".
-     4. Scan-Intervall — Number-Input (1–168 h).
+   Markup folgt `docs/design/ServerSettings.jsx` und
+   `docs/design/server-detail.css` Sektion 9.
+
+   Master-Form (`server-settings-form`) enthaelt Group + Scan-Interval.
+   Tags werden ueber separate Hidden-Sub-Forms verwaltet (HTML5
+   `form="<id>"`-Pattern). Visuell liegen Tag-Controls innerhalb des
+   Master-Form-Blocks, submitten aber an ihre eigenen Endpoints.
 
    Variablen-Vertrag (gesetzt von `app/views/server_settings.py:_render_settings`):
      - `server`             : Server (eager-loaded tag_links.tag + group)
@@ -19,92 +19,122 @@
      - `scan_interval_h`    : int
      - `tag_add_form`       : CSRFOnlyForm  (CSRF fuer Tag-Add)
      - `tag_remove_form`    : CSRFOnlyForm  (CSRF fuer Tag-Remove)
-     - `group_form`         : ServerGroupForm
-     - `scan_interval_form` : ServerScanIntervalForm
+     - `group_form`         : ServerGroupForm  (Backward-Compat)
+     - `scan_interval_form` : ServerScanIntervalForm  (Backward-Compat)
+     - `settings_form`      : ServerSettingsForm  (Single-Save-Form)
      - `hx_partial`         : bool
 
    Sicherheit:
      - Kein `|safe` auf User-/LLM-Daten.
      - CSRF-Token in jeder Form via `hidden_tag()`.
      - Kein Pflicht-Kommentarfeld (ADR-0006).
+     - KEIN Tailwind/DaisyUI — ausschliesslich sd-* CSS-Klassen.
 #}
 {% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
 
-{% block title %}{{ server.name }} · Settings · secscan{% endblock %}
+{% block title %}Einstellungen · {{ server.name }} · secscan{% endblock %}
 
 {% block detail_pane %}
-<div class="px-6 py-6 max-w-[1600px]">
+<div class="server-detail" data-test="server-settings-root">
 
-  {# ── Head: Zurueck-Link + Titel ── #}
+  {# ── Header ── #}
   <div class="sd-settings-head">
-    <a href="{{ url_for('server_detail.show', server_id=server.id) }}"
-       class="sd-back"
-       aria-label="Zurueck zur Server-Detail-Ansicht">
+    <a class="sd-back"
+       href="{{ url_for('server_detail.show', server_id=server.id) }}"
+       aria-label="Zurück zur Server-Detail-Ansicht">
       <span class="sd-back__arrow" aria-hidden="true">&#x2190;</span>
-      <span>Back to detail</span>
+      <span>Zurück</span>
     </a>
     <h1 class="sd-settings-title">
-      Einstellungen &middot; <b>{{ server.name }}</b>
+      Einstellungen · <b>{{ server.name }}</b>
     </h1>
     <span aria-hidden="true"></span>
   </div>
 
-  <div class="sd-settings-sections">
+  {# ── Master-Form: Group + Scan-Interval. Tags sind separater Sub-Mechanismus. ── #}
+  <form method="post"
+        action="{{ url_for('server_settings.save_all', server_id=server.id) }}"
+        data-test="server-settings-form">
+    {{ settings_form.hidden_tag() }}
 
-    {# ── 1. Tags ── #}
-    <section class="sd-settings-section" data-test="settings-section-tags">
-      <h2 class="sd-settings-section__title">Tags</h2>
-      {# _tag_editor.html erwartet die Variablen `server`, `available_tags`,
-         `add_form` und `remove_form`. Im Settings-Kontext heissen die Forms
-         `tag_add_form` und `tag_remove_form` — wir setzen lokale Aliasse. #}
-      {% set add_form = tag_add_form %}
-      {% set remove_form = tag_remove_form %}
-      {% include "servers/_tag_editor.html" %}
-      <p class="sd-settings-section__hint">Tags helfen beim Filtern in der Server-Liste.</p>
-    </section>
+    <div class="sd-settings-sections">
 
-    {# ── 2. Gruppe ── #}
-    <section class="sd-settings-section" data-test="settings-section-group">
-      <h2 class="sd-settings-section__title">Gruppe</h2>
-      <form method="post"
-            action="{{ url_for('server_settings.update_group', server_id=server.id) }}">
-        {{ group_form.hidden_tag() }}
-        <div class="sd-tag-add">
-          {{ group_form.group_id(class_="sd-select", aria_label="Server-Gruppe waehlen") }}
-          <button type="submit" class="sd-save" data-test="settings-group-save">Speichern</button>
+      {# ── Tags ── #}
+      <section class="sd-settings-section" data-test="settings-section-tags">
+        <h2 class="sd-settings-section__title">Tags</h2>
+        <div class="sd-tags" role="list">
+          {% for tag in current_tags %}
+            <span class="sd-tag" role="listitem">
+              <span>#{{ tag.name }}</span>
+              <button type="submit"
+                      form="tag-remove-{{ tag.id }}"
+                      class="sd-tag__x"
+                      aria-label="Tag #{{ tag.name }} entfernen">&#x00D7;</button>
+            </span>
+          {% endfor %}
         </div>
-      </form>
-      <p class="sd-settings-section__hint">Ordnet diesen Server einer Gruppe zu.</p>
-    </section>
 
-    {# ── 3. Scan-Intervall ── #}
-    <section class="sd-settings-section" data-test="settings-section-scan-interval">
-      <h2 class="sd-settings-section__title">Scan-Intervall</h2>
-      <form method="post"
-            action="{{ url_for('server_settings.update_scan_interval', server_id=server.id) }}">
-        {{ scan_interval_form.hidden_tag() }}
+        <div class="sd-tag-add">
+          <select class="sd-select"
+                  name="tag_name"
+                  form="tag-add-form"
+                  aria-label="Tag wählen"
+                  data-test="tag-add-select">
+            <option value="">+ Tag wählen…</option>
+            {% for tag in available_tags %}
+              {% if tag not in current_tags %}
+                <option value="{{ tag.name }}">#{{ tag.name }}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+          <button type="submit"
+                  form="tag-add-form"
+                  class="sd-add-btn"
+                  data-test="tag-add-submit">Hinzufügen</button>
+        </div>
+        <p class="sd-settings-section__hint">Tags helfen beim Filtern in der Server-Liste.</p>
+      </section>
+
+      {# ── Gruppe ── #}
+      <section class="sd-settings-section" data-test="settings-section-group">
+        <h2 class="sd-settings-section__title">Gruppe</h2>
+        {{ settings_form.group_id(class="sd-select", **{"data-test": "settings-group-select", "aria-label": "Server-Gruppe wählen"}) }}
+        <p class="sd-settings-section__hint">Gruppen helfen beim Bündeln von Servern für Bulk-Aktionen.</p>
+      </section>
+
+      {# ── Scan-Intervall ── #}
+      <section class="sd-settings-section" data-test="settings-section-interval">
+        <h2 class="sd-settings-section__title">Scan-Intervall</h2>
         <div class="sd-number-wrap">
-          {{ scan_interval_form.scan_interval_h(
-               class_="sd-input",
-               min="1",
-               max="168",
-               step="1",
-               value=scan_interval_h,
-               aria_label="Scan-Intervall in Stunden"
-             ) }}
+          {{ settings_form.scan_interval_h(class="sd-input", type="number", min="1", max="168", **{"data-test": "settings-interval-input", "aria-label": "Scan-Intervall in Stunden"}) }}
           <span class="sd-number-wrap__suffix">Stunden</span>
         </div>
-        <div style="margin-top: 16px;">
-          <button type="submit" class="sd-save" data-test="settings-scan-interval-save">Speichern</button>
-        </div>
-      </form>
-      <p class="sd-settings-section__hint">
-        Erwartetes Scan-Intervall. Werte ausserhalb von 1–168 Stunden werden abgelehnt.
-        Wird vom Agent beim Install gesetzt; hier anpassbar.
-      </p>
-    </section>
+        <p class="sd-settings-section__hint">Wird vom Agent beim Install gesetzt. Erwartet zwischen 1 und 168 Stunden.</p>
+      </section>
 
-  </div>
+    </div>
+
+    <div class="sd-settings-footer">
+      <button type="submit" class="sd-save" data-test="settings-save-button">Speichern</button>
+    </div>
+  </form>
+
+  {# ── Separate Sub-Forms fuer Tag-Add/Remove (existing endpoints, separate Submit) ── #}
+  {# HTML5 form="<id>" koppelt visuelle Controls oben an diese versteckten Forms. #}
+  <form id="tag-add-form"
+        method="post"
+        action="{{ url_for('server_settings.add_tag', server_id=server.id) }}"
+        style="display: none;">
+    {{ tag_add_form.hidden_tag() }}
+  </form>
+  {% for tag in current_tags %}
+    <form id="tag-remove-{{ tag.id }}"
+          method="post"
+          action="{{ url_for('server_settings.remove_tag', server_id=server.id, tag_id=tag.id) }}"
+          style="display: none;">
+      {{ tag_remove_form.hidden_tag() }}
+    </form>
+  {% endfor %}
 
 </div>
 {% endblock %}

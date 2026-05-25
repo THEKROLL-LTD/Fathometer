@@ -35,6 +35,7 @@ from app.forms import (
     CSRFOnlyForm,
     ServerGroupForm,
     ServerScanIntervalForm,
+    ServerSettingsForm,
 )
 from app.models import Server, ServerGroup, ServerTag, Tag
 
@@ -100,6 +101,7 @@ def _render_settings(server: Server) -> str:
       - `tag_remove_form`: CSRFOnlyForm — CSRF-Token fuer die Remove-Buttons.
       - `group_form`: ServerGroupForm — Group-Selector-Form mit choices.
       - `scan_interval_form`: ServerScanIntervalForm.
+      - `settings_form`: ServerSettingsForm — kombiniertes Single-Save-Form.
       - `hx_partial`: bool.
     """
     available_tags = _all_tags()
@@ -121,6 +123,13 @@ def _render_settings(server: Server) -> str:
         ),
         "scan_interval_form": ServerScanIntervalForm(
             data={"scan_interval_h": server.expected_scan_interval_h},
+        ),
+        "settings_form": ServerSettingsForm(
+            available_groups=available_groups,
+            data={
+                "group_id": group_initial,
+                "scan_interval_h": server.expected_scan_interval_h,
+            },
         ),
     }
 
@@ -333,6 +342,71 @@ def update_scan_interval(server_id: int) -> str | WerkzeugResponse:
         session=sess,
     )
     sess.commit()
+    return _redirect_to_settings(server_id)
+
+
+@server_settings_bp.post("/")
+@login_required
+def save_all(server_id: int) -> str | WerkzeugResponse:
+    """POST /servers/<id>/settings — atomares Save fuer Group + Scan-Interval.
+
+    Tags werden weiterhin ueber die existing /tags/add und /tags/<tag_id>/remove
+    Endpoints verwaltet (dynamisch pro Click), nicht im Master-Submit.
+
+    Audit-Events bleiben separat pro geaendertes Feld.
+    """
+    server = _load_server_with_settings(server_id)
+    if server is None or server.revoked_at is not None or server.retired_at is not None:
+        abort(404)
+
+    sess = get_session()
+    available = list(sess.execute(select(ServerGroup).order_by(ServerGroup.name)).scalars().all())
+    form = ServerSettingsForm(available_groups=available)
+    if not form.validate_on_submit():
+        flash("Ungueltige Eingaben. Bitte Felder pruefen.", "error")
+        return _redirect_to_settings(server_id)
+
+    new_group_id: int | None = form.group_id.data
+    new_interval: int = form.scan_interval_h.data
+
+    # Whitelist-Check: group_id muss None ODER eine bekannte ID sein.
+    if new_group_id is not None and not any(g.id == new_group_id for g in available):
+        flash("Gewaehlte Group existiert nicht (mehr).", "error")
+        return _redirect_to_settings(server_id)
+
+    changed = False
+
+    # ── Group-Change ──────────────────────────────────────────────────────────
+    old_group_id = server.group_id
+    if old_group_id != new_group_id:
+        server.group_id = new_group_id
+        log_event(
+            "server.group_changed",
+            target_type="server",
+            target_id=server.id,
+            metadata={"from": old_group_id, "to": new_group_id},
+            session=sess,
+        )
+        changed = True
+
+    # ── Scan-Interval-Change ──────────────────────────────────────────────────
+    old_interval = server.expected_scan_interval_h
+    if old_interval != new_interval:
+        server.expected_scan_interval_h = new_interval
+        log_event(
+            "server.scan_interval_changed",
+            target_type="server",
+            target_id=server.id,
+            metadata={"from": old_interval, "to": new_interval},
+            session=sess,
+        )
+        changed = True
+
+    # Single commit fuer beide Aenderungen — atomar.
+    if changed:
+        sess.commit()
+
+    flash("Einstellungen gespeichert.", "success")
     return _redirect_to_settings(server_id)
 
 

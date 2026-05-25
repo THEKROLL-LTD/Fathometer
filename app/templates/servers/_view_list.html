@@ -17,13 +17,9 @@
 {% from "_macros.html" import quick_copy, severity_badge, kev_badge, epss_pill, cvss_pill, package_cell, status_badge, sort_header %}
 
 {% if not findings %}
-  <div class="card bg-base-200">
-    <div class="card-body items-center text-center py-10">
-      <p class="opacity-60">Keine Findings fuer diesen Filter.</p>
-      <p class="text-xs opacity-50">
-        Sort/Mode aendern oder einen anderen Server waehlen.
-      </p>
-    </div>
+  <div class="sd-empty-block" data-test="findings-list-empty">
+    <p class="sd-empty">— Keine Findings fuer diesen Filter.</p>
+    <p class="sd-empty">Sort/Mode aendern oder einen anderen Server waehlen.</p>
   </div>
 {% else %}
 {# Block K: Selection-State wird zusaetzlich an `window.__detailSelected`
@@ -48,8 +44,8 @@
        }
      }"
      x-effect="window.__detailSelected = selected">
-<div class="overflow-x-auto rounded-box bg-base-200/40 border border-base-300">
-  <table class="table table-sm align-middle w-full">
+<div class="sd-list-table-wrap">
+  <table class="sd-list-table">
     <thead class="border-b border-base-300">
       <tr>
         {# Checkbox-Spalte fuer Bulk-Auswahl (Block F + K). #}

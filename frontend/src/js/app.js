@@ -12,27 +12,38 @@ import './dashboard_last_refresh.js';
 import { initServerDetailModule } from './server_detail.js';
 
 // Hook fuer HTMX-Pane-Swaps: initServerDetailModule auf neu eingefuegte
-// .sd-detail-root-Elemente anwenden.
+// .server-detail-Elemente anwenden. (Block X Track A: Wrapper-Klasse
+// von .sd-detail-root auf .server-detail umbenannt.)
 document.addEventListener('htmx:afterSettle', function(evt) {
   var elt = (evt.detail && evt.detail.elt) ? evt.detail.elt : document;
   var root = null;
-  if (elt.classList && elt.classList.contains('sd-detail-root')) {
+  if (elt.classList && elt.classList.contains('server-detail')) {
     root = elt;
   } else if (elt.querySelector) {
-    root = elt.querySelector('.sd-detail-root');
+    root = elt.querySelector('.server-detail');
   }
   if (root) initServerDetailModule(root);
 });
 
-// Initial-Load (nicht-HTMX): .sd-detail-root direkt im Dokument suchen.
+// Initial-Load (nicht-HTMX): .server-detail direkt im Dokument suchen.
 if (typeof document !== 'undefined') {
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function() {
-      var root = document.querySelector('.sd-detail-root');
+      var root = document.querySelector('.server-detail');
       if (root) initServerDetailModule(root);
     });
   } else {
-    var root = document.querySelector('.sd-detail-root');
+    var root = document.querySelector('.server-detail');
     if (root) initServerDetailModule(root);
   }
+}
+
+// Alpine.start() laeuft hier, NACH allen Alpine.data()-Registrierungen
+// aus dem app-Bundle (z.B. serverPillPanels in server_detail.js). Der
+// vendor.js-Bundle setzt nur `window.Alpine`; das Starten passiert erst
+// nachdem app.js-Komponenten registriert sind, damit Alpine beim DOM-Walk
+// alle x-data-Namen aufloesen kann.
+if (typeof window !== 'undefined' && window.Alpine && !window.Alpine.__started) {
+  window.Alpine.__started = true;
+  window.Alpine.start();
 }

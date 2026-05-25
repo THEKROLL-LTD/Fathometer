@@ -86,14 +86,15 @@ def _render_pill(
 
 
 def test_pill_renders_when_escalate_only(app: Flask) -> None:
-    """Render mit escalate=3: data-test='action-required-pill-needed' + sd-status-pill--alert."""
+    """Render mit escalate=3: data-test='action-required-pill-needed' + sd-status-pill-Klasse."""
     html = _render_pill(app, yes_subcounts={"escalate": 3})
 
     assert 'data-test="action-required-pill-needed"' in html, (
         f"Pill muss bei escalate=3 rendern (action-required-pill-needed fehlt). HTML: {html!r}"
     )
-    assert "sd-status-pill--alert" in html, (
-        f"sd-status-pill--alert-Klasse fehlt bei escalate=3. HTML: {html!r}"
+    # Track G: Pill nutzt sd-status-pill (kein --alert-Modifier mehr; Variante ist eine Klasse).
+    assert "sd-status-pill" in html, (
+        f"sd-status-pill-Klasse fehlt bei escalate=3. HTML: {html!r}"
     )
 
 
@@ -109,7 +110,7 @@ def test_pill_renders_when_act_only(app: Flask) -> None:
     assert 'data-test="action-required-pill-needed"' in html, (
         f"Pill muss bei act=2 rendern. HTML: {html!r}"
     )
-    assert "sd-status-pill--alert" in html, f"sd-status-pill--alert fehlt bei act=2. HTML: {html!r}"
+    assert "sd-status-pill" in html, f"sd-status-pill fehlt bei act=2. HTML: {html!r}"
 
 
 # ===========================================================================
@@ -124,8 +125,8 @@ def test_pill_renders_when_escalate_and_act(app: Flask) -> None:
     assert 'data-test="action-required-pill-needed"' in html, (
         f"Pill muss bei escalate=1+act=2 rendern. HTML: {html!r}"
     )
-    assert "sd-status-pill--alert" in html, (
-        f"sd-status-pill--alert fehlt bei escalate=1+act=2. HTML: {html!r}"
+    assert "sd-status-pill" in html, (
+        f"sd-status-pill fehlt bei escalate=1+act=2. HTML: {html!r}"
     )
 
 

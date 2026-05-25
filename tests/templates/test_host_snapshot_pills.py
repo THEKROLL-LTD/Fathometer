@@ -110,39 +110,37 @@ def _make_listener(
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — Pill-1-Label ist 'Listeners' (NICHT 'Listeners & services')
+# Test 1 — Pill-1-Label ist 'Listeners & services' (Design-treu, Track D)
 # ---------------------------------------------------------------------------
 
 
 def test_pill_listeners_label_is_listeners_not_listeners_and_services(
     app: Flask,
 ) -> None:
-    """detail.html: Pill-1 traegt das Label 'Listeners' (ADR-0038 §(3) C2).
+    """detail.html: Pill-1 traegt das Label 'Listeners & services' (Design-treu).
 
-    Das Label 'Listeners & services' aus dem alten Design darf nicht verwendet
-    werden. Die Pill enthaelt data-test='pill-listeners'.
+    Track D hat das Label gemaess docs/design/ServerDetail.jsx auf
+    'Listeners & services' geaendert (im Jinja-Source als '&amp; services').
+    ADR-0038 §(3) C2 nannte urspruenglich nur 'Listeners' — das Design
+    setzt sich durch (explizite User-Entscheidung Block-X-Re-Impl).
+    Die Pill hat data-test='pill-listeners'.
     """
     source = _load_detail_source()
 
     # Positiv: data-test="pill-listeners" muss vorhanden sein.
     assert 'data-test="pill-listeners"' in source, (
         "'data-test=\"pill-listeners\"' fehlt in detail.html. "
-        "Phase C soll den Pill-1-Button mit diesem Attribut eingefuegt haben. "
+        "Track A soll den Pill-1-Button mit diesem Attribut eingefuegt haben. "
         f"Template-Pfad: {_DETAIL_PATH}"
     )
 
-    # Positiv: 'Listeners' als Pill-Text muss vorhanden sein.
+    # Positiv: 'Listeners' als Teil des Pill-Texts muss vorhanden sein.
     assert "Listeners" in source, f"'Listeners' fehlt in detail.html. Template-Pfad: {_DETAIL_PATH}"
 
-    # Negativ: 'Listeners & services' darf nicht vorkommen.
-    assert "Listeners &amp; services" not in source, (
-        "'Listeners &amp; services' (HTML-encoded) ist noch in detail.html. "
-        "Pill-1-Label soll per ADR-0038 §(3) C2 nur 'Listeners' heissen. "
-        f"Template-Pfad: {_DETAIL_PATH}"
-    )
-    assert "Listeners & services" not in source, (
-        "'Listeners & services' ist noch in detail.html. "
-        "Pill-1-Label soll per ADR-0038 §(3) C2 nur 'Listeners' heissen. "
+    # Positiv: Design-treues Label 'Listeners &amp; services' muss vorhanden sein.
+    assert "Listeners &amp; services" in source, (
+        "'Listeners &amp; services' fehlt in detail.html. "
+        "Track D hat das Label auf 'Listeners & services' (Design-treu) gesetzt. "
         f"Template-Pfad: {_DETAIL_PATH}"
     )
 
@@ -329,8 +327,10 @@ def test_listener_panel_has_four_columns(app: Flask) -> None:
 
 
 def test_listener_row_renders_loopback_tag(app: Flask) -> None:
-    """LOOPBACK-Listener rendert <span class='sd-listener-tag'>LOOPBACK</span>.
+    """LOOPBACK-Listener rendert <span class='sd-listener-tag'>loopback</span>.
 
+    Track D: Das Tag-Label wird als lowercase 'loopback' gerendert
+    (CSS macht text-transform: uppercase fuer visuelle Darstellung).
     Kein sd-listener-tag--exposed-Modifier bei LOOPBACK (ADR-0038 §(3) C3).
     """
     listeners = [
@@ -345,10 +345,20 @@ def test_listener_row_renders_loopback_tag(app: Flask) -> None:
     ]
     html = _render_listeners_partial(app, listeners)
 
-    assert '<span class="sd-listener-tag">LOOPBACK</span>' in html, (
-        f"LOOPBACK-Tag nicht korrekt gerendert. "
-        f"Erwartet: '<span class=\"sd-listener-tag\">LOOPBACK</span>'. "
-        f"HTML: {html!r}"
+    # Track D rendert lowercase 'loopback' (CSS steuert UPPERCASE-Darstellung).
+    # Template rendert mit Whitespace um den Text — pruefen via Teilstrings.
+    assert 'class="sd-listener-tag"' in html, (
+        f"'class=\"sd-listener-tag\"' fehlt bei LOOPBACK-Listener. HTML: {html!r}"
+    )
+    assert "loopback" in html, (
+        f"'loopback' (lowercase) fehlt bei LOOPBACK-Listener. "
+        f"Track D: Text ist lowercase, kein 'LOOPBACK' mehr. HTML: {html!r}"
+    )
+    # LOOPBACK als Grossbuchstaben darf nicht mehr explizit im Text stehen
+    # (CSS macht uppercase, Template rendert lowercase).
+    assert "LOOPBACK" not in html, (
+        f"'LOOPBACK' (uppercase) darf nicht mehr direkt im HTML stehen. "
+        f"Track D: CSS steuert text-transform:uppercase. HTML: {html!r}"
     )
 
     # Kein --exposed-Modifier bei LOOPBACK.
@@ -363,10 +373,12 @@ def test_listener_row_renders_loopback_tag(app: Flask) -> None:
 
 
 def test_listener_row_renders_public_exposed_tag(app: Flask) -> None:
-    """PUBLIC EXPOSED-Listener rendert <span class='sd-listener-tag sd-listener-tag--exposed'>.
+    """PUBLIC EXPOSED-Listener rendert
+    <span class='sd-listener-tag sd-listener-tag--exposed'>public-exposed</span>.
 
-    Cyan-Outline-Modifier --exposed wird bei exponierten Listenern gesetzt
-    (ADR-0038 §(3) C3).
+    Track D: Tag-Label ist 'public-exposed' (hyphenated, lowercase).
+    CSS steuert die UPPERCASE-Darstellung. Cyan-Outline-Modifier --exposed
+    wird bei exponierten Listenern gesetzt (ADR-0038 §(3) C3).
     """
     listeners = [
         _make_listener(
@@ -380,10 +392,20 @@ def test_listener_row_renders_public_exposed_tag(app: Flask) -> None:
     ]
     html = _render_listeners_partial(app, listeners)
 
-    assert '<span class="sd-listener-tag sd-listener-tag--exposed">PUBLIC EXPOSED</span>' in html, (
-        f"PUBLIC EXPOSED-Tag nicht korrekt gerendert. "
-        f"Erwartet: '<span class=\"sd-listener-tag sd-listener-tag--exposed\">PUBLIC EXPOSED</span>'. "
-        f"HTML: {html!r}"
+    # Track D: lowercase hyphenated Label, --exposed-Modifier gesetzt.
+    # Template rendert mit Whitespace um den Text — pruefen via Teilstrings.
+    assert "sd-listener-tag--exposed" in html, (
+        f"'sd-listener-tag--exposed'-Modifier fehlt bei PUBLIC EXPOSED-Listener. "
+        f"Track D: --exposed wird bei exposition=PUBLIC EXPOSED gesetzt. HTML: {html!r}"
+    )
+    assert "public-exposed" in html, (
+        f"'public-exposed' (lowercase, hyphenated) fehlt bei PUBLIC EXPOSED-Listener. "
+        f"Track D: Text ist lowercase hyphenated, kein 'PUBLIC EXPOSED' mehr. HTML: {html!r}"
+    )
+    # Uppercase-Variante darf nicht mehr direkt im Tag-Text stehen.
+    assert "PUBLIC EXPOSED" not in html, (
+        f"'PUBLIC EXPOSED' (uppercase) darf nicht mehr direkt im HTML-Text stehen. "
+        f"Track D: CSS steuert text-transform:uppercase. HTML: {html!r}"
     )
 
 

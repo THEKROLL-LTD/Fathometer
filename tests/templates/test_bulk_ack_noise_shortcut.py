@@ -135,12 +135,18 @@ def test_bulk_ack_noise_button_data_test_in_source() -> None:
 
 
 def test_bulk_ack_noise_button_text_in_source() -> None:
-    """Template-Source enthaelt 'Acknowledge all noise on this server'."""
+    """Template-Source enthaelt 'Acknowledge all noise on this host'.
+
+    Track G hat den Button-Text von '...on this server' auf '...on this host (N)'
+    umgestellt (Design-treu laut docs/design/ServerDetail.jsx).
+    """
     source = _load_findings_section_source()
 
-    assert "Acknowledge all noise on this server" in source, (
-        "'Acknowledge all noise on this server' fehlt in _findings_section.html. "
-        "Block X Phase G5 erfordert diesen Button-Text."
+    # Neuer Text: "Acknowledge all noise on this host"
+    assert "Acknowledge all noise on this host" in source, (
+        "'Acknowledge all noise on this host' fehlt in _findings_section.html. "
+        "Track G hat 'server' auf 'host' geaendert (Design-konform). "
+        "Urspruenglich: 'Acknowledge all noise on this server'."
     )
 
 
@@ -192,8 +198,9 @@ def test_bulk_ack_noise_button_renders_when_noise_total_positive(
     assert 'data-test="bulk-ack-noise-button"' in html, (
         f"'bulk-ack-noise-button' fehlt bei noise_total=5. HTML: {html!r}"
     )
-    assert "Acknowledge all noise on this server" in html, (
-        f"Button-Text fehlt bei noise_total=5. HTML: {html!r}"
+    assert "Acknowledge all noise on this host" in html, (
+        f"Button-Text 'Acknowledge all noise on this host' fehlt bei noise_total=5. "
+        f"Track G hat 'server' auf 'host' geaendert. HTML: {html!r}"
     )
     assert "(5)" in html, (
         f"'(5)' (noise_total-Counter) fehlt im Button bei noise_total=5. HTML: {html!r}"

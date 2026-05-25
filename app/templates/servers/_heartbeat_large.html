@@ -21,7 +21,7 @@
    Legende-Klassen: sd-legend-swatch/sd-legend-swatch__dot/sd-legend-swatch--<band>.
 #}
 {%- set _is_skel = skel | default(false) -%}
-<div class="sd-heartbeat-frame sd-skel-frame"
+<div class="sd-heartbeat-frame{% if _is_skel %} sd-skel-frame{% endif %}"
      data-test="heartbeat-frame">
   <div class="sd-heartbeat"
        role="img"
@@ -52,8 +52,8 @@
     {%- endif -%}
   </div>
   <div class="sd-heartbeat__axis" aria-hidden="true">
-    <span>–{{ cells | length }}d</span>
-    <span>today</span>
+    <span>-30T</span>
+    <span>Heute</span>
   </div>
   <div class="sd-heartbeat__legend" aria-hidden="true">
     <span class="sd-legend-swatch sd-legend-swatch--escalate">

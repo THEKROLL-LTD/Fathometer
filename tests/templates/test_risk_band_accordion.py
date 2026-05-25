@@ -319,12 +319,25 @@ def test_pending_grouping_subblock_absent_when_pending_count_zero(app: Flask) ->
 
 
 def test_empty_state_when_all_slots_empty(app: Flask) -> None:
-    """Alle 6 Slots leer -> Empty-State mit 'Keine offenen Findings auf diesem Server.'"""
+    """Alle 6 Slots leer -> Empty-State mit sd-empty-block + sd-empty-Klassen.
+
+    Track F hat den Empty-State von DaisyUI card bg-base-200 auf
+    sd-empty-block / sd-empty umgebaut.
+    """
     sections = _all_six_empty_sections()
     html = _render_view_groups(app, risk_band_sections=sections)
 
-    assert "Keine offenen Findings auf diesem Server." in html, (
-        f"Empty-State-Text fehlt wenn alle Slots leer. HTML: {html!r}"
+    # Track F: sd-empty-block-Wrapper + sd-empty-Text-Element.
+    assert "sd-empty-block" in html, (
+        f"'sd-empty-block'-Wrapper fehlt im Empty-State. "
+        f"Track F: sd-empty-block ersetzt DaisyUI card bg-base-200. HTML: {html!r}"
+    )
+    assert "sd-empty" in html, (
+        f"'sd-empty'-Klasse fehlt im Empty-State. HTML: {html!r}"
+    )
+    # Text-Inhalt: Schluessel-Substring genuegt (kein Punkt am Ende im neuen Markup).
+    assert "Keine offenen Findings" in html, (
+        f"Empty-State-Text 'Keine offenen Findings' fehlt. HTML: {html!r}"
     )
 
     # Kein <details>-Tag im Output.
@@ -337,7 +350,11 @@ def test_empty_state_when_all_slots_empty(app: Flask) -> None:
 
 
 def test_sd_risk_band_sections_wrapper_present(app: Flask) -> None:
-    """Output enthaelt data-test='risk-band-sections' wenn mindestens ein Slot belegt."""
+    """Output enthaelt data-test='risk-band-sections' wenn mindestens ein Slot belegt.
+
+    Track F: Der Wrapper hat kein eigenes CSS-Klassen-Attribut mehr —
+    nur data-test='risk-band-sections' (kein 'sd-risk-band-sections'-CSS-Klasse).
+    """
     sections = _all_six_sections(open_band="escalate")
     html = _render_view_groups(app, risk_band_sections=sections)
 
@@ -345,8 +362,11 @@ def test_sd_risk_band_sections_wrapper_present(app: Flask) -> None:
         f"'data-test=\"risk-band-sections\"' fehlt im Output. HTML: {html[:600]!r}"
     )
 
-    assert "sd-risk-band-sections" in html, (
-        f"'sd-risk-band-sections'-Klasse fehlt im Wrapper. HTML: {html[:600]!r}"
+    # Track F: Der Wrapper-Div hat NUR data-test, keine eigene CSS-Klasse mehr.
+    # Wir pruefen dass die <details class="sd-band"> Kinder vorhanden sind.
+    assert 'class="sd-band"' in html, (
+        f"'class=\"sd-band\"'-Klasse fehlt in den <details>-Kindern. "
+        f"Track F hat sd-risk-band-section auf sd-band umbenannt. HTML: {html[:600]!r}"
     )
 
 
@@ -356,14 +376,19 @@ def test_sd_risk_band_sections_wrapper_present(app: Flask) -> None:
 
 
 def test_total_count_rendered_in_summary(app: Flask) -> None:
-    """Slot mit total_count=42 -> '42' erscheint im <summary>-Markup."""
+    """Slot mit total_count=42 -> '42' erscheint im <summary>-Markup via sd-band__count.
+
+    Track F hat sd-risk-band-section__count auf sd-band__count umbenannt.
+    """
     section = _make_nonempty_slot("act", count=42, default_open=True)
     html = _render_section_partial(app, section=section)
 
-    # Die Section rendert total_count im <summary>-Block via
-    # sd-risk-band-section__count-Span.
+    # Die Section rendert total_count im <summary>-Block.
     assert "42" in html, f"total_count=42 soll als '42' im Output erscheinen. HTML: {html!r}"
 
-    assert 'class="sd-risk-band-section__count"' in html, (
-        f"'sd-risk-band-section__count'-Klasse fehlt im Summary-Markup. HTML: {html!r}"
+    # Track F: Klasse ist jetzt sd-band__count (kein sd-risk-band-section__count mehr).
+    assert 'class="sd-band__count"' in html, (
+        f"'sd-band__count'-Klasse fehlt im Summary-Markup. "
+        f"Track F hat 'sd-risk-band-section__count' auf 'sd-band__count' umbenannt. "
+        f"HTML: {html!r}"
     )

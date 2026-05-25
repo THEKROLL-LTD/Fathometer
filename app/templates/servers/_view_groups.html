@@ -3,35 +3,18 @@
    _partials/risk_band_section.html.
 
    Variablen-Vertrag (durchgereicht von _findings_section.html):
-     - risk_band_sections : list[dict] — sechs Slots in
-                            _RISK_BAND_SECTION_ORDER. Siehe
-                            app/views/server_detail.py::_build_risk_band_sections.
-     - pending_grouping_counts : dict[str, int] — wird in den PENDING-Slot
-                                  durchgereicht.
-     - server : Server.
-
-   Default-Verhalten:
-     - Alle Slots collapsed ausser dem mit `default_open=True` (ESCALATE-
-       bevorzugt; sonst erster nicht-leerer).
-     - Innerhalb eines geoeffneten Slots bleiben die Application-Group-Cards
-       collapsed; ihre Findings laden weiter lazy via HTMX
-       (server_detail.group_findings_fragment).
-
-   Empty-State: wenn alle Slots leer sind (kein Application-Group + kein
-   Pending), zeigen wir den vertrauten Empty-State-Block aus Block K.
+     - risk_band_sections       : list[dict] — sechs Slots in _RISK_BAND_SECTION_ORDER.
+     - pending_grouping_counts  : dict[str, int]
+     - server                   : Server.
 #}
 {%- set _total_nonempty = risk_band_sections | rejectattr('is_empty') | list | length -%}
 {% if _total_nonempty == 0 %}
-  <div class="card bg-base-200">
-    <div class="card-body items-center text-center py-10">
-      <p class="opacity-60">Keine offenen Findings auf diesem Server.</p>
-      <p class="text-xs opacity-50">
-        Filter pruefen oder Status auf "alle" stellen.
-      </p>
-    </div>
+  <div class="sd-empty-block" data-test="findings-empty">
+    <p class="sd-empty">— Keine offenen Findings auf diesem Server</p>
+    <p class="sd-empty">Filter pruefen oder Status auf "alle" stellen.</p>
   </div>
 {% else %}
-  <div class="sd-risk-band-sections space-y-2" data-test="risk-band-sections">
+  <div data-test="risk-band-sections">
     {% for section in risk_band_sections %}
       {% include "_partials/risk_band_section.html" %}
     {% endfor %}

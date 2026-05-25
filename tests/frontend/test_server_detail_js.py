@@ -118,11 +118,14 @@ def test_app_js_imports_server_detail_module() -> None:
 
 
 def test_app_js_hooks_htmx_after_settle_for_server_detail() -> None:
-    """app.js registriert einen htmx:afterSettle-Listener der .sd-detail-root als Selektor nutzt.
+    """app.js registriert einen htmx:afterSettle-Listener der .server-detail als Selektor nutzt.
 
     Pane-Swap-Kompatibilitaet: initServerDetailModule muss nur auf neu
     eingefuegte Detail-Pane-Wurzeln angewandt werden, nicht auf beliebige
     HTMX-Swaps. Beides muss in app.js vorhanden sein.
+
+    Block X Track A: Wrapper-Klasse von .sd-detail-root auf .server-detail
+    umbenannt (Track G hat app.js entsprechend aktualisiert).
     """
     assert _APP_JS.exists(), f"app.js fehlt: {_APP_JS}"
 
@@ -133,10 +136,11 @@ def test_app_js_hooks_htmx_after_settle_for_server_detail() -> None:
         "Der HTMX-Hook fuer Server-Detail-Init ist nicht registriert."
     )
 
-    assert ".sd-detail-root" in js_text, (
-        "Selektor '.sd-detail-root' fehlt in app.js. "
+    assert ".server-detail" in js_text, (
+        "Selektor '.server-detail' fehlt in app.js. "
         "initServerDetailModule muss gezielt auf die Detail-Pane-Wurzel "
-        "angewandt werden (nicht auf beliebige Elemente)."
+        "angewandt werden (nicht auf beliebige Elemente). "
+        "(Block X Track A: Umbenennung von .sd-detail-root auf .server-detail)"
     )
 
 

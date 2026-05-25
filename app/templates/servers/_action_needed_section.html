@@ -1,110 +1,73 @@
-{# "Was zu tun ist"-Sektion auf Server-Detail (Block P / v0.9.3, ADR-0023 §c).
-
-   Strukturierte Operator-Workflows zwischen Header-Sub-Line und
-   Host-Snapshot. Bis zu fuenf Cards in Dringlichkeits-Reihenfolge — der
-   View-Helper `_build_action_sections()` skippt leere; wenn das Ergebnis
-   komplett leer ist, blendet sich die Sektion automatisch aus.
+{# "Was zu tun ist"-Sektion auf Server-Detail.
 
    Variablen-Vertrag (aus `app/views/server_detail.py::_build_action_sections`):
      - `action_sections` : list[dict] mit Keys:
          `id`           : str  — eindeutiger Slug fuer data-test-Attribute.
          `label`        : str  — vollstaendiges Label "PHASE · Aktion".
          `variant`      : str  — CSS-Variant-Slug ("escalate-distro" etc.).
-         `filter`       : tuple — (risk_band, action_type, group_kind|None).
          `count`        : int  — Anzahl Groups in der Card.
-         `show_labels`  : bool — ob die Group-Label-Sub-Liste rendern soll
-                                  (ESCALATE: ja, ACT: nein — Visual-Noise).
-         `groups`       : list[dict] — Entries aus `_load_application_groups
-                                       _for_server` mit `group`/`findings`/
-                                       `worst_finding`.
+         `groups`       : list[dict] — Entries mit `group`/`findings`/
+                                       `worst_finding`/`evaluation`.
 
    Sicherheit:
-     - Group-Labels, Reason und Finding-Identifier sind Pydantic-validiert
-       beim Ingest (ASCII-safe / Length-Cap). Jinja-Autoescape laeuft
-       trotzdem ueberall — kein `|safe`.
-     - Default-collapsed: `<details>` ohne `open`-Attribut, damit kein
-       Mid-Page-Layout-Jitter beim Detail-Laden entsteht.
+     - Group-Labels, Reason und Finding-Identifier sind Pydantic-validiert.
+       Jinja-Autoescape laeuft trotzdem ueberall — kein `|safe`.
+     - Default-collapsed: `<details>` ohne `open`-Attribut.
 #}
 {% if action_sections %}
-<section id="action-needed" class="py-6 space-y-3"
-         data-test="action-needed-section">
-  <div>
-    <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">
-      Was zu tun ist
-    </div>
-    <h3 class="font-mono text-base font-medium mt-1">Operator-Workflows</h3>
-  </div>
-
-  <div class="grid gap-3 grid-cols-1 lg:grid-cols-2">
+<section class="sd-section" data-test="action-needed-section">
+  <p class="sd-eyebrow">Was zu tun ist</p>
+  <h2 class="sd-h3">Operator-Workflows</h2>
+  <div class="sd-workflows">
     {% for card in action_sections %}
       {%- set is_escalate = card.variant.startswith('escalate') -%}
       {%- set phase_label = 'ESCALATE' if is_escalate else 'ACT' -%}
-      {%- set badge_class = 'badge-error' if is_escalate else 'badge-warning' -%}
+      {%- set badge_modifier = 'sd-badge--escalate' if is_escalate else 'sd-badge--act' -%}
       {%- set action_label = card.label.split('·', 1)[1].strip() if '·' in card.label else card.label -%}
-      <details class="rounded-box bg-base-200/40 border border-base-300 group"
-               data-test="action-card-{{ card.id }}">
-        <summary class="px-5 py-3 cursor-pointer flex items-center justify-between gap-3 list-none">
-          <div class="flex items-center gap-3 min-w-0 flex-1">
-            <span class="badge {{ badge_class }} badge-sm font-mono"
-                  data-test="action-card-{{ card.id }}-phase">{{ phase_label }}</span>
-            <div class="min-w-0 flex-1">
-              <div class="text-sm font-medium truncate"
-                   data-test="action-card-{{ card.id }}-action">{{ action_label }}</div>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="badge badge-neutral badge-sm font-mono"
-                  data-test="action-card-{{ card.id }}-count">{{ card.count }}</span>
-            <span class="text-xs opacity-50 group-open:rotate-180 transition-transform"
-                  aria-hidden="true">▾</span>
-          </div>
+      {%- set subline = card.groups | map(attribute='group') | map(attribute='label') | list | join(' · ') -%}
+      <details class="workflow-card" data-test="action-card-{{ card.id }}">
+        <summary class="workflow-card__summary">
+          <span class="sd-badge {{ badge_modifier }}" data-test="action-card-{{ card.id }}-phase">{{ phase_label }}</span>
+          <span class="workflow-card__title" data-test="action-card-{{ card.id }}-action">{{ action_label }}</span>
+          <span class="workflow-card__subline">{{ subline }}</span>
+          <span class="workflow-card__count" data-test="action-card-{{ card.id }}-count">{{ card.count }}</span>
+          <span class="workflow-card__chev" aria-hidden="true">›</span>
         </summary>
-
-        <div class="border-t border-base-300 px-5 py-3 overflow-x-auto">
-          <table class="workflow-card__drilldown"
-                 data-test="action-card-{{ card.id }}-table">
+        <div class="workflow-card__body">
+          <table class="workflow-table" data-test="action-card-{{ card.id }}-table">
             <thead>
               <tr>
-                <th class="text-[10px] uppercase tracking-wider opacity-65">Group</th>
-                <th class="text-[10px] uppercase tracking-wider opacity-65">Worst Finding</th>
-                <th class="text-[10px] uppercase tracking-wider opacity-65">Reason</th>
+                <th class="workflow-table__group">Group</th>
+                <th class="workflow-table__cve">Worst Finding</th>
+                <th class="workflow-table__reason">Reason</th>
               </tr>
             </thead>
             <tbody>
               {% for entry in card.groups %}
                 <tr data-test="action-card-{{ card.id }}-row">
-                  <td class="font-mono whitespace-nowrap">
-                    <a href="#group-{{ entry.group.id }}"
-                       class="link link-hover">{{ entry.group.label }}</a>
+                  <td class="workflow-table__group"><a href="#group-{{ entry.group.id }}">{{ entry.group.label }}</a></td>
+                  <td class="workflow-table__cve">
+                    {% if entry.worst_finding %}{{ entry.worst_finding.identifier_key }}{% else %}—{% endif %}
                   </td>
-                  <td class="font-mono text-xs">
-                    {% if entry.worst_finding %}
-                      {{ entry.worst_finding.identifier_key }}
-                    {% else %}
-                      <span class="opacity-50">—</span>
-                    {% endif %}
-                  </td>
-                  <td class="text-xs opacity-70">
+                  <td class="workflow-table__reason">
                     {% if entry.evaluation and entry.evaluation.risk_band_reason %}
                       {{ entry.evaluation.risk_band_reason }}
-                    {% else %}
-                      <span class="opacity-50">—</span>
-                    {% endif %}
+                    {% else %}—{% endif %}
                   </td>
                 </tr>
               {% endfor %}
             </tbody>
           </table>
-          {% if card.groups | length > 25 %}
-            {%- set _total_pages = ((card.groups | length) // 25) + (1 if (card.groups | length) % 25 else 0) -%}
-            <div class="workflow-card__pagination"
-                 data-test="action-card-{{ card.id }}-pagination"
-                 aria-label="Pagination">
-              <span class="workflow-card__pagination-info">Seite 1 von {{ _total_pages }}</span>
-              <button type="button" class="workflow-card__pagination-btn" disabled aria-label="Previous page">&#8249;</button>
-              <button type="button" class="workflow-card__pagination-btn" disabled aria-label="Next page">&#8250;</button>
-            </div>
-          {% endif %}
+          <div class="workflow-card__footer">
+            {%- set _per_page = 25 -%}
+            {%- set _total = card.groups | length -%}
+            {%- set _total_pages = ((_total - 1) // _per_page) + 1 if _total > 0 else 1 -%}
+            <span>{{ _total }} Findings · Seite 1 von {{ _total_pages }}</span>
+            <span class="workflow-card__pager">
+              <button type="button" aria-label="Vorherige Seite" disabled>‹</button>
+              <button type="button" aria-label="Nächste Seite" disabled>›</button>
+            </span>
+          </div>
         </div>
       </details>
     {% endfor %}

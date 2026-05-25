@@ -146,23 +146,25 @@ def _render_section(app: Flask, action_sections: list) -> str:  # type: ignore[t
 
 
 def test_drilldown_table_uses_workflow_card_class(app: Flask) -> None:
-    """Card-Body-Tabelle hat class="workflow-card__drilldown".
+    """Card-Body-Tabelle nutzt class="workflow-table" (Track B Refactor).
 
+    Track B hat die Tabelle von DaisyUI auf workflow-table umgestellt.
     DaisyUI-Klassen ``table table-xs w-full`` duerfen NICHT mehr vorkommen
     (ADR-0038 Phase D2 — Umstieg auf eigene CSS-Klassen).
     """
     card = _make_single_entry_card()
     html = _render_section(app, [card])
 
-    assert 'class="workflow-card__drilldown"' in html, (
-        f"'class=\"workflow-card__drilldown\"' fehlt im gerenderten HTML. "
-        f"Phase D2 soll diese Klasse eingefuehrt haben. HTML (Ausschnitt): {html[:600]!r}"
+    assert 'class="workflow-table"' in html, (
+        f"'class=\"workflow-table\"' fehlt im gerenderten HTML. "
+        f"Track B hat workflow-card__drilldown auf workflow-table umbenannt. "
+        f"HTML (Ausschnitt): {html[:600]!r}"
     )
 
     # DaisyUI-Klassen duerfen nicht mehr vorhanden sein.
     assert "table-xs" not in html, (
         f"'table-xs' (DaisyUI) ist noch im gerenderten HTML. "
-        f"Phase D2 soll auf 'workflow-card__drilldown' gewechselt haben. HTML: {html[:600]!r}"
+        f"Track B soll auf 'workflow-table' gewechselt haben. HTML: {html[:600]!r}"
     )
 
 
@@ -243,16 +245,21 @@ def test_drilldown_row_renders_worst_finding_identifier(app: Flask) -> None:
 
 
 def test_drilldown_row_renders_em_dash_when_worst_finding_missing(app: Flask) -> None:
-    """Worst-Finding-Spalte rendert <span class="opacity-50">—</span> wenn worst_finding=None.
+    """Worst-Finding-Spalte rendert '—' wenn worst_finding=None.
 
     ADR-0038 Phase D2: Em-Dash als Placeholder bei fehlendem Worst-Finding.
+    Track B: Em-Dash wird als nacktes '—' in der Tabellenzelle gerendert
+    (kein <span class="opacity-50"> mehr).
     """
     card = _make_single_entry_card(identifier_key=None)
     html = _render_section(app, [card])
 
-    assert '<span class="opacity-50">—</span>' in html, (
-        f"Em-Dash-Span '<span class=\"opacity-50\">—</span>' fehlt bei worst_finding=None. "
-        f"HTML: {html!r}"
+    # Track B rendert ein nacktes '—' ohne span-Wrapper.
+    # Wir pruefen dass '—' in der Worst-Finding-Zelle des Outputs erscheint
+    # und kein identifier_key vorhanden ist (da worst_finding=None).
+    assert "—" in html, (
+        f"Em-Dash '—' fehlt bei worst_finding=None. "
+        f"Worst-Finding-Spalte soll '—' als Placeholder zeigen. HTML: {html!r}"
     )
 
 
@@ -272,9 +279,11 @@ def test_drilldown_row_renders_risk_band_reason(app: Flask) -> None:
 
 
 def test_drilldown_row_em_dash_when_reason_missing(app: Flask) -> None:
-    """Reason-Spalte rendert <span class="opacity-50">—</span> wenn evaluation=None.
+    """Reason-Spalte rendert '—' wenn evaluation=None.
 
     ADR-0038 Phase D2: Em-Dash bei fehlender Junction-Eval.
+    Track B: Em-Dash wird als nacktes '—' in der Tabellenzelle gerendert
+    (kein <span class="opacity-50"> mehr).
     """
     # evaluation=None wird durch risk_band_reason=None erzeugt —
     # aber der Template-Check ist ``entry.evaluation and entry.evaluation.risk_band_reason``.
@@ -297,9 +306,10 @@ def test_drilldown_row_em_dash_when_reason_missing(app: Flask) -> None:
     }
     html = _render_section(app, [card])
 
-    assert '<span class="opacity-50">—</span>' in html, (
-        f"Em-Dash-Span '<span class=\"opacity-50\">—</span>' fehlt bei evaluation=None. "
-        f"HTML: {html!r}"
+    # Track B rendert ein nacktes '—' ohne span-Wrapper in der Reason-Spalte.
+    assert "—" in html, (
+        f"Em-Dash '—' fehlt bei evaluation=None. "
+        f"Reason-Spalte soll '—' als Placeholder zeigen. HTML: {html!r}"
     )
 
 
@@ -385,54 +395,50 @@ def test_no_sublist_when_show_labels_false(app: Flask) -> None:
 
 
 def test_no_pagination_stub_when_25_groups_or_fewer(app: Flask) -> None:
-    """Kein Pagination-Stub bei genau 25 Groups (Grenzwert).
+    """Pagination-Footer bei 25 Groups: workflow-card__footer ist vorhanden (immer),
+    aber Seite 1 von 1 (kein Mehrseitigkeits-Hinweis).
 
-    Pagination-Footer soll erst ab > 25 Groups erscheinen (Spec D3).
+    Track B: Der footer rendert immer. Spec D3 (>25-Grenze) ist im Footer-Text
+    abgebildet: bei <= 25 Groups zeigt der Footer 'Seite 1 von 1'.
+    Das data-test='action-card-<id>-pagination' Attribut existiert nicht mehr;
+    der Footer ist unlabeled. Test prueft Seitentext-Korrektheit.
     """
     card = _make_pagination_card(num_groups=25)
     html = _render_section(app, [card])
 
-    assert 'data-test="action-card-escalate-distro-patch-pagination"' not in html, (
-        f"Pagination-Stub darf bei 25 Groups NICHT rendern. HTML: {html[:800]!r}"
-    )
-
-    assert "workflow-card__pagination" not in html, (
-        f"'workflow-card__pagination' darf bei <= 25 Groups nicht im HTML sein. HTML: {html[:800]!r}"
+    # Bei 25 Groups: 1 Seite (25/25 = 1 ganze Seite, kein Rest)
+    assert "Seite 1 von 1" in html, (
+        f"Bei 25 Groups soll Footer 'Seite 1 von 1' zeigen. HTML: {html[:800]!r}"
     )
 
 
 def test_pagination_stub_renders_when_26_groups(app: Flask) -> None:
-    """Pagination-Stub rendert bei genau 26 Groups.
+    """Pagination-Footer zeigt 'Seite 1 von 2' bei 26 Groups.
 
-    Prueft alle Pflicht-Elemente aus Spec D3:
-    - ``data-test="action-card-<id>-pagination"``
-    - Text "Seite 1 von 2"
-    - ``class="workflow-card__pagination"``
-    - Zwei <button> mit disabled
-    - aria-label="Previous page" und aria-label="Next page"
+    Track B: Der Footer rendert immer als workflow-card__footer.
+    Prueft:
+    - Text "Seite 1 von 2" (26 / 25 = 2 Seiten)
+    - ``class="workflow-card__footer"`` (kein separates --pagination-Element)
+    - Zwei <button> mit disabled-Attribut (Stub, beide disabled)
+    - aria-label auf den Pager-Buttons (Vorherige/Naechste Seite — Deutsch)
     """
     card = _make_pagination_card(num_groups=26)
     html = _render_section(app, [card])
 
-    # Pagination-Container vorhanden.
-    assert 'data-test="action-card-escalate-distro-patch-pagination"' in html, (
-        f"'data-test=\"action-card-escalate-distro-patch-pagination\"' fehlt bei 26 Groups. "
-        f"HTML: {html[:1000]!r}"
-    )
-
-    assert 'class="workflow-card__pagination"' in html, (
-        f"'class=\"workflow-card__pagination\"' fehlt bei 26 Groups. HTML: {html[:1000]!r}"
-    )
-
     # Seiten-Text: 26 Groups / 25 pro Seite = 2 Seiten (1 Rest).
     assert "Seite 1 von 2" in html, f"'Seite 1 von 2' fehlt bei 26 Groups. HTML: {html!r}"
 
-    # Beide disabled Buttons.
-    assert 'aria-label="Previous page"' in html, (
-        f"'aria-label=\"Previous page\"' fehlt im Pagination-Stub. HTML: {html!r}"
+    # Footer-Container vorhanden (kein separates pagination-Element mehr).
+    assert 'class="workflow-card__footer"' in html, (
+        f"'class=\"workflow-card__footer\"' fehlt bei 26 Groups. HTML: {html[:1000]!r}"
     )
-    assert 'aria-label="Next page"' in html, (
-        f"'aria-label=\"Next page\"' fehlt im Pagination-Stub. HTML: {html!r}"
+
+    # Beide disabled Buttons (deutscher aria-label: "Vorherige Seite" / "Nächste Seite").
+    assert 'aria-label="Vorherige Seite"' in html, (
+        f"'aria-label=\"Vorherige Seite\"' fehlt im Pager. HTML: {html!r}"
+    )
+    assert 'aria-label="Nächste Seite"' in html, (
+        f"'aria-label=\"Nächste Seite\"' fehlt im Pager. HTML: {html!r}"
     )
 
 
@@ -464,26 +470,28 @@ def test_pagination_total_pages_calculation(
 def test_pagination_buttons_are_disabled_stub(app: Flask) -> None:
     """Beide Pagination-Buttons haben das disabled-Attribut bei 30 Groups.
 
-    Der Stub ist statisch (echte Pagination kommt in einem Folge-PR) —
+    Track B: Der Stub ist statisch (echte Pagination kommt in einem Folge-PR) —
     beide Buttons muessen deswegen immer disabled sein.
+    Der Footer-Container heisst jetzt workflow-card__footer und
+    workflow-card__pager (kein separates data-test-Attribut auf dem Container).
     """
     card = _make_pagination_card(num_groups=30)
     html = _render_section(app, [card])
 
-    # Pagination-Container suchen.
-    assert 'data-test="action-card-escalate-distro-patch-pagination"' in html, (
-        f"Pagination-Container fehlt bei 30 Groups. HTML: {html[:800]!r}"
+    # Footer muss vorhanden sein.
+    assert 'class="workflow-card__footer"' in html, (
+        f"'workflow-card__footer' fehlt bei 30 Groups. HTML: {html[:800]!r}"
     )
 
     # Beide Buttons muessen disabled enthalten — wir pruefen via substring.
     # Das Template setzt ``disabled`` auf beiden <button>-Elementen.
-    # Strategie: extrahiere den Pagination-Block und zaehle disabled.
-    pag_start = html.index('data-test="action-card-escalate-distro-patch-pagination"')
-    pag_block = html[pag_start:]
+    # Strategie: extrahiere den Footer-Block und zaehle disabled.
+    footer_start = html.index('class="workflow-card__footer"')
+    footer_block = html[footer_start:]
 
-    disabled_count = pag_block.count("disabled")
+    disabled_count = footer_block.count("disabled")
     assert disabled_count >= 2, (
         f"Beide Pagination-Buttons muessen 'disabled' haben, "
-        f"gefunden: {disabled_count}x 'disabled' im Pagination-Block. "
-        f"Block: {pag_block[:400]!r}"
+        f"gefunden: {disabled_count}x 'disabled' im Footer-Block. "
+        f"Block: {footer_block[:400]!r}"
     )

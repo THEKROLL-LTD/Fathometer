@@ -142,6 +142,13 @@ export function setupScanFlashSync(rootEl, opts) {
  * Single-Open-State: nur ein Panel ('listeners' | 'services' | null) offen.
  * Registrierung defensiv: klappt sowohl wenn Alpine bereits bereit ist
  * als auch wenn alpine:init noch aussteht.
+ *
+ * DEPRECATED (Block X Track A): detail.html verwendet seit der Re-Implementation
+ * ein kombiniertes inline-x-data-Object auf .server-detail (trendRange + open +
+ * toggle). Niemand callt x-data="serverPillPanels" mehr. Die Registration bleibt
+ * aus Kompatibilitaetsgruenden erhalten (Tests pruefen auf Alpine.data-Aufruf);
+ * kann in einem Folge-Block entfernt werden wenn die Test-Assertion ebenfalls
+ * angepasst wird.
  */
 function registerPillPanels() {
   var factory = function() {

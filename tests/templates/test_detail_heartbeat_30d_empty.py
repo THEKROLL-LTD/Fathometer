@@ -51,16 +51,25 @@ def _extract_heartbeat_section(source: str) -> str:
     Nutzt den dedizierten Kommentar-Anker als Trennpunkt.
     Gibt einen renderbaren Jinja-Snippet zurueck der nur die Lebenszeichen-
     Sektion enthaelt (ohne {% extends %}).
+
+    Track A hat die Sektions-Kommentar-Anker auf '{# ── N) Name ── #}'-Format
+    umgestellt (anstatt '{# =============== N. Name}').
     """
-    # Anker: "4. Lebenszeichen" bis "5. Severity-Trend"
-    start_marker = "{# =============== 4. Lebenszeichen"
-    end_marker = "{# =============== 5. Severity-Trend"
+    # Track A Anker-Format: "{# ── 5) Lebenszeichen" bis "{# ── 6) Severity-Trend"
+    start_marker = "{# ── 5) Lebenszeichen"
+    end_marker = "{# ── 6) Severity-Trend"
 
     start_idx = source.find(start_marker)
     end_idx = source.find(end_marker)
 
-    assert start_idx != -1, f"Start-Anker '{start_marker}' fehlt in detail.html."
-    assert end_idx != -1, f"End-Anker '{end_marker}' fehlt in detail.html."
+    assert start_idx != -1, (
+        f"Start-Anker '{start_marker}' fehlt in detail.html. "
+        f"Track A hat das Anker-Format auf '{{# ── N) Name ── #}}' geaendert."
+    )
+    assert end_idx != -1, (
+        f"End-Anker '{end_marker}' fehlt in detail.html. "
+        f"Track A hat das Anker-Format auf '{{# ── N) Name ── #}}' geaendert."
+    )
 
     return source[start_idx:end_idx]
 
@@ -162,12 +171,16 @@ def test_no_legacy_50_day_label() -> None:
 
 
 def test_empty_state_when_snapshot_at_is_none(app: Flask) -> None:
-    """server.host_state_snapshot_at=None -> '— never scanned' + data-test='heartbeat-empty'."""
+    """server.host_state_snapshot_at=None -> '— noch nie gescannt' + data-test='heartbeat-empty'.
+
+    Track A hat den Text von '— never scanned' auf '— noch nie gescannt' geaendert
+    (deutsch wie der Rest der UI-Sprache).
+    """
     html = _render_heartbeat_section(app, snapshot_at=None)
 
-    assert "— never scanned" in html, (
-        f"'— never scanned' fehlt im Empty-State-Output. "
-        f"Wenn host_state_snapshot_at IS NULL soll dieser Text angezeigt werden. "
+    assert "— noch nie gescannt" in html, (
+        f"'— noch nie gescannt' fehlt im Empty-State-Output. "
+        f"Track A hat den Text auf Deutsch umgestellt (von '— never scanned'). "
         f"HTML: {html!r}"
     )
 

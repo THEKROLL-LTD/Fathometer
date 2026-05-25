@@ -1,38 +1,26 @@
-{# Risk-Band-Top-Level-Accordion-Slot fuer die Triage-Queue (Block X
-   Phase F, ADR-0038 §6). Wrappt die Application-Group-Cards eines Risk-
-   Bands in einem <details>-Element mit Header-Summary.
+{# Risk-Band-Top-Level-Accordion-Slot fuer die Triage-Queue.
+   Umgebaut von .sd-risk-band-section auf .sd-band (Design-treu, ADR-0038 §6).
 
    Variablen-Vertrag:
      - section : dict mit Keys `band`, `groups`, `pending_count`,
-                 `total_count`, `is_empty`, `default_open` — siehe
-                 `_build_risk_band_sections()` in app/views/server_detail.py.
-     - server  : Server-ORM (fuer das Pending-Lazy-Endpoint).
-     - pending_grouping_counts : dict[str, int] — durchgereicht fuer den
-                                  PENDING-Slot.
-
-   Render-Pfad:
-     - Wenn `section.is_empty`: nichts rendern (caller filtert oder
-       wir rendern einen leeren Stub — siehe Spec §F4 Empty-Slot-Policy).
-     - Sonst: <details> mit Summary (Chevron + Pill + Band-Label + Count)
-       und Body (Card-Container).
-
-   Default-Expanded-Logik:
-     - `section.default_open` -> open-Attribut am <details>.
+                 `total_count`, `is_empty`, `default_open`
+     - server  : Server-ORM
+     - pending_grouping_counts : dict[str, int]
 #}
 {%- if not section.is_empty -%}
-<details class="sd-risk-band-section"
+<details class="sd-band"
          data-test="risk-band-{{ section.band }}"
          {% if section.default_open %}open{% endif %}>
-  <summary class="sd-risk-band-section__summary">
-    <span class="sd-risk-band-section__chevron" aria-hidden="true">›</span>
-    {% with band_value=section.band, as_link=false, compact=true, show_count=false %}
-      {% include "_partials/risk_band_pill.html" %}
-    {% endwith %}
-    <span class="sd-risk-band-section__count">{{ section.total_count }}</span>
+  <summary class="sd-band__summary">
+    <span class="sd-band__chev" aria-hidden="true">›</span>
+    <span class="sd-badge sd-badge--{{ section.band }}">{{ section.band | upper }}</span>
+    <span aria-hidden="true"></span>
+    <span class="sd-band__count"><b>{{ section.total_count }}</b> findings</span>
   </summary>
-  <div class="sd-risk-band-section__body">
+
+  <div class="sd-band__body">
     {%- if section.groups -%}
-      <div class="space-y-3">
+      <div data-test="band-groups">
         {%- for entry in section.groups -%}
           {%- set _grp = entry.group -%}
           {%- set _ev = entry.evaluation -%}
@@ -55,38 +43,28 @@
       </div>
     {%- endif -%}
 
-    {# PENDING-Slot: Pending-Grouping-Block am Ende, lazy-loaded pro Band. #}
+    {# PENDING-Slot: Findings ohne Application-Group-Zuweisung #}
     {%- if section.band == 'pending' and section.pending_count > 0 -%}
-      <section class="sd-risk-band-section__pending mt-4" data-test="pending-grouping-section">
-        <header class="flex items-center gap-2 mb-2">
-          <h3 class="text-sm font-mono uppercase tracking-[0.12em] opacity-65">
-            Pending grouping
-          </h3>
-          <span class="badge badge-ghost badge-sm">
+      <section class="sd-band__pending" data-test="pending-grouping-section">
+        <header>
+          <h3 class="sd-eyebrow">Pending grouping</h3>
+          <span class="sd-band__pending-count">
             {{ section.pending_count }} {% if section.pending_count == 1 %}finding{% else %}findings{% endif %}
           </span>
         </header>
-        <p class="text-xs opacity-60 mb-2">
-          These findings have not been assigned to an application group.
-        </p>
-        <div class="space-y-1">
+        <p class="sd-empty">These findings have not been assigned to an application group.</p>
+        <div data-test="pending-bands">
           {%- for band, count in pending_grouping_counts.items() if count > 0 -%}
-            <details class="rounded border border-base-300 bg-base-200/40"
-                     data-test="pending-band-{{ band }}">
-              <summary class="px-3 py-2 cursor-pointer flex items-center gap-3">
-                {% with band_value=band, as_link=false, compact=true, show_count=false %}
-                  {% include "_partials/risk_band_pill.html" %}
-                {% endwith %}
-                <span class="opacity-70 text-sm">{{ count }} findings</span>
+            <details class="sd-pending-band" data-test="pending-band-{{ band }}">
+              <summary>
+                <span class="sd-badge sd-badge--{{ band }}">{{ band | upper }}</span>
+                <span class="sd-band__count">{{ count }} findings</span>
               </summary>
               <div hx-get="{{ url_for('server_detail.pending_findings_fragment', server_id=server.id) }}?risk_band={{ band }}"
                    hx-trigger="toggle once from:closest details, click once from:closest summary"
                    hx-swap="innerHTML"
                    data-test="pending-band-lazy-slot">
-                <div class="opacity-60 text-xs italic px-3 py-2">
-                  <span class="loading loading-spinner loading-xs align-middle mr-1"></span>
-                  Lade Findings…
-                </div>
+                <p class="sd-empty">Lade Findings…</p>
               </div>
             </details>
           {%- endfor -%}

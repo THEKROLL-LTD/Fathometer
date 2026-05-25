@@ -1,30 +1,35 @@
-{# Server-Detail `/servers/<id>` — komplettes Redesign (Block K, ADR-0018).
+{# Server-Detail `/servers/<id>` — Komplett-Refactor (Block X Re-Implementation, Track A).
+   Markup folgt 1:1 dem Design aus docs/design/ServerDetail.jsx und
+   docs/design/server-detail.css. Keine Tailwind/DaisyUI-Klassen.
+   Alle Styling-Klassen kommen aus frontend/src/css/components/server-detail.css.
 
-   Sektions-Reihenfolge (Block X / ADR-0038):
-     1. Header       — Hostname, Status-Pill-Reihe, OS-Zeile, Sysline,
-                       KI-Bewertung-Button, Zahnrad-Settings-Button.
-     2. HeaderStats  — Total + Tendenz links, 4 KPI-Sparklines rechts.
-     3. Lebenszeichen — HeartbeatLarge.
-     4. Severity-Trend — Stacked-Bar-Chart + Range-Toggle + Legende.
-     5. Triage Queue — eingebunden via `servers/_findings_section.html`.
+   Sektions-Reihenfolge (JSX-Reihenfolge):
+     1. Header      — sd-header: Hostname + Tags + KI-Button + Zahnrad
+     2. Sysline     — sd-sysline: OS-Zeile + Listeners/Services-Chips
+        Flyouts     — server_pill_listeners + server_pill_services
+     3. Workflows   — _action_needed_section (Track B)
+     4. HeaderStats — sd-stats: Total-Open-Zahl + 4 KPI-Tiles
+     5. Heartbeat   — sd-section: _heartbeat_large
+     6. Trend       — sd-section: _stacked_bar_chart
+     7. Triage      — sd-section: _findings_section (Track C)
 
-   Hinweis Block X: Tag-Editor und Tag-Hashtag-Zeile sind in die
-   Settings-Sub-View (`/servers/<id>/settings/`) ausgelagert (ADR-0038 §2).
-   `add_form`/`remove_form` werden von diesem Template nicht mehr benoetigt
-   — sie stehen ausschliesslich ueber `server_settings.show` bereit.
+   Alpine-Scope-Strategie:
+     - `.server-detail` traegt `x-data` mit BEIDEN Scopes zusammengefuehrt
+       (trendRange + serverPillPanels) als kombiniertes Object-Literal.
+     - `serverPillPanels` (aus static/js/server_detail.js) wird per
+       Alpine.data() registriert und hat `open`/`toggle()`. Hier wird es
+       inline expandiert um beides in einem Scope zusammenzufuehren.
+       Track G soll pruefen ob `serverPillPanels` als registriertes
+       Alpine.data-Objekt inline gemergt werden kann (TODO Track G).
 
-   Variablen-Vertrag (gesetzt in `app/views/server_detail.py:show`):
-     - `server`         : Server (mit eager-loaded tag_links.tag)
-     - `view_filter`    : FindingsViewFilter
-     - `findings`/`groups`/`diff` : View-Modus-abhaengig
-     - `tendency`        : Tendency-Enum (Block K)
-     - `sparklines`      : dict[str, list[int]] mit Keys kev/critical/high/medium/low (Block K)
-     - `trend_data`      : list[DailySeverityCount] (Block K)
-     - `heartbeat_cells` : list[DailyStatus] (Block K)
-     - `quick_counts`    : dict mit kev_open/critical_open/high_open/medium_open/total_open (Block K)
-     - `ack_form`/`reopen_form`/`note_form`/`bulk_form`/`csrf_form` im Flat-Modus
-     - `llm_configured`  : bool
-     - `hx_partial`      : bool — entscheidet zwischen Vollseite und Fragment.
+   Variablen-Vertrag (server_detail.py:show):
+     - server, view_filter, findings/groups/diff (mode-abhaengig)
+     - tendency, sparklines, trend_data, heartbeat_cells, quick_counts
+     - total_findings_count (quick_counts["total_all"])
+     - action_required, listeners, services, processes
+     - noise_findings, noise_total, action_sections
+     - llm_configured, hx_partial
+     - is_agent_outdated, is_trivy_outdated, is_trivy_db_outdated (Jinja-Globals)
 #}
 {% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
 
@@ -38,23 +43,30 @@
 {% set db_stale = is_active
    and (not server.trivy_db_updated_at
         or server.trivy_db_updated_at | is_older_than_h(168)) %}
-{# Triage-Queue-Anzahl fuer den Eyebrow-Counter in der Findings-Sektion.
-   Phase B (ADR-0030 Befund 2): `findings` ist im Group-Default-Pfad leer;
-   der Counter wird aus `counts.open` abgeleitet (vom Service berechnet),
-   nicht aus `findings | length`. #}
-{% set total_findings = counts.open if counts else (findings | length) %}
+{% set _snapshot_at = server.host_state_snapshot_at %}
+{% set _listeners_list = listeners | default([]) %}
+{% set _services_list = services | default([]) %}
 
-<div class="sd-detail-root px-6 py-6 max-w-[1600px] divide-y divide-base-content/10"
-     x-data="{ trendRange: '30T' }">
+{# Combined Alpine scope: trendRange fuer Severity-Trend-Section +
+   serverPillPanels-State (open/toggle) fuer Listeners/Services-Chips.
+   Beide Scopes muessen das .server-detail-Wrapper-Element umschliessen
+   damit Pill-Buttons in der Sysline UND Flyouts darunter erreichbar sind.
+   Track G: pruefen ob serverPillPanels als Alpine.data()-Factory referenziert
+   werden kann statt inline expandiert. #}
+<div class="server-detail"
+     x-data="{
+       trendRange: '30T',
+       open: null,
+       toggle(k) { this.open = (this.open === k ? null : k); }
+     }">
 
-  {# =============== 1. Header =============== #}
-  <header class="flex items-start justify-between gap-4 flex-wrap pb-8">
-    <div class="min-w-0 flex-1">
-      <div class="flex items-center gap-3 flex-wrap">
-        <h1 class="font-mono text-2xl lg:text-3xl font-semibold tracking-tight break-all">{{ server.name }}</h1>
-        {# Block O (ADR-0022): Action-Required-Pill als ERSTE Header-Pill,
-           vor allen Status-/Outdated-Pills. Drei Varianten (needed/safe/
-           update-agent) je nach yes_count + host_state_snapshot_at. #}
+  {# ── 1) Header ── #}
+  <header class="sd-header">
+    <div class="sd-header__left">
+      <h1 class="sd-hostname">{{ server.name }}</h1>
+      <div class="sd-header__tags">
+        {# Action-Required-Pill (Block O / ADR-0022).
+           Rendert nur bei yes_count > 0 oder snapshot_missing. Track B refactored. #}
         {% with yes_count=action_required.yes_count,
                 no_count=action_required.no_count,
                 yes_subcounts=action_required.yes_subcounts,
@@ -62,25 +74,22 @@
                 snapshot_missing=(server.host_state_snapshot_at is none) %}
           {% include "_partials/action_required_pill.html" %}
         {% endwith %}
-        {# Status-Pill-Reihe. Reihenfolge: schlimmster Marker zuerst. #}
-        {# ADR-0025 §4: aktive Server ohne Auffaelligkeit zeigen KEINE
-           Status-Pille mehr — Pills signalisieren Aufmerksamkeit, nicht
-           Hintergrund-Rauschen. Die `active`-Pille in der Settings-Server-
-           Liste bleibt unangetastet (anderer Kontext). #}
+
+        {# Status-Flags: revoked / retired / stale-kombiniert / stale / db-stale #}
         {% if server.revoked_at %}
-          <span class="badge badge-sm badge-error font-mono"
-                title="Revoked on {{ server.revoked_at.strftime('%Y-%m-%d %H:%M') }}">
+          <span class="sd-status-flag"
+                title="Revoked on {{ server.revoked_at.strftime('%Y-%m-%d %H:%M') }}"
+                data-test="pill-revoked">
             revoked
           </span>
         {% elif server.retired_at %}
-          <span class="badge badge-sm badge-ghost font-mono"
-                title="Decommissioned on {{ server.retired_at.strftime('%Y-%m-%d %H:%M') }}">
+          <span class="sd-status-flag"
+                title="Decommissioned on {{ server.retired_at.strftime('%Y-%m-%d %H:%M') }}"
+                data-test="pill-retired">
             retired
           </span>
         {% endif %}
-        {# Phase G2: kombinierte stale-Pill wenn beide stale, sonst einzeln.
-           Outdated-Pills (Block N) bleiben unten unangetastet — verschiedene
-           Operator-Aktionen, ADR-0038 §9b. #}
+        {# Phase G2: kombinierte stale-Flag wenn beide stale, sonst einzeln. #}
         {% if scan_stale and db_stale %}
           <span class="sd-status-flag"
                 title="Last scan and Trivy DB are both stale. Scan threshold: {{ server.expected_scan_interval_h }}h. DB threshold: 7 days."
@@ -100,89 +109,35 @@
             db stale
           </span>
         {% endif %}
-        {# Block N (ADR-0021): drei Outdated-Pills. `is_agent_outdated` etc.
-           kommen aus `_inject_agent_version_helpers`. Tooltips erklaeren
-           den Schwellwert und nennen den Update-Befehl. #}
+        {# Block N (ADR-0021): drei Outdated-Flags. #}
         {% if is_agent_outdated(server) %}
-          <span class="badge badge-sm badge-error font-mono tooltip tooltip-bottom"
-                data-tip="Agent {{ server.agent_version or 'unknown' }} is below minimum {{ min_agent_version }}. Run: curl -fsSL {{ external_base_url }}/install.sh | sudo bash"
+          <span class="sd-status-flag"
+                title="Agent {{ server.agent_version or 'unknown' }} is below minimum {{ min_agent_version }}. Run: curl -fsSL {{ external_base_url }}/install.sh | sudo bash"
                 data-test="pill-agent-outdated">
-            ⚠ agent {{ server.agent_version or '?' }}
+            &#x26A0; agent {{ server.agent_version or '?' }}
           </span>
         {% endif %}
         {% if is_trivy_outdated(server) %}
-          <span class="badge badge-sm badge-warning font-mono tooltip tooltip-bottom"
-                data-tip="Trivy {{ server.trivy_version or 'unknown' }} is below minimum {{ min_trivy_version }}. Re-run installer to update."
+          <span class="sd-status-flag"
+                title="Trivy {{ server.trivy_version or 'unknown' }} is below minimum {{ min_trivy_version }}. Re-run installer to update."
                 data-test="pill-trivy-outdated">
-            ⚠ trivy {{ server.trivy_version or '?' }}
+            &#x26A0; trivy {{ server.trivy_version or '?' }}
           </span>
         {% endif %}
         {% if is_trivy_db_outdated(server) %}
-          <span class="badge badge-sm badge-warning font-mono tooltip tooltip-bottom"
-                data-tip="Trivy DB last updated {{ server.trivy_db_updated_at | humanize_delta }}. Threshold: {{ trivy_db_stale_threshold_days }} days."
+          <span class="sd-status-flag"
+                title="Trivy DB last updated {{ server.trivy_db_updated_at | humanize_delta }}. Threshold: {{ trivy_db_stale_threshold_days }} days."
                 data-test="pill-trivy-db-stale">
-            ⚠ trivy-db stale
+            &#x26A0; trivy-db stale
           </span>
         {% endif %}
       </div>
-      <p class="font-mono text-xs opacity-60 mt-2">
-        {% if server.os_pretty_name %}{{ server.os_pretty_name }}{% endif %}
-        {% if server.kernel_version %}
-          {% if server.os_pretty_name %}<span class="opacity-30 mx-2">·</span>{% endif %}{{ server.kernel_version }}
-        {% endif %}
-        {% if server.architecture %}
-          {% if server.os_pretty_name or server.kernel_version %}<span class="opacity-30 mx-2">·</span>{% endif %}{{ server.architecture }}
-        {% endif %}
-      </p>
-      <div class="sd-sysline">
-        <span class="sd-sysline__seg">
-          <span class="sd-sysline__prompt">&gt;</span> expected interval <b>{{ server.expected_scan_interval_h }} h</b>
-        </span>
-        <span class="sd-sysline__sep">&middot;</span>
-        <span class="sd-sysline__seg">
-          last scan <b>{% if server.last_scan_at %}<time datetime="{{ server.last_scan_at.isoformat() }}" title="{{ server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.last_scan_at | relative_time }}</time>{% else %}never{% endif %}</b>
-        </span>
-        <span class="sd-sysline__sep">&middot;</span>
-        <span class="sd-sysline__seg">
-          trivy-db <b>{% if server.trivy_db_updated_at %}<time datetime="{{ server.trivy_db_updated_at.isoformat() }}" title="{{ server.trivy_db_updated_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.trivy_db_updated_at | relative_time }}</time>{% else %}unknown{% endif %}</b>
-        </span>
-      </div>
-      {# Block X Phase C (ADR-0038 §(3)): Host-Snapshot kollabiert in zwei
-         Header-Pills mit Slide-Down-Panels. snapshot_at IS NULL -> disabled. #}
-      {% set _snapshot_at = server.host_state_snapshot_at %}
-      {% set _listeners_list = listeners | default([]) %}
-      {% set _services_list = services | default([]) %}
-      <div class="sd-pills" x-data="serverPillPanels" data-test="server-pills">
-        <button type="button"
-                class="sd-chip"
-                :class="open === 'listeners' ? 'sd-chip--open' : ''"
-                @click="toggle('listeners')"
-                :aria-expanded="open === 'listeners' ? 'true' : 'false'"
-                aria-controls="server-pill-listeners-panel"
-                data-test="pill-listeners"
-                {% if _snapshot_at is none %}disabled title="Update agent to >= 0.3.0 for snapshot"{% endif %}>
-          <span class="sd-chip__caret" aria-hidden="true">&#x203A;</span>
-          Listeners <span class="sd-chip__count">{{ _listeners_list | length }}</span>
-        </button>
-        <button type="button"
-                class="sd-chip"
-                :class="open === 'services' ? 'sd-chip--open' : ''"
-                @click="toggle('services')"
-                :aria-expanded="open === 'services' ? 'true' : 'false'"
-                aria-controls="server-pill-services-panel"
-                data-test="pill-services"
-                {% if _snapshot_at is none %}disabled title="Update agent to >= 0.3.0 for snapshot"{% endif %}>
-          <span class="sd-chip__caret" aria-hidden="true">&#x203A;</span>
-          Active services <span class="sd-chip__count">{{ _services_list | length }}</span>
-        </button>
-
-        {% if _snapshot_at is not none %}
-          {% include "_partials/server_pill_listeners.html" %}
-          {% include "_partials/server_pill_services.html" %}
-        {% endif %}
-      </div>
     </div>
-    <div class="flex flex-wrap items-center gap-2 shrink-0">
+
+    <div class="sd-header__right">
+      {# KI-Bewertung-Button. Alpine x-data bleibt als separates Scope-Object
+         auf dem umgebenden div (eigene async start()-Logik, kein Konflikt
+         mit dem aeusseren trendRange/open-Scope). #}
       {% if llm_configured and is_active %}
         <div x-data="{
               busy: false,
@@ -213,87 +168,137 @@
                   this.busy = false;
                 }
               }
-             }"
-             class="inline-block">
+             }">
           <button type="button"
-                  class="btn btn-sm btn-primary gap-2"
+                  class="sd-ai-button"
                   @click="start()"
                   :disabled="busy"
                   title="LLM-Bewertung anfordern (oder zur aktiven Conversation springen)">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" aria-hidden="true">
+              <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
             </svg>
             <span x-show="!busy">KI-Bewertung anfordern</span>
-            <span x-show="busy" class="flex items-center gap-2">
-              <span class="loading loading-spinner loading-xs"></span>
-              startet…
-            </span>
+            <span x-show="busy">startet&#x2026;</span>
           </button>
         </div>
       {% elif is_active %}
         <a href="{{ url_for('llm_settings.show') }}"
-           class="btn btn-sm btn-ghost"
+           class="sd-ai-button"
            title="LLM-Provider ist noch nicht konfiguriert.">
-          KI-Bewertung (Provider fehlt)
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" aria-hidden="true">
+            <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
+          </svg>
+          <span>KI-Bewertung (Provider fehlt)</span>
         </a>
       {% endif %}
-      <a href="{{ url_for('server_settings.show', server_id=server.id) }}"
-         class="btn btn-sm btn-ghost"
+      <a class="sd-icon-button"
+         href="{{ url_for('server_settings.show', server_id=server.id) }}"
          title="Server-Einstellungen (Tags, Gruppe, Scan-Intervall)"
-         data-test="server-settings-link"
-         aria-label="Server-Einstellungen">
-        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path>
+         aria-label="Einstellungen"
+         data-test="server-settings-link">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03Z" />
         </svg>
       </a>
     </div>
   </header>
 
-  {# =============== 1a-bis. "Was zu tun ist" (Block P / v0.9.3, ADR-0023 §c) =============== #}
+  {# ── 2) Sysline + Listeners/Services-Chips ── #}
+  {# sd-sysline traegt alle Segmente einschliesslich der beiden Chip-Buttons.
+     open/toggle kommen aus dem x-data des aeusseren .server-detail-Wrappers. #}
+  <div class="sd-sysline" data-test="server-pills">
+    <span class="sd-sysline__prompt">&gt;</span>
+    {% if server.os_pretty_name %}
+      <span class="sd-sysline__seg">{{ server.os_pretty_name }}</span>
+    {% endif %}
+    {% if server.kernel_version %}
+      <span class="sd-sysline__sep">·</span>
+      <span class="sd-sysline__seg">{{ server.kernel_version }}</span>
+    {% endif %}
+    {% if server.architecture %}
+      <span class="sd-sysline__sep">·</span>
+      <span class="sd-sysline__seg">{{ server.architecture }}</span>
+    {% endif %}
+    <span class="sd-sysline__sep">·</span>
+    <span class="sd-sysline__seg">last scan <b>{% if server.last_scan_at %}<time datetime="{{ server.last_scan_at.isoformat() }}" title="{{ server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.last_scan_at | relative_time }}</time>{% else %}never{% endif %}</b></span>
+    <span class="sd-sysline__sep">·</span>
+    <span class="sd-sysline__seg">trivy-db <b>{% if server.trivy_db_updated_at %}<time datetime="{{ server.trivy_db_updated_at.isoformat() }}" title="{{ server.trivy_db_updated_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ server.trivy_db_updated_at | relative_time }}</time>{% else %}unknown{% endif %}</b></span>
+    <span class="sd-sysline__sep">·</span>
+    <span class="sd-sysline__seg">expected interval <b>{{ server.expected_scan_interval_h }} h</b></span>
+
+    <button type="button"
+            class="sd-chip"
+            :aria-expanded="open === 'listeners' ? 'true' : 'false'"
+            @click="toggle('listeners')"
+            aria-controls="sd-flyout-listeners"
+            data-test="pill-listeners"
+            {% if _snapshot_at is none %}disabled title="Update agent to >= 0.3.0 for snapshot"{% endif %}>
+      <span>Listeners &amp; services</span>
+      <span class="sd-chip__count">{{ _listeners_list | length }}</span>
+      <span class="sd-chip__caret" aria-hidden="true">&#x203A;</span>
+    </button>
+    <button type="button"
+            class="sd-chip"
+            :aria-expanded="open === 'services' ? 'true' : 'false'"
+            @click="toggle('services')"
+            aria-controls="sd-flyout-services"
+            data-test="pill-services"
+            {% if _snapshot_at is none %}disabled title="Update agent to >= 0.3.0 for snapshot"{% endif %}>
+      <span>Active services</span>
+      <span class="sd-chip__count">{{ _services_list | length }}</span>
+      <span class="sd-chip__caret" aria-hidden="true">&#x203A;</span>
+    </button>
+  </div>
+
+  {# Flyouts haengen direkt unter der Sysline. Track D refactored die Partials. #}
+  {% if _snapshot_at is not none %}
+    {% include "_partials/server_pill_listeners.html" %}
+    {% include "_partials/server_pill_services.html" %}
+  {% endif %}
+
+  {# ── 3) Operator-Workflows ── #}
   {% include "servers/_action_needed_section.html" %}
 
-  {# =============== 2. HeaderStats =============== #}
-  <section class="py-8 flex items-end justify-between gap-8 flex-wrap">
-    <div class="min-w-0">
-      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Findings · offen · gesamt</div>
-      <div class="flex items-baseline gap-4 mt-3 flex-wrap min-w-0">
-        <div class="text-[64px] font-light leading-none tracking-tight" style="font-variant-numeric: tabular-nums;">
-          {{ quick_counts.total_open | default(0) }}
-        </div>
+  {# ── 4) HeaderStats ── #}
+  <section class="sd-section sd-stats">
+    <div class="sd-stats__primary">
+      <p class="sd-eyebrow">Findings · open · total</p>
+      <div class="sd-stats__num">
+        <strong>{{ quick_counts.total_open | default(0) }}</strong>
         {% if tendency is defined and tendency is not none %}
-          <div class="font-mono text-sm opacity-60 lowercase">{{ tendency.label }}</div>
+          <span class="sd-stats__delta">{{ tendency.label }}</span>
         {% endif %}
       </div>
+      <p class="sd-stats__total">von {{ total_findings_count | default(0) }} Findings gesamt</p>
     </div>
     <div class="sd-tiles">
-      {% with label='KEV', value=quick_counts.kev_open | default(0), tone='error', sparkline=sparklines.kev | default([]), kev_indicator=true %}
+      {% with label='KEV', value=quick_counts.kev_open | default(0), tone='error',
+              sparkline=sparklines.kev | default([]), kev_indicator=true %}
         {% include "servers/_kpi_card.html" %}
       {% endwith %}
-      {% with label='Critical', value=quick_counts.critical_open | default(0), tone='error', sparkline=sparklines.critical | default([]), kev_indicator=false %}
+      {% with label='Critical', value=quick_counts.critical_open | default(0), tone='error',
+              sparkline=sparklines.critical | default([]), kev_indicator=false %}
         {% include "servers/_kpi_card.html" %}
       {% endwith %}
-      {% with label='High', value=quick_counts.high_open | default(0), tone='warning', sparkline=sparklines.high | default([]), kev_indicator=false %}
+      {% with label='High', value=quick_counts.high_open | default(0), tone='warning',
+              sparkline=sparklines.high | default([]), kev_indicator=false %}
         {% include "servers/_kpi_card.html" %}
       {% endwith %}
-      {% with label='Medium', value=quick_counts.medium_open | default(0), tone='accent', sparkline=sparklines.medium | default([]), kev_indicator=false %}
+      {% with label='Medium', value=quick_counts.medium_open | default(0), tone='accent',
+              sparkline=sparklines.medium | default([]), kev_indicator=false %}
         {% include "servers/_kpi_card.html" %}
       {% endwith %}
     </div>
   </section>
 
-  {# =============== 4. Lebenszeichen =============== #}
-  {# Block X Phase E (ADR-0038 §5 + ADR-0035): 30 Ticks / 4 Risk-Bands.
-     Legende ist Teil des _heartbeat_large.html-Partials.
-     Empty-State bei host_state_snapshot_at IS NULL (nie gescannt). #}
-  <section class="py-8 space-y-4">
-    <div>
-      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Lebenszeichen · 30 Tage</div>
-      <h3 class="font-mono text-base font-medium mt-1">Taegliche Risk-Band-Zustaende</h3>
-    </div>
+  {# ── 5) Lebenszeichen ── #}
+  <section class="sd-section">
+    <p class="sd-eyebrow">Lebenszeichen · 30 Tage</p>
+    <h2 class="sd-h3">Tägliche Scans · Worst-Risk-Band pro Tag</h2>
     {% if server.host_state_snapshot_at is none %}
       <div class="sd-heartbeat-frame sd-heartbeat-frame--empty" data-test="heartbeat-empty">
-        <p class="sd-empty">— never scanned</p>
+        <p class="sd-empty">— noch nie gescannt</p>
       </div>
     {% else %}
       {% with cells=heartbeat_cells | default([]) %}
@@ -302,29 +307,13 @@
     {% endif %}
   </section>
 
-  {# =============== 5. Severity-Trend =============== #}
-  {# Block X Phase E (ADR-0038 §5): Range-Toggle 24h/7T/30T, kein 50T.
-     Default: 30T (trendRange im x-data oben). sd-trend-Klassen (Phase A0). #}
-  <section class="py-8 space-y-3">
-    <div class="flex items-end justify-between gap-3 flex-wrap">
-      <div>
-        <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Severity Trend · pro Tag</div>
-        <h3 class="font-mono text-base font-medium mt-1">
-          Verteilung der offenen Findings ueber
-          <span x-text="trendRange === '24h' ? '24 h' : trendRange.replace('T',' Tage')"></span>
-        </h3>
-      </div>
-      <div class="sd-trend-range" role="group" aria-label="Zeit-Range">
-        {% for range_value in ['24h', '7T', '30T'] %}
-          <button type="button"
-                  @click="trendRange = '{{ range_value }}'"
-                  :class="trendRange === '{{ range_value }}' ? 'active' : ''"
-                  :aria-pressed="trendRange === '{{ range_value }}' ? 'true' : 'false'">
-            {{ range_value }}
-          </button>
-        {% endfor %}
-      </div>
-    </div>
+  {# ── 6) Severity-Trend ── #}
+  <section class="sd-section">
+    <p class="sd-eyebrow">Severity trend · pro Tag</p>
+    <h2 class="sd-h3">
+      Verteilung der offenen Findings über
+      <span x-text="trendRange === '24h' ? '24 Stunden' : trendRange === '7T' ? '7 Tage' : '30 Tage'"></span>
+    </h2>
     {% with days_data=trend_data | default([]) %}
       {% include "servers/_stacked_bar_chart.html" %}
     {% endwith %}
@@ -336,36 +325,35 @@
       {% set t_sum = t_critical + t_high + t_medium + t_low %}
       <div class="sd-trend-legend">
         <span class="sd-trend-legend__item">
-          <span class="sd-legend-swatch sd-legend-swatch--escalate"><span class="sd-legend-swatch__dot"></span></span>
-          <span class="uppercase">Critical</span>
+          <span class="sd-trend-seg sd-trend-seg--critical" style="width:10px;height:10px;display:inline-block"></span>
+          <span>Critical</span>
           <span class="sd-trend-legend__count">{{ t_critical }}</span>
           <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_critical * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
         </span>
         <span class="sd-trend-legend__item">
-          <span class="sd-legend-swatch sd-legend-swatch--act"><span class="sd-legend-swatch__dot"></span></span>
-          <span class="uppercase">High</span>
+          <span class="sd-trend-seg sd-trend-seg--high" style="width:10px;height:10px;display:inline-block"></span>
+          <span>High</span>
           <span class="sd-trend-legend__count">{{ t_high }}</span>
           <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_high * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
         </span>
         <span class="sd-trend-legend__item">
-          <span class="sd-legend-swatch sd-legend-swatch--nominal"><span class="sd-legend-swatch__dot"></span></span>
-          <span class="uppercase">Medium</span>
+          <span class="sd-trend-seg sd-trend-seg--medium" style="width:10px;height:10px;display:inline-block"></span>
+          <span>Medium</span>
           <span class="sd-trend-legend__count">{{ t_medium }}</span>
           <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_medium * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
         </span>
         <span class="sd-trend-legend__item">
-          <span class="sd-legend-swatch sd-legend-swatch--unknown"><span class="sd-legend-swatch__dot"></span></span>
-          <span class="uppercase">Low</span>
+          <span class="sd-trend-seg sd-trend-seg--low" style="width:10px;height:10px;display:inline-block"></span>
+          <span>Low</span>
           <span class="sd-trend-legend__count">{{ t_low }}</span>
           <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_low * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
         </span>
       </div>
-      <div class="opacity-40 font-mono text-[11px]">σ kumulativ · roh-totals nicht entdupliziert</div>
     {% endif %}
   </section>
 
-  {# =============== 6. Triage Queue (Findings) =============== #}
-  <section class="py-8">
+  {# ── 7) Triage Queue ── #}
+  <section class="sd-section">
     {% include "servers/_findings_section.html" %}
   </section>
 

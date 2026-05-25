@@ -1,39 +1,63 @@
-{# Findings-Stack fuer das Drill-down innerhalb einer Application-Group-Card
-   (Block X Phase G, ADR-0038 §7 — umbau von <table> zu <details>-Stack).
+{# Findings-Stack fuer den Drilldown innerhalb einer Application-Group-Card
+   (Block X Phase G, ADR-0038 §7 — <details class="sd-finding">-Stack).
 
-   Bewusst minimaler Subset des Block-K-`_view_list.html`-Markups: kein
-   Bulk-Select, keine Mode-Toggle/Sort-Header, keine Modals pro Zeile.
+   6-col-grid in .sd-finding__summary:
+     [Checkbox 28px][CVE+Title 1.4fr][Pkg+Diff 1.2fr][EPSS 70px][CVSS 60px][Severity 84px]
 
    Variablen-Vertrag:
-     - `findings` : list[Finding] — Findings dieser Group, Default-Sort-
-                    Reihenfolge bereits vom Backend.
+     - `findings` : list[Finding]
 
-   Sicherheit: `f.risk_band_reason` NIEMALS mit |safe ausgeben — LLM-Output,
+   Sicherheit: f.risk_band_reason NIEMALS mit |safe — LLM-Output,
    Jinja-Autoescape ist Pflicht (ADR-0038 §G4).
-
-   Worst-Finding-Anker `id="finding-{{f.id}}"` bleibt erhalten, damit der
-   Worst-Finding-Link in der Card auf die Zeile springt.
 #}
-{% from "_macros.html" import severity_badge, kev_badge, status_badge,
-                              cvss_pill, epss_pill, package_cell, quick_copy %}
+{% from "_macros.html" import kev_badge, quick_copy %}
 
 {% if findings %}
 <div class="sd-findings-stack">
+  <div class="sd-findings-head" aria-hidden="true">
+    <span></span>
+    <span>CVE / Titel</span>
+    <span>Paket</span>
+    <span class="sd-findings-head__right">EPSS</span>
+    <span class="sd-findings-head__right">CVSS</span>
+    <span class="sd-findings-head__right">Severity</span>
+  </div>
+
   {% for f in findings %}
     <details class="sd-finding"
              id="finding-{{ f.id }}"
              data-test="group-finding-row-{{ f.id }}">
       <summary class="sd-finding__summary">
-        <span class="sd-finding__cve">
-          <span class="sd-finding__cve-id">{{ f.identifier_key }}</span>
-          {{ kev_badge(f.is_kev, size='xs') }}
-          {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+        {# Checkbox-Spalte: kein Bulk-Select in Group-Drilldown (kein x-data-Scope hier) #}
+        <input type="checkbox"
+               class="sd-checkbox"
+               value="{{ f.id }}"
+               aria-label="Finding {{ f.identifier_key }} auswaehlen"
+               data-bulk-id="true"
+               x-data
+               :checked="(window.__detailSelected || []).includes({{ f.id }})"
+               @change="
+                 const cur = window.__detailSelected || [];
+                 window.__detailSelected = $event.target.checked
+                   ? [...cur, {{ f.id }}]
+                   : cur.filter(id => id !== {{ f.id }})
+               ">
+
+        {# CVE + Titel #}
+        <div class="sd-finding__cve">
+          <span class="sd-finding__cve-id">
+            {{ f.identifier_key }}
+            {{ kev_badge(f.is_kev, size='xs') }}
+            {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+          </span>
           {% if f.title %}
             <span class="sd-finding__title" title="{{ f.title }}">{{ f.title }}</span>
           {% endif %}
-        </span>
-        <span class="sd-finding__pkg">
-          {{ package_cell(f.package_name, f.finding_class) }}
+        </div>
+
+        {# Paket + Versionsdiff #}
+        <div class="sd-finding__pkg">
+          <span class="sd-finding__pkg-name">{{ f.package_name }}</span>
           {% if f.installed_version %}
             <span class="sd-finding__pkg-diff">
               <span class="sd-finding__pkg-from">{{ f.installed_version }}</span>
@@ -43,25 +67,37 @@
               {% endif %}
             </span>
           {% endif %}
+        </div>
+
+        {# EPSS #}
+        <span class="sd-cap sd-cap--neutral">
+          {%- if f.epss_score is not none -%}
+            {{ "%.3f" | format(f.epss_score) }}
+          {%- else -%}—{%- endif -%}
         </span>
-        <span class="sd-finding__metrics">
-          {{ epss_pill(f.epss_score) }}
-          {{ cvss_pill(f.cvss_v3_score) }}
-          {{ status_badge(f.status) }}
-          {{ severity_badge(f.severity, size='xs') }}
+
+        {# CVSS #}
+        <span class="sd-cap sd-cap--neutral">
+          {%- if f.cvss_v3_score is not none -%}
+            {{ "%.1f" | format(f.cvss_v3_score) }}
+          {%- else -%}—{%- endif -%}
+        </span>
+
+        {# Severity #}
+        <span class="sd-cap {% if f.severity in ('CRITICAL', 'HIGH') %}sd-cap--accent{% else %}sd-cap--neutral{% endif %}">
+          {{ f.severity or '—' }}
         </span>
       </summary>
+
       {%- if f.risk_band_reason -%}
         <div class="sd-finding__body">
-          <div class="sd-finding__reason">
-            <div class="sd-finding__reason-eyebrow">KI-Bewertung</div>
-            <p class="sd-finding__reason-text">{{ f.risk_band_reason }}</p>
-          </div>
+          <p class="sd-ai-eyebrow">KI-Bewertung</p>
+          <p class="sd-ai-text">{{ f.risk_band_reason }}</p>
         </div>
       {%- endif -%}
     </details>
   {% endfor %}
 </div>
 {% else %}
-  <p class="text-xs opacity-60 italic">Keine Findings in dieser Group.</p>
+  <p class="sd-empty">Keine Findings in dieser Group.</p>
 {% endif %}

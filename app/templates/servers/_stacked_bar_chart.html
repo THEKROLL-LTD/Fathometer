@@ -1,22 +1,43 @@
-{# Block X Phase E (ADR-0038 §5): Severity-Trend auf sd-trend-Klassen.
+{# Block X Track E (ADR-0038 §5): Severity-Trend auf sd-trend-Klassen.
+   Range-Toggle (24h / 7T / 30T) und Axis-Labels sind IN diesem Frame.
 
    Variablen-Vertrag:
      - days_data : list[DailySeverityCount] — aelteste zuerst. Felder:
                    day, critical, high, medium, low, kev.
      - skel      : bool (optional) — Skeleton-State mit --skel-Modifier.
 
+   Alpine-Scope: trendRange-Variable kommt vom aeusseren .server-detail-Wrapper
+   (x-data definiert in detail.html). Keine eigene x-data noetig.
+
    Sicherheit: numerische Werte, kein User-Input. Kein |safe.
 
-   CSS-Klassen: sd-trend-frame/sd-trend-chart/sd-trend-col/sd-trend-seg--*
-   aus frontend/src/css/components/server-detail.css (Phase A0).
-   sd-trend-col ist ein flex-column-reverse-Container; Segmente werden
-   bottom-up gestapelt: critical zuerst -> high -> medium -> low.
+   CSS-Klassen: sd-trend-frame/sd-trend-head/sd-trend-range/sd-trend-chart/
+   sd-trend-col/sd-trend-seg/sd-trend-seg--*/sd-trend-axis
+   aus frontend/src/css/components/server-detail.css.
+
+   Segmente: sd-trend-col ist flex-column-reverse (bottom-up).
+   Render-Reihenfolge: low, medium, high, critical (kommen dann unten raus).
+   style="flex: N" teilt die Spaltenhoehe proportional auf.
+   Spaltenhoehe = prozentualer Anteil am vmax (ueber alle 30 Tage).
 #}
 {%- set _is_skel = skel | default(false) -%}
 {%- set n = days_data | length -%}
-<div class="sd-trend-frame sd-skel-frame"
+<div class="sd-trend-frame{% if _is_skel %} sd-skel-frame{% endif %}"
      data-test="severity-trend-frame">
-  <div class="sd-trend-chart">
+
+  <div class="sd-trend-head">
+    <span class="sd-eyebrow" style="margin: 0;">Severity trend</span>
+    <div class="sd-trend-range" role="group" aria-label="Zeitraum">
+      {% for r in ['24h', '7T', '30T'] %}
+        <button type="button"
+                :class="trendRange === '{{ r }}' ? 'active' : ''"
+                :aria-pressed="trendRange === '{{ r }}' ? 'true' : 'false'"
+                @click="trendRange = '{{ r }}'">{{ r }}</button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="sd-trend-chart" role="img" aria-label="Severity-Verlauf">
     {%- if _is_skel -%}
       {%- for _ in range(30) -%}
         <div class="sd-trend-col sd-trend-col--skel" aria-hidden="true"></div>
@@ -29,27 +50,33 @@
       {%- endfor -%}
       {%- for d in days_data -%}
         {%- set total = d.critical + d.high + d.medium + d.low -%}
-        {%- set crit_pct = (d.critical * 100.0 / ns.vmax) if d.critical else 0 -%}
-        {%- set high_pct = (d.high * 100.0 / ns.vmax) if d.high else 0 -%}
-        {%- set med_pct  = (d.medium * 100.0 / ns.vmax) if d.medium else 0 -%}
-        {%- set low_pct  = (d.low * 100.0 / ns.vmax) if d.low else 0 -%}
+        {%- set h = ((total * 100.0 / ns.vmax) if ns.vmax > 0 else 4) -%}
         <div class="sd-trend-col"
              data-day="{{ d.day.isoformat() }}"
-             title="{{ d.day.isoformat() }} · crit {{ d.critical }} · high {{ d.high }} · med {{ d.medium }} · low {{ d.low }}{% if d.kev %} · {{ d.kev }} KEV{% endif %}">
-          {%- if d.critical -%}
-            <span class="sd-trend-seg--critical" style="height: {{ '%.2f' | format(crit_pct) }}%;"></span>
-          {%- endif -%}
-          {%- if d.high -%}
-            <span class="sd-trend-seg--high" style="height: {{ '%.2f' | format(high_pct) }}%;"></span>
+             title="{{ d.day.isoformat() }} · crit {{ d.critical }} · high {{ d.high }} · med {{ d.medium }} · low {{ d.low }}{% if d.kev %} · {{ d.kev }} KEV{% endif %}"
+             style="height: {{ '%.2f' | format(h | float) }}%;">
+          {# bottom-up: column-reverse dreht die Render-Reihenfolge um,
+             daher low zuerst -> landet unten in der Spalte. #}
+          {%- if d.low -%}
+            <span class="sd-trend-seg sd-trend-seg--low"      style="flex: {{ d.low }};"></span>
           {%- endif -%}
           {%- if d.medium -%}
-            <span class="sd-trend-seg--medium" style="height: {{ '%.2f' | format(med_pct) }}%;"></span>
+            <span class="sd-trend-seg sd-trend-seg--medium"   style="flex: {{ d.medium }};"></span>
           {%- endif -%}
-          {%- if d.low -%}
-            <span class="sd-trend-seg--low" style="height: {{ '%.2f' | format(low_pct) }}%;"></span>
+          {%- if d.high -%}
+            <span class="sd-trend-seg sd-trend-seg--high"     style="flex: {{ d.high }};"></span>
+          {%- endif -%}
+          {%- if d.critical -%}
+            <span class="sd-trend-seg sd-trend-seg--critical" style="flex: {{ d.critical }};"></span>
           {%- endif -%}
         </div>
       {%- endfor -%}
     {%- endif -%}
   </div>
+
+  <div class="sd-trend-axis" aria-hidden="true">
+    <span x-text="trendRange === '24h' ? '-24h' : trendRange === '7T' ? '-6T' : '-29T'">-29T</span>
+    <span>Heute</span>
+  </div>
+
 </div>

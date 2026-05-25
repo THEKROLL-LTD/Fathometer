@@ -1,40 +1,31 @@
-{# Application-Group-Card im `evaluating`-/`Nicht bewertet`-State
-   (Block P, ADR-0023; ADR-0025 §2; ADR-0028 §UI-bei-Eval-Lücke).
-
-   Wird gerendert wenn fuer diese `(group, server)`-Kombination keine
-   Junction-Row in `application_group_evaluations` existiert — also Pass 1
-   ist durch (Group existiert mit Label), aber Pass 2 hat fuer diesen
-   Server noch nichts persistiert. Beim naechsten regulaeren Scan triggert
-   der Block-P-Hook Pass-2 (siehe `app/services/scan_processing.py`).
-   Block-L-Polling fueltert die UI nach sobald die Junction-Row erscheint.
+{# Application-Group-Card im evaluating-/Nicht-bewertet-State
+   (Block P, ADR-0023; ADR-0025; ADR-0028).
 
    Render-Vertrag:
-     - `group` : ApplicationGroup (mit `id`, `label`, `explanation?`).
-     - `count` : int — Anzahl OPEN-Findings dieser Group (aus dem Aggregat-
-                 Loader, Block-Q Phase B). Findings selbst werden NICHT
-                 eager mitgegeben.
+     - `group` : ApplicationGroup (id, label, explanation?)
+     - `count` : int
+
+   Sicherheit: group.label, group.explanation sind LLM-Output — kein |safe.
 #}
-<div class="card bg-base-200/40 rounded-box p-4 mb-3"
+<div class="sd-app-group sd-app-group--evaluating"
      data-test="group-evaluating-{{ group.id }}">
-  <div class="flex items-center justify-between gap-3 flex-wrap">
-    <div class="min-w-0">
-      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">
-        APPLICATION GROUP
-      </div>
-      <h3 class="font-mono text-xl truncate" data-test="group-label">
-        {{ group.label }}
-      </h3>
+  <div class="sd-app-group__header">
+    <div class="sd-app-group__label-block">
+      <p class="sd-eyebrow">Application Group</p>
+      <h3 class="sd-app-group__label" data-test="group-label">{{ group.label }}</h3>
       {% if group.explanation %}
-        <p class="text-xs opacity-70 mt-1">{{ group.explanation }}</p>
+        <p class="sd-app-group__explanation">{{ group.explanation }}</p>
       {% endif %}
     </div>
-    <div class="flex items-center gap-2 opacity-70 shrink-0">
-      <span class="loading loading-spinner loading-sm"
-            data-test="group-evaluating-spinner"
-            aria-label="Evaluating"></span>
-      <span class="text-xs" data-test="group-evaluating-text">
-        Evaluating risk for {{ count }} {% if count == 1 %}finding{% else %}findings{% endif %}...
+    <div class="sd-app-group__meta sd-app-group__meta--evaluating">
+      <span class="sd-app-group__evaluating-text"
+            data-test="group-evaluating-text">
+        Evaluating risk for {{ count }} {% if count == 1 %}finding{% else %}findings{% endif %}…
       </span>
+      <span class="sd-app-group__evaluating-spinner"
+            data-test="group-evaluating-spinner"
+            aria-label="Evaluating"
+            role="status"></span>
     </div>
   </div>
 </div>

@@ -414,6 +414,43 @@ class ServerScanIntervalForm(FlaskForm):
     )
 
 
+class ServerSettingsForm(FlaskForm):
+    """Kombiniertes Single-Save-Form fuer Server-Settings (Block X, Track F).
+
+    Felder:
+      - `group_id`        : SelectField — existierende ServerGroup oder None.
+      - `scan_interval_h` : IntegerField — Stunden 1..168.
+
+    Tags werden NICHT in diesem Form verwaltet; Add/Remove laufen weiterhin
+    ueber separate Endpoints (`server_settings.add_tag` / `remove_tag`).
+
+    Choices fuer `group_id` werden im Konstruktor gesetzt, damit der View-
+    Handler keine extra Lookup-Logik benoetigt.
+    """
+
+    group_id = SelectField(
+        "Group",
+        coerce=lambda v: int(v) if v not in (None, "", "none") else None,
+        validators=[OptionalValidator()],
+    )
+    scan_interval_h = IntegerField(
+        "Scan-Intervall (h)",
+        validators=[DataRequired(), NumberRange(min=1, max=168)],
+    )
+
+    def __init__(
+        self,
+        *args: object,
+        available_groups: Sequence[ServerGroup] | None = None,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        choices: list[tuple[str, str]] = [("none", "— keine —")]
+        if available_groups:
+            choices.extend((str(g.id), g.name) for g in available_groups)
+        self.group_id.choices = choices
+
+
 __all__ = [
     "NOTE_TEXT_MAX_LEN",
     "TAG_COLOR_REGEX",
@@ -430,6 +467,7 @@ __all__ = [
     "ReopenForm",
     "ServerGroupForm",
     "ServerScanIntervalForm",
+    "ServerSettingsForm",
     "SetupStep1Form",
     "SetupStep2Form",
     "SetupStep3Form",
