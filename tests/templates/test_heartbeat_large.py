@@ -263,7 +263,9 @@ def test_live_ticks_had_scan_false_renders_zero(app: Flask) -> None:
 
 
 def test_legend_has_four_swatches(app: Flask) -> None:
-    """Legende enthaelt vier sd-legend-swatch-Elemente in Reihenfolge escalate/act/nominal/unknown."""
+    """Legende enthaelt vier sd-legend-swatch-Elemente in Design-Reihenfolge
+    unknown -> nominal -> act -> escalate (Schweregrad aufsteigend, von links
+    nach rechts gelesen). Siehe docs/design/ServerDetail.jsx Z. 358-363."""
     cells = _make_30_cells()
     html = _render(app, cells=cells)
 
@@ -274,8 +276,8 @@ def test_legend_has_four_swatches(app: Flask) -> None:
         f"HTML (Legende): {html!r}"
     )
 
-    # Reihenfolge: escalate -> act -> nominal -> unknown
-    expected_order = ["--escalate", "--act", "--nominal", "--unknown"]
+    # Reihenfolge: unknown -> nominal -> act -> escalate (Design-treu).
+    expected_order = ["--unknown", "--nominal", "--act", "--escalate"]
     positions = []
     for swatch in expected_order:
         full = f"sd-legend-swatch{swatch}"

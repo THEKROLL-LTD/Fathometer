@@ -610,6 +610,9 @@
   flex: 1;
   min-width: 12px;
   max-width: 18px;
+  padding: 0;
+  border: 1px solid var(--text-tertiary);
+  background: transparent;
   cursor: pointer;
   transition: transform var(--dur-hover) var(--ease-drift),
               filter    var(--dur-hover) var(--ease-drift);
@@ -623,7 +626,7 @@
 .sd-heartbeat__tick--unknown  { background: var(--text-ghost);     opacity: 0.45; }
 .sd-heartbeat__tick--nominal  { background: var(--border-visible); }
 .sd-heartbeat__tick--act      { background: var(--text-secondary); opacity: 0.85; }
-.sd-heartbeat__tick--escalate { background: var(--accent); }
+.sd-heartbeat__tick--escalate { background: var(--accent); border-color: var(--accent); }
 
 .sd-heartbeat__axis {
   display: flex;

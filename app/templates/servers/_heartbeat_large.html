@@ -28,8 +28,10 @@
        aria-label="Heartbeat letzte 30 Tage">
     {%- if _is_skel -%}
       {%- for _ in range(30) -%}
-        <span class="sd-heartbeat__tick sd-heartbeat__tick--skel"
-              aria-hidden="true"></span>
+        <button type="button"
+                class="sd-heartbeat__tick sd-heartbeat__tick--skel"
+                aria-hidden="true"
+                tabindex="-1"></button>
       {%- endfor -%}
     {%- else -%}
       {%- for cell in cells -%}
@@ -43,11 +45,13 @@
         {%- else -%}
           {%- set _band = 'unknown' -%}
         {%- endif -%}
-        <span class="sd-heartbeat__tick sd-heartbeat__tick--{{ _band }}"
-              data-day="{{ cell.day.isoformat() }}"
-              data-band="{{ _band }}"
-              data-had-scan="{{ '1' if cell.had_scan else '0' }}"
-              aria-hidden="true"></span>
+        <button type="button"
+                class="sd-heartbeat__tick sd-heartbeat__tick--{{ _band }}"
+                data-day="{{ cell.day.isoformat() }}"
+                data-band="{{ _band }}"
+                data-had-scan="{{ '1' if cell.had_scan else '0' }}"
+                aria-hidden="true"
+                tabindex="-1"></button>
       {%- endfor -%}
     {%- endif -%}
   </div>
@@ -55,18 +59,22 @@
     <span>-30T</span>
     <span>Heute</span>
   </div>
-  <div class="sd-heartbeat__legend" aria-hidden="true">
-    <span class="sd-legend-swatch sd-legend-swatch--escalate">
-      <span class="sd-legend-swatch__dot"></span>escalate
-    </span>
-    <span class="sd-legend-swatch sd-legend-swatch--act">
-      <span class="sd-legend-swatch__dot"></span>act
-    </span>
-    <span class="sd-legend-swatch sd-legend-swatch--nominal">
-      <span class="sd-legend-swatch__dot"></span>nominal
-    </span>
-    <span class="sd-legend-swatch sd-legend-swatch--unknown">
-      <span class="sd-legend-swatch__dot"></span>unknown
-    </span>
-  </div>
+</div>
+{# Legende sitzt AUSSERHALB der .sd-heartbeat-frame — Design-Vorgabe
+   (docs/design/ServerDetail.jsx Z. 358-363). Reihenfolge unknown ->
+   nominal -> act -> escalate von links nach rechts (Schweregrad
+   aufsteigend). #}
+<div class="sd-heartbeat__legend" aria-hidden="true">
+  <span class="sd-legend-swatch sd-legend-swatch--unknown">
+    <span class="sd-legend-swatch__dot"></span>unknown
+  </span>
+  <span class="sd-legend-swatch sd-legend-swatch--nominal">
+    <span class="sd-legend-swatch__dot"></span>nominal
+  </span>
+  <span class="sd-legend-swatch sd-legend-swatch--act">
+    <span class="sd-legend-swatch__dot"></span>act
+  </span>
+  <span class="sd-legend-swatch sd-legend-swatch--escalate">
+    <span class="sd-legend-swatch__dot"></span>escalate
+  </span>
 </div>
