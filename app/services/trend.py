@@ -1,8 +1,9 @@
-"""Tendenz-Berechnung fuer den Server-Detail-Header (Block K, ADR-0018).
+"""Tendenz-Berechnung fuer den Server-Detail-Header (Block K, ADR-0018;
+ADR-0038 reduziert das Fenster auf 30 Tage).
 
 Liefert eine grob-granulare Klassifikation, ob die OPEN-Findings eines
 Servers in den letzten Tagen steigen, fallen oder stabil bleiben. Speist
-das Tendenz-Label in der HeaderStats-Sektion ("ueber 50 tage stabil" etc.).
+das Tendenz-Label in der HeaderStats-Sektion ("ueber 30 tage stabil" etc.).
 
 Heuristik (siehe ADR-0018 §Begruendung):
     avg(Daily-OPEN-Total ueber `days_short` Tage)
@@ -13,7 +14,7 @@ Heuristik (siehe ADR-0018 §Begruendung):
     diff <=  -threshold -> FALLING
     sonst              -> STABLE
 
-Default-Parameter: `days_short=7`, `days_long=50`, `threshold=0.05`. Magic
+Default-Parameter: `days_short=7`, `days_long=30`, `threshold=0.05`. Magic
 Numbers stehen NICHT in der Logik, sondern als Default-Werte am Signatur-
 Kopf — testbar und sichtbar.
 
@@ -42,14 +43,14 @@ class Tendency(StrEnum):
     def label(self) -> str:
         """Menschenlesbares Label gemaess Design-Mockup (lowercase).
 
-        Hinweis: das Label ist auf das Default-Fenster (50 Tage) zugeschnitten.
-        Mit einem abweichenden `days_long` weicht der Text vom Wahrheits-
-        gehalt ab — fuer den MVP-Block-K-Scope ist das vertretbar.
+        Hinweis: das Label ist auf das Default-Fenster (30 Tage, ADR-0038)
+        zugeschnitten. Mit einem abweichenden `days_long` weicht der Text
+        vom Wahrheitsgehalt ab — fuer den MVP-Scope ist das vertretbar.
         """
         return {
-            Tendency.STABLE: "über 50 tage stabil",
-            Tendency.RISING: "über 50 tage steigend",
-            Tendency.FALLING: "über 50 tage fallend",
+            Tendency.STABLE: "über 30 tage stabil",
+            Tendency.RISING: "über 30 tage steigend",
+            Tendency.FALLING: "über 30 tage fallend",
         }[self]
 
 
@@ -57,7 +58,7 @@ def tendency_from_counts(
     counts: list[DailySeverityCount],
     *,
     days_short: int = 7,
-    days_long: int = 50,
+    days_long: int = 30,
     threshold: float = 0.05,
 ) -> Tendency:
     """Berechnet die Tendenz aus einer bereits berechneten Counts-Liste.
@@ -70,7 +71,7 @@ def tendency_from_counts(
         counts: Ergebnis von `daily_severity_counts_for_server`. Leere Liste
             liefert STABLE als Default.
         days_short: Kurzfenster fuer den avg-Short-Vergleich (Default 7).
-        days_long: Langfenster; sollte `len(counts)` entsprechen (Default 50).
+        days_long: Langfenster; sollte `len(counts)` entsprechen (Default 30).
         threshold: Schwelle fuer signifikante Aenderung (Default 5%).
 
     Returns:
@@ -109,7 +110,7 @@ def compute_tendency(
     server_id: int,
     *,
     days_short: int = 7,
-    days_long: int = 50,
+    days_long: int = 30,
     threshold: float = 0.05,
     now: datetime | None = None,
 ) -> Tendency:
@@ -124,7 +125,7 @@ def compute_tendency(
         session: aktive SQLAlchemy-Session.
         server_id: Ziel-Server.
         days_short: Kurzfenster (Default 7 Tage).
-        days_long: Langfenster (Default 50 Tage).
+        days_long: Langfenster (Default 30 Tage, ADR-0038).
         threshold: Schwelle fuer signifikante Aenderung (Default 5%).
         now: optionaler "Jetzt"-Zeitstempel (fuer Tests).
 
