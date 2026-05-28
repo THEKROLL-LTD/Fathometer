@@ -13,6 +13,7 @@
 @import "./components/sysline.css";
 @import "./components/auth.css";
 @import "./components/server-detail.css";
+@import "./components/findings.css";
 @import "./components/settings-manage.css";
 
 /* Legacy-Shim als LETZTER Import — die Tailwind-Utility-Klassen darin
