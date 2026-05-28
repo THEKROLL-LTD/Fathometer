@@ -1,8 +1,9 @@
-{# Pending-Bucket-Body: Cross-Server-Sammler-Tabelle (ADR-0037 §(2),
-   TICKET-006 Etappe 3).
+{# Pending-Bucket-Body: Cross-Server-Sammler-Liste (ADR-0037 §(2),
+   TICKET-006 Etappe 3; Design-Adoption Spec §6 + §8).
 
    Render-Vertrag wie `bucket_findings_table.html`, plus zusaetzliche
-   Server-Spalte (Operator muss erkennen koennen, woher das Finding kommt).
+   Server-Spalte als erste Datenspalte (Operator muss erkennen koennen, woher
+   das Finding kommt — der Sammler ist cross-server).
 
    Variablen:
      - `findings`  : list[Finding] (eager-loaded `server`).
@@ -11,124 +12,132 @@
      - `per_page`  : int (Default 20).
      - `filter_qs` : str — kanonischer Filter-Querystring.
 
+   8-Spalten-Layout (Checkbox · Server · CVE/Titel · Paket · EPSS · CVSS ·
+   Severity · Erstmals). Das 8-Spalten-Grid wird ueber den `.pending-bucket`-
+   Ancestor in findings.css aktiviert.
+
    Pager-Target: `closest [data-test='pending-bucket-findings-lazy-slot']`
    (siehe `pending_bucket_card.html`).
-#}
-{% from "_macros.html" import severity_badge, kev_badge, status_badge,
-                              cvss_pill, epss_pill, package_cell, quick_copy %}
 
+   Sicherheit: `risk_band_reason` NIE mit |safe (ADR-0038 §G4). KEIN DaisyUI.
+#}
 {% if findings %}
-<div class="overflow-x-auto rounded-box bg-base-100/40 border border-base-300"
-     data-test="pending-bucket-findings-table"
+<div data-test="pending-bucket-findings-table"
      data-total="{{ total }}"
      data-page="{{ page }}"
      data-per-page="{{ per_page }}">
-  <table class="table table-xs align-middle w-full">
-    <thead class="border-b border-base-300">
-      <tr>
-        <th class="w-8 pr-0"></th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Server</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">CVE / Titel</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Paket</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">EPSS</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">CVSS</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Status</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Severity</th>
-        <th class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">Erstmals</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for f in findings %}
-        <tr id="finding-{{ f.id }}"
-            class="hover {% if f.is_kev %}bg-error/5{% endif %}"
-            data-test="pending-bucket-finding-row-{{ f.id }}">
-          <td class="pr-0" @click.stop>
-            <input type="checkbox"
-                   class="checkbox checkbox-sm"
-                   data-bulk-finding-id="{{ f.id }}"
-                   value="{{ f.id }}"
-                   @change="toggleFinding({{ f.id }}, $event.target.checked)"
-                   aria-label="Finding {{ f.identifier_key }} fuer Bulk auswaehlen">
-          </td>
-          <td>
-            <a href="{{ url_for('server_detail.show', server_id=f.server.id) }}"
-               hx-get="{{ url_for('server_detail.show', server_id=f.server.id) }}"
-               hx-target="#detail-pane"
-               hx-swap="outerHTML"
-               hx-push-url="true"
+  <div class="bucket-findings-head" aria-hidden="true">
+    <span></span>
+    <span>Server</span>
+    <span>CVE / Titel</span>
+    <span>Paket</span>
+    <span class="bucket-findings-head__right">EPSS</span>
+    <span class="bucket-findings-head__right">CVSS</span>
+    <span class="bucket-findings-head__right">Severity</span>
+    <span class="bucket-findings-head__right">Erstmals</span>
+  </div>
+
+  {% for f in findings %}
+    {%- set _sev = (f.severity.value if f.severity is not string else f.severity) | lower if f.severity else none -%}
+    <details class="bucket-finding"
+             id="finding-{{ f.id }}"
+             data-test="pending-bucket-finding-row-{{ f.id }}">
+      <summary class="bucket-finding__summary">
+        <input type="checkbox"
+               class="sd-checkbox"
+               data-bulk-finding-id="{{ f.id }}"
+               value="{{ f.id }}"
                @click.stop
-               class="link link-hover font-mono text-xs"
-               data-test="pending-finding-server-link">
-              {{ f.server.name }}
-            </a>
-          </td>
-          <td>
-            <div class="flex items-center gap-2 flex-wrap min-w-0">
-              <span class="font-mono text-xs font-semibold">{{ f.identifier_key }}</span>
-              {{ kev_badge(f.is_kev, size='xs') }}
-              {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
-            </div>
-            {% if f.title %}
-              <div class="text-xs opacity-60 truncate max-w-[44ch] mt-0.5"
-                   title="{{ f.title }}">{{ f.title }}</div>
-            {% endif %}
-          </td>
-          <td class="max-w-[24ch]">
-            <div class="flex items-center gap-1 min-w-0">
-              {{ package_cell(f.package_name, f.finding_class) }}
-            </div>
-            {% if f.installed_version %}
-              <div class="font-mono text-[10px] opacity-50">
-                {{ f.installed_version }}{% if f.fixed_version %} → <span class="text-success">{{ f.fixed_version }}</span>{% endif %}
-              </div>
-            {% endif %}
-          </td>
-          <td>{{ epss_pill(f.epss_score) }}</td>
-          <td>{{ cvss_pill(f.cvss_v3_score) }}</td>
-          <td>{{ status_badge(f.status) }}</td>
-          <td>{{ severity_badge(f.severity) }}</td>
-          <td class="text-xs whitespace-nowrap">
-            <time datetime="{{ f.first_seen_at.isoformat() }}"
-                  title="{{ f.first_seen_at.strftime('%Y-%m-%d %H:%M %Z') }}">
-              {{ f.first_seen_at.strftime('%Y-%m-%d') }}
-            </time>
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+               @change="toggleFinding({{ f.id }}, $event.target.checked)"
+               aria-label="Finding {{ f.identifier_key }} fuer Bulk auswaehlen">
+
+        <a href="{{ url_for('server_detail.show', server_id=f.server.id) }}"
+           hx-get="{{ url_for('server_detail.show', server_id=f.server.id) }}"
+           hx-target="#detail-pane"
+           hx-swap="outerHTML"
+           hx-push-url="true"
+           @click.stop
+           class="bucket-finding__server"
+           title="{{ f.server.name }}"
+           data-test="pending-finding-server-link">
+          {{ f.server.name }}
+        </a>
+
+        <div class="sd-finding__cve">
+          <span class="sd-finding__cve-id">
+            <span>{{ f.identifier_key }}</span>
+            {% if f.is_kev %}<span class="sd-badge sd-badge--kev">KEV</span>{% endif %}
+          </span>
+          {% if f.title %}
+            <span class="sd-finding__title" title="{{ f.title }}">{{ f.title }}</span>
+          {% endif %}
+        </div>
+
+        <div class="sd-finding__pkg">
+          <span class="sd-finding__pkg-name">{{ f.package_name }}</span>
+          {% if f.installed_version %}
+            <span class="sd-finding__pkg-diff">
+              <span class="sd-finding__pkg-from">{{ f.installed_version }}</span>
+              {% if f.fixed_version %}
+                <span class="sd-finding__pkg-arrow">→</span>
+                <span class="sd-finding__pkg-to">{{ f.fixed_version }}</span>
+              {% endif %}
+            </span>
+          {% endif %}
+        </div>
+
+        <span class="sd-cap sd-cap--neutral">
+          {%- if f.epss_score is not none -%}{{ "%.3f" | format(f.epss_score) }}{%- else -%}—{%- endif -%}
+        </span>
+        <span class="sd-cap sd-cap--neutral">
+          {%- if f.cvss_v3_score is not none -%}{{ "%.1f" | format(f.cvss_v3_score) }}{%- else -%}—{%- endif -%}
+        </span>
+        <span class="sd-cap {% if _sev == 'critical' %}sd-cap--accent{% else %}sd-cap--neutral{% endif %}">
+          {{ _sev | upper if _sev else '—' }}
+        </span>
+
+        <span class="bucket-finding__first-seen">
+          <time datetime="{{ f.first_seen_at.isoformat() }}"
+                title="{{ f.first_seen_at.strftime('%Y-%m-%d %H:%M %Z') }}">
+            {{ f.first_seen_at.strftime('%Y-%m-%d') }}
+          </time>
+        </span>
+      </summary>
+
+      {%- if f.risk_band_reason -%}
+        <div class="bucket-finding__body">
+          <p class="sd-ai-eyebrow">KI-Bewertung</p>
+          <p class="sd-ai-text">{{ f.risk_band_reason }}</p>
+        </div>
+      {%- endif -%}
+    </details>
+  {% endfor %}
 </div>
 
-{%- set _total_pages = (total + per_page - 1) // per_page if per_page > 0 else 0 -%}
-{% if _total_pages > 1 %}
-  <nav class="flex items-center justify-between gap-3 mt-2 px-2 font-mono text-xs"
-       aria-label="Pending-Bucket-Pagination"
-       data-test="pending-bucket-pager">
-    {% if page > 1 %}
-      <button type="button"
-              class="btn btn-xs btn-ghost"
-              hx-get="{{ url_for('findings.pending_fragment', page=page-1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
-              hx-target="closest [data-test='pending-bucket-findings-lazy-slot']"
-              hx-swap="innerHTML"
-              data-test="pending-bucket-pager-prev">« vorherige</button>
-    {% else %}
-      <span class="btn btn-xs btn-ghost btn-disabled" aria-disabled="true">« vorherige</span>
-    {% endif %}
-    <span class="opacity-65">Seite {{ page }} von {{ _total_pages }}</span>
-    {% if page < _total_pages %}
-      <button type="button"
-              class="btn btn-xs btn-ghost"
-              hx-get="{{ url_for('findings.pending_fragment', page=page+1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
-              hx-target="closest [data-test='pending-bucket-findings-lazy-slot']"
-              hx-swap="innerHTML"
-              data-test="pending-bucket-pager-next">naechste »</button>
-    {% else %}
-      <span class="btn btn-xs btn-ghost btn-disabled" aria-disabled="true">naechste »</span>
-    {% endif %}
-  </nav>
-{% endif %}
+{%- set _total_pages = ((total + per_page - 1) // per_page) if per_page > 0 else 1 -%}
+<div class="bucket-card__footer" data-test="pending-bucket-pager">
+  <span>Seite {{ page }} von {{ _total_pages }} · {{ total }} {% if total == 1 %}Finding{% else %}Findings{% endif %}</span>
+  <span class="bucket-card__pager">
+    <button type="button"
+            aria-label="Vorherige Seite"
+            data-test="pending-bucket-pager-prev"
+            {% if page > 1 %}
+            hx-get="{{ url_for('findings.pending_fragment', page=page - 1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
+            hx-target="closest [data-test='pending-bucket-findings-lazy-slot']"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this"
+            {% else %}disabled{% endif %}>‹</button>
+    <button type="button"
+            aria-label="Nächste Seite"
+            data-test="pending-bucket-pager-next"
+            {% if page < _total_pages %}
+            hx-get="{{ url_for('findings.pending_fragment', page=page + 1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
+            hx-target="closest [data-test='pending-bucket-findings-lazy-slot']"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this"
+            {% else %}disabled{% endif %}>›</button>
+  </span>
+</div>
 {% else %}
-  <p class="text-xs opacity-60 italic px-3 py-2" data-test="pending-bucket-findings-empty">
-    Keine Findings im Pending-Sammler.
-  </p>
+<p class="sd-empty" data-test="pending-bucket-findings-empty">Keine Findings im Pending-Sammler.</p>
 {% endif %}
