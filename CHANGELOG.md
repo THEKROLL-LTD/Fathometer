@@ -4,6 +4,35 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — ADR-0042: Agent-Fire-and-Forget, Job-Status-Endpoint entfernt
+
+### Changed
+
+- `secscan-agent.sh`: Der Agent beendet nach der `202`-Annahme sofort mit Exit 0
+  (Fire-and-Forget). Polling-Loop entfernt; die Meldung „Scan queued …, waiting
+  for processing…" ist weg, stattdessen `Scan accepted (job_id=…)`.
+- `POST /api/scans` 202-Body schrumpft von `{job_id, status, status_url}` auf
+  `{job_id, status}` — `status_url` zeigte auf den entfernten Endpoint.
+
+### Removed
+
+- **Status-Endpoint `GET /api/scans/jobs/<job_id>`** (`app/api/scans.py`):
+  Route `scan_job_status`, Serializer `_serialize_job_status`, Konstante
+  `_MAX_ERROR_LEN`. Kein Konsument mehr nach dem Agent-Fire-and-Forget.
+- Agent-Exit-Codes 4 (`failed`) und 5 (Polling-Timeout) sowie
+  `SECSCAN_POLL_MAX_SEC`-Override.
+- `tests/api/test_scan_status_endpoint_unit.py` (testete nur den entfernten
+  Serializer); `status_url`-Assert in `test_scans_async_edge.py` und
+  Status-Endpoint-Abschnitt in `test_scan_ingest_e2e_flow.py`.
+
+### Notes
+
+- Async-Ingest-Kern (Queue-Tabelle, Edge-Fast-Path, Worker-Sub-Tick,
+  Idempotency, Payload-Transit) aus ADR-0026 bleibt unverändert. Scan-Ergebnis
+  und -Fehler sieht der Operator weiterhin im Dashboard (ADR-0019) und über die
+  Audit-Events `scan.queued`/`scan.ingested`/`scan.ingest_failed`.
+- ADR-0042 (`docs/decisions/0042-agent-fire-and-forget-ingest.md`).
+
 ## [Unreleased] — TICKET-006: Findings Cross-Server Bucket-View (ADR-0037)
 
 ### Findings-Seite

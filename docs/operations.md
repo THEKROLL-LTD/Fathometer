@@ -160,9 +160,12 @@ muss laufen, sonst stehen die `scan_ingest_jobs`-Rows fuer immer queued.
 Der Operator-Login + Setup-Wizard bleibt unabhaengig vom Worker erreichbar
 (Web-Container und Worker sind getrennt).
 
-Agent ab v0.4.0 erwartet das 202+`job_id`-Response und pollt
-`GET /api/scans/jobs/<id>` bis `done`/`failed` (oder Polling-Timeout
-nach 600s).
+Der Agent beendet nach der 202-Annahme sofort (Fire-and-Forget, ADR-0042) —
+er pollt **nicht** auf einen Job-Status-Endpoint (dieser ist entfernt). Den
+Verarbeitungs-Fortschritt und -Ausgang (inkl. `failed`) sieht der Operator
+serverseitig: in der `scan_ingest_jobs`-Tabelle (Queue-Inspect-SQL unten),
+im Dashboard (HTMX-Polling, ADR-0019) und über die Audit-Events
+`scan.queued` / `scan.ingested` / `scan.ingest_failed`.
 
 ### Queue-Inspect
 

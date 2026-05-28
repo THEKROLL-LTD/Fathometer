@@ -136,7 +136,6 @@ def test_happy_path_returns_202_with_job_id(
     body = resp.get_json()
     assert "job_id" in body
     assert body["status"] == "queued"
-    assert body["status_url"] == f"/api/scans/jobs/{body['job_id']}"
 
     # Job in DB
     jobs = _ingest_jobs(async_db_app, server_id)

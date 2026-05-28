@@ -1,5 +1,4 @@
 """`POST /api/scans` — Async-Scan-Ingest mit Auth-vor-Body-Parse.
-`GET /api/scans/jobs/<job_id>` — Async-Job-Status-Endpoint (Block R Phase D).
 
 Strikte Reihenfolge — niemals vertauschen (ARCHITECTURE.md §9):
 
@@ -12,12 +11,12 @@ Strikte Reihenfolge — niemals vertauschen (ARCHITECTURE.md §9):
 6. Agent-Version-Gate.
 7. Soft-Cap + INSERT in `scan_ingest_jobs` (Idempotency via Partial-Unique).
 8. Audit `scan.queued`.
-9. 202 + `{job_id, status, status_url}`.
+9. 202 + `{job_id, status}`.
 
 Die Verarbeitung (Findings-UPSERT, Host-State, Pre-Triage, Group-Matcher,
 LLM-Job-Queueing, Audit `scan.ingested`) laeuft asynchron im
-`secscan-llm-worker` (`app/workers/scan_ingest_worker.py`). Agent pollt
-`GET /api/scans/jobs/<id>` bis `done`/`failed`.
+`secscan-llm-worker` (`app/workers/scan_ingest_worker.py`). Der Agent beendet
+nach der 202-Annahme und wartet nicht auf das Ergebnis.
 
 Historischer Hinweis: das urspruenglich in ADR-0026 / Block R Phase H als
 Cutover-Schutz eingefuehrte Feature-Flag `SCAN_INGEST_ASYNC` ist seit
@@ -30,19 +29,6 @@ DoS-Schutz:
   schluerft keine CPU am Parser.
 - gzip-Decompress streamend mit hartem 100-MB-Bound (`SECSCAN_MAX_DECOMPRESSED_MB`).
 - JSON-Parse-Tiefe auf 32 begrenzt (§10 "JSON-Parser-Tiefenlimit").
-
-# Block-R Phase D — On-Demand-Verification:
-# Folgende Tests sind als db_integration-Marker markiert und nur auf
-# explizite Anweisung ausfuehren (kein Default-pytest-Lauf):
-#
-# 1. Cross-Server-404: Job existiert auf Server A, Request mit Server-B-Token
-#    -> 404 job_not_found (Server-Scoping, kein 403 um Job-IDs nicht zu leaken).
-# 2. Auth-Fail-401: GET /api/scans/jobs/1 ohne Bearer -> 401 unauthorized.
-# 3. Server-Inactive-403: GET /api/scans/jobs/1 mit revoked-Server-Token -> 403.
-# 4. Polling-Burst: 50 Calls in einer Minute auf den Status-Endpoint innerhalb
-#    des Rate-Limit-Buckets (gleicher Bucket wie POST /api/scans, 60/hour Default).
-# 5. Alle vier Status-Werte (queued, in_progress, done, failed) via echten DB-Rows.
-#    Verifikation dass counts/scan_id bei done, error bei failed im Response stehen.
 """
 
 from __future__ import annotations
@@ -50,7 +36,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from datetime import datetime
 from typing import Any, cast
 
 import structlog
@@ -70,7 +55,7 @@ from app.middleware.gzip import (
     DecompressLimitError,
     read_decompressed_body,
 )
-from app.models import ScanIngestJob, Server
+from app.models import Server
 from app.services.agent_version import version_lt
 from app.services.findings_ingest import server_is_active
 
@@ -318,7 +303,6 @@ def _handle_async_ingest(
             {
                 "job_id": job.id,
                 "status": "queued",
-                "status_url": f"/api/scans/jobs/{job.id}",
             }
         ),
     )
@@ -412,124 +396,4 @@ def ingest_scan() -> Response | tuple[Response, int]:
     return _handle_async_ingest(get_session(), server, decompressed, _gzipped)
 
 
-# ---------------------------------------------------------------------------
-# Job-Status-Endpoint (Block R Phase D)
-# ---------------------------------------------------------------------------
-
-_MAX_ERROR_LEN = 4096
-"""Maximale Laenge des error-Strings im Status-Response (Schutz gegen riesige
-Pydantic-Stacktraces die als `error` persistiert wurden). Der Worker truncated
-bereits — hier nochmals als Defense-in-Depth."""
-
-
-def _serialize_job_status(job: ScanIngestJob) -> dict[str, Any]:
-    """Serialisiert einen `ScanIngestJob` in den API-Response-Body.
-
-    Reines Python, kein Flask-Context benoetigt — testbar ohne DB.
-
-    Format (ADR-0026 §Status-Endpoint):
-    - Basis: job_id, status, created_at (ISO), picked_up_at (ISO|null),
-             finished_at (ISO|null), attempts.
-    - bei status='done': zusaetzlich scan_id und counts-Dict aus result-JSONB.
-    - bei status='failed': zusaetzlich error (max 4096 Chars).
-
-    Counts-Felder kommen 1:1 aus `job.result` (JSONB). Fehlt ein Feld im
-    JSONB (z.B. aeltere Worker-Version), wird es mit 0 befuellt — kein
-    KeyError im Client.
-    """
-
-    def _iso(dt: datetime | None) -> str | None:
-        if dt is None:
-            return None
-        return dt.isoformat()
-
-    body: dict[str, Any] = {
-        "job_id": job.id,
-        "status": job.status,
-        "created_at": _iso(job.created_at),
-        "picked_up_at": _iso(job.picked_up_at),
-        "finished_at": _iso(job.finished_at),
-        "attempts": job.attempts,
-    }
-
-    if job.status == "done":
-        result: dict[str, Any] = job.result or {}
-        body["scan_id"] = job.scan_id
-        body["counts"] = {
-            "findings_total": result.get("findings_total", 0),
-            "findings_inserted": result.get("findings_inserted", 0),
-            "findings_updated": result.get("findings_updated", 0),
-            "findings_resolved": result.get("findings_resolved", 0),
-            "class_os_pkgs": result.get("class_os_pkgs", 0),
-            "class_lang_pkgs": result.get("class_lang_pkgs", 0),
-            "class_other": result.get("class_other", 0),
-        }
-    elif job.status == "failed":
-        raw_error = job.error or ""
-        body["error"] = raw_error[:_MAX_ERROR_LEN]
-
-    return body
-
-
-@api_bp.get("/scans/jobs/<int:job_id>")
-@csrf.exempt
-@limiter.limit(lambda: _scans_auth_rate_limit())
-def scan_job_status(job_id: int) -> Response | tuple[Response, int]:
-    """GET /api/scans/jobs/<job_id> — Async-Ingest-Job-Status (ADR-0026 Phase D).
-
-    Authentifizierung via Bearer-Token wie bei POST /api/scans. Der Job wird
-    server-scoped ausgelesen: nur Jobs des authentifizierten Servers sind
-    sichtbar. Ein Job eines anderen Servers gibt 404 zurueck (kein 403) —
-    Job-IDs werden nicht zwischen Servern geleakt.
-
-    Rate-Limit: gleicher Per-Server-Bucket wie POST /api/scans
-    (ADR-0026 §Status-Endpoint).
-    """
-    # ---- 1. Auth: Bearer-Header lesen ------------------------------------
-    token = _parse_bearer(request.headers.get("Authorization"))
-    if token is None:
-        return json_error(401, "unauthorized", "Bearer-Token fehlt oder ist ungueltig")
-
-    server = _find_server_by_token(token)
-    if server is None:
-        sess = get_session()
-        log_event(
-            "auth.failed",
-            target_type="server",
-            target_id=None,
-            metadata={"ip": request.remote_addr or "unknown", "endpoint": "/api/scans/jobs"},
-            actor="unknown",
-            session=sess,
-        )
-        sess.commit()
-        return json_error(401, "unauthorized", "Bearer-Token unbekannt")
-
-    if not server_is_active(server):
-        return json_error(403, "server_inactive", "Server ist revoked oder retired")
-
-    # ---- 2. Job-Lookup mit Server-Scoping --------------------------------
-    sess = get_session()
-    job = sess.execute(
-        select(ScanIngestJob).where(
-            ScanIngestJob.id == job_id,
-            ScanIngestJob.server_id == server.id,
-        )
-    ).scalar_one_or_none()
-
-    if job is None:
-        return json_error(404, "job_not_found", f"Job {job_id} nicht gefunden")
-
-    # ---- 3. Response aufbauen --------------------------------------------
-    log.debug(
-        "api.scans.job_status",
-        server_id=server.id,
-        job_id=job_id,
-        status=job.status,
-    )
-
-    resp = cast(Response, jsonify(_serialize_job_status(job)))
-    resp.status_code = 200
-    return resp
-
-
-__all__ = ["ingest_scan", "scan_job_status"]
+__all__ = ["ingest_scan"]

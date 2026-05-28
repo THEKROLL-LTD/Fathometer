@@ -5,6 +5,8 @@
 **Vorgänger-Block:** Block Q (v0.10.0)
 **Status:** Geplant
 
+> **Nachtrag 2026-05-28 ([ADR-0042](../decisions/0042-agent-fire-and-forget-ingest.md)):** Der unten beschriebene **Status-Endpoint** (Phase D) und der **Agent-Polling-Loop** (Phase E) sind wieder entfernt. Der Agent beendet jetzt direkt nach der 202-Annahme (Fire-and-Forget); das 202-Body enthält kein `status_url` mehr. Die Phasen A–C, F–H (Queue-Tabelle, Edge-Fast-Path, Worker-Sub-Tick, Stale-Reaper, Retention) bleiben unverändert in Kraft. Phasen D/E unten sind historisch.
+
 > **Hinweis zur Block-Nomenklatur:** Die in ADR-0025, Block-Q-Spec und STATE.md mit *"vermutlich Block R"* tentativ reservierte _Triple-`_load_findings()`-Konsolidierung_ rückt auf **Block S**. Async-Ingest ist Block R, weil Produktions-Stabilität (Agent-Connection-Aborts) priorisiert wird.
 
 ## Ziel

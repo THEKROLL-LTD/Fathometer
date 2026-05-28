@@ -1,6 +1,6 @@
 # ADR-0026 — Asynchroner Scan-Ingest mit `scan_ingest_jobs`-Queue
 
-**Status:** Akzeptiert · **Cutover abgeschlossen 2026-05-22** mit v0.12.0: das ursprünglich vorgesehene Feature-Flag `SECSCAN_SCAN_INGEST_ASYNC` ist ersatzlos entfernt, Async ist der einzige Pfad (kein Sync-Fallback mehr im Edge-Handler). Operator-Setups ohne `secscan-llm-worker`-Container sind nicht mehr unterstützt.
+**Status:** Akzeptiert · **Cutover abgeschlossen 2026-05-22** mit v0.12.0: das ursprünglich vorgesehene Feature-Flag `SECSCAN_SCAN_INGEST_ASYNC` ist ersatzlos entfernt, Async ist der einzige Pfad (kein Sync-Fallback mehr im Edge-Handler). Operator-Setups ohne `secscan-llm-worker`-Container sind nicht mehr unterstützt. · **Teilweise abgelöst durch ADR-0042 (2026-05-28):** Status-Endpoint `GET /api/scans/jobs/<id>` und Agent-Polling-Loop sind entfernt — der Agent beendet nach der 202-Annahme (Fire-and-Forget). Der Async-Ingest-Kern (Queue, Worker-Sub-Tick, Idempotency, Payload-Transit) bleibt unverändert.
 **Datum:** 2026-05-22
 **Block:** R (Implementation, siehe `docs/blocks/R-async-ingest.md`)
 **Vorgänger:** ADR-0003 (Push, nicht Pull), ADR-0005 (Roh-JSON wird nicht persistiert — wird durch dieses ADR um eine **Transit-Ausnahme** erweitert), ADR-0022 (Pre-Triage-Lauf wandert in den Worker), ADR-0023 (Worker-Modell als Vorbild)

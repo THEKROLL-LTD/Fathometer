@@ -53,20 +53,16 @@
 #
 # Run as root, typically via cron or a systemd timer.
 #
-# Block R (ADR-0026) — v0.4.0 changes:
-#   - `POST /api/scans` now returns 202 + job_id (async fast-path).
-#   - Polling-Loop: `GET /api/scans/jobs/<id>` every 2s, max 600s.
-#   - On `done`: exit 0, log counts.
-#   - On `failed`: exit 4 (new), log error.
-#   - On polling timeout: exit 5 (new).
+# Block R (ADR-0026) — async fast-path:
+#   - `POST /api/scans` returns 202 + job_id.
+#   - The agent exits immediately after acceptance; the server processes
+#     the scan asynchronously. No polling.
 #
 # Exit codes:
-#   0  success (scan ingested and processed)
+#   0  success (scan accepted by server)
 #   1  missing requirements or configuration
 #   2  trivy scan failed
-#   3  upload failed (HTTP-layer, before polling)
-#   4  scan processing failed (status='failed' from worker)
-#   5  polling timeout (10 min without done/failed)
+#   3  upload failed (HTTP-layer)
 #
 
 set -euo pipefail
@@ -325,8 +321,7 @@ log "Host: ${os_pretty} (kernel ${kernel_version}, ${arch}, trivy ${trivy_versio
 trivy_raw="$(mktemp -t secscan-trivy-raw.XXXXXX.json)"
 trivy_out="$(mktemp -t secscan-trivy.XXXXXX.json)"
 response_body="$(mktemp -t secscan-resp.XXXXXX)"
-status_json="$(mktemp -t secscan-status.XXXXXX)"
-trap 'rm -f "$trivy_raw" "$trivy_out" "$response_body" "$status_json"' EXIT
+trap 'rm -f "$trivy_raw" "$trivy_out" "$response_body"' EXIT
 
 log "Starting trivy scan on ${SCAN_PATH} ..."
 if ! "$TRIVY_BIN" rootfs "$SCAN_PATH" \
@@ -440,49 +435,7 @@ if [[ -z "$job_id" || "$job_id" = "null" ]]; then
   cat "$response_body" >&2 || true
   exit 3
 fi
-log "Scan queued (job_id=${job_id}), waiting for processing..."
-
-# ----- Polling-Loop (Block R, ADR-0026) ----------------------------------
-# Poll GET /api/scans/jobs/<id> every 2s, max 600s (10 min).
-# SECSCAN_POLL_MAX_SEC can be overridden for testing.
-poll_start="$(date +%s)"
-poll_max_sec="${SECSCAN_POLL_MAX_SEC:-600}"
-poll_interval_sec=2
-while :; do
-  now="$(date +%s)"
-  elapsed="$((now - poll_start))"
-  if [[ "$elapsed" -ge "$poll_max_sec" ]]; then
-    log "Error: scan processing timed out after ${poll_max_sec}s (job_id=${job_id})"
-    exit 5
-  fi
-
-  if ! curl -fsS --max-time 10 \
-      -H "Authorization: Bearer ${SECSCAN_API_KEY}" \
-      -o "$status_json" \
-      "${SECSCAN_URL%/}/api/scans/jobs/${job_id}"; then
-    log "Warning: status poll failed, retrying (job_id=${job_id})"
-    sleep "$poll_interval_sec"
-    continue
-  fi
-
-  job_status="$(jq -r '.status' < "$status_json")"
-  case "$job_status" in
-    done)
-      log "Scan processed (job_id=${job_id})"
-      jq '.counts' < "$status_json" >&2 || true
-      exit 0
-      ;;
-    failed)
-      log "Error: scan processing failed (job_id=${job_id})"
-      jq '.error' < "$status_json" >&2 || true
-      exit 4
-      ;;
-    queued|in_progress)
-      sleep "$poll_interval_sec"
-      ;;
-    *)
-      log "Unknown status: ${job_status} (job_id=${job_id})"
-      sleep "$poll_interval_sec"
-      ;;
-  esac
-done
+# Upload accepted (202). The server processes the scan asynchronously;
+# the agent does not wait for the result and exits successfully here.
+log "Scan accepted (job_id=${job_id})"
+exit 0

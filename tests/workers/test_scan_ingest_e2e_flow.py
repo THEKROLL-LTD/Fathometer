@@ -1,13 +1,12 @@
 """End-to-End-Smoke fuer den Async-Ingest-Flow (Block R, ADR-0026).
 
-Marker: db_integration — testet HTTP-Edge → Worker-Pickup → Status-Endpoint
-gegen die echte Test-Postgres-DB. KEIN Docker-Compose-Start — das wird
-separat im Operator-Smoke ausgefuehrt.
+Marker: db_integration — testet HTTP-Edge → Worker-Pickup gegen die echte
+Test-Postgres-DB. KEIN Docker-Compose-Start — das wird separat im
+Operator-Smoke ausgefuehrt.
 
-Verifiziert die kompletten drei Schritte aus dem Operator-Cutover-Plan:
-1. POST /api/scans mit Flag=true → 202 + job_id binnen <1s.
+Verifiziert die beiden Schritte aus dem Operator-Cutover-Plan:
+1. POST /api/scans → 202 + job_id binnen <1s.
 2. Worker-Tick verarbeitet den Job → status='done' + Counts in `result`.
-3. GET /api/scans/jobs/<id> liefert done + scan_id + counts.
 """
 
 from __future__ import annotations
@@ -99,7 +98,6 @@ def test_full_async_flow_post_to_done(async_db_app: Flask) -> None:
     assert payload["status"] == "queued"
     assert isinstance(payload["job_id"], int)
     job_id = payload["job_id"]
-    assert payload["status_url"] == f"/api/scans/jobs/{job_id}"
 
     # Edge-Latenz sollte deutlich unter 1s sein (Operator-Erwartung).
     assert edge_latency_ms < 1000, f"Edge zu langsam: {edge_latency_ms:.0f}ms"
@@ -156,64 +154,3 @@ def test_full_async_flow_post_to_done(async_db_app: Flask) -> None:
             assert ingested[0].actor == "e2e-server"
         finally:
             verify_sess.close()
-
-    # --- 4. Status-Endpoint: GET /api/scans/jobs/<id> ---
-    status_resp = client.get(
-        f"/api/scans/jobs/{job_id}",
-        headers={"Authorization": f"Bearer {api_key}"},
-    )
-    assert status_resp.status_code == 200, status_resp.data
-    status_body = status_resp.get_json()
-    assert status_body["status"] == "done"
-    assert status_body["job_id"] == job_id
-    assert status_body["scan_id"] == job.scan_id
-    assert "counts" in status_body
-    assert status_body["counts"]["findings_total"] > 0
-    assert status_body["counts"]["findings_inserted"] >= 0
-    assert "error" not in status_body or status_body.get("error") is None
-
-
-def test_status_endpoint_cross_server_returns_404(async_db_app: Flask) -> None:
-    """Cross-Server-Job-Lookup liefert 404 statt 403 (kein Job-ID-Leak)."""
-    client = async_db_app.test_client()
-
-    with async_db_app.app_context():
-        _, key_a = register_test_server(async_db_app, name="server-a")
-        _, key_b = register_test_server(async_db_app, name="server-b")
-
-    # Server A erzeugt einen Job
-    body = _gzip_envelope(_build_envelope(hostname="srv-a-host"))
-    resp = client.post(
-        "/api/scans",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {key_a}",
-            "Content-Type": "application/json",
-            "Content-Encoding": "gzip",
-        },
-    )
-    assert resp.status_code == 202
-    job_id = resp.get_json()["job_id"]
-
-    # Server B versucht den Job zu lesen → 404
-    cross_resp = client.get(
-        f"/api/scans/jobs/{job_id}",
-        headers={"Authorization": f"Bearer {key_b}"},
-    )
-    assert cross_resp.status_code == 404
-    err = cross_resp.get_json()
-    # Format: {"error":{"code":"job_not_found","message":"..."}}
-    assert "job_not_found" in json.dumps(err)
-
-
-def test_status_endpoint_unknown_job_returns_404(async_db_app: Flask) -> None:
-    """Unbekannte Job-ID liefert 404."""
-    client = async_db_app.test_client()
-    with async_db_app.app_context():
-        _, api_key = register_test_server(async_db_app, name="lookup-server")
-
-    resp = client.get(
-        "/api/scans/jobs/999999",
-        headers={"Authorization": f"Bearer {api_key}"},
-    )
-    assert resp.status_code == 404

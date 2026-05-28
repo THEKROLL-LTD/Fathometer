@@ -31,7 +31,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0023](0023-llm-risk-reviewer-and-application-grouping.md) | LLM-Risk-Reviewer mit Application-Grouping (Two-Pass) und asynchroner Job-Queue (Block P) | Akzeptiert (§UI-Konsequenzen amendet durch 0038 — Workflow-Card-Drilldown, Inline-Reason) |
 | [0024](0024-external-epss-kev-enrichment.md) | Externe EPSS-/KEV-Anreicherung | Akzeptiert |
 | [0025](0025-server-detail-and-findings-slim-down.md) | Server-Detail- und Dashboard-Entschlackung, dedizierte Findings-Seite (Block Q) | Teilweise abgelöst durch 0037 (Cross-Server-Findings-Bucket-View) |
-| [0026](0026-async-scan-ingest.md) | Asynchroner Scan-Ingest mit `scan_ingest_jobs`-Queue (Block R) | Akzeptiert |
+| [0026](0026-async-scan-ingest.md) | Asynchroner Scan-Ingest mit `scan_ingest_jobs`-Queue (Block R) | Akzeptiert (§Status-Endpoint + §Agent-Polling teilweise abgelöst durch 0042) |
 | [0027](0027-no-per-finding-risk-band-audit.md) | Keine per-Finding-`risk_band`-Audit-Events | Akzeptiert |
 | [0028](0028-application-group-evaluations-junction.md) | Application-Group-Evaluations als Junction-Tabelle (Block T) | Akzeptiert |
 | [0029](0029-parallel-llm-worker-concurrency.md) | Parallele LLM-Job-Verarbeitung im Worker (Single-Worker, In-Process-Concurrency, Block U) | Akzeptiert |
@@ -46,6 +46,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0038](0038-server-detail-triage-refactor.md) | Server-Detail Triage-First Content-Refactor (Sektions-/Inhalts-Umbau, Styling out-of-Scope; Block X) | Akzeptiert |
 | [0039](0039-server-detail-lazy-render-architecture.md) | Server-Detail Lazy-Render-Architektur + Triage-Queue-Pagination (Block Y) | Akzeptiert |
 | [0040](0040-group-and-tag-hybrid-lifecycle.md) | Hybrid-Lifecycle für Gruppen und Tags: Inline-Create im Server-Settings, `/settings/{groups,tags}` als Manage-Only (Block Z) — schließt ADR-0034 §Re-Open-Trigger CRUD-UI | Akzeptiert |
+| [0042](0042-agent-fire-and-forget-ingest.md) | Agent-Fire-and-Forget: Job-Status-Endpoint + Polling-Loop entfernt, Agent beendet nach 202 — löst ADR-0026 §Status-Endpoint/§Agent-Polling teilweise ab | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 
