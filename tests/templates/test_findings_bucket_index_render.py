@@ -194,10 +194,12 @@ def test_index_two_buckets_render_counter_and_cards(app: Flask) -> None:
         filter_qs="risk_band=escalate",
     )
 
-    # Counter mit Plural-Suffix.
+    # Counter mit Plural-Suffix (Werte sind im Design in <b> gewrappt).
     assert 'data-test="findings-bucket-counter"' in html, "Counter-Marker fehlt"
-    assert "2 Gruppen" in html, f"'2 Gruppen' nicht im Counter: {html[:1000]}"
-    assert "8 Findings" in html, f"'8 Findings' (Summe) nicht im Counter: {html[:1000]}"
+    assert "<b>2</b>" in html and "Gruppen" in html, f"'2 Gruppen' nicht im Counter: {html[:1000]}"
+    assert "<b>8</b>" in html and "Findings" in html, (
+        f"'8 Findings' (Summe) nicht im Counter: {html[:1000]}"
+    )
 
     # Bucket-Cards.
     assert 'data-test="bucket-card-1-10"' in html, "Erste Bucket-Card fehlt"
@@ -278,8 +280,8 @@ def test_index_pending_bucket_renders_after_buckets(app: Flask) -> None:
     )
 
     # Counter zaehlt Pending mit (1 + 1 = 2 Gruppen, 2 + 4 = 6 Findings).
-    assert "2 Gruppen" in html, "Counter muss Pending mitzaehlen"
-    assert "6 Findings" in html, "Counter-Summe inkl. Pending erwartet"
+    assert "<b>2</b>" in html and "Gruppen" in html, "Counter muss Pending mitzaehlen"
+    assert "<b>6</b>" in html and "Findings" in html, "Counter-Summe inkl. Pending erwartet"
 
 
 # ---------------------------------------------------------------------------

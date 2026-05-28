@@ -3,7 +3,6 @@
    Posted Form-POST an `/findings/bulk/acknowledge` mit:
      - `bucket_selections` (JSON-String): Liste von {server_id, group_id, filter}.
      - `finding_ids`       (JSON-String): explizite Liste von Finding-IDs.
-     - `comment`           (optional): Audit-Notiz.
 
    Erwartet, dass es INNERHALB eines Containers mit
    `x-data="bucketBulkSelection()"` (siehe `static/js/bucket_bulk_ack.js`)
@@ -11,8 +10,8 @@
    `submitting`, `total`, `openModal()`, `closeModal()`, `onSubmit($event)`
    zu.
 
-   ADR-0006: Comment-Feld ist optional. Keine `required`-Attribute, kein
-   client-seitiges "bitte ausfuellen"-Lock.
+   ADR-0006: kein Comment-/Notiz-/Begruendungs-Feld. Bulk-Ack bestaetigt mit
+   einem einzigen Button.
 
    Sicherheit:
      - CSRF-Token via Hidden-Input (flask-wtf serverseitig validiert).
@@ -53,15 +52,6 @@
         <p class="text-xs opacity-60">
           Bucket-Selektion wird serverseitig zu Findings aufgeloest. Nur OPEN-Findings werden geaendert.
         </p>
-        <label class="form-control">
-          <span class="label-text text-xs opacity-70 pb-1">Kommentar (optional)</span>
-          <textarea name="comment"
-                    class="textarea textarea-bordered textarea-sm"
-                    rows="2"
-                    maxlength="8192"
-                    placeholder="Kurze Notiz fuer den Audit-Log..."
-                    data-test="bucket-bulk-ack-comment"></textarea>
-        </label>
       </div>
       <div class="modal-action">
         <button type="button" class="btn btn-sm btn-ghost"

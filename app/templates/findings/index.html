@@ -36,195 +36,214 @@
 {% block title %}Findings · secscan{% endblock %}
 
 {% block detail_pane %}
-<div id="findings-pane" class="max-w-[1600px] mx-auto px-6 py-6 space-y-6">
-  <header class="flex items-end justify-between gap-3 flex-wrap">
+{# Chip-Remove-URL: aktueller Query-String minus die uebergebenen Keys (und
+   `page`). Rein server-seitig aus `request.args` gebaut — kein neuer
+   Endpoint, keine Python-Aenderung. #}
+{%- macro chip_url(skip) -%}
+{{ url_for('findings.index') }}?{% for k in request.args %}{% if k not in skip and k != 'page' %}{% for v in request.args.getlist(k) %}{{ k | urlencode }}={{ v | urlencode }}&{% endfor %}{% endif %}{% endfor %}
+{%- endmacro -%}
+<div id="findings-pane" class="findings">
+  <header class="findings__header">
     <div>
-      <div class="text-[10px] uppercase tracking-[0.12em] font-mono opacity-65">FINDINGS</div>
-      <h1 class="font-mono text-2xl lg:text-3xl mt-1">Findings</h1>
+      <p class="sd-eyebrow">Findings</p>
+      <h1 class="findings__title">Findings</h1>
     </div>
     {% if is_filtered and total_buckets > 0 %}
-      <div class="text-xs opacity-65" data-test="findings-bucket-counter">
-        {{ total_buckets }} {% if total_buckets == 1 %}Gruppe{% else %}Gruppen{% endif %}
-        · {{ total_findings_in_buckets }} {% if total_findings_in_buckets == 1 %}Finding{% else %}Findings{% endif %}
+      <div class="findings__counter" data-test="findings-bucket-counter">
+        <b>{{ total_buckets }}</b> {% if total_buckets == 1 %}Gruppe{% else %}Gruppen{% endif %}
+        <span class="findings__counter-sep" aria-hidden="true">·</span>
+        <b>{{ total_findings_in_buckets }}</b> {% if total_findings_in_buckets == 1 %}Finding{% else %}Findings{% endif %}
       </div>
     {% endif %}
   </header>
 
-  {# Filter-Bar als GET-Form ohne hx-trigger — expliziter Submit via
-     "Anwenden"-Button. Keine Sort-/Dir-Hidden-Inputs mehr (ADR-0037 §(5):
-     Sort-Selector entfaellt fuer die Bucket-View). #}
+  {# Filter-Bar als GET-Form ohne hx-trigger — expliziter Submit. Keine Sort-/
+     Dir-Hidden-Inputs (ADR-0037 §(5): Sort-Selector entfaellt). KEV/Stale-
+     Toggles via Alpine (aria-pressed-Pill + Hidden-Input fuer den GET-Submit).
+     Default-empty `kev_only=`/`stale_only=` wird vom DashboardFilter-Parser als
+     falsy gewertet. #}
   <form method="get" action="{{ url_for('findings.index') }}"
-        class="card bg-base-200/40 border border-base-300 p-3"
+        class="findings__filter-bar"
+        role="search"
+        x-data="{ kev: {{ 'true' if filt.kev_only else 'false' }}, stale: {{ 'true' if filt.stale_only else 'false' }} }"
         data-test="findings-filter-form">
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 items-end">
-      <label class="form-control">
-        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Suche</span>
-        <input type="search" name="q" value="{{ filt.q or '' }}"
-               placeholder="CVE / Paket / Server / Titel"
-               class="input input-sm input-bordered"
-               maxlength="128"
-               autocomplete="off"
-               data-test="filter-q">
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Tag</span>
-        <select name="tag" class="select select-sm select-bordered" data-test="filter-tag">
-          <option value="">alle Tags</option>
-          {% for t in available_tags %}
-            <option value="{{ t.name }}" {% if t.name in filt.tags %}selected{% endif %}>#{{ t.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Risk-Band</span>
-        <select name="risk_band" class="select select-sm select-bordered" data-test="filter-risk-band">
-          <option value="">alle</option>
-          {% for b in ['escalate','act','mitigate','pending','unknown','monitor','noise'] %}
-            <option value="{{ b }}" {% if filt.risk_band == b %}selected{% endif %}>{{ b }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">App-Group</span>
-        <select name="application_group" class="select select-sm select-bordered" data-test="filter-application-group">
-          <option value="">alle Groups</option>
-          {% for g in available_application_groups %}
-            <option value="{{ g.id }}" {% if filt.application_group_id == g.id %}selected{% endif %}>{{ g.label }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Action</span>
-        <select name="action_required" class="select select-sm select-bordered" data-test="filter-action-required">
-          <option value="">alle</option>
-          <option value="yes" {% if filt.action_required == 'yes' %}selected{% endif %}>yes</option>
-          <option value="no"  {% if filt.action_required == 'no'  %}selected{% endif %}>no</option>
-        </select>
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Severity (min)</span>
-        <select name="severity" class="select select-sm select-bordered" data-test="filter-severity">
-          <option value="">alle</option>
-          {% for sev in ['critical','high','medium','low'] %}
-            <option value="{{ sev }}" {% if filt.severity and filt.severity.value == sev %}selected{% endif %}>{{ sev }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-65 font-mono uppercase tracking-wide">Status</span>
-        <select name="status" class="select select-sm select-bordered" data-test="filter-status">
-          {% for st in ['open','acknowledged','resolved','all'] %}
-            <option value="{{ st }}" {% if filt.status == st %}selected{% endif %}>{{ st }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <div class="flex flex-col gap-1 text-xs">
-        <label class="cursor-pointer flex items-center gap-2">
-          <input type="checkbox" name="kev_only" value="1" {% if filt.kev_only %}checked{% endif %}
-                 class="checkbox checkbox-sm" data-test="filter-kev-only">
-          <span>nur KEV</span>
-        </label>
-        <label class="cursor-pointer flex items-center gap-2">
-          <input type="checkbox" name="stale_only" value="1" {% if filt.stale_only %}checked{% endif %}
-                 class="checkbox checkbox-sm" data-test="filter-stale-only">
-          <span>nur stale</span>
-        </label>
-      </div>
-    </div>
+    <input class="ff-input ff-q" type="search" name="q" value="{{ filt.q or '' }}"
+           placeholder="suche CVE, paket, titel, server…"
+           maxlength="128" autocomplete="off"
+           aria-label="Suche" data-test="filter-q">
 
-    <div class="mt-3 flex items-center justify-between gap-2 flex-wrap">
-      <div class="text-xs opacity-60">
-        {% if is_filtered and total_buckets == 0 %}
-          Kein Treffer fuer diesen Filter.
-        {% endif %}
-      </div>
-      <div class="flex items-center gap-2">
-        {# CSV-Export: aktiver Filter, alle Seiten (ADR-0020 unveraendert). #}
-        <a href="{{ url_for('findings.export_csv') }}?{{ view_filter.to_query_string() }}"
-           class="btn btn-xs btn-ghost gap-1.5"
-           download
-           data-test="findings-csv-export">
-          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-               aria-hidden="true">
-            <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
-          </svg>
-          csv exportieren
-        </a>
-        <button type="submit" class="btn btn-sm btn-primary" data-test="findings-submit">
-          Anwenden
-        </button>
-      </div>
-    </div>
+    <select class="ff-select" name="tag" aria-label="Tag" data-test="filter-tag">
+      <option value="">tag · alle</option>
+      {% for t in available_tags %}
+        <option value="{{ t.name }}" {% if t.name in filt.tags %}selected{% endif %}>tag · {{ t.name }}</option>
+      {% endfor %}
+    </select>
+
+    <select class="ff-select" name="risk_band" aria-label="Risk-Band" data-test="filter-risk-band">
+      <option value="">risk-band · alle</option>
+      {% for b in ['escalate','act','mitigate','pending','unknown','monitor','noise'] %}
+        <option value="{{ b }}" {% if filt.risk_band == b %}selected{% endif %}>risk-band · {{ b }}</option>
+      {% endfor %}
+    </select>
+
+    <select class="ff-select" name="application_group" aria-label="Application-Group" data-test="filter-application-group">
+      <option value="">app-group · alle</option>
+      {% for g in available_application_groups %}
+        <option value="{{ g.id }}" {% if filt.application_group_id == g.id %}selected{% endif %}>app-group · {{ g.label }}</option>
+      {% endfor %}
+    </select>
+
+    <select class="ff-select" name="action_required" aria-label="Action required" data-test="filter-action-required">
+      <option value="">action · alle</option>
+      <option value="yes" {% if filt.action_required == 'yes' %}selected{% endif %}>action · required</option>
+      <option value="no"  {% if filt.action_required == 'no'  %}selected{% endif %}>action · none</option>
+    </select>
+
+    <select class="ff-select" name="severity" aria-label="Severity min" data-test="filter-severity">
+      <option value="">severity · alle</option>
+      {% for sev in ['critical','high','medium','low'] %}
+        <option value="{{ sev }}" {% if filt.severity and filt.severity.value == sev %}selected{% endif %}>severity ≥ {{ sev }}</option>
+      {% endfor %}
+    </select>
+
+    <select class="ff-select" name="status" aria-label="Status" data-test="filter-status">
+      {% for st in ['open','acknowledged','resolved','all'] %}
+        <option value="{{ st }}" {% if filt.status == st %}selected{% endif %}>status · {{ st }}</option>
+      {% endfor %}
+    </select>
+
+    <input type="hidden" name="kev_only" :value="kev ? '1' : ''">
+    <button type="button" class="ff-toggle" :aria-pressed="kev" @click="kev = !kev" data-test="filter-kev-only">
+      <span class="ff-toggle__dot" aria-hidden="true"></span>
+      <span>KEV only</span>
+    </button>
+
+    <input type="hidden" name="stale_only" :value="stale ? '1' : ''">
+    <button type="button" class="ff-toggle" :aria-pressed="stale" @click="stale = !stale" data-test="filter-stale-only">
+      <span class="ff-toggle__dot" aria-hidden="true"></span>
+      <span>Stale only</span>
+    </button>
+
+    <button type="submit" class="ff-submit" data-test="findings-submit">
+      <span>filter</span>
+      <span aria-hidden="true">→</span>
+    </button>
+    <a href="{{ url_for('findings.index') }}" class="ff-reset" data-test="findings-reset">zurücksetzen</a>
+
+    {# CSV-Export: filter-scoped, alle Seiten (ADR-0020 unveraendert). Bleibt in
+       der Filter-Bar (immer erreichbar), nicht in der nur-bei-Selektion
+       sichtbaren Bulk-Toolbar. #}
+    <a href="{{ url_for('findings.export_csv') }}?{{ view_filter.to_query_string() }}"
+       class="ff-reset" download data-test="findings-csv-export">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+        <path d="M12 3v14" /><path d="M6 11l6 6 6-6" /><path d="M4 21h16" />
+      </svg>
+      <span>csv exportieren</span>
+    </a>
   </form>
 
+  {# Aktive-Filter-Chips: nur wenn ein Filter aktiv ist. Jeder Chip linkt mit ×
+     auf den Filter ohne diesen Key. #}
+  {% if filt.is_active %}
+    <div class="findings__filter-chips" role="region" aria-label="Aktive Filter" data-test="findings-filter-chips">
+      {% if filt.q %}
+        <span class="ff-chip"><b>q</b><span>{{ filt.q }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['q']) }}" aria-label="Filter q entfernen">×</a></span>
+      {% endif %}
+      {% if filt.tags %}
+        <span class="ff-chip"><b>tag</b><span>{{ filt.tags | join(', ') }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['tag','tags']) }}" aria-label="Filter tag entfernen">×</a></span>
+      {% endif %}
+      {% if filt.risk_band %}
+        <span class="ff-chip"><b>risk-band</b><span>{{ filt.risk_band }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['risk_band']) }}" aria-label="Filter risk-band entfernen">×</a></span>
+      {% endif %}
+      {% if filt.application_group_id %}
+        {%- set _ag_label = (available_application_groups | selectattr('id', 'equalto', filt.application_group_id) | map(attribute='label') | first) or filt.application_group_id -%}
+        <span class="ff-chip"><b>app-group</b><span>{{ _ag_label }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['application_group']) }}" aria-label="Filter app-group entfernen">×</a></span>
+      {% endif %}
+      {% if filt.action_required %}
+        <span class="ff-chip"><b>action</b><span>{{ filt.action_required }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['action_required']) }}" aria-label="Filter action entfernen">×</a></span>
+      {% endif %}
+      {% if filt.severity %}
+        <span class="ff-chip"><b>severity</b><span>{{ filt.severity.value }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['severity']) }}" aria-label="Filter severity entfernen">×</a></span>
+      {% endif %}
+      {% if filt.status != 'open' %}
+        <span class="ff-chip"><b>status</b><span>{{ filt.status }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['status']) }}" aria-label="Filter status entfernen">×</a></span>
+      {% endif %}
+      {% if filt.kev_only %}
+        <span class="ff-chip"><b>kev</b><span>on</span>
+          <a class="ff-chip__x" href="{{ chip_url(['kev_only']) }}" aria-label="Filter kev entfernen">×</a></span>
+      {% endif %}
+      {% if filt.stale_only %}
+        <span class="ff-chip"><b>stale</b><span>on</span>
+          <a class="ff-chip__x" href="{{ chip_url(['stale_only']) }}" aria-label="Filter stale entfernen">×</a></span>
+      {% endif %}
+    </div>
+  {% endif %}
+
   {% if not is_filtered %}
-    {# Empty-State: kein Render der Bucket-Liste. #}
-    <div class="card bg-base-200/40 border border-base-300" data-test="findings-empty-state">
-      <div class="card-body items-center text-center py-12">
-        <p class="text-base">Filter setzen oder suchen — die Liste bleibt sonst leer.</p>
-        <p class="text-sm opacity-65">
-          Insgesamt <span class="font-mono font-semibold">{{ total_findings }}</span> Findings ueber
-          <span class="font-mono font-semibold">{{ visible_servers }}</span> Server.
-        </p>
-      </div>
+    {# Empty-State: kein Render der Bucket-Liste (Spec §3). Zwei mono-Zeilen,
+       `>`-Prefix via CSS, zentriert. #}
+    <div class="findings__empty" role="status" data-test="findings-empty-state">
+      <p class="findings__empty-line">
+        <b>{{ total_findings }}</b> findings im fleet, <b>{{ visible_servers }}</b> servers.
+      </p>
+      <p class="findings__empty-line">
+        setze einen filter oder suche nach CVE, paket oder server.
+      </p>
     </div>
   {% elif total_buckets == 0 %}
-    <div class="card bg-base-200/40 border border-base-300">
-      <div class="card-body items-center text-center py-10">
-        <p class="opacity-60 italic">Kein Treffer fuer diesen Filter.</p>
-      </div>
+    <div class="findings__empty" role="status" data-test="findings-no-match">
+      <p class="findings__empty-line">Kein Treffer für diesen Filter.</p>
+      <p class="findings__empty-line">Filter lockern oder zurücksetzen.</p>
     </div>
   {% else %}
-    {# Bucket-Liste mit Alpine-State fuer Bucket+Finding-Selektion. Der
-       gesamte Bereich (inkl. Bulk-Toolbar, Bulk-Bar, Cards, Modal) lebt im
-       gleichen `x-data`-Scope — sonst sehen Modal und Toolbar die
-       Selection-Listen nicht. #}
+    {# Bucket-Liste mit Alpine-State fuer Bucket+Finding-Selektion. Bulk-Toolbar,
+       Cards und Modal teilen den `bucketBulkSelection()`-Scope. #}
     <section id="findings-section"
              data-test="findings-buckets-section"
              x-data="bucketBulkSelection()">
 
-      <div class="flex items-center gap-2 flex-wrap mb-3">
+      <div class="findings__bulk-toolbar"
+           x-show="total > 0"
+           x-cloak
+           role="region"
+           aria-label="Bulk-Aktionen"
+           data-test="bucket-bulk-bar">
+        <span class="ff-bulk-count"><b x-text="total"></b> ausgewählt</span>
         <button type="button"
-                class="btn btn-xs btn-primary gap-1"
-                x-show="total > 0"
-                x-cloak
+                class="ff-bulk-ack"
                 @click="openModal()"
                 data-test="bucket-bulk-toolbar">
-          auswahl ack
-          <span class="font-mono opacity-80" x-text="'·' + total"></span>
+          <span>Auswahl ack</span>
+          <span aria-hidden="true">→</span>
         </button>
-      </div>
-
-      <div x-show="total > 0"
-           x-cloak
-           x-transition.opacity
-           class="flex items-center gap-3 px-3 py-1.5 mb-2 text-xs bg-base-200/40 rounded-box"
-           role="region"
-           aria-label="Bucket-Auswahl-Zaehler"
-           data-test="bucket-bulk-bar">
-        <span><span x-text="total" class="font-semibold"></span> ausgewaehlt</span>
         <button type="button"
-                class="btn btn-ghost btn-xs"
+                class="ff-bulk-link ff-bulk-link--right"
                 @click="clearAll()"
-                data-test="bucket-bulk-clear">Auswahl leeren</button>
+                data-test="bucket-bulk-clear">Auswahl aufheben</button>
       </div>
 
-      {% for bucket in buckets %}
-        {% with filter_qs=filter_qs %}
-          {% include "_partials/bucket_card.html" %}
-        {% endwith %}
-      {% endfor %}
+      <div class="findings__list">
+        {% for bucket in buckets %}
+          {% with filter_qs=filter_qs %}
+            {% include "_partials/bucket_card.html" %}
+          {% endwith %}
+        {% endfor %}
 
-      {% if pending_bucket %}
-        {% with bucket=pending_bucket, filter_qs=filter_qs %}
-          {% include "_partials/pending_bucket_card.html" %}
-        {% endwith %}
-      {% endif %}
+        {% if pending_bucket %}
+          {% with bucket=pending_bucket, filter_qs=filter_qs %}
+            {% include "_partials/pending_bucket_card.html" %}
+          {% endwith %}
+        {% endif %}
+      </div>
 
-      {# Bulk-Ack-Modal — eigenes Mini-Modal (Form-POST), weil das bestehende
-         `bulk_ack_modal()`-Macro auf die JSON-API
-         `/api/findings/bulk-acknowledge` zielt. #}
       {% include "_partials/bucket_bulk_ack_modal.html" %}
     </section>
   {% endif %}
