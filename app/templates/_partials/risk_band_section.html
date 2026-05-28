@@ -1,18 +1,20 @@
-{# Risk-Band-Slot fuer die Triage-Queue (ADR-0038 Re-Implementation,
-   2026-05-25). Direkt-Rendering der Findings — KEIN Application-Group-
-   Zwischenlayer mehr (Group-Sicht lebt in den Operator-Workflows).
+{# Risk-Band-Slot fuer die Triage-Queue.
+
+   Block Y Phase A (ADR-0039 §1): der Body ist ein Lazy-Slot — Findings
+   kommen vom Triage-Endpoint (Phase C wired `hx-get`+`hx-trigger`).
+   Block Y Phase C (ADR-0039 §3): der Body laedt jetzt die erste Page
+   automatisch wenn das Band default-open ist (`hx-trigger="load"`),
+   sonst beim ersten Aufklappen des `<details>` (`hx-trigger="toggle …
+   once"`).
 
    Variablen-Vertrag (durchgereicht aus _view_groups.html):
-     - section : dict mit Keys `band`, `findings`, `total_count`,
-                 `is_empty`, `default_open` — siehe
-                 `_build_risk_band_sections()` in app/views/server_detail.py.
+     - section : dict mit Keys `band`, `total_count`, `is_empty`,
+                 `default_open` — siehe `_view_groups.html`.
      - server  : Server-ORM.
 
-   Sicherheit: f.identifier_key, f.package_name, f.installed_version,
-   f.fixed_version, f.title, f.risk_band_reason sind alle escaped via
-   Jinja-Autoescape — niemals `|safe` auf LLM-Output (ADR-0038 §G4).
+   Sicherheit: section.band ist server-seitig auf eine feste Whitelist
+   beschraenkt (_RISK_BAND_SECTION_ORDER), kein User-Input.
 #}
-{% from "_macros.html" import kev_badge %}
 {%- if not section.is_empty -%}
 <details class="sd-band"
          data-test="risk-band-{{ section.band }}"
@@ -23,81 +25,15 @@
     <span aria-hidden="true"></span>
     <span class="sd-band__count"><b>{{ section.total_count }}</b>findings</span>
   </summary>
-  <div class="sd-band__body">
-    <div class="sd-findings-head" aria-hidden="true">
-      <span></span>
-      <span>CVE / Titel</span>
-      <span>Paket</span>
-      <span class="sd-findings-head__right">EPSS</span>
-      <span class="sd-findings-head__right">CVSS</span>
-      <span class="sd-findings-head__right">Severity</span>
+  <div class="sd-band__body"
+       id="risk-band-{{ section.band }}-body"
+       data-test="risk-band-body-{{ section.band }}"
+       hx-get="{{ url_for('server_detail.triage_band_fragment', server_id=server.id, band=section.band, page=1) }}"
+       {% if section.default_open %}hx-trigger="load"{% else %}hx-trigger="toggle from:closest details once"{% endif %}
+       hx-swap="innerHTML">
+    <div class="sd-skel-frame" data-test="risk-band-skel-{{ section.band }}">
+      <p class="sd-empty">Lade Findings …</p>
     </div>
-    {%- for f in section.findings -%}
-      {%- set _sev_str = (f.severity.value if f.severity is not string else f.severity) | lower -%}
-      {%- set _is_top_sev = _sev_str in ('critical', 'high') -%}
-      <details class="sd-finding"
-               id="finding-{{ f.id }}"
-               data-test="band-finding-{{ f.id }}">
-        <summary class="sd-finding__summary">
-          <input type="checkbox"
-                 class="sd-checkbox"
-                 value="{{ f.id }}"
-                 aria-label="Finding {{ f.identifier_key }} auswaehlen"
-                 data-bulk-id="true"
-                 x-data
-                 :checked="(window.__detailSelected || []).includes({{ f.id }})"
-                 @change="
-                   const cur = window.__detailSelected || [];
-                   window.__detailSelected = $event.target.checked
-                     ? [...cur, {{ f.id }}]
-                     : cur.filter(id => id !== {{ f.id }});
-                   window.dispatchEvent(new CustomEvent('detail-selection-changed', {
-                     detail: { count: window.__detailSelected.length }
-                   }));
-                 ">
-          <div class="sd-finding__cve">
-            <span class="sd-finding__cve-id">
-              {{ f.identifier_key }}
-              {{ kev_badge(f.is_kev, size='xs') }}
-            </span>
-            {% if f.title %}
-              <span class="sd-finding__title" title="{{ f.title }}">{{ f.title }}</span>
-            {% endif %}
-          </div>
-          <div class="sd-finding__pkg">
-            <span class="sd-finding__pkg-name">{{ f.package_name }}</span>
-            {% if f.installed_version %}
-              <span class="sd-finding__pkg-diff">
-                <span class="sd-finding__pkg-from">{{ f.installed_version }}</span>
-                {% if f.fixed_version %}
-                  <span class="sd-finding__pkg-arrow">→</span>
-                  <span class="sd-finding__pkg-to">{{ f.fixed_version }}</span>
-                {% endif %}
-              </span>
-            {% endif %}
-          </div>
-          <span class="sd-cap sd-cap--neutral">
-            {%- if f.epss_score is not none -%}
-              {{ "%.3f" | format(f.epss_score) }}
-            {%- else -%}—{%- endif -%}
-          </span>
-          <span class="sd-cap sd-cap--neutral">
-            {%- if f.cvss_v3_score is not none -%}
-              {{ "%.1f" | format(f.cvss_v3_score) }}
-            {%- else -%}—{%- endif -%}
-          </span>
-          <span class="sd-cap {% if _is_top_sev %}sd-cap--accent{% else %}sd-cap--neutral{% endif %}">
-            {{ _sev_str | upper if _sev_str else '—' }}
-          </span>
-        </summary>
-        {%- if f.risk_band_reason -%}
-          <div class="sd-finding__body">
-            <p class="sd-ai-eyebrow">KI-Bewertung</p>
-            <p class="sd-ai-text">{{ f.risk_band_reason }}</p>
-          </div>
-        {%- endif -%}
-      </details>
-    {%- endfor -%}
   </div>
 </details>
 {%- endif -%}

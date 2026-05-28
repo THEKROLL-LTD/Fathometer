@@ -44,8 +44,9 @@
    and (not server.trivy_db_updated_at
         or server.trivy_db_updated_at | is_older_than_h(168)) %}
 {% set _snapshot_at = server.host_state_snapshot_at %}
-{% set _listeners_list = listeners | default([]) %}
-{% set _services_list = services | default([]) %}
+{# Block Y / ADR-0039 §1: listeners/services kommen aus dem Host-Snapshot-
+   Fragment-Endpoint (Phase B). Im Initial-Render gibt es weder Counts noch
+   die Flyout-Panel-Inhalte. #}
 
 {# Combined Alpine scope: trendRange fuer Severity-Trend-Section +
    serverPillPanels-State (open/toggle) fuer Listeners/Services-Chips.
@@ -230,6 +231,8 @@
     <span class="sd-sysline__sep">·</span>
     <span class="sd-sysline__seg">expected interval <b>{{ server.expected_scan_interval_h }} h</b></span>
 
+    {# Block Y Phase A: Counts kommen aus dem Host-Snapshot-Fragment (Phase B).
+       Im Initial-Render bleibt die Chip-Zahl ein Em-Dash. #}
     <button type="button"
             class="sd-chip"
             :aria-expanded="open === 'listeners' ? 'true' : 'false'"
@@ -238,7 +241,7 @@
             data-test="pill-listeners"
             {% if _snapshot_at is none %}disabled title="Update agent to >= 0.3.0 for snapshot"{% endif %}>
       <span>Listeners &amp; services</span>
-      <span class="sd-chip__count">{{ _listeners_list | length }}</span>
+      <span class="sd-chip__count">—</span>
       <span class="sd-chip__caret" aria-hidden="true">&#x203A;</span>
     </button>
     <button type="button"
@@ -249,16 +252,18 @@
             data-test="pill-services"
             {% if _snapshot_at is none %}disabled title="Update agent to >= 0.3.0 for snapshot"{% endif %}>
       <span>Active services</span>
-      <span class="sd-chip__count">{{ _services_list | length }}</span>
+      <span class="sd-chip__count">—</span>
       <span class="sd-chip__caret" aria-hidden="true">&#x203A;</span>
     </button>
   </div>
 
-  {# Flyouts haengen direkt unter der Sysline. Track D refactored die Partials. #}
-  {% if _snapshot_at is not none %}
-    {% include "_partials/server_pill_listeners.html" %}
-    {% include "_partials/server_pill_services.html" %}
-  {% endif %}
+  {# Block Y Phase B (ADR-0039 §2): Host-Snapshot-Slot. Der Fragment-Endpoint
+     liefert die beiden Slide-Down-Panels (Listeners + Services) und ersetzt
+     diesen DIV per outerHTML. #}
+  <div id="sd-host-snapshot"
+       hx-get="{{ url_for('server_detail.host_snapshot_fragment', server_id=server.id) }}"
+       hx-trigger="load"
+       hx-swap="outerHTML"></div>
 
   {# ── 3) Operator-Workflows ── #}
   {% include "servers/_action_needed_section.html" %}
@@ -270,89 +275,86 @@
       <div class="sd-stats__num">
         <strong>{{ quick_counts.total_open | default(0) }}</strong>
         {% if tendency is defined and tendency is not none %}
-          <span class="sd-stats__delta">{{ tendency.label }}</span>
+          <span id="sd-stats-delta" class="sd-stats__delta">{{ tendency.label }}</span>
         {% endif %}
       </div>
       <p class="sd-stats__total">von {{ total_findings_count | default(0) }} Findings gesamt</p>
     </div>
-    <div class="sd-tiles">
+    {# Block Y Phase B (ADR-0039 §2): KPI-Tiles-Skeleton. Der Sparklines-
+       Fragment-Endpoint ersetzt diesen DIV (inkl. Sparklines) per
+       outerHTML. Initial-Render zeigt die KPI-Zahl, aber leere Sparkline. #}
+    <div class="sd-tiles"
+         id="sd-tiles"
+         hx-get="{{ url_for('server_detail.sparklines_fragment', server_id=server.id) }}"
+         hx-trigger="load"
+         hx-swap="outerHTML">
       {% with label='KEV', value=quick_counts.kev_open | default(0), tone='error',
-              sparkline=sparklines.kev | default([]), kev_indicator=true %}
+              sparkline=[], kev_indicator=true %}
         {% include "servers/_kpi_card.html" %}
       {% endwith %}
       {% with label='Critical', value=quick_counts.critical_open | default(0), tone='error',
-              sparkline=sparklines.critical | default([]), kev_indicator=false %}
+              sparkline=[], kev_indicator=false %}
         {% include "servers/_kpi_card.html" %}
       {% endwith %}
       {% with label='High', value=quick_counts.high_open | default(0), tone='warning',
-              sparkline=sparklines.high | default([]), kev_indicator=false %}
+              sparkline=[], kev_indicator=false %}
         {% include "servers/_kpi_card.html" %}
       {% endwith %}
       {% with label='Medium', value=quick_counts.medium_open | default(0), tone='accent',
-              sparkline=sparklines.medium | default([]), kev_indicator=false %}
+              sparkline=[], kev_indicator=false %}
         {% include "servers/_kpi_card.html" %}
       {% endwith %}
     </div>
   </section>
 
   {# ── 5) Lebenszeichen ── #}
-  <section class="sd-section">
+  {# Block Y Phase A: Heartbeat-Markup ist ein Skeleton. Der Live-Inhalt
+     kommt aus dem Heartbeat-Fragment-Endpoint (Phase B). Bei never-scanned
+     bleibt der Empty-State erhalten (kein Fragment-Trigger noetig). #}
+  <section class="sd-section" data-test="heartbeat-section">
     <p class="sd-eyebrow">Lebenszeichen · 30 Tage</p>
     <h2 class="sd-h3">Tägliche Scans · Worst-Risk-Band pro Tag</h2>
-    {% if server.host_state_snapshot_at is none %}
-      <div class="sd-heartbeat-frame sd-heartbeat-frame--empty" data-test="heartbeat-empty">
-        <p class="sd-empty">— noch nie gescannt</p>
-      </div>
-    {% else %}
-      {% with cells=heartbeat_cells | default([]) %}
-        {% include "servers/_heartbeat_large.html" %}
-      {% endwith %}
-    {% endif %}
+    {# Block Y Phase B (ADR-0039 §2): Heartbeat-Skeleton. Das Fragment
+       liefert entweder den --empty-State (never-scanned) oder die volle
+       Heartbeat-Bar und ersetzt diesen DIV per outerHTML. #}
+    <div id="sd-heartbeat"
+         hx-get="{{ url_for('server_detail.heartbeat_fragment', server_id=server.id) }}"
+         hx-trigger="load"
+         hx-swap="outerHTML">
+      {% if server.host_state_snapshot_at is none %}
+        <div class="sd-heartbeat-frame sd-heartbeat-frame--empty" data-test="heartbeat-empty">
+          <p class="sd-empty">— noch nie gescannt</p>
+        </div>
+      {% else %}
+        {% with cells=[], skel=True %}
+          {% include "servers/_heartbeat_large.html" %}
+        {% endwith %}
+      {% endif %}
+    </div>
   </section>
 
   {# ── 6) Severity-Trend ── #}
-  <section class="sd-section">
+  {# Block Y Phase A: Trend-Chart und Legende kommen aus dem Trend-Fragment-
+     Endpoint (Phase B). Initial-Render rendert das Chart-Skeleton mit
+     30 leeren Spalten und ohne Legende. #}
+  <section class="sd-section" data-test="trend-section">
     <p class="sd-eyebrow">Severity trend · pro Tag</p>
     <h2 class="sd-h3">
       Verteilung der offenen Findings über
       <span x-text="trendRange === '24h' ? '24 Stunden' : trendRange === '7T' ? '7 Tage' : '30 Tage'"></span>
     </h2>
-    {% with days_data=trend_data | default([]) %}
-      {% include "servers/_stacked_bar_chart.html" %}
-    {% endwith %}
-    {% if trend_data %}
-      {% set t_critical = trend_data | sum(attribute='critical') %}
-      {% set t_high = trend_data | sum(attribute='high') %}
-      {% set t_medium = trend_data | sum(attribute='medium') %}
-      {% set t_low = trend_data | sum(attribute='low') %}
-      {% set t_sum = t_critical + t_high + t_medium + t_low %}
-      <div class="sd-trend-legend">
-        <span class="sd-trend-legend__item">
-          <span class="sd-trend-seg sd-trend-seg--critical" style="width:10px;height:10px;display:inline-block"></span>
-          <span>Critical</span>
-          <span class="sd-trend-legend__count">{{ t_critical }}</span>
-          <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_critical * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
-        </span>
-        <span class="sd-trend-legend__item">
-          <span class="sd-trend-seg sd-trend-seg--high" style="width:10px;height:10px;display:inline-block"></span>
-          <span>High</span>
-          <span class="sd-trend-legend__count">{{ t_high }}</span>
-          <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_high * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
-        </span>
-        <span class="sd-trend-legend__item">
-          <span class="sd-trend-seg sd-trend-seg--medium" style="width:10px;height:10px;display:inline-block"></span>
-          <span>Medium</span>
-          <span class="sd-trend-legend__count">{{ t_medium }}</span>
-          <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_medium * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
-        </span>
-        <span class="sd-trend-legend__item">
-          <span class="sd-trend-seg sd-trend-seg--low" style="width:10px;height:10px;display:inline-block"></span>
-          <span>Low</span>
-          <span class="sd-trend-legend__count">{{ t_low }}</span>
-          <span class="sd-trend-legend__pct">{% if t_sum %}{{ '%.1f' | format(t_low * 100.0 / t_sum) | replace('.',',') }}%{% else %}0%{% endif %}</span>
-        </span>
-      </div>
-    {% endif %}
+    {# Block Y Phase B (ADR-0039 §2): Trend-Skeleton. Das Fragment liefert
+       das volle Chart + Legende und ersetzt diesen DIV per outerHTML.
+       Zusaetzlich wird die Tendency-Quick-Schaetzung im Header per OOB-
+       Swap mit der vollen 30-Tage-Aggregation ueberschrieben. #}
+    <div id="sd-trend"
+         hx-get="{{ url_for('server_detail.trend_fragment', server_id=server.id) }}"
+         hx-trigger="load"
+         hx-swap="outerHTML">
+      {% with days_data=[], skel=True %}
+        {% include "servers/_stacked_bar_chart.html" %}
+      {% endwith %}
+    </div>
   </section>
 
   {# ── 7) Triage Queue ── #}

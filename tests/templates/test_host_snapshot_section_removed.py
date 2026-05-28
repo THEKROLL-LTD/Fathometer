@@ -44,16 +44,26 @@ def test_host_snapshot_partial_does_not_exist() -> None:
 
 
 def test_detail_html_no_longer_includes_host_snapshot() -> None:
-    """Phase C: detail.html includet host_snapshot.html nicht mehr.
+    """Phase C: detail.html includet das geloeschte _partials/host_snapshot.html
+    nicht mehr (ADR-0038 §(3) C8).
 
-    Kein Include-Pfad und kein Dateiname darf noch im Source vorhanden sein
-    (ADR-0038 §(3) C8).
+    Block Y Phase B (ADR-0039): detail.html referenziert weiterhin den
+    Endpoint-Namen `server_detail.host_snapshot_fragment` via `url_for`
+    fuer den HTMX-Slot. Dieser Verweis ist erlaubt; verboten ist nur das
+    Include des alten Partials oder das alte data-test-Marker.
     """
     source = _DETAIL_PATH.read_text(encoding="utf-8")
 
-    assert "host_snapshot" not in source, (
-        f"'host_snapshot' ist noch im detail.html-Source vorhanden. "
+    assert "_partials/host_snapshot.html" not in source, (
+        f"Include-Pfad '_partials/host_snapshot.html' ist noch im detail.html-Source. "
         f"Erwartet: kein Include-Verweis auf das geloeschte Partial. "
+        f"ADR-0038 §(3) Task C8. Template-Pfad: {_DETAIL_PATH}"
+    )
+    # Auch ein bloßer Include-Befehl mit dem Dateinamen ist verboten — wir
+    # erlauben aber den Endpoint-Namen `host_snapshot_fragment` (Block Y
+    # Phase B, ADR-0039) als legitime Referenz.
+    assert "include " not in source.lower() or "host_snapshot.html" not in source, (
+        f"'include ... host_snapshot.html' ist noch im detail.html-Source. "
         f"ADR-0038 §(3) Task C8. Template-Pfad: {_DETAIL_PATH}"
     )
 

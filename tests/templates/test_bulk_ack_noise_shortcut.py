@@ -42,6 +42,19 @@ _FINDINGS_SECTION_PATH = (
     Path(__file__).parent.parent.parent / "app" / "templates" / "servers" / "_findings_section.html"
 )
 
+# Block Y Phase B (ADR-0039): die Bulk-Ack-Noise-Toolbar (Button + Modal-
+# Include) ist aus _findings_section.html ausgelagert in das Noise-Fragment-
+# Partial. Die statischen Source-Checks und die Snippet-Renders pruefen
+# daher das Fragment-Partial.
+_NOISE_FRAGMENT_PATH = (
+    Path(__file__).parent.parent.parent
+    / "app"
+    / "templates"
+    / "servers"
+    / "_partials"
+    / "noise_fragment.html"
+)
+
 _BULK_MODAL_PATH = (
     Path(__file__).parent.parent.parent
     / "app"
@@ -57,8 +70,13 @@ _BULK_MODAL_PATH = (
 
 
 def _load_findings_section_source() -> str:
-    """Laedt _findings_section.html-Source direkt vom Filesystem."""
-    return _FINDINGS_SECTION_PATH.read_text(encoding="utf-8")
+    """Laedt _findings_section.html-Source direkt vom Filesystem.
+
+    Block Y Phase B: viele Source-Substring-Checks pruefen jetzt das
+    Noise-Fragment-Partial statt _findings_section.html — _findings_section.
+    html enthaelt nach Phase B nur noch den HTMX-Slot.
+    """
+    return _NOISE_FRAGMENT_PATH.read_text(encoding="utf-8")
 
 
 def _load_bulk_modal_source() -> str:
@@ -67,12 +85,13 @@ def _load_bulk_modal_source() -> str:
 
 
 def _extract_noise_button_snippet(source: str) -> str:
-    """Extrahiert den Bulk-Ack-Noise-Block aus _findings_section.html.
+    """Extrahiert den Bulk-Ack-Noise-Block aus noise_fragment.html.
 
-    Der Block beginnt mit dem Block-O-Kommentar und dem if-Statement und
-    endet mit dem passenden {% endif %}.
+    Block Y Phase B: das Markup lebt jetzt im Noise-Fragment-Partial.
+    Der Block beginnt mit dem if-Statement (noise_total > 0) und endet
+    mit dem passenden {% endif %}.
     """
-    start_marker = "{% if (noise_total | default(0)) > 0 %}"
+    start_marker = "{% if _noise_total > 0 %}"
     end_marker = "{% endif %}"
 
     start_idx = source.index(start_marker)
@@ -95,28 +114,23 @@ def _render_noise_snippet(
     noise_total: int | None,
     noise_findings: list[SimpleNamespace] | None = None,
 ) -> str:
-    """Rendert den Noise-Button-Snippet mit einem Stub fuer das Modal-Include.
+    """Rendert das vollstaendige Noise-Fragment-Partial.
 
-    Das ``{% include "servers/_bulk_ack_noise_modal.html" %}`` im Snippet
-    wird aufgeloest, weil wir Flask-Env nutzen — das Modal wird real gerendert.
-    Wir uebergeben minimale noise_findings und noise_total.
+    Block Y Phase B: das Bulk-Ack-Noise-Markup lebt jetzt im Noise-
+    Fragment-Partial; statt einer Snippet-Extraktion rendern wir das Partial
+    direkt. Das ``{% include "servers/_bulk_ack_noise_modal.html" %}``
+    innerhalb wird real aufgeloest.
     """
-    snippet = _extract_noise_button_snippet(_load_findings_section_source())
+    from flask import render_template
 
     ctx: dict[str, Any] = {}
     if noise_total is not None:
         ctx["noise_total"] = noise_total
-    # noise_findings fuer das {% include %} Modal-Partial
     ctx["noise_findings"] = noise_findings or []
-
-    # server wird im Modal-Partial referenziert (aria-labelledby etc.), nicht
-    # direkt im Button-Block; wir uebergeben None — das Modal rendert ohne
-    # server.name, aber das ist fuer diese Unit-Tests irrelevant.
     ctx["server"] = SimpleNamespace(id=1, name="test-server")
 
     with app.test_request_context("/servers/1"):
-        tmpl = app.jinja_env.from_string(snippet)
-        return tmpl.render(**ctx)
+        return render_template("servers/_partials/noise_fragment.html", **ctx)
 
 
 # ===========================================================================
@@ -151,11 +165,17 @@ def test_bulk_ack_noise_button_text_in_source() -> None:
 
 
 def test_bulk_ack_noise_render_condition_in_source() -> None:
-    """Template-Source nutzt '(noise_total | default(0)) > 0' als Render-Condition."""
+    """Template-Source nutzt einen default(0)-Filter als Render-Condition.
+
+    Block Y Phase B: die Condition lebt im Noise-Fragment-Partial. Das Partial
+    setzt `_noise_total = noise_total | default(0)` und rendert den Button
+    nur wenn `_noise_total > 0`. default(0) muss erhalten bleiben damit eine
+    fehlende noise_total-Variable nicht zum Render fuehrt.
+    """
     source = _load_findings_section_source()
 
-    assert "(noise_total | default(0)) > 0" in source, (
-        "'(noise_total | default(0)) > 0'-Condition fehlt in _findings_section.html. "
+    assert "noise_total | default(0)" in source, (
+        "'noise_total | default(0)'-Filter fehlt in noise_fragment.html. "
         "default(0)-Filter muss vorhanden sein damit fehlende Variable == keine Pill."
     )
 

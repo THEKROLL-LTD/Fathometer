@@ -1,13 +1,20 @@
 {# Server-Detail-Findings-Section: Top-Level-Accordion mit Risk-Band-Slots
-   (Block X Phase F, ADR-0038 §6). Pro Slot ein <details>-Element via
-   _partials/risk_band_section.html.
+   (Block X Phase F, ADR-0038 §6; Block Y Phase A, ADR-0039 §1).
+
+   Block Y / ADR-0039: der Body jedes Risk-Band-Slots ist ein Lazy-Slot —
+   Findings werden erst beim Expand vom Triage-Endpoint (Phase C) geladen.
+   Initial-Render rendert nur die Akkordeon-Header mit Count.
 
    Variablen-Vertrag (durchgereicht von _findings_section.html):
-     - risk_band_sections       : list[dict] — sechs Slots in _RISK_BAND_SECTION_ORDER.
-     - pending_grouping_counts  : dict[str, int]
-     - server                   : Server.
+     - risk_band_header_counts : dict[str, int] — Count pro Band aus
+                                 `_risk_band_header_counts()`. Insertion-
+                                 Order entspricht `_RISK_BAND_SECTION_ORDER`.
+     - default_open_band       : str | None — Band das default offen rendert
+                                 (Escalate first, sonst hoechstes nicht-leeres).
+     - pending_grouping_counts : dict[str, int]
+     - server                  : Server.
 #}
-{%- set _total_nonempty = risk_band_sections | rejectattr('is_empty') | list | length -%}
+{%- set _total_nonempty = (risk_band_header_counts | dictsort | selectattr('1', '>', 0) | list | length) -%}
 {% if _total_nonempty == 0 %}
   <div class="sd-empty-block" data-test="findings-empty">
     <p class="sd-empty">— Keine offenen Findings auf diesem Server</p>
@@ -15,8 +22,17 @@
   </div>
 {% else %}
   <div data-test="risk-band-sections">
-    {% for section in risk_band_sections %}
-      {% include "_partials/risk_band_section.html" %}
+    {% for band, total in risk_band_header_counts.items() %}
+      {% if total > 0 %}
+        {% with section={
+            "band": band,
+            "total_count": total,
+            "is_empty": False,
+            "default_open": band == default_open_band,
+        } %}
+          {% include "_partials/risk_band_section.html" %}
+        {% endwith %}
+      {% endif %}
     {% endfor %}
   </div>
   <div class="sd-queue-footer" data-test="findings-total-footer">

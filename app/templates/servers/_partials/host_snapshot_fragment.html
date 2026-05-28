@@ -1,0 +1,19 @@
+{# Block Y / ADR-0039 Phase B: Host-Snapshot-Fragment-Response.
+
+   Wird vom Endpoint `server_detail.host_snapshot_fragment` geliefert.
+   Ersetzt den leeren Slot `<div id="sd-host-snapshot">` im Initial-Render
+   per hx-swap="outerHTML". Enthaelt beide Slide-Down-Panels (Listeners +
+   Services). Alpine-Scope (open/toggle) lebt auf dem aeusseren
+   .server-detail-Wrapper und bleibt beim Swap erhalten.
+
+   Variablen-Vertrag:
+     - server    : Server-ORM-Objekt.
+     - listeners : list[dict] (siehe `_load_host_snapshot`).
+     - services  : list[str].
+     - processes : list[ServerProcess] (vom Pid-zu-Args-Lookup nicht
+                   abhaengig, aber Teil des Helper-Outputs).
+#}
+<div id="sd-host-snapshot" data-test="host-snapshot-fragment">
+  {% include "_partials/server_pill_listeners.html" %}
+  {% include "_partials/server_pill_services.html" %}
+</div>

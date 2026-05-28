@@ -4,7 +4,9 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
-**MVP + UI v2 + ADR-0016 bis ADR-0038 + Block-X-Server-Detail-Content-Refactor abgeschlossen — Ziel v0.13.0 (2026-05-24).**
+**MVP + UI v2 + ADR-0016 bis ADR-0038 + Block-X-Server-Detail-Content-Refactor abgeschlossen — Ziel v0.13.0 (2026-05-24). Block Y (ADR-0039) geplant.**
+
+**Block Y geplant 2026-05-27 — Server-Detail Lazy-Render-Architektur + Triage-Queue-Pagination (ADR-0039).** Branch `feat/block-y-server-detail-lazy-render`, vier Phasen (A: Initial-Render-Reduktion + Projektionen, B: HTMX-Fragment-Endpoints, C: Triage-Queue Collapsed + Lazy + Paginiert, D: Aufräumen + Drift-Tests). Zielversion v0.14.0. Keine Schema-Migration. Löst das Eager-Load-Everything-Pattern in `show()` auf: 17–19 Queries → ~6–8 im Critical Path, Rest parallel via HTMX-Fragmente. `_build_risk_band_sections` + `_assemble_risk_band_sections` werden gelöscht (volle Finding-Hydration weg). Triage-Queue wird paginiert (25/Seite, "Mehr laden"). `_load_application_groups_for_server` wechselt auf SQL-Projektionen statt ORM-Objekte. Query-Deduplizierung (pending_grouping + action_required zusammenlegen). Block V (ADR-0030, Dashboard + Sidebar) bleibt eigenständig geplant.
 
 **Block X abgeschlossen 2026-05-24 — Server-Detail Content-Refactor + Style-Adoption (ADR-0038).** Branch `feat/block-x-server-detail-content`, acht Phasen-Commits A0 → G. Reviewer APPROVED-BLOCK-X mit einem GELB-Item (G6-Shim-Audit), das im Phase-G-Commit-Body dokumentiert ist. Security-Auditor APPROVED (Phase B + Phase G). **+242 neue Pure-Unit-Tests** über den ganzen Block (Baseline 1813 → 2055 passed). Default-Suite `pytest` ~43 s, 2055 passed / 6 skipped / 662 deselected.
 

@@ -75,8 +75,13 @@ def _extract_heartbeat_section(source: str) -> str:
 
 
 def _make_server(snapshot_at: datetime | None) -> SimpleNamespace:
-    """Minimal-Mock eines Server-Objekts fuer Lebenszeichen-Render."""
-    return SimpleNamespace(host_state_snapshot_at=snapshot_at)
+    """Minimal-Mock eines Server-Objekts fuer Lebenszeichen-Render.
+
+    Block Y Phase B: Lebenszeichen-Sektion enthaelt `url_for('server_detail.
+    heartbeat_fragment', server_id=server.id)` — daher braucht der Mock
+    seit Phase B ein `id`-Feld.
+    """
+    return SimpleNamespace(id=42, host_state_snapshot_at=snapshot_at)
 
 
 def _make_cells(n: int = 30) -> list[SimpleNamespace]:

@@ -1,0 +1,29 @@
+{# Block Y / ADR-0039 Phase B: Heartbeat-Bar-Fragment-Response.
+
+   Wird vom Endpoint `server_detail.heartbeat_fragment` geliefert. Ersetzt
+   den Skeleton-Wrapper `<div id="sd-heartbeat">` im Initial-Render per
+   hx-swap="outerHTML". Bei never-scanned-Servern liefert der Endpoint den
+   `--empty`-State (kein Skeleton zurueck — der Operator soll sofort sehen
+   dass nie ein Scan lief).
+
+   Variablen-Vertrag:
+     - server : Server-ORM-Objekt (fuer host_state_snapshot_at-Check).
+     - cells  : list[DailyStatus] aus `heartbeats_for_servers` — wird nur
+                gerendert wenn host_state_snapshot_at gesetzt ist.
+
+   Single-Source-Pattern: Initial-Render und Fragment-Response teilen das
+   `_heartbeat_large.html`-Partial; das `skel`-Flag entscheidet ueber den
+   Render-Pfad. Der Wrapper-DIV mit der ID ist hier aussen drumherum, damit
+   `outerHTML`-Swap funktioniert.
+#}
+<div id="sd-heartbeat" data-test="heartbeat-fragment">
+  {% if server.host_state_snapshot_at is none %}
+    <div class="sd-heartbeat-frame sd-heartbeat-frame--empty" data-test="heartbeat-empty">
+      <p class="sd-empty">— noch nie gescannt</p>
+    </div>
+  {% else %}
+    {% with cells=cells, skel=False %}
+      {% include "servers/_heartbeat_large.html" %}
+    {% endwith %}
+  {% endif %}
+</div>

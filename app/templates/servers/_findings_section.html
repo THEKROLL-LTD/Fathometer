@@ -45,21 +45,13 @@
       {{ bulk_ack_modal(id='bulk-ack-modal-toolbar', title='Ausgewaehlte Findings abhaken') }}
     </div>
 
-    {# Bulk-Ack-Noise — nur wenn noise_total > 0 (Block O / ADR-0022) #}
-    {% if (noise_total | default(0)) > 0 %}
-      {%- set _noise_ids = noise_findings | map(attribute='id') | list -%}
-      <div x-data="bulkAckNoise(() => {{ _noise_ids | tojson }})" class="inline-flex"
-           data-test="bulk-ack-noise-scope">
-        <button type="button"
-                class="is-prominent"
-                @click="openModal()"
-                title="Alle noise-Findings auf diesem Server abhaken"
-                data-test="bulk-ack-noise-button">
-          Acknowledge all noise on this host ({{ noise_total }})
-        </button>
-        {% include "servers/_bulk_ack_noise_modal.html" %}
-      </div>
-    {% endif %}
+    {# Block Y Phase B (ADR-0039 §2): Bulk-Ack-Noise lebt im Noise-Fragment.
+       Der Slot bleibt im Initial-Render leer; das Fragment ersetzt ihn per
+       outerHTML mit Button + Modal (oder leerem DIV wenn noise_total=0). #}
+    <div id="sd-noise-toolbar"
+         hx-get="{{ url_for('server_detail.noise_fragment', server_id=server.id) }}"
+         hx-trigger="load"
+         hx-swap="outerHTML"></div>
 
     {# CSV-Export — letztes Element, margin-left: auto via Layout #}
     <a href="{{ url_for('findings.export_csv') }}?server_id={{ server.id }}&{{ view_filter.to_query_string() }}"

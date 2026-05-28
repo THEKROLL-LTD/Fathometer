@@ -1,0 +1,37 @@
+{# Block Y / ADR-0039 Phase B: Noise-Toolbar-Fragment-Response.
+
+   Wird vom Endpoint `server_detail.noise_fragment` geliefert. Ersetzt den
+   leeren Slot `<div id="sd-noise-toolbar">` in `_findings_section.html`
+   per hx-swap="outerHTML". Liefert den vollstaendigen Bulk-Ack-Noise-
+   Toolbar-Button (sichtbar nur wenn noise_total > 0) inklusive
+   eingebettetem Modal.
+
+   Variablen-Vertrag:
+     - server         : Server-ORM-Objekt.
+     - noise_total    : int — vollstaendige Anzahl noise-Findings.
+     - noise_findings : list[Finding] (max 50, fuer die Inline-Preview im
+                        Modal).
+#}
+{%- set _noise_total = noise_total | default(0) -%}
+{%- set _noise_findings = noise_findings | default([]) -%}
+<div id="sd-noise-toolbar"
+     data-test="noise-fragment"
+     data-noise-total="{{ _noise_total }}">
+  {% if _noise_total > 0 %}
+    {%- set _noise_ids = _noise_findings | map(attribute='id') | list -%}
+    <div x-data="bulkAckNoise(() => {{ _noise_ids | tojson }})"
+         class="inline-flex"
+         data-test="bulk-ack-noise-scope">
+      <button type="button"
+              class="is-prominent"
+              @click="openModal()"
+              title="Alle noise-Findings auf diesem Server abhaken"
+              data-test="bulk-ack-noise-button">
+        Acknowledge all noise on this host ({{ _noise_total }})
+      </button>
+      {% with noise_total=_noise_total, noise_findings=_noise_findings %}
+        {% include "servers/_bulk_ack_noise_modal.html" %}
+      {% endwith %}
+    </div>
+  {% endif %}
+</div>

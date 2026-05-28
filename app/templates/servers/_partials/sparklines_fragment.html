@@ -1,0 +1,36 @@
+{# Block Y / ADR-0039 Phase B: KPI-Tiles-Fragment-Response.
+
+   Wird vom Endpoint `server_detail.sparklines_fragment` geliefert. Ersetzt
+   den Skeleton-Wrapper `<div id="sd-tiles">` im Initial-Render per
+   hx-swap="outerHTML". Das Partial enthaelt den DIV-Wrapper UND die vier
+   KPI-Cards mit Live-Sparklines.
+
+   Variablen-Vertrag:
+     - quick_counts : dict[str,int] mit Keys total_open, kev_open,
+                      critical_open, high_open, medium_open, low_open.
+     - sparklines   : dict[str, list[int]] mit Keys kev, critical, high,
+                      medium — 30 OPEN-Snapshot-Werte (aelteste zuerst).
+
+   Single-Source-Pattern: das Initial-Render-Skeleton in `detail.html`
+   nutzt dasselbe Partial-Pattern (vier `_kpi_card.html`-Includes), nur mit
+   `sparkline=[]`. Beim Fragment-Swap wird der gesamte Tiles-Block ersetzt.
+#}
+{%- set _spark = sparklines | default({}) -%}
+<div class="sd-tiles" id="sd-tiles">
+  {% with label='KEV', value=quick_counts.kev_open | default(0), tone='error',
+          sparkline=_spark.get('kev', []), kev_indicator=true %}
+    {% include "servers/_kpi_card.html" %}
+  {% endwith %}
+  {% with label='Critical', value=quick_counts.critical_open | default(0), tone='error',
+          sparkline=_spark.get('critical', []), kev_indicator=false %}
+    {% include "servers/_kpi_card.html" %}
+  {% endwith %}
+  {% with label='High', value=quick_counts.high_open | default(0), tone='warning',
+          sparkline=_spark.get('high', []), kev_indicator=false %}
+    {% include "servers/_kpi_card.html" %}
+  {% endwith %}
+  {% with label='Medium', value=quick_counts.medium_open | default(0), tone='accent',
+          sparkline=_spark.get('medium', []), kev_indicator=false %}
+    {% include "servers/_kpi_card.html" %}
+  {% endwith %}
+</div>

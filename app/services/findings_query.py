@@ -442,7 +442,20 @@ def count_findings(
         kev_only=filt.kev_only,
         search=filt.search,
     )
-    stmt = select(Finding.status, func.count(Finding.id)).group_by(Finding.status)
+    # Block Y / ADR-0039 §5: KEV-Count via FILTER-Aggregat in derselben
+    # GROUP-BY-Status-Query — kein zweiter SELECT mehr (ein DB-Roundtrip
+    # statt zwei). Wir tragen das KEV-FILTER-Aggregat als nicht-gruppierte
+    # Spalte ueber einen Subquery-OR-Trick — einfacher: separates Aggregat
+    # ueber das gleiche Where mit `subquery()`. Praktisch portieren wir das
+    # `Finding.is_kev`-FILTER direkt in jede Status-Group-Row und summieren
+    # dann das OPEN-Bucket heraus.
+    stmt = select(
+        Finding.status,
+        func.count(Finding.id).label("total"),
+        func.count()
+        .filter(Finding.is_kev.is_(True), Finding.status == FindingStatus.OPEN)
+        .label("kev_open"),
+    ).group_by(Finding.status)
     stmt = _apply_filters(stmt, server_id, bypass)
     rows = session.execute(stmt).all()
 
@@ -453,22 +466,17 @@ def count_findings(
         "total": 0,
         "kev_open": 0,
     }
-    for status_value, n in rows:
-        n_int = int(n)
+    for row in rows:
+        n_int = int(row.total)
         counts["total"] += n_int
-        if status_value == FindingStatus.OPEN:
+        if row.status == FindingStatus.OPEN:
             counts["open"] = n_int
-        elif status_value == FindingStatus.ACKNOWLEDGED:
+            counts["kev_open"] = int(row.kev_open or 0)
+        elif row.status == FindingStatus.ACKNOWLEDGED:
             counts["acknowledged"] = n_int
-        elif status_value == FindingStatus.RESOLVED:
+        elif row.status == FindingStatus.RESOLVED:
             counts["resolved"] = n_int
 
-    kev_stmt = select(func.count(Finding.id)).where(
-        Finding.server_id == server_id,
-        Finding.status == FindingStatus.OPEN,
-        Finding.is_kev.is_(True),
-    )
-    counts["kev_open"] = int(session.execute(kev_stmt).scalar() or 0)
     return counts
 
 

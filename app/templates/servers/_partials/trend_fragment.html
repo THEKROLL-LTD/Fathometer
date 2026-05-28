@@ -1,0 +1,35 @@
+{# Block Y / ADR-0039 Phase B: Severity-Trend-Fragment-Response.
+
+   Wird vom Endpoint `server_detail.trend_fragment` geliefert. Ersetzt den
+   Skeleton-Wrapper `<div id="sd-trend">` im Initial-Render per
+   hx-swap="outerHTML". Aktualisiert zusaetzlich den Tendency-Span im
+   Header per OOB-Swap (die Quick-Schaetzung aus dem Initial-Render wird
+   durch die volle 30-Tage-Aggregation ueberschrieben).
+
+   Variablen-Vertrag:
+     - trend_data : list[DailySeverityCount] (aelteste zuerst).
+     - tendency   : Tendency-Enum mit `.label`-Property.
+
+   Single-Source-Pattern: Initial-Render und Fragment-Response teilen das
+   `_stacked_bar_chart.html`-Partial; das `skel`-Flag entscheidet ueber
+   den Render-Pfad. Der Wrapper-DIV mit der ID ist hier aussen drumherum,
+   damit `outerHTML`-Swap funktioniert.
+#}
+<div id="sd-trend" data-test="trend-fragment">
+  {% with days_data=trend_data, skel=False %}
+    {% include "servers/_stacked_bar_chart.html" %}
+  {% endwith %}
+  <ul class="sd-trend-legend" aria-hidden="true">
+    <li><span class="sd-legend-swatch sd-legend-swatch--critical"><span class="sd-legend-swatch__dot"></span>critical</span></li>
+    <li><span class="sd-legend-swatch sd-legend-swatch--high"><span class="sd-legend-swatch__dot"></span>high</span></li>
+    <li><span class="sd-legend-swatch sd-legend-swatch--medium"><span class="sd-legend-swatch__dot"></span>medium</span></li>
+    <li><span class="sd-legend-swatch sd-legend-swatch--low"><span class="sd-legend-swatch__dot"></span>low</span></li>
+  </ul>
+</div>
+{# OOB-Swap fuer den Tendency-Span im Header — die volle 30-Tage-
+   Aggregation kann von der Quick-Schaetzung (7-vs-7-Tage) abweichen, daher
+   immer ueberschreiben (Single-Source-Wahrheit: das Fragment liefert die
+   korrekte Tendency). #}
+<span id="sd-stats-delta"
+      class="sd-stats__delta"
+      hx-swap-oob="outerHTML">{{ tendency.label }}</span>

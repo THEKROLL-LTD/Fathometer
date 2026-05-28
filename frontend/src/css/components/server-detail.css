@@ -475,7 +475,8 @@
   cursor: pointer;
   transition: color var(--dur-hover) var(--ease-drift), border-color var(--dur-hover) var(--ease-drift);
 }
-.workflow-card__pager button:hover { color: var(--text-primary); border-color: var(--border-visible); }
+.workflow-card__pager button:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-visible); }
+.workflow-card__pager button:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* Alias: workflow-card__drilldown entspricht dem design-seitigen workflow-table. */
 .workflow-card__drilldown { width: 100%; border-collapse: collapse; border-top: var(--hairline); }
@@ -842,6 +843,12 @@
 .sd-band__count b { color: var(--text-primary); font-weight: 700; margin-right: 4px; }
 
 .sd-band__body { animation: sd-flyout-in 260ms var(--ease-materialize); }
+
+/* Pager-Footer der Triage-Band-Seiten: Innenabstand wie die Finding-Rows
+   (16px Gutter links/rechts) plus Bodenabstand, damit er nicht an der
+   Spaltenkante klebt. Ueberschreibt das reine padding-top von
+   .workflow-card__footer. */
+.sd-band__footer { padding: 14px 16px 16px; }
 
 /* 6-Spalten-Grid-Tabelle innerhalb eines Bands */
 .sd-findings-head,

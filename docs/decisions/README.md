@@ -44,6 +44,8 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0036](0036-single-pane-polling-hx-preserve.md) | Single-Pane Dashboard-Polling mit hx-preserve + OOB-Swaps (Block W) | Akzeptiert |
 | [0037](0037-findings-cross-server-bucket-view.md) | `/findings`: Cross-Server Bucket-View nach (Server, ApplicationGroup) — ersetzt ADR-0025 §(5) | Akzeptiert |
 | [0038](0038-server-detail-triage-refactor.md) | Server-Detail Triage-First Content-Refactor (Sektions-/Inhalts-Umbau, Styling out-of-Scope; Block X) | Akzeptiert |
+| [0039](0039-server-detail-lazy-render-architecture.md) | Server-Detail Lazy-Render-Architektur + Triage-Queue-Pagination (Block Y) | Akzeptiert |
+| [0040](0040-group-and-tag-hybrid-lifecycle.md) | Hybrid-Lifecycle für Gruppen und Tags: Inline-Create im Server-Settings, `/settings/{groups,tags}` als Manage-Only (Block Z) — schließt ADR-0034 §Re-Open-Trigger CRUD-UI | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

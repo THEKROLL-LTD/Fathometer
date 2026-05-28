@@ -1,0 +1,133 @@
+{# Triage-Findings-Page-Fragment (Block Y Phase C, ADR-0039 §3).
+
+   Wird vom Lazy-Slot in `_partials/risk_band_section.html` per HTMX
+   nachgeladen (Initial-Load Page 1) und von den Pager-Buttons im Footer
+   (Vor/Zurueck-Navigation). Rendert IMMER eine vollstaendige Seite:
+   Spaltenkopf + max 25 Finding-Rows + Pagination-Footer. Jede Navigation
+   ersetzt den kompletten Body-Inhalt (`hx-swap="innerHTML"` auf
+   `#risk-band-<band>-body`) — kein Append, sondern Seiten-Ersatz, analog
+   zum Design `docs/design/ServerDetail.jsx` (WorkflowCard-Footer + Pager).
+
+   Variablen-Vertrag:
+     - findings    : list[Row] — SQLAlchemy `Row`-Projektionen mit 13 Spalten
+                     (siehe `triage_band_fragment` in `server_detail.py`).
+                     Attribut-Zugriff via `f.id`, `f.identifier_key`, ...
+                     `f.severity` ist ein `Severity`-Enum-Wert.
+     - server      : Server-ORM (fuer `url_for` auf Folge-Pages).
+     - band        : str — eines aus `_RISK_BAND_SECTION_ORDER`.
+     - page        : int >= 1 — aktuelle Seite (1-basiert).
+     - total       : int — Gesamtzahl Findings im Band (fuer den Footer).
+     - total_pages : int >= 1 — Anzahl Seiten.
+     - has_prev    : bool — True wenn page > 1.
+     - has_next    : bool — True wenn page < total_pages.
+
+   Sicherheit: `f.risk_band_reason` NIE mit |safe rendern (LLM-Output,
+   Jinja-Autoescape ist Pflicht, ADR-0038 §G4). `band` ist server-seitig
+   gegen `_RISK_BAND_SECTION_ORDER` whitelisted — kein User-Input.
+#}
+{% from "_macros.html" import kev_badge, quick_copy %}
+{%- if not findings -%}
+  <p class="sd-empty" data-test="triage-empty-{{ band }}">Keine Findings in diesem Band.</p>
+{%- else -%}
+<div class="sd-findings-head" aria-hidden="true">
+  <span></span>
+  <span>CVE / Titel</span>
+  <span>Paket</span>
+  <span class="sd-findings-head__right">EPSS</span>
+  <span class="sd-findings-head__right">CVSS</span>
+  <span class="sd-findings-head__right">Severity</span>
+</div>
+{% for f in findings %}
+  <details class="sd-finding"
+           id="finding-{{ f.id }}"
+           data-test="triage-finding-row-{{ f.id }}">
+    <summary class="sd-finding__summary">
+      <input type="checkbox"
+             class="sd-checkbox"
+             value="{{ f.id }}"
+             aria-label="Finding {{ f.identifier_key }} auswaehlen"
+             data-bulk-id="true"
+             x-data
+             :checked="(window.__detailSelected || []).includes({{ f.id }})"
+             @change="
+               const cur = window.__detailSelected || [];
+               window.__detailSelected = $event.target.checked
+                 ? [...cur, {{ f.id }}]
+                 : cur.filter(id => id !== {{ f.id }})
+             ">
+
+      <div class="sd-finding__cve">
+        <span class="sd-finding__cve-id">
+          {{ f.identifier_key }}
+          {{ kev_badge(f.is_kev, size='xs') }}
+          {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+        </span>
+        {% if f.title %}
+          <span class="sd-finding__title" title="{{ f.title }}">{{ f.title }}</span>
+        {% endif %}
+      </div>
+
+      <div class="sd-finding__pkg">
+        <span class="sd-finding__pkg-name">{{ f.package_name }}</span>
+        {% if f.installed_version %}
+          <span class="sd-finding__pkg-diff">
+            <span class="sd-finding__pkg-from">{{ f.installed_version }}</span>
+            {% if f.fixed_version %}
+              <span class="sd-finding__pkg-arrow">→</span>
+              <span class="sd-finding__pkg-to">{{ f.fixed_version }}</span>
+            {% endif %}
+          </span>
+        {% endif %}
+      </div>
+
+      <span class="sd-cap sd-cap--neutral">
+        {%- if f.epss_score is not none -%}
+          {{ "%.3f" | format(f.epss_score) }}
+        {%- else -%}—{%- endif -%}
+      </span>
+
+      <span class="sd-cap sd-cap--neutral">
+        {%- if f.cvss_v3_score is not none -%}
+          {{ "%.1f" | format(f.cvss_v3_score) }}
+        {%- else -%}—{%- endif -%}
+      </span>
+
+      {%- set _sev_str = (f.severity.value if f.severity is not string else f.severity) | lower -%}
+      <span class="sd-cap {% if _sev_str in ('critical', 'high') %}sd-cap--accent{% else %}sd-cap--neutral{% endif %}">
+        {{ _sev_str | upper if _sev_str else '—' }}
+      </span>
+    </summary>
+
+    {%- if f.risk_band_reason -%}
+      <div class="sd-finding__body">
+        <p class="sd-ai-eyebrow">KI-Bewertung</p>
+        <p class="sd-ai-text">{{ f.risk_band_reason }}</p>
+      </div>
+    {%- endif -%}
+  </details>
+{% endfor %}
+{%- set _body_target = "#risk-band-" ~ band ~ "-body" -%}
+<div class="workflow-card__footer sd-band__footer" data-test="triage-pager-{{ band }}">
+  <span>Seite {{ page }} von {{ total_pages }} · {{ total }} Findings</span>
+  <span class="workflow-card__pager">
+    <button type="button"
+            aria-label="Vorherige Seite"
+            data-test="triage-pager-prev-{{ band }}"
+            {% if has_prev %}
+            hx-get="{{ url_for('server_detail.triage_band_fragment', server_id=server.id, band=band, page=page - 1) }}"
+            hx-target="{{ _body_target }}"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this"
+            {% else %}disabled{% endif %}>&#x2039;</button>
+    <button type="button"
+            aria-label="Nächste Seite"
+            data-test="triage-pager-next-{{ band }}"
+            {% if has_next %}
+            hx-get="{{ url_for('server_detail.triage_band_fragment', server_id=server.id, band=band, page=page + 1) }}"
+            hx-target="{{ _body_target }}"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this"
+            {% else %}disabled{% endif %}>&#x203A;</button>
+  </span>
+</div>
+{%- endif -%}

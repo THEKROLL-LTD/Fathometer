@@ -1,27 +1,21 @@
 """Pure-Unit-Tests fuer Risk-Band-Accordion-Markup
 ``_partials/risk_band_section.html`` + ``servers/_view_groups.html``
-(Block X Phase F, ADR-0038 §6).
+(Block X Phase F, ADR-0038 §6; Block Y Phase A, ADR-0039 §1).
 
-Prueft (DoD-Punkt 6, Block X Phase F):
-  1.  Sechs <details>-Tags in fester Reihenfolge escalate->noise.
+Block Y / ADR-0039: das Template-Vertragstausch fuer den Akkordeon-Header:
+  - `risk_band_header_counts` (dict[band, count]) statt `risk_band_sections`.
+  - `default_open_band` (str | None) wird vom View vorberechnet.
+  - Der Section-Body ist ein Lazy-Slot (Phase C wired hx-get) — keine
+    `findings`-Schleife mehr im Initial-Render.
+
+Prueft (DoD-Punkt 6, Block X Phase F + Block Y Phase A):
+  1.  Akkordeon-Headers in fester Reihenfolge escalate->noise.
   2.  Nur ESCALATE-Slot bekommt open-Attribut wenn ESCALATE nicht leer.
   3.  Erster nicht-leerer Slot offen wenn ESCALATE leer.
   4.  Leere Slots werden nicht gerendert.
-  5.  Pending-Grouping-Subblock in PENDING-Slot wenn pending_count > 0.
-  6.  Pending-Grouping-Subblock abwesend wenn pending_count == 0.
-  7.  Empty-State wenn alle Slots leer.
-  8.  sd-risk-band-sections-Wrapper mit data-test="risk-band-sections" present.
-  9.  total_count wird im <summary>-Markup gerendert.
-
-Render-Strategie:
-  - Option A: ``render_template_string`` mit Source-Read des jeweiligen
-    Templates, eigener Jinja-App-Context.
-  - Fuer _view_groups.html: risk_band_sections mit minimalen Slot-Dicts,
-    groups=[] (kein application_group_card-Include wird ausgefuehrt).
-  - Fuer _partials/risk_band_section.html: direkt mit einzelnem section-Dict
-    und groups=[] damit keine Card-Includes getriggert werden.
-  - Fuer Pending-Subblock-Tests: section.band='pending' + pending_count > 0
-    mit groups=[] — nur der Pending-Subblock-Zweig wird gerendert.
+  5.  Empty-State wenn alle Counts 0.
+  6.  data-test="risk-band-sections"-Wrapper present.
+  7.  total_count wird im <summary>-Markup gerendert.
 """
 
 from __future__ import annotations
@@ -45,15 +39,7 @@ _SECTION_PARTIAL_PATH = _TEMPLATES_ROOT / "_partials" / "risk_band_section.html"
 # ---------------------------------------------------------------------------
 
 
-def _make_empty_slot(band: str, *, default_open: bool = False) -> dict[str, Any]:
-    """Erstellt einen leeren Slot-Dict (is_empty=True)."""
-    return {
-        "band": band,
-        "findings": [],
-        "total_count": 0,
-        "is_empty": True,
-        "default_open": default_open,
-    }
+_BANDS_ORDER = ("escalate", "act", "mitigate", "pending", "monitor", "noise")
 
 
 def _make_nonempty_slot(
@@ -62,42 +48,40 @@ def _make_nonempty_slot(
     count: int = 3,
     default_open: bool = False,
 ) -> dict[str, Any]:
-    """Erstellt einen nicht-leeren Slot-Dict (is_empty=False, findings=[]).
+    """Slot-Dict fuer das `_partials/risk_band_section.html`-Partial.
 
-    findings=[] intentional: die Finding-Rendering-Schleife in
-    risk_band_section.html ueberspringt eine leere Liste, das Accordion-
-    Markup (summary, chev, count) wird trotzdem ueber ``not section.is_empty``
-    getriggert. Fuer Tests die Accordion-Logik (open/close) pruefen reicht
-    das.
+    Block Y / ADR-0039: das Partial konsumiert nur noch `band`, `total_count`,
+    `is_empty`, `default_open` — keine `findings`-Schleife mehr.
     """
     return {
         "band": band,
-        "findings": [],
         "total_count": count,
         "is_empty": False,
         "default_open": default_open,
     }
 
 
-def _all_six_empty_sections() -> list[dict[str, Any]]:
-    """Alle sechs Slots leer."""
-    bands = ["escalate", "act", "mitigate", "pending", "monitor", "noise"]
-    return [_make_empty_slot(b) for b in bands]
+def _empty_header_counts() -> dict[str, int]:
+    return dict.fromkeys(_BANDS_ORDER, 0)
 
 
-def _all_six_sections(open_band: str | None = "escalate") -> list[dict[str, Any]]:
-    """Alle sechs Slots nicht leer; open_band bekommt default_open=True."""
-    bands = ["escalate", "act", "mitigate", "pending", "monitor", "noise"]
-    return [_make_nonempty_slot(b, default_open=(b == open_band)) for b in bands]
+def _all_nonempty_header_counts() -> dict[str, int]:
+    return dict.fromkeys(_BANDS_ORDER, 3)
 
 
 def _render_view_groups(
     app: Flask,
     *,
-    risk_band_sections: list[dict[str, Any]],
+    risk_band_header_counts: dict[str, int],
+    default_open_band: str | None = "escalate",
     pending_grouping_counts: dict[str, int] | None = None,
+    total_findings_count: int = 0,
 ) -> str:
-    """Rendert _view_groups.html mit render_template_string."""
+    """Rendert _view_groups.html mit render_template_string.
+
+    Block Y / ADR-0039: Vertrag jetzt `risk_band_header_counts` +
+    `default_open_band` statt der alten `risk_band_sections`-Liste.
+    """
     from flask import render_template_string
 
     source = _VIEW_GROUPS_PATH.read_text(encoding="utf-8")
@@ -106,9 +90,11 @@ def _render_view_groups(
     with app.test_request_context("/servers/42"):
         return render_template_string(
             source,
-            risk_band_sections=risk_band_sections,
+            risk_band_header_counts=risk_band_header_counts,
+            default_open_band=default_open_band,
             pending_grouping_counts=pgc,
             server=server,
+            total_findings_count=total_findings_count,
         )
 
 
@@ -118,10 +104,7 @@ def _render_section_partial(
     section: dict[str, Any],
     pending_grouping_counts: dict[str, int] | None = None,
 ) -> str:
-    """Rendert _partials/risk_band_section.html mit render_template_string.
-
-    Nutzt groups=[] im Section-Dict damit kein Card-Include getriggert wird.
-    """
+    """Rendert _partials/risk_band_section.html mit render_template_string."""
     from flask import render_template_string
 
     source = _SECTION_PARTIAL_PATH.read_text(encoding="utf-8")
@@ -142,10 +125,10 @@ def _render_section_partial(
 
 
 def test_six_details_in_order(app: Flask) -> None:
-    """Render mit allen 6 nicht-leeren Slots -> 6 <details> in Reihenfolge
+    """Render mit allen 6 Bands populated -> 6 <details> in Reihenfolge
     escalate -> act -> mitigate -> pending -> monitor -> noise."""
-    sections = _all_six_sections(open_band="escalate")
-    html = _render_view_groups(app, risk_band_sections=sections)
+    counts = _all_nonempty_header_counts()
+    html = _render_view_groups(app, risk_band_header_counts=counts, default_open_band="escalate")
 
     expected_order = ["escalate", "act", "mitigate", "pending", "monitor", "noise"]
     positions: list[int] = []
@@ -201,15 +184,13 @@ def test_only_escalate_open_when_escalate_nonempty(app: Flask) -> None:
 
 
 def test_first_nonempty_slot_open_when_escalate_empty(app: Flask) -> None:
-    """ESCALATE leer, ACT nicht leer und default_open=True -> ACT hat open."""
-    escalate = _make_empty_slot("escalate", default_open=False)
-    act = _make_nonempty_slot("act", default_open=True)
-    remaining = [_make_empty_slot(b) for b in ["mitigate", "pending", "monitor", "noise"]]
-    sections = [escalate, act, *remaining]
+    """ESCALATE leer (count=0), ACT count>0 mit default_open_band='act' -> ACT hat open."""
+    counts = _empty_header_counts()
+    counts["act"] = 5
 
-    html = _render_view_groups(app, risk_band_sections=sections)
+    html = _render_view_groups(app, risk_band_header_counts=counts, default_open_band="act")
 
-    # ESCALATE soll gar nicht gerendert sein (is_empty=True -> kein <details>).
+    # ESCALATE soll gar nicht gerendert sein (count=0 -> kein <details>).
     assert 'data-test="risk-band-escalate"' not in html, (
         "Leerer ESCALATE-Slot soll nicht gerendert werden"
     )
@@ -219,7 +200,7 @@ def test_first_nonempty_slot_open_when_escalate_empty(app: Flask) -> None:
 
     act_partial = _render_section_partial(
         app,
-        section=act,
+        section=_make_nonempty_slot("act", count=5, default_open=True),
     )
     details_tag_match = _re.search(r"<details\s[^>]+>", act_partial)
     assert details_tag_match is not None, (
@@ -237,12 +218,11 @@ def test_first_nonempty_slot_open_when_escalate_empty(app: Flask) -> None:
 
 
 def test_empty_slots_not_rendered(app: Flask) -> None:
-    """Nur ESCALATE nicht leer -> nur ESCALATE-<details>, kein act/mitigate/etc."""
-    escalate = _make_nonempty_slot("escalate", default_open=True)
-    rest = [_make_empty_slot(b) for b in ["act", "mitigate", "pending", "monitor", "noise"]]
-    sections = [escalate, *rest]
+    """Nur ESCALATE count>0 -> nur ESCALATE-<details>, kein act/mitigate/etc."""
+    counts = _empty_header_counts()
+    counts["escalate"] = 3
 
-    html = _render_view_groups(app, risk_band_sections=sections)
+    html = _render_view_groups(app, risk_band_header_counts=counts, default_open_band="escalate")
 
     assert 'data-test="risk-band-escalate"' in html, "ESCALATE-Slot soll gerendert sein"
 
@@ -258,13 +238,13 @@ def test_empty_slots_not_rendered(app: Flask) -> None:
 
 
 def test_empty_state_when_all_slots_empty(app: Flask) -> None:
-    """Alle 6 Slots leer -> Empty-State mit sd-empty-block + sd-empty-Klassen.
+    """Alle 6 Bands count=0 -> Empty-State mit sd-empty-block + sd-empty-Klassen.
 
     Track F hat den Empty-State von DaisyUI card bg-base-200 auf
     sd-empty-block / sd-empty umgebaut.
     """
-    sections = _all_six_empty_sections()
-    html = _render_view_groups(app, risk_band_sections=sections)
+    counts = _empty_header_counts()
+    html = _render_view_groups(app, risk_band_header_counts=counts, default_open_band=None)
 
     # Track F: sd-empty-block-Wrapper + sd-empty-Text-Element.
     assert "sd-empty-block" in html, (
@@ -292,8 +272,8 @@ def test_sd_risk_band_sections_wrapper_present(app: Flask) -> None:
     Track F: Der Wrapper hat kein eigenes CSS-Klassen-Attribut mehr —
     nur data-test='risk-band-sections' (kein 'sd-risk-band-sections'-CSS-Klasse).
     """
-    sections = _all_six_sections(open_band="escalate")
-    html = _render_view_groups(app, risk_band_sections=sections)
+    counts = _all_nonempty_header_counts()
+    html = _render_view_groups(app, risk_band_header_counts=counts, default_open_band="escalate")
 
     assert 'data-test="risk-band-sections"' in html, (
         f"'data-test=\"risk-band-sections\"' fehlt im Output. HTML: {html[:600]!r}"
