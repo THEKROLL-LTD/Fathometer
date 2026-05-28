@@ -16,7 +16,7 @@
      - `noise_total`            : int
      - `noise_findings`         : list[Finding]
 #}
-{% from "_macros.html" import sort_header, bulk_ack_modal %}
+{% from "_macros.html" import bulk_ack_modal %}
 {%- set _open_total = (quick_counts.total_open if quick_counts else 0) -%}
 <section class="sd-section" id="findings-section"
          x-data="{ selectionCount: (window.__detailSelected || []).length }"

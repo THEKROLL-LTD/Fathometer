@@ -450,13 +450,12 @@ def create_app() -> Flask:
 
     @app.context_processor
     def _inject_agent_version_helpers() -> dict[str, Any]:
-        """Block N (ADR-0021) — Outdated-Helper + Konstanten + Finding-Cause.
+        """Block N (ADR-0021) — Outdated-Helper + Konstanten.
 
         Exponiert die Heuristik-Funktionen aus `app.services.agent_version`
         als Jinja-Globals (`is_agent_outdated`, `is_trivy_outdated`,
         `is_trivy_db_outdated`) plus die zugehoerigen Schwellwerte fuer
-        Tooltip-Strings. `format_finding_cause` rendert die Ursachen-Sub-
-        Zeile pro Finding (Task #12a).
+        Tooltip-Strings.
 
         `external_base_url` liefert die im Setup-Wizard hinterlegte Public-
         URL — Fallback auf `request.host_url`, damit Dev-Setups ohne
@@ -467,7 +466,6 @@ def create_app() -> Flask:
             is_trivy_db_outdated,
             is_trivy_outdated,
         )
-        from app.services.finding_display import format_finding_cause
 
         external_base_url = app.config.get("EXTERNAL_BASE_URL")
         if not external_base_url:
@@ -480,7 +478,6 @@ def create_app() -> Flask:
             "is_agent_outdated": is_agent_outdated,
             "is_trivy_outdated": is_trivy_outdated,
             "is_trivy_db_outdated": is_trivy_db_outdated,
-            "format_finding_cause": format_finding_cause,
             "min_agent_version": Settings.MIN_AGENT_VERSION,
             "min_trivy_version": Settings.MIN_TRIVY_VERSION,
             "trivy_db_stale_threshold_days": Settings.TRIVY_DB_STALE_THRESHOLD_DAYS,
