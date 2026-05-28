@@ -61,6 +61,24 @@ Der Befehl ist idempotent. Er kopiert finale ``ApplicationGroup.risk_band``-
 Verdicts auf alle zugeordneten Findings, damit bestehende UI-Counter und
 Filter ohne Re-Scan konsistent sind.
 
+## Gruppen & Tags — Lifecycle (Block Z, ADR-0040)
+
+Gruppen und Tags entstehen seit Block Z **inline im Server-Detail-Settings**
+(`/servers/<id>/settings/`): Name eintippen, „+ Anlegen" — die Gruppe/der Tag
+wird in einem Flow angelegt und dem aktuellen Server zugewiesen. Ein
+`psql`-Workaround zum Anlegen von Gruppen ist nicht mehr nötig.
+
+`/settings/groups` und `/settings/tags` sind reine **Verwaltungs-Surfaces**:
+Rename, Delete, Color-Edit (Tags), Position-Reorder via Up/Down (Gruppen). Es
+gibt dort **kein** Anlege-Formular mehr.
+
+Leere Gruppen werden **nicht** automatisch gelöscht (bewusst, ADR-0040). Sie
+bleiben in `/settings/groups` mit `member_count = 0` sichtbar und sind dort
+löschbar, werden aber aus der Sidebar weggeblendet (die Aggregation
+`sidebar_group_aggregates.group_counts()` liefert nur Gruppen mit ≥1 Server).
+Delete einer Gruppe setzt `server.group_id = NULL` für alle Member
+(ON-DELETE-SET-NULL, ADR-0034) — kein Server wird gelöscht.
+
 ## Block-Q-Feed-Pull (ADR-0024)
 
 ### Health-Checks

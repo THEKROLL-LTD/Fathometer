@@ -23,7 +23,7 @@ from __future__ import annotations
 import structlog
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import login_required
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from werkzeug.wrappers import Response as WerkzeugResponse
@@ -33,9 +33,11 @@ from app.db import get_session
 from app.forms import (
     TAG_NAME_REGEX,
     CSRFOnlyForm,
+    ServerGroupCreateForm,
     ServerGroupForm,
     ServerScanIntervalForm,
     ServerSettingsForm,
+    ServerTagCreateForm,
 )
 from app.models import Server, ServerGroup, ServerTag, Tag
 
@@ -131,6 +133,8 @@ def _render_settings(server: Server) -> str:
                 "scan_interval_h": server.expected_scan_interval_h,
             },
         ),
+        "group_create_form": ServerGroupCreateForm(),
+        "tag_create_form": ServerTagCreateForm(),
     }
 
     hx_request = request.headers.get("HX-Request") == "true"
@@ -407,6 +411,141 @@ def save_all(server_id: int) -> str | WerkzeugResponse:
         sess.commit()
 
     flash("Einstellungen gespeichert.", "success")
+    return _redirect_to_settings(server_id)
+
+
+# ---------------------------------------------------------------------------
+# Inline-Create-Endpoints (Block Z, ADR-0040 §Inline-Create).
+#
+# Anlage einer Gruppe bzw. eines Tags direkt im Server-Settings-Kontext,
+# atomar mit der Zuweisung an den aktuellen Server. Race-sicher via
+# IntegrityError-Catch + Re-Fetch der existing Row (Idempotenz).
+# ---------------------------------------------------------------------------
+
+
+@server_settings_bp.post("/group/create")
+@login_required
+def group_create(server_id: int) -> str | WerkzeugResponse:
+    """POST /servers/<id>/settings/group/create — legt eine Gruppe an + weist zu.
+
+    1. Server laden + revoked/retired-404-Guard.
+    2. `ServerGroupCreateForm` validieren (Regex/Length/CSRF).
+    3. `position = COALESCE(MAX(position), -1) + 1`.
+    4. `ServerGroup` anlegen + flush; bei `IntegrityError` (paralleler Anlage
+       desselben Namens) die existierende Gruppe nachladen und zuweisen.
+    5. `server.group_id` setzen, Audit `group.created` (nur bei echter Anlage,
+       `via=server_settings`) + `server.group_changed` in einer Transaktion.
+    """
+    server = _load_server_with_settings(server_id)
+    if server is None or server.revoked_at is not None or server.retired_at is not None:
+        abort(404)
+
+    form = ServerGroupCreateForm()
+    if not form.validate_on_submit():
+        flash("Ungueltiger Gruppen-Name.", "error")
+        return _redirect_to_settings(server_id)
+
+    name = (form.name.data or "").strip()
+    sess = get_session()
+
+    next_position = int(
+        sess.execute(select(func.coalesce(func.max(ServerGroup.position), -1) + 1)).scalar_one()
+    )
+
+    group = ServerGroup(name=name, position=next_position)
+    sess.add(group)
+    created = True
+    try:
+        sess.flush()
+    except IntegrityError:
+        sess.rollback()
+        created = False
+        group = sess.execute(select(ServerGroup).where(ServerGroup.name == name)).scalar_one()
+        log.warning("server_settings.group_create_race", server_id=server_id, name=name)
+
+    if created:
+        log_event(
+            "group.created",
+            target_type="group",
+            target_id=group.id,
+            metadata={"name": group.name, "position": group.position, "via": "server_settings"},
+            session=sess,
+        )
+
+    old_group_id = server.group_id
+    if old_group_id != group.id:
+        server.group_id = group.id
+        log_event(
+            "server.group_changed",
+            target_type="server",
+            target_id=server.id,
+            metadata={"from": old_group_id, "to": group.id},
+            session=sess,
+        )
+
+    sess.commit()
+    return _redirect_to_settings(server_id)
+
+
+@server_settings_bp.post("/tags/create")
+@login_required
+def tag_create(server_id: int) -> str | WerkzeugResponse:
+    """POST /servers/<id>/settings/tags/create — legt einen Tag an + weist zu.
+
+    1. Server laden + revoked/retired-404-Guard.
+    2. `ServerTagCreateForm` validieren.
+    3. `Tag` mit Default-Color `#6b7280` anlegen + flush; bei `IntegrityError`
+       den existierenden Tag nachladen (Race-/Idempotenz-Pfad).
+    4. `ServerTag`-Link idempotent anhaengen (existing-Link via SELECT pruefen).
+    5. Audit `tag.created` (nur bei echter Anlage, `via=server_settings`) +
+       `server.tag.added` (nur bei neuem Link) in einer Transaktion.
+    """
+    server = _load_server_with_settings(server_id)
+    if server is None or server.revoked_at is not None or server.retired_at is not None:
+        abort(404)
+
+    form = ServerTagCreateForm()
+    if not form.validate_on_submit():
+        flash("Ungueltiger Tag-Name.", "error")
+        return _redirect_to_settings(server_id)
+
+    name = (form.name.data or "").strip()
+    sess = get_session()
+
+    tag = Tag(name=name, color="#6b7280")
+    sess.add(tag)
+    created = True
+    try:
+        sess.flush()
+    except IntegrityError:
+        sess.rollback()
+        created = False
+        tag = sess.execute(select(Tag).where(Tag.name == name)).scalar_one()
+        log.warning("server_settings.tag_create_race", server_id=server_id, name=name)
+
+    if created:
+        log_event(
+            "tag.created",
+            target_type="tag",
+            target_id=tag.id,
+            metadata={"name": tag.name, "color": tag.color, "via": "server_settings"},
+            session=sess,
+        )
+
+    existing_link = sess.execute(
+        select(ServerTag).where(ServerTag.server_id == server.id, ServerTag.tag_id == tag.id)
+    ).scalar_one_or_none()
+    if existing_link is None:
+        sess.add(ServerTag(server_id=server.id, tag_id=tag.id))
+        log_event(
+            "server.tag.added",
+            target_type="server",
+            target_id=server.id,
+            metadata={"tag_id": tag.id, "tag_name": tag.name},
+            session=sess,
+        )
+
+    sess.commit()
     return _redirect_to_settings(server_id)
 
 

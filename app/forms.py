@@ -39,6 +39,11 @@ TAG_NAME_REGEX = re.compile(r"^[a-z0-9][a-z0-9._\-]{0,31}$")
 TAG_COLOR_REGEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9._\-]{3,64}$")
 
+# ServerGroup-Namen (ADR-0034 §Schema, CHECK-Constraint `ck_server_groups_name_charset`).
+# Single Source of Truth fuer ServerGroupCreateForm (Phase A) UND GroupRenameForm
+# (Phase C) — Block-Z-Risiken-Tabelle verlangt identische Regex in beiden Pfaden.
+SERVER_GROUP_NAME_REGEX = re.compile(r"^[A-Za-z0-9 _.-]+$")
+
 SEVERITY_CHOICES: list[tuple[str, str]] = [
     ("critical", "Critical"),
     ("high", "High"),
@@ -139,6 +144,42 @@ class TagForm(FlaskForm):
                 "Ungueltiger Tag-Name. Erlaubt: a-z, 0-9, '.', '_', '-' "
                 "(Start mit Buchstabe/Ziffer, max 32 Zeichen)."
             )
+
+    def validate_color(self, field: StringField) -> None:
+        if not field.data or not TAG_COLOR_REGEX.match(field.data):
+            raise ValidationError("Farbe muss im Format #rrggbb sein.")
+
+
+class TagRenameForm(FlaskForm):
+    """Rename eines Tags auf der `/settings/tags`-Manage-Seite (Block Z).
+
+    Gleiche Regex/Length-Validation wie `TagForm.name` (Single Source of Truth
+    `TAG_NAME_REGEX`).
+    """
+
+    name = StringField(
+        "Neuer Name",
+        validators=[DataRequired(), Length(min=1, max=32)],
+    )
+
+    def validate_name(self, field: StringField) -> None:
+        if not field.data or not TAG_NAME_REGEX.match(field.data):
+            raise ValidationError(
+                "Ungueltiger Tag-Name. Erlaubt: a-z, 0-9, '.', '_', '-' "
+                "(Start mit Buchstabe/Ziffer, max 32 Zeichen)."
+            )
+
+
+class TagColorForm(FlaskForm):
+    """Color-Edit eines Tags auf der `/settings/tags`-Manage-Seite (Block Z).
+
+    Gleiche Regex wie `TagForm.color` (`TAG_COLOR_REGEX`, `^#[0-9a-fA-F]{6}$`).
+    """
+
+    color = StringField(
+        "Farbe (Hex, z.B. #6b7280)",
+        validators=[DataRequired(), Length(min=7, max=7)],
+    )
 
     def validate_color(self, field: StringField) -> None:
         if not field.data or not TAG_COLOR_REGEX.match(field.data):
@@ -451,25 +492,131 @@ class ServerSettingsForm(FlaskForm):
         self.group_id.choices = choices
 
 
+class ServerGroupCreateForm(FlaskForm):
+    """Inline-Anlage einer neuen ServerGroup im Server-Settings-Sub-View (Block Z).
+
+    Single-Field-Form (ADR-0006 — keine Pflicht-Felder ueber `name` hinaus).
+    `position` setzt der View-Handler auf `MAX(position) + 1`, ein Operator
+    waehlt sie nicht. Regex teilt sich die Quelle mit `GroupRenameForm`
+    (`SERVER_GROUP_NAME_REGEX`).
+    """
+
+    name = StringField(
+        "Gruppen-Name",
+        validators=[
+            DataRequired(),
+            Length(min=1, max=64),
+            Regexp(
+                SERVER_GROUP_NAME_REGEX,
+                message="Erlaubt: A-Z, a-z, 0-9, Leerzeichen, '_', '.', '-' (max 64 Zeichen).",
+            ),
+        ],
+    )
+
+    def validate_name(self, field: StringField) -> None:
+        """Whitespace-only-Namen ablehnen.
+
+        Das Leerzeichen ist Teil der `SERVER_GROUP_NAME_REGEX`-Charset, also
+        wuerde `"   "` Regex + `Length(min=1)` bestehen. Der View strippt den
+        Namen aber vor dem Insert — das Ergebnis `""` verletzt dann die DB-
+        CHECK-Constraints (`ck_server_groups_name_length`/`_charset`) und der
+        Race-Catch-`scalar_one()` faende keine Row (NoResultFound → 500).
+        Form-seitig abfangen, damit Form-Akzeptanz die DB-CHECKs deckt.
+        """
+        if not field.data or not field.data.strip():
+            raise ValidationError("Gruppen-Name darf nicht nur aus Leerzeichen bestehen.")
+
+
+class GroupRenameForm(FlaskForm):
+    """Rename einer ServerGroup auf der `/settings/groups`-Manage-Seite (Block Z).
+
+    Gleiche Regex/Length-Validation wie `ServerGroupCreateForm` (geteilte
+    `SERVER_GROUP_NAME_REGEX`-Konstante — Block-Z-Risiken-Tabelle verlangt
+    Drift-Freiheit). Whitespace-only wird Form-seitig abgelehnt, damit die
+    Form-Akzeptanz die DB-CHECK-Constraints deckt.
+    """
+
+    name = StringField(
+        "Neuer Name",
+        validators=[
+            DataRequired(),
+            Length(min=1, max=64),
+            Regexp(
+                SERVER_GROUP_NAME_REGEX,
+                message="Erlaubt: A-Z, a-z, 0-9, Leerzeichen, '_', '.', '-' (max 64 Zeichen).",
+            ),
+        ],
+    )
+
+    def validate_name(self, field: StringField) -> None:
+        if not field.data or not field.data.strip():
+            raise ValidationError("Gruppen-Name darf nicht nur aus Leerzeichen bestehen.")
+
+
+class GroupMoveForm(FlaskForm):
+    """Position-Reorder einer ServerGroup (Up/Down-Swap) auf `/settings/groups`.
+
+    `direction` ist ein SelectField mit Whitelist `up`/`down` — Drag-Drop ist
+    ADR-0040-Re-Open-Trigger, hier genuegen Pfeil-Buttons.
+    """
+
+    direction = SelectField(
+        "Richtung",
+        choices=[("up", "up"), ("down", "down")],
+        validators=[DataRequired()],
+    )
+
+
+class ServerTagCreateForm(FlaskForm):
+    """Inline-Anlage eines neuen Tags im Server-Settings-Sub-View (Block Z).
+
+    Single-Field-Form. Color wird NICHT gefuehrt — der View-Handler setzt den
+    Default `#6b7280` (analog `TagForm.color.default`); kein Color-Picker im
+    Inline-Flow (ADR-0040 §Verworfen). Regex identisch zu `TagForm.name`.
+    """
+
+    name = StringField(
+        "Tag-Name",
+        validators=[
+            DataRequired(),
+            Length(min=1, max=32),
+            Regexp(
+                TAG_NAME_REGEX,
+                message=(
+                    "Ungueltiger Tag-Name. Erlaubt: a-z, 0-9, '.', '_', '-' "
+                    "(Start mit Buchstabe/Ziffer, max 32 Zeichen)."
+                ),
+            ),
+        ],
+    )
+
+
 __all__ = [
     "NOTE_TEXT_MAX_LEN",
+    "SERVER_GROUP_NAME_REGEX",
     "TAG_COLOR_REGEX",
     "TAG_NAME_REGEX",
     "AcknowledgeForm",
     "BulkActionForm",
     "CSRFOnlyForm",
     "GroupAcknowledgeForm",
+    "GroupMoveForm",
+    "GroupRenameForm",
     "LlmReviewerConcurrencyForm",
     "LlmSettingsForm",
     "LoginForm",
     "MasterKeyRotateForm",
     "NoteForm",
     "ReopenForm",
+    "ServerGroupCreateForm",
     "ServerGroupForm",
     "ServerScanIntervalForm",
     "ServerSettingsForm",
+    "ServerTagCreateForm",
     "SetupStep1Form",
     "SetupStep2Form",
     "SetupStep3Form",
+    "TagColorForm",
     "TagForm",
+    "TagRenameForm",
 ]

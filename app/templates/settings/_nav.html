@@ -30,6 +30,17 @@
       </a>
     </li>
     <li>
+      <a href="{{ url_for('settings.groups_list') }}"
+         hx-get="{{ url_for('settings.groups_list') }}"
+         hx-target="#settings-content"
+         hx-swap="innerHTML"
+         hx-push-url="true"
+         hx-headers='{"HX-Target": "settings-content"}'
+         class="{% if active == 'groups' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
+        Gruppen
+      </a>
+    </li>
+    <li>
       <a href="{{ url_for('llm_settings.show') }}"
          hx-get="{{ url_for('llm_settings.show') }}"
          hx-target="#settings-content"

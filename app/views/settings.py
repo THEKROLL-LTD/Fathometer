@@ -37,11 +37,14 @@ from app.config import load_settings
 from app.db import get_session
 from app.forms import (
     CSRFOnlyForm,
+    GroupMoveForm,
+    GroupRenameForm,
     LlmReviewerConcurrencyForm,
     LlmReviewerModeForm,
     LlmReviewerRequeueForm,
     MasterKeyRotateForm,
-    TagForm,
+    TagColorForm,
+    TagRenameForm,
 )
 from app.models import (
     ApplicationGroup,
@@ -50,6 +53,7 @@ from app.models import (
     LLMJob,
     LLMRiskCache,
     Server,
+    ServerGroup,
     Tag,
 )
 from app.services.stale_detection import is_db_stale
@@ -78,8 +82,12 @@ def settings_index() -> WerkzeugResponse:
 
 
 # ---------------------------------------------------------------------------
-# Tags — bestehende Routen (unveraendert in Verhalten, Templates kommen
-# vom frontend-implementer auf den neuen `_shell.html`-Pfad).
+# Tags — Manage-Only-Seite (Block Z, ADR-0040 — Refactor).
+#
+# KEIN Create-Pfad mehr — Tags entstehen ausschliesslich inline im Server-
+# Settings-Sub-View (`server_settings.tag_create`). Diese Seite bietet nur
+# Rename, Color-Edit und Delete. Der frühere `POST /settings/tags`-Create-
+# Endpoint ist ersatzlos entfernt (POST liefert jetzt 405).
 # ---------------------------------------------------------------------------
 
 
@@ -92,50 +100,97 @@ def tags_list() -> Any:
         active="tags",
         content_template="settings/tags.html",
         tags=tags,
-        form=TagForm(),
+        rename_form=TagRenameForm(),
+        color_form=TagColorForm(),
         delete_form=CSRFOnlyForm(),
     )
 
 
-@settings_bp.post("/tags")
+@settings_bp.post("/tags/<int:tag_id>/rename")
 @login_required
-def tags_create() -> Any:
+def tags_rename(tag_id: int) -> Any:
+    """`POST /settings/tags/<id>/rename` — Tag umbenennen.
+
+    No-Op bei identischem Namen (kein Audit). `IntegrityError` (Name bereits
+    vergeben) → Flash + Redirect ohne 500.
+    """
     sess = get_session()
-    form = TagForm()
+    form = TagRenameForm()
     if not form.validate_on_submit():
-        tags = sess.execute(select(Tag).order_by(Tag.name)).scalars().all()
         for field_name, errors in form.errors.items():
             for err in errors:
                 flash(f"{field_name}: {err}", "error")
-        return make_response(
-            render_settings(
-                active="tags",
-                content_template="settings/tags.html",
-                tags=tags,
-                form=form,
-                delete_form=CSRFOnlyForm(),
-            ),
-            400,
-        )
+        if not form.errors:
+            flash("Ungueltiger CSRF-Token.", "error")
+        return redirect(url_for("settings.tags_list"))
 
-    tag = Tag(name=cast(str, form.name.data), color=cast(str, form.color.data))
-    sess.add(tag)
+    tag = sess.execute(select(Tag).where(Tag.id == tag_id)).scalar_one_or_none()
+    if tag is None:
+        flash("Tag nicht gefunden.", "error")
+        return redirect(url_for("settings.tags_list"))
+
+    new_name = cast(str, form.name.data)
+    old_name = tag.name
+    if old_name == new_name:
+        return redirect(url_for("settings.tags_list"))  # No-op, kein Audit
+
+    tag.name = new_name
     try:
         sess.flush()
     except IntegrityError:
         sess.rollback()
-        flash("Tag existiert bereits.", "error")
+        flash(f"Name '{new_name}' ist bereits vergeben.", "error")
         return redirect(url_for("settings.tags_list"))
 
     log_event(
-        "tag.created",
+        "tag.renamed",
         target_type="tag",
-        target_id=tag.id,
-        metadata={"name": tag.name, "color": tag.color},
+        target_id=tag_id,
+        metadata={"from": old_name, "to": new_name},
         session=sess,
     )
     sess.commit()
-    flash(f"Tag '{tag.name}' angelegt.", "success")
+    flash(f"Tag '{old_name}' in '{new_name}' umbenannt.", "success")
+    return redirect(url_for("settings.tags_list"))
+
+
+@settings_bp.post("/tags/<int:tag_id>/color")
+@login_required
+def tags_color(tag_id: int) -> Any:
+    """`POST /settings/tags/<id>/color` — Tag-Farbe aendern.
+
+    No-Op bei identischer Farbe (kein Audit).
+    """
+    sess = get_session()
+    form = TagColorForm()
+    if not form.validate_on_submit():
+        for field_name, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field_name}: {err}", "error")
+        if not form.errors:
+            flash("Ungueltiger CSRF-Token.", "error")
+        return redirect(url_for("settings.tags_list"))
+
+    tag = sess.execute(select(Tag).where(Tag.id == tag_id)).scalar_one_or_none()
+    if tag is None:
+        flash("Tag nicht gefunden.", "error")
+        return redirect(url_for("settings.tags_list"))
+
+    new_color = cast(str, form.color.data)
+    old_color = tag.color
+    if old_color == new_color:
+        return redirect(url_for("settings.tags_list"))  # No-op, kein Audit
+
+    tag.color = new_color
+    log_event(
+        "tag.color_changed",
+        target_type="tag",
+        target_id=tag_id,
+        metadata={"from": old_color, "to": new_color},
+        session=sess,
+    )
+    sess.commit()
+    flash(f"Farbe von Tag '{tag.name}' geaendert.", "success")
     return redirect(url_for("settings.tags_list"))
 
 
@@ -165,6 +220,199 @@ def tags_delete(tag_id: int) -> Any:
     sess.commit()
     flash(f"Tag '{name}' geloescht.", "success")
     return redirect(url_for("settings.tags_list"))
+
+
+# ---------------------------------------------------------------------------
+# Gruppen — Manage-Only-Seite (Block Z, ADR-0040).
+#
+# KEIN Create-Pfad — Gruppen entstehen ausschliesslich inline im Server-
+# Settings-Sub-View (`server_settings.group_create`). Diese Seite bietet nur
+# Rename, Delete und Position-Reorder (Up/Down-Swap).
+# ---------------------------------------------------------------------------
+
+
+def _groups_with_member_counts(sess: Any) -> list[dict[str, Any]]:
+    """Liefert alle Gruppen mit aggregiertem Member-Count, sortiert.
+
+    Ein LEFT JOIN servers GROUP BY group — leere Gruppen tauchen mit
+    `member_count = 0` auf (sie werden hier bewusst gezeigt, nur die Sidebar
+    blendet sie weg). Sortierung wie die Sidebar: `position, name`.
+    """
+    stmt = (
+        select(
+            ServerGroup.id,
+            ServerGroup.name,
+            ServerGroup.position,
+            func.count(Server.id).label("member_count"),
+        )
+        .outerjoin(Server, Server.group_id == ServerGroup.id)
+        .group_by(ServerGroup.id, ServerGroup.name, ServerGroup.position)
+        .order_by(ServerGroup.position, ServerGroup.name)
+    )
+    return [
+        {
+            "id": int(row.id),
+            "name": row.name,
+            "position": int(row.position),
+            "member_count": int(row.member_count),
+        }
+        for row in sess.execute(stmt).all()
+    ]
+
+
+@settings_bp.get("/groups")
+@login_required
+def groups_list() -> Any:
+    """`GET /settings/groups` — Manage-Only-Liste aller Gruppen."""
+    sess = get_session()
+    return render_settings(
+        active="groups",
+        content_template="settings/groups.html",
+        groups=_groups_with_member_counts(sess),
+        rename_form=GroupRenameForm(),
+        move_form=GroupMoveForm(),
+        delete_form=CSRFOnlyForm(),
+    )
+
+
+@settings_bp.post("/groups/<int:group_id>/rename")
+@login_required
+def groups_rename(group_id: int) -> Any:
+    """`POST /settings/groups/<id>/rename` — Gruppe umbenennen.
+
+    No-Op bei identischem Namen (kein Audit). `IntegrityError` (Name bereits
+    vergeben) → Flash + Redirect ohne 500.
+    """
+    sess = get_session()
+    form = GroupRenameForm()
+    if not form.validate_on_submit():
+        for field_name, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field_name}: {err}", "error")
+        if not form.errors:
+            flash("Ungueltiger CSRF-Token.", "error")
+        return redirect(url_for("settings.groups_list"))
+
+    group = sess.execute(select(ServerGroup).where(ServerGroup.id == group_id)).scalar_one_or_none()
+    if group is None:
+        flash("Gruppe nicht gefunden.", "error")
+        return redirect(url_for("settings.groups_list"))
+
+    new_name = cast(str, form.name.data).strip()
+    old_name = group.name
+    if old_name == new_name:
+        return redirect(url_for("settings.groups_list"))  # No-op, kein Audit
+
+    group.name = new_name
+    try:
+        sess.flush()
+    except IntegrityError:
+        sess.rollback()
+        flash(f"Name '{new_name}' ist bereits vergeben.", "error")
+        return redirect(url_for("settings.groups_list"))
+
+    log_event(
+        "group.renamed",
+        target_type="group",
+        target_id=group_id,
+        metadata={"from": old_name, "to": new_name},
+        session=sess,
+    )
+    sess.commit()
+    flash(f"Gruppe '{old_name}' in '{new_name}' umbenannt.", "success")
+    return redirect(url_for("settings.groups_list"))
+
+
+@settings_bp.post("/groups/<int:group_id>/delete")
+@login_required
+def groups_delete(group_id: int) -> Any:
+    """`POST /settings/groups/<id>/delete` — Gruppe loeschen.
+
+    ON-DELETE-SET-NULL (ADR-0034) setzt `server.group_id = NULL` fuer alle
+    Member — kein Server wird geloescht. Member-Count wird VOR dem Delete
+    gelesen und ins Audit geschrieben (`member_count_before`).
+    """
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Ungueltiger CSRF-Token.", "error")
+        return redirect(url_for("settings.groups_list"))
+
+    sess = get_session()
+    group = sess.execute(select(ServerGroup).where(ServerGroup.id == group_id)).scalar_one_or_none()
+    if group is None:
+        flash("Gruppe nicht gefunden.", "error")
+        return redirect(url_for("settings.groups_list"))
+
+    member_count = int(
+        sess.execute(select(func.count(Server.id)).where(Server.group_id == group_id)).scalar_one()
+    )
+    name = group.name
+    sess.delete(group)
+    log_event(
+        "group.deleted",
+        target_type="group",
+        target_id=group_id,
+        metadata={"name": name, "member_count_before": member_count},
+        session=sess,
+    )
+    sess.commit()
+    flash(f"Gruppe '{name}' geloescht ({member_count} Server jetzt ungrouped).", "success")
+    return redirect(url_for("settings.groups_list"))
+
+
+@settings_bp.post("/groups/<int:group_id>/move")
+@login_required
+def groups_move(group_id: int) -> Any:
+    """`POST /settings/groups/<id>/move` — Position-Reorder per Up/Down-Swap.
+
+    Findet den Nachbarn mit `position < this` (up) bzw. `position > this`
+    (down) und tauscht beide `position`-Werte atomar. No-Op + Flash wenn kein
+    Nachbar existiert (Gruppe bereits ganz oben/unten).
+    """
+    sess = get_session()
+    form = GroupMoveForm()
+    if not form.validate_on_submit():
+        flash("Ungueltige Richtung.", "error")
+        return redirect(url_for("settings.groups_list"))
+
+    group = sess.execute(select(ServerGroup).where(ServerGroup.id == group_id)).scalar_one_or_none()
+    if group is None:
+        flash("Gruppe nicht gefunden.", "error")
+        return redirect(url_for("settings.groups_list"))
+
+    direction = form.direction.data
+    if direction == "up":
+        neighbor = sess.execute(
+            select(ServerGroup)
+            .where(ServerGroup.position < group.position)
+            .order_by(ServerGroup.position.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+    else:  # "down" — SelectField-Whitelist garantiert up|down
+        neighbor = sess.execute(
+            select(ServerGroup)
+            .where(ServerGroup.position > group.position)
+            .order_by(ServerGroup.position.asc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+    if neighbor is None:
+        edge = "oben" if direction == "up" else "unten"
+        flash(f"Gruppe ist bereits ganz {edge}.", "info")
+        return redirect(url_for("settings.groups_list"))
+
+    old_position = group.position
+    group.position = neighbor.position
+    neighbor.position = old_position
+    log_event(
+        "group.moved",
+        target_type="group",
+        target_id=group_id,
+        metadata={"from_position": old_position, "to_position": group.position},
+        session=sess,
+    )
+    sess.commit()
+    return redirect(url_for("settings.groups_list"))
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,120 @@
+{# Gruppen-Verwaltung Content (Block Z, Phase C / ADR-0040).
+
+   Manage-Only-Seite: Rename, Delete, Up/Down-Reorder. KEIN Anlege-Form —
+   Gruppen entstehen inline im Server-Detail-Settings (Phase A/B).
+
+   Wird ueber `render_settings(active="groups", ...)` in einem von drei
+   Modi gerendert (Vollseite / Detail-Pane-Fragment / Content-Only).
+   Daher KEIN `extends`, KEIN `block` — Content-only-Template, analog
+   `settings/tags.html`. Ausschliesslich `sd-*`-Klassen (kein DaisyUI/Tailwind).
+
+   Variablen-Vertrag (gesetzt von `app/views/settings.py:groups_list`):
+     - `groups`      : list[dict] mit id, name, position, member_count.
+                       Bereits sortiert nach position, name. Kann leer sein.
+     - `rename_form` : GroupRenameForm  (Feld name + csrf_token).
+     - `move_form`   : GroupMoveForm    (direction SelectField + csrf_token).
+     - `delete_form` : CSRFOnlyForm     (nur csrf_token).
+
+   Sicherheit:
+     - Kein `|safe` auf User-Daten. `g.name` rendert unter Jinja-Autoescape.
+     - CSRF-Token in jeder state-changing Form.
+     - Kein Pflicht-Kommentarfeld (ADR-0006). Delete-Confirm ist ein
+       client-seitiger Bestaetigungs-Dialog, kein Pflicht-Feld.
+#}
+<div class="sd-manage">
+  <header class="sd-manage-head">
+    <h1 class="sd-settings-section__title">Gruppen</h1>
+    <p class="sd-settings-section__hint">
+      Gruppen bündeln Server für die Sidebar-Übersicht. Hier verwaltest du
+      Reihenfolge, Namen und Löschung.
+    </p>
+    <p class="sd-settings-section__hint">
+      Gruppen entstehen, indem du im Server-Detail-Settings eine neue Gruppe zuweist.
+    </p>
+  </header>
+
+  {% if groups %}
+    <table class="sd-manage-table" data-test="groups-table">
+      <thead>
+        <tr>
+          <th>Reihenfolge</th>
+          <th>Name</th>
+          <th>Server</th>
+          <th>Aktion</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for g in groups %}
+          <tr class="sd-manage-row" data-test="group-row-{{ g.id }}">
+            <td>
+              <div class="sd-manage-actions">
+                <form method="post"
+                      action="{{ url_for('settings.groups_move', group_id=g.id) }}">
+                  {{ move_form.csrf_token }}
+                  <button type="submit"
+                          name="direction"
+                          value="up"
+                          class="sd-move-btn"
+                          data-test="group-move-up-{{ g.id }}"
+                          aria-label="Gruppe {{ g.name }} nach oben"
+                          {% if loop.first %}disabled{% endif %}>&#x2191;</button>
+                </form>
+                <form method="post"
+                      action="{{ url_for('settings.groups_move', group_id=g.id) }}">
+                  {{ move_form.csrf_token }}
+                  <button type="submit"
+                          name="direction"
+                          value="down"
+                          class="sd-move-btn"
+                          data-test="group-move-down-{{ g.id }}"
+                          aria-label="Gruppe {{ g.name }} nach unten"
+                          {% if loop.last %}disabled{% endif %}>&#x2193;</button>
+                </form>
+              </div>
+            </td>
+            <td>
+              <form method="post"
+                    action="{{ url_for('settings.groups_rename', group_id=g.id) }}"
+                    class="sd-manage-actions">
+                {{ rename_form.csrf_token }}
+                <input class="sd-input"
+                       type="text"
+                       name="name"
+                       value="{{ g.name }}"
+                       maxlength="64"
+                       pattern="^[A-Za-z0-9 _.-]+$"
+                       title="Buchstaben, Ziffern, Leerzeichen, '_', '.', '-' (max 64 Zeichen)"
+                       aria-label="Gruppe {{ g.name }} umbenennen"
+                       data-test="group-rename-input-{{ g.id }}">
+                <button type="submit"
+                        class="sd-add-btn"
+                        data-test="group-rename-submit-{{ g.id }}">Umbenennen</button>
+              </form>
+            </td>
+            <td>
+              <span class="sd-manage-count"
+                    data-test="group-member-count-{{ g.id }}">{{ g.member_count }}</span>
+            </td>
+            <td>
+              <form method="post"
+                    action="{{ url_for('settings.groups_delete', group_id=g.id) }}"
+                    x-data
+                    @submit="if (!confirm('{{ g.member_count }} Server fallen in ungrouped zurück — wirklich löschen?')) $event.preventDefault();">
+                {{ delete_form.csrf_token }}
+                <button type="submit"
+                        class="sd-danger-btn"
+                        data-test="group-delete-{{ g.id }}"
+                        aria-label="Gruppe {{ g.name }} löschen">Löschen</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="sd-manage-empty" data-test="groups-empty">
+      Noch keine Gruppen. Lege deine erste Gruppe im Server-Detail-Settings an,
+      indem du einem Server eine Gruppe zuweist.
+    </p>
+  {% endif %}
+</div>

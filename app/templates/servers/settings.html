@@ -95,14 +95,46 @@
                   class="sd-add-btn"
                   data-test="tag-add-submit">Hinzufügen</button>
         </div>
-        <p class="sd-settings-section__hint">Tags helfen beim Filtern in der Server-Liste.</p>
+
+        <div class="sd-inline-create">
+          <input class="sd-input"
+                 type="text"
+                 name="name"
+                 form="tag-create-form"
+                 maxlength="32"
+                 pattern="^[a-z0-9][a-z0-9._-]{0,31}$"
+                 placeholder="Neuen Tag anlegen…"
+                 aria-label="Neuen Tag-Namen eingeben"
+                 data-test="tag-inline-create-input">
+          <button type="submit"
+                  form="tag-create-form"
+                  class="sd-add-btn"
+                  data-test="tag-inline-create-submit">+ Anlegen</button>
+        </div>
+        <p class="sd-settings-section__hint">Tags helfen beim Filtern in der Server-Liste. Neue Tags entstehen direkt hier und werden diesem Server zugewiesen.</p>
       </section>
 
       {# ── Gruppe ── #}
       <section class="sd-settings-section" data-test="settings-section-group">
         <h2 class="sd-settings-section__title">Gruppe</h2>
         {{ settings_form.group_id(class="sd-select", **{"data-test": "settings-group-select", "aria-label": "Server-Gruppe wählen"}) }}
-        <p class="sd-settings-section__hint">Gruppen helfen beim Bündeln von Servern für Bulk-Aktionen.</p>
+
+        <div class="sd-inline-create">
+          <input class="sd-input"
+                 type="text"
+                 name="name"
+                 form="group-create-form"
+                 maxlength="64"
+                 pattern="^[A-Za-z0-9 _.-]+$"
+                 placeholder="Neue Gruppe anlegen…"
+                 aria-label="Neuen Gruppen-Namen eingeben"
+                 data-test="group-inline-create-input">
+          <button type="submit"
+                  form="group-create-form"
+                  class="sd-add-btn"
+                  data-test="group-inline-create-submit">+ Neue Gruppe anlegen</button>
+        </div>
+        <p class="sd-settings-section__hint">Gruppen helfen beim Bündeln von Servern für Bulk-Aktionen. Eine neue Gruppe entsteht direkt hier und wird diesem Server zugewiesen.</p>
       </section>
 
       {# ── Scan-Intervall ── #}
@@ -138,6 +170,20 @@
       {{ tag_remove_form.hidden_tag() }}
     </form>
   {% endfor %}
+
+  {# ── Inline-Create-Sub-Forms (Block Z, Phase B, ADR-0040). Separate Endpoints, separate Submit. ── #}
+  <form id="group-create-form"
+        method="post"
+        action="{{ url_for('server_settings.group_create', server_id=server.id) }}"
+        style="display: none;">
+    {{ group_create_form.hidden_tag() }}
+  </form>
+  <form id="tag-create-form"
+        method="post"
+        action="{{ url_for('server_settings.tag_create', server_id=server.id) }}"
+        style="display: none;">
+    {{ tag_create_form.hidden_tag() }}
+  </form>
 
 </div>
 {% endblock %}

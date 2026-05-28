@@ -1185,6 +1185,15 @@
   gap: 10px;
   align-items: stretch;
 }
+
+/* Inline-Create-Zeile (Block Z, Phase B): Text-Input + "+ Anlegen"-Button */
+.sd-inline-create {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 10px;
+}
+.sd-inline-create .sd-input { flex: 1; }
 .sd-select, .sd-input {
   background: transparent;
   border: 1px solid var(--border-subtle);

@@ -19,11 +19,9 @@ from __future__ import annotations
 
 import pytest
 from flask import Flask
-from flask.testing import FlaskClient
 from werkzeug.datastructures import MultiDict
 
 from app.forms import TAG_NAME_REGEX, TagForm
-from tests._helpers import create_admin_user, login
 
 # ---------------------------------------------------------------------------
 # Reines Regex-Pattern (unit-level).
@@ -119,39 +117,3 @@ def test_tag_form_validation_rejects_bad_color(app: Flask) -> None:
             form = TagForm(formdata=_make_form_data("prod", color=color))
             assert not form.validate(), f"form accepted bad color {color!r}"
             assert "color" in form.errors, form.errors
-
-
-# ---------------------------------------------------------------------------
-# HTTP-Integration: 2 Cases via `/settings/tags`-Route.
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def authed_client(db_app: Flask) -> FlaskClient:
-    create_admin_user(db_app)
-    client = db_app.test_client()
-    login(client)
-    return client
-
-
-def test_tag_route_rejects_invalid_name_with_400(authed_client: FlaskClient) -> None:
-    resp = authed_client.post(
-        "/settings/tags",
-        data={"name": "Foo Bar", "color": "#6b7280"},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 400, (resp.status_code, resp.data[:200])
-    # Im Body steht die Fehlermeldung (Form wird re-rendered).
-    body = resp.get_data(as_text=True)
-    assert "Tag-Name" in body or "Ungueltiger" in body or "ungueltig" in body.lower(), body[:400]
-
-
-def test_tag_route_accepts_valid_name(authed_client: FlaskClient) -> None:
-    resp = authed_client.post(
-        "/settings/tags",
-        data={"name": "prod-eu", "color": "#6b7280"},
-        follow_redirects=False,
-    )
-    # Erfolgsfall: Redirect auf die Liste.
-    assert resp.status_code == 302, (resp.status_code, resp.data[:200])
-    assert "/settings/tags" in resp.headers["Location"]
