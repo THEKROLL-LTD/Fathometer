@@ -73,6 +73,7 @@ from app.services.llm_risk_reviewer import (
     Pass2Evaluation,
     Pass2Result,
 )
+from app.services.pass2_enqueue import Pass2Trigger, enqueue_pass2_for_server
 from app.settings_service import ensure_settings_row
 from app.workers import feed_enrichment
 
@@ -156,6 +157,11 @@ def __getattr__(name: str) -> Any:
 # Block R (ADR-0026): Scan-Ingest-Retention-Sweep-Cadence (1 Stunde).
 SCAN_INGEST_RETENTION_SWEEP_INTERVAL_SEC: float = 3600.0
 
+# TICKET-007: Backstop-Sweep-Cadence fuer den Pass-2-Auto-Trigger (5 min).
+# Faengt den Trigger nach falls der Hook im _do_pass1/_requeue_or_fail-Pfad
+# aus irgendeinem Grund nicht gefeuert hat (Worker-Crash, DB-Hickup).
+PASS2_BACKSTOP_SWEEP_INTERVAL_SEC: float = 300.0
+
 # Modul-State (graceful Shutdown + Cadence-Tracking).
 _shutdown: bool = False
 # v0.9.5: ``_last_heartbeat_at`` ist Legacy — Heartbeat lebt jetzt im
@@ -168,6 +174,8 @@ _last_debug_log_eviction_at: float = 0.0
 _last_feed_pull_check_at: float = 0.0
 # Block R (ADR-0026): Letzter Lauf des Scan-Ingest-Retention-Sweeps.
 _last_retention_sweep_at: float = 0.0
+# TICKET-007: Letzter Lauf des Pass-2-Backstop-Sweeps.
+_last_pass2_backstop_sweep_at: float = 0.0
 
 # v0.9.6: Mode-/Budget-Caching + Idle-Backoff. Reduziert die Idle-SQL-Last
 # (vorher ~120 Queries/Minute bei leerer Queue) drastisch.
@@ -314,13 +322,14 @@ def request_shutdown_for_tests() -> None:
 def reset_shutdown_for_tests() -> None:
     """Test-Hook — setzt das Shutdown-Flag zurueck (zwischen Tests)."""
     global _shutdown, _last_heartbeat_at, _last_reaper_at, _last_debug_log_eviction_at
-    global _last_feed_pull_check_at, _last_retention_sweep_at
+    global _last_feed_pull_check_at, _last_retention_sweep_at, _last_pass2_backstop_sweep_at
     _shutdown = False
     _last_heartbeat_at = 0.0
     _last_reaper_at = 0.0
     _last_debug_log_eviction_at = 0.0
     _last_feed_pull_check_at = 0.0
     _last_retention_sweep_at = 0.0
+    _last_pass2_backstop_sweep_at = 0.0
     # v0.9.5: Stop-Event clearen damit Test-Re-Runs den Heartbeat-Thread
     # nicht im Stop-State festhalten.
     _heartbeat_thread_stop.clear()
@@ -783,7 +792,7 @@ def _run_subticks() -> None:
     Teil ist herausgenommen.
     """
     global _last_reaper_at, _last_debug_log_eviction_at, _last_feed_pull_check_at
-    global _last_retention_sweep_at
+    global _last_retention_sweep_at, _last_pass2_backstop_sweep_at
     now_mono = time.monotonic()
 
     # Stale-Reaper alle 60s (beide Tabellen: llm_jobs + scan_ingest_jobs).
@@ -818,6 +827,92 @@ def _run_subticks() -> None:
         session.commit()
     if scan_ingest_job_id is not None:
         _process_scan_ingest_job_safe(scan_ingest_job_id)
+
+    # TICKET-007: Pass-2-Backstop-Sweep alle 5 min (Crash-Backstop fuer den
+    # _do_pass1/_requeue_or_fail-Hook). Idempotent — bei normalem Betrieb no-op.
+    if now_mono - _last_pass2_backstop_sweep_at > PASS2_BACKSTOP_SWEEP_INTERVAL_SEC:
+        _run_pass2_backstop_sweep_safe()
+        _last_pass2_backstop_sweep_at = now_mono
+
+
+# ---------------------------------------------------------------------------
+# Pass-2-Auto-Trigger (TICKET-007)
+# ---------------------------------------------------------------------------
+
+
+def _maybe_trigger_pass2_after_pass1(*, server_id: int | None, trigger: Pass2Trigger) -> None:
+    """Triggert das Pass-2-Enqueue sobald das letzte Pass-1 fuer einen Server
+    terminiert (done oder final-failed).
+
+    Sibling-Check: nur wenn KEIN Pass-1-Job (``group_detection``) fuer den
+    Server mehr ``queued``/``in_progress`` ist, wird der idempotente Helper
+    ``enqueue_pass2_for_server`` gerufen — sonst wartet der Trigger auf die
+    Terminierung des letzten Siblings (der dann selbst hier landet).
+
+    Defensiv: jede Exception (DB-Hickup, Helper-Fehler) wird geloggt und
+    geschluckt — der Pass-1-Done-/Fail-Pfad darf davon nicht sterben.
+    """
+    if server_id is None:
+        return
+    try:
+        with get_session() as session:
+            pending = session.execute(
+                text(
+                    """
+                    SELECT count(*) FROM llm_jobs
+                    WHERE job_type = 'group_detection'
+                      AND server_id = :sid
+                      AND status IN ('queued', 'in_progress')
+                    """
+                ),
+                {"sid": server_id},
+            ).scalar()
+            if pending and int(pending) > 0:
+                return
+            enqueue_pass2_for_server(session, server_id, trigger=trigger)
+            session.commit()
+    except Exception:  # pragma: no cover — DB-Hickup darf den Worker nicht killen
+        log.exception("llm_worker.pass2_trigger_failed server_id=%s", server_id)
+
+
+def _run_pass2_backstop_sweep_safe() -> None:
+    """Crash-Backstop fuer den Pass-2-Trigger.
+
+    Faengt den Trigger ab wenn der Hook im ``_do_pass1``- oder
+    ``_requeue_or_fail``-Pfad aus irgendeinem Grund nicht gefeuert hat
+    (Worker-Crash zwischen Pass-1-Done und Hook-Aufruf, DB-Hickup).
+
+    Findet Server-IDs mit kuerzlicher Pass-1-Aktivitaet (Performance-Guard:
+    ``completed_at`` in den letzten 24 h) und 0 pending Pass-1-Jobs
+    (queued + in_progress) und ruft den idempotenten Helper. Bei normaler
+    Operation no-op, weil der Hook bereits gefeuert hat und der
+    NOT-EXISTS-Guard im Helper greift.
+    """
+    try:
+        with get_session() as session:
+            candidate_server_ids = [
+                int(row[0])
+                for row in session.execute(
+                    text(
+                        """
+                        SELECT DISTINCT server_id FROM llm_jobs
+                        WHERE job_type = 'group_detection'
+                          AND server_id IS NOT NULL
+                          AND completed_at > now() - interval '24 hours'
+                        EXCEPT
+                        SELECT DISTINCT server_id FROM llm_jobs
+                        WHERE job_type = 'group_detection'
+                          AND server_id IS NOT NULL
+                          AND status IN ('queued', 'in_progress')
+                        """
+                    )
+                ).fetchall()
+            ]
+            for sid in candidate_server_ids:
+                enqueue_pass2_for_server(session, sid, trigger="backstop_sweep")
+            session.commit()
+    except Exception:  # pragma: no cover — DB-Hickup darf den Worker nicht killen
+        log.exception("llm_worker.pass2_backstop_sweep_failed")
 
 
 # ---------------------------------------------------------------------------
@@ -1145,6 +1240,10 @@ async def _do_pass1(job_id: int) -> None:
             # Block-P §1, ADR-0023).
             llm_budget.budget_consume(session, llm_budget.estimate_tokens(job))
             session.commit()
+
+    # TICKET-007 Hook A: Pass-2 enqueuen sobald das letzte Pass-1 fuer diesen
+    # Server done ist (Sibling-Check im Helper-Wrapper). Eigene Session, defensiv.
+    _maybe_trigger_pass2_after_pass1(server_id=job_server_id, trigger="pass1_completion")
 
 
 async def _persist_pass1_groups(
@@ -2107,6 +2206,10 @@ def _requeue_or_fail(job_id: int, error: str) -> None:
         if job is None:
             return
         if job.attempts >= MAX_ATTEMPTS:
+            # TICKET-007 Hook B: server_id/job_type vor dem Commit sichern, der
+            # Pass-2-Trigger laeuft danach in eigener Session.
+            failed_server_id = job.server_id
+            failed_job_type = job.job_type
             job.status = "failed"
             job.error = error[:1024]
             job.completed_at = datetime.now(UTC)
@@ -2127,6 +2230,12 @@ def _requeue_or_fail(job_id: int, error: str) -> None:
                 job.attempts,
                 error[:200],
             )
+            # Pass-2 enqueuen wenn ein Pass-1 final failed und keine Pass-1-
+            # Siblings mehr laufen (Sibling-Check im Helper-Wrapper).
+            if failed_job_type == "group_detection":
+                _maybe_trigger_pass2_after_pass1(
+                    server_id=failed_server_id, trigger="pass1_final_failed"
+                )
             return
         # Requeue mit exponential backoff (attempts * 60s).
         backoff_min = max(1, job.attempts)
