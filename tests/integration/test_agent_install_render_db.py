@@ -47,7 +47,7 @@ def test_install_sh_full_wizard_template(db_app: Flask) -> None:
     assert "Master-Key" in body
 
     # Eingebackene Konstanten.
-    assert 'RECOMMENDED_TRIVY_VERSION="0.70.2"' in body
+    assert 'RECOMMENDED_TRIVY_VERSION="0.70.0"' in body
     assert 'MIN_TRIVY_VERSION="0.70.0"' in body
     assert 'CURRENT_AGENT_VERSION="0.3.1"' in body
 

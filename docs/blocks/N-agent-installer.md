@@ -50,7 +50,7 @@ Subagent-Aufrufe nennen die Sektionen explizit.
 - `MIN_AGENT_VERSION: str = "0.1.0"` — niedrigste Agent-Version, die das Backend noch akzeptiert.
 - `CURRENT_AGENT_VERSION: str = "0.2.0"` — Version, die der Installer als „aktuell" ausliefert (matched `AGENT_VERSION` in `secscan-agent.sh`).
 - `MIN_TRIVY_VERSION: str = "0.70.0"` — niedrigste Trivy-Version, die als „nicht veraltet" gilt (Quelle: ARCHITECTURE §11 Mindestversion für vollständige EPSS-/KEV-/Attack-Vector-Felder).
-- `RECOMMENDED_TRIVY_VERSION: str = "0.70.2"` — Version, die der Installer als pinned Binary herunterlädt. Wird beim Bump im selben Commit aktualisiert.
+- `RECOMMENDED_TRIVY_VERSION: str = "0.70.0"` — Version, die der Installer als pinned Binary herunterlädt. Wird beim Bump im selben Commit aktualisiert.
 - `TRIVY_RELEASE_URL_TEMPLATE: str = "https://github.com/aquasecurity/trivy/releases/download/v{version}/trivy_{version}_Linux-{arch}.tar.gz"`
 - `TRIVY_DB_STALE_THRESHOLD_DAYS: int = 7` — Schwelle für „Trivy-DB veraltet"-Pill.
 
@@ -191,7 +191,7 @@ Atomare Single-Migration für beide Tabellen — sauberer Roll-Back. Kein Backfi
 **DoD:**
 
 - Unit-Tests in `tests/api/test_scans_envelope_trivy_version.py`:
-  - Envelope mit `host.trivy_version="0.70.2"` → Server-Feld gesetzt nach Ingest.
+  - Envelope mit `host.trivy_version="0.70.0"` → Server-Feld gesetzt nach Ingest.
   - Envelope ohne `host.trivy_version` → Server-Feld bleibt None, Ingest erfolgreich (Forward-Compat).
   - Envelope mit `agent_version="0.0.5"` und `MIN_AGENT_VERSION="0.1.0"` → 400, Audit-Event geschrieben.
   - Envelope mit `agent_version="0.2.0"` (>= MIN) → 202 wie bisher.

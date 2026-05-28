@@ -145,7 +145,7 @@ Das API hat zwei Aspekte: server-facing (für Trivy-Push-Clients) und browser-fa
     "os_pretty_name": "Ubuntu 22.04.4 LTS",
     "kernel_version": "5.15.0-91-generic",
     "architecture": "x86_64",
-    "trivy_version": "0.70.2"
+    "trivy_version": "0.70.0"
   },
   "host_state": {
     "snapshot_at": "2026-05-18T03:14:22Z",

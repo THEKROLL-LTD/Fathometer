@@ -171,7 +171,7 @@ class Settings(BaseSettings):
     MIN_AGENT_VERSION: ClassVar[str] = "0.1.0"
     CURRENT_AGENT_VERSION: ClassVar[str] = "0.3.1"
     MIN_TRIVY_VERSION: ClassVar[str] = "0.70.0"
-    RECOMMENDED_TRIVY_VERSION: ClassVar[str] = "0.70.2"
+    RECOMMENDED_TRIVY_VERSION: ClassVar[str] = "0.70.0"
     TRIVY_RELEASE_URL_TEMPLATE: ClassVar[str] = (
         "https://github.com/aquasecurity/trivy/releases/download/"
         "v{version}/trivy_{version}_Linux-{arch}.tar.gz"

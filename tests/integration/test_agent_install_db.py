@@ -146,7 +146,7 @@ def test_install_sh_returns_shellscript(db_app: Flask) -> None:
 def test_install_sh_contains_recommended_trivy_version(db_app: Flask) -> None:
     client = db_app.test_client()
     body = client.get("/install.sh").get_data(as_text=True)
-    assert 'RECOMMENDED_TRIVY_VERSION="0.70.2"' in body
+    assert 'RECOMMENDED_TRIVY_VERSION="0.70.0"' in body
     assert 'MIN_TRIVY_VERSION="0.70.0"' in body
     assert 'CURRENT_AGENT_VERSION="0.3.1"' in body
 
