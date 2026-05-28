@@ -3,10 +3,11 @@
 ARCHITECTURE.md §7: alle Filter im URL-Query-String fuer teilbare Links.
 
 ADR-0025 / Block Q: das frueher hier lebende `mode`-Feld (`list/group/diff`)
-ist ersatzlos entfallen — es gibt nur noch einen Render-Modus
-(Application-Group-Cards bzw. flache Tabelle bei aktivem Filter / `?flat=1`).
-Ein etwaiger `?mode=`-Param in der URL wird in `from_request` still
-ignoriert; veraltete Bookmarks landen damit nicht in 4xx.
+ist ersatzlos entfallen. ADR-0041 / Block AA: auch der Flat-Switch
+(`?flat`-Querystring + flache Tabelle) ist entfernt — es gibt nur noch die
+Application-Group-Card-Ansicht. Ein etwaiger `?mode=`-/`?flat`-Param in der
+URL wird in `from_request` still ignoriert; veraltete Bookmarks landen damit
+nicht in 4xx.
 
 Ungueltige Werte werden **stillschweigend auf den Default zurueckgesetzt**
 und nur geloggt — eine Bookmark mit veraltetem `severity=xy` darf nicht in

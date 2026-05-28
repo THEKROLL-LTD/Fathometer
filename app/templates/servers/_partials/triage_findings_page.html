@@ -9,10 +9,11 @@
    zum Design `docs/design/ServerDetail.jsx` (WorkflowCard-Footer + Pager).
 
    Variablen-Vertrag:
-     - findings    : list[Row] — SQLAlchemy `Row`-Projektionen mit 13 Spalten
-                     (siehe `triage_band_fragment` in `server_detail.py`).
-                     Attribut-Zugriff via `f.id`, `f.identifier_key`, ...
-                     `f.severity` ist ein `Severity`-Enum-Wert.
+     - findings    : list[Finding] — volle ORM-Objekte mit eager-loaded
+                     `notes` (Block AA, ADR-0041 — ersetzt die ADR-0039-
+                     13-Spalten-Projektion). `f.severity` ist `Severity`-Enum.
+     - note_form / csrf_form / ack_form / reopen_form — fuer den
+                     `finding_inline_body.html`-Include.
      - server      : Server-ORM (fuer `url_for` auf Folge-Pages).
      - band        : str — eines aus `_RISK_BAND_SECTION_ORDER`.
      - page        : int >= 1 — aktuelle Seite (1-basiert).
@@ -40,7 +41,8 @@
 {% for f in findings %}
   <details class="sd-finding"
            id="finding-{{ f.id }}"
-           data-test="triage-finding-row-{{ f.id }}">
+           data-test="triage-finding-row-{{ f.id }}"
+           x-data="{ ackOpen: false, reopenOpen: false }">
     <summary class="sd-finding__summary">
       <input type="checkbox"
              class="sd-checkbox"
@@ -98,12 +100,9 @@
       </span>
     </summary>
 
-    {%- if f.risk_band_reason -%}
-      <div class="sd-finding__body">
-        <p class="sd-ai-eyebrow">KI-Bewertung</p>
-        <p class="sd-ai-text">{{ f.risk_band_reason }}</p>
-      </div>
-    {%- endif -%}
+    {% with finding=f %}
+      {% include "_partials/finding_inline_body.html" %}
+    {% endwith %}
   </details>
 {% endfor %}
 {%- set _body_target = "#risk-band-" ~ band ~ "-body" -%}

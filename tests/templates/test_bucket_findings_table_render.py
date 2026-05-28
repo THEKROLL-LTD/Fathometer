@@ -21,8 +21,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any
 
 from flask import Flask
+
+from app.forms import AcknowledgeForm, CSRFOnlyForm, NoteForm, ReopenForm
+from app.models import FindingStatus
 
 # em-dash (U+2014) — Platzhalter fuer None-Werte in EPSS/CVSS/Severity.
 _EM_DASH = "—"
@@ -47,6 +51,11 @@ def _make_finding(
     cvss_v3_score: float | None = 7.5,
     severity: str | None = "high",
     first_seen_at: datetime | None = None,
+    status: FindingStatus = FindingStatus.OPEN,
+    description: str | None = None,
+    primary_url: str | None = None,
+    references: list[str] | None = None,
+    notes: list[Any] | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=finding_id,
@@ -61,6 +70,11 @@ def _make_finding(
         cvss_v3_score=cvss_v3_score,
         severity=severity,
         first_seen_at=first_seen_at or datetime(2024, 5, 1, 12, 0, tzinfo=UTC),
+        status=status,
+        description=description,
+        primary_url=primary_url,
+        references=references,
+        notes=notes if notes is not None else [],
     )
 
 
@@ -87,6 +101,10 @@ def _render(
             server_id=server_id,
             group_id=group_id,
             filter_qs=filter_qs,
+            note_form=NoteForm(),
+            csrf_form=CSRFOnlyForm(),
+            ack_form=AcknowledgeForm(),
+            reopen_form=ReopenForm(),
         )
 
 
@@ -187,28 +205,30 @@ def test_epss_cvss_em_dash_when_none(app: Flask) -> None:
 
 
 def test_inline_ai_reason_rendered_when_set(app: Flask) -> None:
-    """risk_band_reason gesetzt -> sd-ai-eyebrow + KI-Bewertung + sd-ai-text + Text."""
+    """Block AA: risk_band_reason gesetzt -> Single-Source-Body (sd-finding__body)
+    mit sd-ai-eyebrow + KI-Bewertung + sd-ai-text + Text."""
     reason = "vendor (redhat) severity HIGH"
     html = _render(app, findings=[_make_finding(risk_band_reason=reason)])
-    assert "bucket-finding__body" in html, html
+    assert "sd-finding__body" in html, html
     assert "sd-ai-eyebrow" in html, html
     assert "KI-Bewertung" in html, html
     assert "sd-ai-text" in html, html
     assert reason in html, html
 
 
-def test_inline_ai_reason_absent_when_none(app: Flask) -> None:
-    """risk_band_reason None -> kein bucket-finding__body, kein KI-Bewertung."""
+def test_inline_ai_reason_pending_fallback_when_none(app: Flask) -> None:
+    """Block AA: risk_band_reason None -> Body rendert mit Pending-Fallback."""
     html = _render(app, findings=[_make_finding(risk_band_reason=None)])
-    assert "bucket-finding__body" not in html, html
-    assert "KI-Bewertung" not in html, html
+    assert "sd-finding__body" in html, html
+    assert "sd-ai-text--pending" in html, html
+    assert "Pass 2" in html, html
 
 
-def test_inline_ai_reason_absent_when_empty(app: Flask) -> None:
-    """risk_band_reason '' (falsy) -> kein Reason-Block."""
+def test_inline_ai_reason_pending_fallback_when_empty(app: Flask) -> None:
+    """Block AA: risk_band_reason '' (falsy) -> Body rendert mit Pending-Fallback."""
     html = _render(app, findings=[_make_finding(risk_band_reason="")])
-    assert "bucket-finding__body" not in html, html
-    assert "KI-Bewertung" not in html, html
+    assert "sd-finding__body" in html, html
+    assert "sd-ai-text--pending" in html, html
 
 
 def test_inline_ai_reason_is_html_escaped(app: Flask) -> None:
@@ -286,11 +306,18 @@ def test_pager_prev_active_when_page_gt_1(app: Flask) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_no_daisyui_classes(app: Flask) -> None:
-    """Kein DaisyUI-Markup mehr im umgebauten Partial."""
+def test_no_daisyui_classes_in_summary(app: Flask) -> None:
+    """Kein DaisyUI-Markup in der Bucket-Summary-Row.
+
+    Block AA (ADR-0041): der gemeinsame Inline-Body includet das beibehaltene
+    Ack-/Reopen-Modal + Notes-Thread, die noch Legacy-Shim-Klassen tragen
+    ("migrate, not refactor"). Geprueft wird daher nur der Summary-Teil bis
+    zum Body-Start.
+    """
     html = _render(app, findings=[_make_finding(is_kev=True, risk_band_reason="x")])
+    summary = html[: html.index('<div class="sd-finding__body"')]
     for needle in ('class="badge ', " btn-", "table table", "link-hover", "checkbox checkbox"):
-        assert needle not in html, f"DaisyUI-Rest gefunden: {needle!r}"
+        assert needle not in summary, f"DaisyUI-Rest in Summary gefunden: {needle!r}"
 
 
 def test_no_quick_copy_clipboard_button(app: Flask) -> None:

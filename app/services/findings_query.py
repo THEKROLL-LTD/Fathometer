@@ -382,6 +382,12 @@ def list_findings(
 ) -> list[Finding]:
     """Liefert eine flache Liste von Findings fuer den *Liste*-View.
 
+    .. note:: Block AA (ADR-0041) hat den flachen Listen-/Flat-Switch-Pfad
+       entfernt; seither hat diese Funktion **keinen App-View-Konsumenten**
+       mehr. Sie bleibt erhalten (Pure-Query-Helper, eigene db_integration-
+       Tests in ``tests/integration/test_findings_query_db.py``) — Re-Use bei
+       einer etwaigen Wieder-Einführung von Filter-/Sort-Narrowing.
+
     Sortierung:
     - Wenn `sort` `None` ist: Default-Reihenfolge aus §15 (KEV/EPSS/CVSS/
       Severity/first_seen) ueber `_order_clauses()`.

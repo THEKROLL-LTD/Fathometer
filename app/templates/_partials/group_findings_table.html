@@ -5,10 +5,16 @@
      [Checkbox 28px][CVE+Title 1.4fr][Pkg+Diff 1.2fr][EPSS 70px][CVSS 60px][Severity 84px]
 
    Variablen-Vertrag:
-     - `findings` : list[Finding]
+     - `findings`   : list[Finding] (ORM, notes eager-loaded)
+     - `note_form`  : NoteForm
+     - `csrf_form`  : CSRFOnlyForm
+     - `ack_form`   : AcknowledgeForm
+     - `reopen_form`: ReopenForm
 
-   Sicherheit: f.risk_band_reason NIEMALS mit |safe — LLM-Output,
-   Jinja-Autoescape ist Pflicht (ADR-0038 §G4).
+   Block AA (ADR-0041): der aufgeklappte Body kommt aus dem Single-Source-
+   Partial `_partials/finding_inline_body.html` (AI-Reason + Action-Button,
+   Description, Primary-URL, References, Notes). Sicherheit: LLM-/Trivy-/User-
+   Daten NIEMALS mit |safe — Jinja-Autoescape ist Pflicht (ADR-0038 §G4).
 #}
 {% from "_macros.html" import kev_badge, quick_copy %}
 
@@ -26,7 +32,8 @@
   {% for f in findings %}
     <details class="sd-finding"
              id="finding-{{ f.id }}"
-             data-test="group-finding-row-{{ f.id }}">
+             data-test="group-finding-row-{{ f.id }}"
+             x-data="{ ackOpen: false, reopenOpen: false }">
       <summary class="sd-finding__summary">
         {# Checkbox-Spalte: kein Bulk-Select in Group-Drilldown (kein x-data-Scope hier) #}
         <input type="checkbox"
@@ -90,12 +97,9 @@
         </span>
       </summary>
 
-      {%- if f.risk_band_reason -%}
-        <div class="sd-finding__body">
-          <p class="sd-ai-eyebrow">KI-Bewertung</p>
-          <p class="sd-ai-text">{{ f.risk_band_reason }}</p>
-        </div>
-      {%- endif -%}
+      {% with finding=f %}
+        {% include "_partials/finding_inline_body.html" %}
+      {% endwith %}
     </details>
   {% endfor %}
 </div>

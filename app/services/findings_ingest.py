@@ -275,6 +275,8 @@ def _build_finding_row(
         "cwe_ids": vuln.cwe_ids or None,
         "attack_vector": _ATTACK_VECTOR_MAP[attack_vector_str].value,
         "references": vuln.references or None,
+        # Block AA (ADR-0041): PrimaryURL persistieren (bereits Envelope-validiert).
+        "primary_url": vuln.primary_url,
         # Block N (ADR-0021) — Ursachen-Felder.
         "package_purl": cause["package_purl"],
         "target_path": cause["target_path"],
@@ -441,6 +443,9 @@ def ingest_scan(
                 "cwe_ids": stmt.excluded.cwe_ids,
                 "attack_vector": stmt.excluded.attack_vector,
                 "references": stmt.excluded.references,
+                # Block AA (ADR-0041): aktueller Scan ist Quelle der Wahrheit,
+                # auch Ueberschreiben auf NULL.
+                "primary_url": stmt.excluded.primary_url,
                 "last_seen_at": stmt.excluded.last_seen_at,
                 "finding_class": stmt.excluded.finding_class,
                 # Block N (ADR-0021) — Ursachen-Felder: bei jedem Re-Ingest

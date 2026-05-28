@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fathometer · Mockup · Finding-Detail Inline (Block AA)</title>
+
+  <!--
+    HINWEIS: Diese Datei ist selbst-tragend (JSX inline), damit sie per
+    Doppelklick aus dem Finder ohne lokalen Webserver läuft. Die Datei
+    `FindingDetailInline.jsx` ist eine 1:1-Kopie zum bequemen Lesen/Editieren,
+    aber NICHT live geladen (Babel-Standalone + file:// → CORS-Block).
+    Bei Änderungen am Layout: beide Dateien parallel anpassen, oder mit
+    `python3 -m http.server` aus `docs/design/` heraus servieren und die
+    .jsx wieder als externes <script src> einbinden.
+  -->
+
+  <link rel="stylesheet" href="design-tokens.css" />
+
+  <!-- React + Babel (pinned, identisch zu Findings.html) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+  <style>
+    body { background: var(--surface-base); margin: 0; font-family: var(--font-mono); color: var(--text-primary); }
+    .sd-checkbox { accent-color: var(--accent); }
+    @keyframes sd-flyout-in {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary { list-style: none; }
+    summary:hover { background: var(--surface-raised); }
+    details[open] > summary { background: var(--surface-raised); }
+    a:hover { color: var(--accent) !important; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+/* Fathometer — FindingDetailInline (Block AA, ADR-0041 Mockup, inline) */
+
+const { useState } = React;
+
+// ── Mock-Daten ──────────────────────────────────────────────
+const MOCK_FINDINGS = [
+  {
+    id: 4711,
+    identifier_key: 'CVE-2018-1121',
+    title: 'procps: process hiding through race condition enumerating /proc',
+    package_name: 'linux-modules-5.15.0-179-generic',
+    installed_version: '5.15.0-179.189',
+    fixed_version: null,
+    epss_score: 0.020,
+    cvss_v3_score: 5.9,
+    severity: 'low',
+    is_kev: false,
+    status: 'open',
+    risk_band: 'escalate',
+    risk_band_reason:
+      'haproxy on 0.0.0.0:80 PUBLIC-EXPOSED; kernel modules loaded system-wide, ' +
+      'reachable via network; CVE-2024-53179 high severity, no fix',
+    description:
+      'procps-ng, in versions prior to 3.3.15, is vulnerable to a local privilege ' +
+      'escalation in top. If a user runs top with HOME unset in an attacker-controlled ' +
+      'directory, the attacker can achieve privilege escalation by exploiting one of ' +
+      'several vulnerabilities in the config_file() function.',
+    primary_url: 'https://avd.aquasec.com/nvd/cve-2018-1121',
+    references: [
+      'https://www.openwall.com/lists/oss-security/2018/05/22/7',
+      'https://lists.debian.org/debian-lts-announce/2018/06/msg00010.html',
+      'https://access.redhat.com/security/cve/CVE-2018-1121',
+      'https://ubuntu.com/security/CVE-2018-1121',
+      'https://nvd.nist.gov/vuln/detail/CVE-2018-1121',
+      'https://github.com/advisories/GHSA-xxxx-yyyy-zzzz',
+    ],
+    notes: [
+      { id: 1, author: 'sven', created_at_rel: 'vor 2 Tagen', text: 'Triage: niedrige Priorität, nicht produktionsrelevant.' },
+    ],
+  },
+  {
+    id: 4712,
+    identifier_key: 'CVE-2024-7264',
+    title: 'curl: ASN.1 date parser overread',
+    package_name: 'libcurl4',
+    installed_version: '7.81.0-1ubuntu1.20',
+    fixed_version: '7.81.0-1ubuntu1.21',
+    epss_score: 0.001,
+    cvss_v3_score: 5.3,
+    severity: 'medium',
+    is_kev: false,
+    status: 'open',
+    risk_band: 'act',
+    risk_band_reason: null,
+    description:
+      'libcurl performs ASN.1 date parsing in a way that may read one byte beyond ' +
+      'the end of the input buffer. The risk of impact is considered low, as the ' +
+      'overread is constrained and the typical use does not expose the byte.',
+    primary_url: 'https://curl.se/docs/CVE-2024-7264.html',
+    references: [
+      'https://curl.se/docs/CVE-2024-7264.html',
+      'https://hackerone.com/reports/2559516',
+    ],
+    notes: [],
+  },
+  {
+    id: 4713,
+    identifier_key: 'CVE-2023-39320',
+    title: 'golang: html/template: improper handling of empty HTML attributes',
+    package_name: 'github.com/foo/bar@/srv/app/go.mod',
+    installed_version: 'v1.4.0',
+    fixed_version: 'v1.5.1',
+    epss_score: 0.004,
+    cvss_v3_score: 6.1,
+    severity: 'medium',
+    is_kev: false,
+    status: 'acknowledged',
+    risk_band: 'monitor',
+    risk_band_reason:
+      'lang-pkg in einer internen Tool-Binary; nicht öffentlich gemounted, kein http-Handler.',
+    description:
+      'Templates containing actions in unquoted HTML attributes (e.g. `attr={{.}}`) ' +
+      'do not consider whether the attribute contains whitespace, allowing for ' +
+      'injection of additional attributes when the action value contains a space.',
+    primary_url: 'https://pkg.go.dev/vuln/GO-2023-2041',
+    references: [
+      'https://pkg.go.dev/vuln/GO-2023-2041',
+      'https://github.com/advisories/GHSA-9j7m-gj95-hwfg',
+    ],
+    notes: [
+      { id: 11, author: 'system-ack', created_at_rel: 'gestern', text: 'Akzeptiertes Restrisiko, Tool nicht extern erreichbar.' },
+    ],
+  },
+];
+
+// ── Styles (inline) ─────────────────────────────────────────
+const summaryStyle = {
+  display: 'grid',
+  gridTemplateColumns: '28px 1.4fr 1.2fr 70px 60px 84px',
+  gap: 16,
+  alignItems: 'center',
+  padding: '14px 16px',
+  cursor: 'pointer',
+  fontSize: 12.5,
+  fontFamily: 'var(--font-mono)',
+};
+const headStyle = {
+  display: 'grid',
+  gridTemplateColumns: '28px 1.4fr 1.2fr 70px 60px 84px',
+  gap: 16,
+  padding: '8px 16px',
+  fontSize: 10,
+  letterSpacing: '0.15em',
+  textTransform: 'uppercase',
+  color: 'var(--text-tertiary)',
+  borderBottom: 'var(--hairline)',
+};
+const detailsStyle = { borderBottom: 'var(--hairline)', background: 'transparent' };
+const bodyStyle = { padding: '0 16px 22px 60px', animation: 'sd-flyout-in 240ms var(--ease-materialize)' };
+const bodyHeadStyle = {
+  display: 'flex', alignItems: 'flex-start', gap: 16,
+  paddingTop: 12, paddingBottom: 8, borderTop: 'var(--hairline)',
+};
+const eyebrowStyle = {
+  fontFamily: 'var(--font-mono)', fontSize: 9.5, letterSpacing: '0.2em',
+  textTransform: 'uppercase', color: 'var(--accent)', margin: '0 0 6px',
+};
+const reasonStyle = {
+  fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 1.7,
+  color: 'var(--text-secondary)', margin: 0, maxWidth: '78ch',
+};
+const descStyle = {
+  fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: 1.7,
+  color: 'var(--text-secondary)', margin: 0, maxWidth: '78ch', whiteSpace: 'pre-line',
+};
+const actionBtnStyle = {
+  fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.08em',
+  textTransform: 'uppercase', padding: '8px 14px', background: 'transparent',
+  color: 'var(--text-primary)', border: '1px solid var(--accent)',
+  borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+};
+const primaryLinkStyle = {
+  fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--accent)',
+  textDecoration: 'none', borderBottom: '1px solid var(--accent-glow)', paddingBottom: 1,
+};
+const refsListStyle = { listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 4, maxWidth: '78ch' };
+const refLinkStyle = {
+  fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-secondary)',
+  textDecoration: 'none', borderBottom: '1px dotted var(--border-visible)', paddingBottom: 1,
+  display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+};
+const notesListStyle = { listStyle: 'none', margin: '0 0 10px', padding: 0, display: 'grid', gap: 8 };
+const noteItemStyle = {
+  background: 'var(--surface-raised)', border: 'var(--hairline)',
+  padding: '8px 10px', borderRadius: 'var(--radius-sm)',
+};
+const noteHeaderStyle = {
+  display: 'flex', justifyContent: 'space-between',
+  fontSize: 10.5, letterSpacing: '0.05em', marginBottom: 4, color: 'var(--text-tertiary)',
+};
+const textareaStyle = {
+  width: '100%', background: 'var(--surface-raised)',
+  border: '1px solid var(--border-visible)', borderRadius: 'var(--radius-sm)',
+  color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 12,
+  padding: '8px 10px', resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+};
+const noteSubmitStyle = {
+  fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.08em',
+  textTransform: 'uppercase', padding: '6px 12px',
+  background: 'var(--accent)', color: 'var(--surface-base)',
+  border: '1px solid var(--accent)', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+};
+const capStyle = {
+  display: 'inline-block', padding: '2px 8px',
+  border: 'var(--hairline)', borderRadius: 'var(--radius-sm)',
+  fontFamily: 'var(--font-mono)', fontSize: 11, textAlign: 'right',
+};
+const accentCapStyle = { ...capStyle, color: 'var(--accent)', borderColor: 'var(--accent)' };
+const kevBadge = {
+  marginLeft: 6, padding: '0 5px', fontSize: 10,
+  color: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: 'var(--radius-sm)',
+};
+const codeStyle = {
+  fontFamily: 'var(--font-mono)', background: 'var(--surface-raised)',
+  padding: '1px 5px', border: 'var(--hairline)', borderRadius: 'var(--radius-sm)',
+};
+const modalBackdropStyle = {
+  position: 'fixed', inset: 0, background: 'var(--backdrop-modal)',
+  backdropFilter: 'var(--backdrop-blur)', display: 'flex',
+  alignItems: 'center', justifyContent: 'center', zIndex: 100,
+};
+const modalBoxStyle = {
+  background: 'var(--surface-elevated)', border: 'var(--border)',
+  padding: 24, width: 'min(540px, 90vw)', borderRadius: 'var(--radius-md)',
+};
+
+// ── Components ──────────────────────────────────────────────
+function SummaryRow({ f, onToggle }) {
+  const sev = (f.severity || '').toLowerCase();
+  const sevAccent = sev === 'critical' || sev === 'high';
+  return (
+    <summary
+      style={summaryStyle}
+      onClick={(e) => { e.preventDefault(); onToggle(); }}
+    >
+      <input
+        type="checkbox"
+        className="sd-checkbox"
+        aria-label={`Finding ${f.identifier_key} auswählen`}
+        onClick={(e) => e.stopPropagation()}
+      />
+      <div>
+        <div>
+          <span style={{ fontWeight: 600 }}>{f.identifier_key}</span>
+          {f.is_kev ? <span style={kevBadge}>KEV</span> : null}
+        </div>
+        {f.title ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.title}>
+            {f.title}
+          </div>
+        ) : null}
+      </div>
+      <div>
+        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.package_name}</div>
+        {f.installed_version ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 10.5, marginTop: 2 }}>
+            <span>{f.installed_version}</span>
+            {f.fixed_version ? (
+              <>
+                <span style={{ margin: '0 6px', color: 'var(--text-ghost)' }}>→</span>
+                <span style={{ color: 'var(--accent)' }}>{f.fixed_version}</span>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      <span style={capStyle}>{f.epss_score != null ? f.epss_score.toFixed(3) : '—'}</span>
+      <span style={capStyle}>{f.cvss_v3_score != null ? f.cvss_v3_score.toFixed(1) : '—'}</span>
+      <span style={sevAccent ? accentCapStyle : capStyle}>
+        {sev ? sev.toUpperCase() : '—'}
+      </span>
+    </summary>
+  );
+}
+
+function BodyHeader({ f, onAckClick }) {
+  const isAck = f.status === 'acknowledged';
+  return (
+    <div style={bodyHeadStyle}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {f.risk_band_reason ? (
+          <>
+            <p style={eyebrowStyle}>KI-Bewertung</p>
+            <p style={reasonStyle}>{f.risk_band_reason}</p>
+          </>
+        ) : (
+          <p style={{ ...reasonStyle, color: 'var(--text-tertiary)' }}>
+            KI-Bewertung steht aus — Pass 2 läuft asynchron.
+          </p>
+        )}
+      </div>
+      <div style={{ flexShrink: 0, paddingLeft: 16 }}>
+        <button type="button" onClick={onAckClick} style={actionBtnStyle}>
+          {isAck ? 'Re-open …' : 'Abhaken …'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PrimaryLink({ url }) {
+  if (!url) return null;
+  return (
+    <div style={{ marginTop: 18 }}>
+      <p style={eyebrowStyle}>Quelle</p>
+      <a href={url} target="_blank" rel="noopener noreferrer" style={primaryLinkStyle}>{url}</a>
+    </div>
+  );
+}
+
+function Description({ text }) {
+  if (!text) return null;
+  return (
+    <div style={{ marginTop: 18 }}>
+      <p style={eyebrowStyle}>Beschreibung</p>
+      <p style={descStyle}>{text}</p>
+    </div>
+  );
+}
+
+function References({ urls }) {
+  if (!urls || urls.length === 0) return null;
+  return (
+    <div style={{ marginTop: 18 }}>
+      <p style={eyebrowStyle}>References ({urls.length})</p>
+      <ul style={refsListStyle}>
+        {urls.map((u) => (
+          <li key={u} style={{ margin: 0, padding: 0 }}>
+            <a href={u} target="_blank" rel="noopener noreferrer" style={refLinkStyle} title={u}>{u}</a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function NotesThread({ finding }) {
+  const [draft, setDraft] = useState('');
+  const [notes, setNotes] = useState(finding.notes || []);
+  const submitNote = (e) => {
+    e.preventDefault();
+    const body = draft.trim();
+    if (!body) return;
+    setNotes([{ id: Date.now(), author: 'sven', created_at_rel: 'gerade eben', text: body }, ...notes]);
+    setDraft('');
+  };
+  return (
+    <div style={{ marginTop: 18 }}>
+      <p style={eyebrowStyle}>Notizen</p>
+      {notes.length === 0 ? (
+        <p style={{ ...descStyle, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>Noch keine Notizen.</p>
+      ) : (
+        <ul style={notesListStyle}>
+          {notes.map((n) => (
+            <li key={n.id} style={noteItemStyle}>
+              <header style={noteHeaderStyle}>
+                <span>{n.author}</span>
+                <time>{n.created_at_rel}</time>
+              </header>
+              <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-secondary)' }}>{n.text}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={submitNote} style={{ marginTop: 10 }}>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={2}
+          placeholder="Hinweis für das Team … (Markdown-Subset)"
+          aria-label="Notiz-Text"
+          style={textareaStyle}
+        />
+        <div style={{ textAlign: 'right', marginTop: 6 }}>
+          <button type="submit" disabled={!draft.trim()} style={{ ...noteSubmitStyle, opacity: draft.trim() ? 1 : 0.4, cursor: draft.trim() ? 'pointer' : 'not-allowed' }}>
+            Note hinzufügen
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function FakeAckModal({ f, onClose }) {
+  const isAck = f.status === 'acknowledged';
+  return (
+    <div onClick={onClose} style={modalBackdropStyle}>
+      <div onClick={(e) => e.stopPropagation()} style={modalBoxStyle}>
+        <h3 style={{ margin: '0 0 12px', fontSize: 16, color: 'var(--text-primary)' }}>
+          {isAck ? 'Finding wieder öffnen' : 'Finding abhaken'}: <span>{f.identifier_key}</span>
+        </h3>
+        <p style={{ ...descStyle, marginBottom: 12 }}>
+          Optional kannst du einen Kommentar dazu hinterlegen. Der Kommentar erscheint als Note im
+          Thread und ist <strong>niemals Pflicht</strong>.
+        </p>
+        <textarea rows={3} placeholder="Kommentar (optional)" style={textareaStyle} />
+        <div style={{ marginTop: 12, textAlign: 'right' }}>
+          <button type="button" onClick={onClose} style={{ ...noteSubmitStyle, background: 'transparent', color: 'var(--text-secondary)', marginRight: 8 }}>Abbrechen</button>
+          <button type="button" onClick={onClose} style={noteSubmitStyle}>{isAck ? 'Re-open' : 'Abhaken'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FindingRow({ f, open, onToggle }) {
+  const [modalOpen, setModalOpen] = useState(false);
+  return (
+    <details open={open} style={detailsStyle}>
+      <SummaryRow f={f} onToggle={onToggle} />
+      {open ? (
+        <div style={bodyStyle}>
+          <BodyHeader f={f} onAckClick={() => setModalOpen(true)} />
+          <Description text={f.description} />
+          <PrimaryLink url={f.primary_url} />
+          <References urls={f.references} />
+          <NotesThread finding={f} />
+        </div>
+      ) : null}
+      {modalOpen ? <FakeAckModal f={f} onClose={() => setModalOpen(false)} /> : null}
+    </details>
+  );
+}
+
+function Mockup() {
+  const [openMap, setOpenMap] = useState({ 4711: true, 4712: false, 4713: true });
+  const toggle = (id) => setOpenMap({ ...openMap, [id]: !openMap[id] });
+
+  return (
+    <div style={{ maxWidth: 1200, margin: '40px auto', padding: 24, background: 'var(--surface-base)' }}>
+      <h2 style={{ marginTop: 0, marginBottom: 4, fontSize: 18, color: 'var(--text-primary)' }}>
+        Block AA · Mockup — Finding-Detail Inline
+      </h2>
+      <p style={{ ...descStyle, marginTop: 0, marginBottom: 24 }}>
+        Vorlage für die erweiterte <code style={codeStyle}>&lt;details class="sd-finding"&gt;</code>-Row.
+        Ersetzt das bisherige Detail-Modal und den <code style={codeStyle}>?flat=1</code>-Switch.
+        Drei Beispiel-Zeilen: mit AI-Reason (aufgeklappt), ohne AI-Reason (collapsed),
+        bereits acknowledged (aufgeklappt — Button heißt „Re-open …").
+      </p>
+
+      <div style={{ borderTop: 'var(--hairline)' }}>
+        <div style={headStyle} aria-hidden="true">
+          <span></span>
+          <span>CVE / Titel</span>
+          <span>Paket</span>
+          <span style={{ textAlign: 'right' }}>EPSS</span>
+          <span style={{ textAlign: 'right' }}>CVSS</span>
+          <span style={{ textAlign: 'right' }}>Severity</span>
+        </div>
+        {MOCK_FINDINGS.map((f) => (
+          <FindingRow key={f.id} f={f} open={openMap[f.id]} onToggle={() => toggle(f.id)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<Mockup />);
+  </script>
+</body>
+</html>

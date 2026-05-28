@@ -381,6 +381,11 @@ class Finding(Base):
     )
     references: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
 
+    # Block AA (ADR-0041): Trivy-PrimaryURL (Aquasec-/NVD-/Vendor-Direktlink).
+    # Bereits im Envelope-Schema validiert; wird beim Re-Ingest gefuellt
+    # (NULL fuer Bestands-Findings bis zum naechsten Scan).
+    primary_url: Mapped[str | None] = mapped_column(String(2048))
+
     # Block N (ADR-0021): Ursachen-Felder pro Finding. Werden bei jedem
     # Re-Ingest geschrieben (auch beim Update — kein historisches Bewahren).
     # `package_name` enthaelt weiterhin das ADR-0011-`@target`-Suffix fuer

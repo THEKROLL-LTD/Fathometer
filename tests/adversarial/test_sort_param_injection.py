@@ -216,11 +216,11 @@ def test_sort_param_no_sql_injection_surface_via_findings_query(db_app: Flask) -
 def test_sort_and_dir_combined_payloads(db_app: Flask) -> None:
     """`?sort=X&dir=Y` mit beiden ungueltig -> 200 + Default-Sort.
 
-    ADR-0025 §2/§3: Findings werden default lazy in Group-Cards gerendert.
-    Damit die CVE-ID im Initial-HTML auftaucht, erzwingen wir mit `?flat=1`
-    die flache Tabelle (`_view_list.html`). Der eigentliche Injection-Test
-    ist davon unabhaengig — beide ungueltigen Strings fallen vor SQL-Render
-    auf den Default-Sort zurueck.
+    Block AA (ADR-0041): der `?flat=1`-Flat-Pfad ist entfernt; die Group-Card-
+    Ansicht ist der einzige Render-Pfad und laedt Findings lazy. Der Injection-
+    Test bleibt gueltig: beide ungueltigen sort/dir-Strings fallen in
+    `FindingsViewFilter.from_request` auf den Default zurueck, erreichen nie
+    eine SQL-Render-Stelle — die Seite rendert 200, die Tabelle bleibt intakt.
     """
     create_admin_user(db_app)
     sid = _create_server(db_app, name="srv-combined")
@@ -230,12 +230,26 @@ def test_sort_and_dir_combined_payloads(db_app: Flask) -> None:
     resp = client.get(
         f"/servers/{sid}",
         query_string={
-            "flat": "1",
             "sort": "'; DROP TABLE findings;--",
             "dir": "'; DROP TABLE users;--",
         },
     )
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    # Tabelle wurde nicht modifiziert: Finding ist noch da.
-    assert "CVE-COMBI-001" in body
+    # Seite rendert (Server-Header sichtbar) — kein 500, keine Injection.
+    assert "srv-combined" in body
+    # Finding bleibt in der DB (Tabelle nicht modifiziert).
+    from sqlalchemy import select
+
+    factory = get_session_factory(db_app)
+    with db_app.app_context():
+        sess = factory()
+        try:
+            rows = (
+                sess.execute(select(Finding.identifier_key).where(Finding.server_id == sid))
+                .scalars()
+                .all()
+            )
+        finally:
+            sess.close()
+    assert "CVE-COMBI-001" in rows

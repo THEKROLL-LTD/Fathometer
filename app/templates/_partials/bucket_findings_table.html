@@ -53,7 +53,8 @@
     {%- set _sev = (f.severity.value if f.severity is not string else f.severity) | lower if f.severity else none -%}
     <details class="bucket-finding"
              id="finding-{{ f.id }}"
-             data-test="bucket-finding-row-{{ f.id }}">
+             data-test="bucket-finding-row-{{ f.id }}"
+             x-data="{ ackOpen: false, reopenOpen: false }">
       <summary class="bucket-finding__summary">
         <input type="checkbox"
                class="sd-checkbox"
@@ -104,12 +105,9 @@
         </span>
       </summary>
 
-      {%- if f.risk_band_reason -%}
-        <div class="bucket-finding__body">
-          <p class="sd-ai-eyebrow">KI-Bewertung</p>
-          <p class="sd-ai-text">{{ f.risk_band_reason }}</p>
-        </div>
-      {%- endif -%}
+      {% with finding=f %}
+        {% include "_partials/finding_inline_body.html" %}
+      {% endwith %}
     </details>
   {% endfor %}
 </div>

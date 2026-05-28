@@ -15,7 +15,7 @@ spaeter aus dem Trend-Fragment.
 
 URL-Filter (alle optional, Defaults sicher): `status`, `class`,
 `severity`, `kev_only`, `q`, `risk_band`, `action_required`,
-`application_group`, `sort`, `dir`, `flat`.
+`application_group`, `sort`, `dir`.
 
 HTMX-Pattern: bei `HX-Request: true` rendert der Endpoint die Detail-
 Pane-Fragment-Variante von `servers/detail.html` (Server-Header +
@@ -59,7 +59,6 @@ from app.models import (
 from app.schemas.findings_view_filter import FindingsViewFilter
 from app.services.findings_query import (
     count_findings,
-    list_findings,
 )
 from app.services.heartbeat_aggregation import heartbeats_for_servers
 from app.services.listener_exposure import classify_exposure
@@ -604,37 +603,6 @@ def _load_pending_grouping_counts(sess: Any, server_id: int) -> dict[str, int]:
     return result
 
 
-def _is_flat_mode(view_filter: FindingsViewFilter) -> bool:
-    """Spiegelt die Template-Conditional aus `_findings_section.html:122-133`.
-
-    Liefert True wenn die flache Tabelle (`_view_list.html`) gerendert wird,
-    False wenn die Group-Card-Ansicht (`_view_groups.html`) gerendert wird.
-
-    Phase B (ADR-0030 Befund 2): `list_findings` wird nur aufgerufen wenn
-    der Rueckgabewert True ist — im Group-Default-Pfad ist die flache Liste
-    nicht sichtbar und jeder `list_findings`-Call waere verworfen.
-
-    Exakte Kopie der Template-Logik:
-        _filters_active = (status != open OR class != both OR kev_only OR
-                           search OR risk_band OR action_required OR ag_id)
-        _sort_default = (sort == 'risk' AND dir == 'desc')
-        _force_flat   = request.args.get('flat') == '1'
-        flat_mode     = _force_flat OR _filters_active OR NOT _sort_default
-    """
-    _filters_active = (
-        view_filter.status != "open"
-        or view_filter.finding_class != "both"
-        or view_filter.kev_only
-        or bool(view_filter.search)
-        or view_filter.risk_band is not None
-        or view_filter.action_required is not None
-        or view_filter.application_group_id is not None
-    )
-    _sort_default = view_filter.sort == "risk" and view_filter.dir == "desc"
-    _force_flat = request.args.get("flat") == "1"
-    return _force_flat or _filters_active or not _sort_default
-
-
 def _render_findings_section(
     server: Server,
     view_filter: FindingsViewFilter,
@@ -652,26 +620,15 @@ def _render_findings_section(
     — so verteilt `show()` die Queries selbst und der Test kann sie isoliert
     patchen.
 
-    Phase B (ADR-0030 Befund 2): `list_findings` wird nur aufgerufen wenn
-    der Group-Default-Pfad NICHT aktiv ist.
+    Block AA (ADR-0041): der Flat-Switch und die flache Tabelle sind entfernt.
+    `_findings_section.html` rendert unkonditional die Group-Card-Ansicht; die
+    Form-Objekte werden immer in den Context gehaengt (Bulk-Toolbar +
+    Lazy-Fragment-Bodies).
     """
     sess = get_session()
     findings_filter = view_filter.to_findings_filter()
 
     counts = count_findings(sess, server.id, findings_filter)
-
-    flat_mode = _is_flat_mode(view_filter)
-    if flat_mode:
-        findings_list = list_findings(
-            sess,
-            server.id,
-            findings_filter,
-            sort=view_filter.sort,
-            dir=view_filter.dir,
-        )
-    else:
-        # Group-Default-Pfad: flache Liste wird im Template nicht gerendert.
-        findings_list = []
 
     # Defensive Defaults — wenn der Caller nichts mitgibt, holen wir die
     # Daten hier nach (z.B. fuer Tests die nur die Findings-Section testen).
@@ -691,22 +648,20 @@ def _render_findings_section(
         "server": server,
         "view_filter": view_filter,
         "counts": counts,
-        "findings": findings_list,
+        # Block AA (ADR-0041): kein Flat-Pfad mehr — `findings` bleibt leer
+        # (Backward-Compat falls ein Template den Key referenziert).
+        "findings": [],
         "application_groups": application_groups,
         "pending_grouping_counts": pending_grouping_counts,
         "risk_band_header_counts": risk_band_header_counts,
         "default_open_band": default_open_band,
+        # Form-Objekte unkonditional — Bulk-Toolbar + Lazy-Fragment-Bodies.
+        "ack_form": AcknowledgeForm(),
+        "reopen_form": ReopenForm(),
+        "note_form": NoteForm(),
+        "bulk_form": BulkActionForm(),
+        "csrf_form": CSRFOnlyForm(),
     }
-    if flat_mode:
-        ctx.update(
-            {
-                "ack_form": AcknowledgeForm(),
-                "reopen_form": ReopenForm(),
-                "note_form": NoteForm(),
-                "bulk_form": BulkActionForm(),
-                "csrf_form": CSRFOnlyForm(),
-            }
-        )
     return ctx
 
 
@@ -843,6 +798,7 @@ def group_findings_fragment(server_id: int, group_id: int) -> str:
     findings = list(
         sess.execute(
             select(Finding)
+            .options(selectinload(Finding.notes))
             .where(
                 Finding.server_id == server_id,
                 Finding.application_group_id == group_id,
@@ -863,6 +819,10 @@ def group_findings_fragment(server_id: int, group_id: int) -> str:
     return render_template(
         "_partials/group_findings_table.html",
         findings=findings,
+        note_form=NoteForm(),
+        csrf_form=CSRFOnlyForm(),
+        ack_form=AcknowledgeForm(),
+        reopen_form=ReopenForm(),
     )
 
 
@@ -876,19 +836,18 @@ def pending_findings_fragment(server_id: int) -> str:
     Operator das Bucket-`<details>` aufklappt, holt das HTMX-Pattern das
     `<tbody>`-Fragment hier nach.
 
-    Rueckgabe ist ein HTML-Partial (`_partials/pending_findings_table.html`).
-    400, wenn `risk_band` fehlt oder nicht in der Whitelist
-    (`_PENDING_BANDS`) liegt. 404, wenn der Server nicht existiert oder der
-    Bucket auf diesem Server keine OPEN-Findings hat.
+    Rueckgabe ist ein HTML-Partial (`_partials/group_findings_table.html` —
+    die `<details>`-Variante). 400, wenn `risk_band` fehlt oder nicht in der
+    Whitelist (`_PENDING_BANDS`) liegt. 404, wenn der Server nicht existiert
+    oder der Bucket auf diesem Server keine OPEN-Findings hat.
 
     Sortierung ist Spec-fix (siehe ADR-0025 §15-Default): KEV desc, EPSS desc
     nulls last, CVSS desc nulls last, `first_seen_at` asc.
 
-    Block Y Phase D Hinweis: ``select(Finding)`` ist hier bewusst beibehalten
-    — das Template ``_partials/pending_findings_table.html`` greift auf
-    dieselbe breite Palette von ORM-Feldern wie der Group-Lazy-Endpoint zu.
-    Die Projektions-Migration ist als Folge-Refactor ausserhalb Block Y
-    geplant.
+    Block AA (ADR-0041): die Pending-Grouping-Sektion nutzt fortan dieselbe
+    `<details class="sd-finding">`-Variante wie der Group-Drilldown
+    (`group_findings_table.html`) inkl. `finding_inline_body.html`. Volle
+    ORM-Hydration mit `selectinload(Finding.notes)`.
     """
     band = request.args.get("risk_band")
     if band not in _PENDING_BANDS:
@@ -900,6 +859,7 @@ def pending_findings_fragment(server_id: int) -> str:
     findings = list(
         sess.execute(
             select(Finding)
+            .options(selectinload(Finding.notes))
             .where(
                 Finding.server_id == server_id,
                 Finding.application_group_id.is_(None),
@@ -919,9 +879,12 @@ def pending_findings_fragment(server_id: int) -> str:
     if not findings:
         abort(404)
     return render_template(
-        "_partials/pending_findings_table.html",
+        "_partials/group_findings_table.html",
         findings=findings,
-        risk_band=band,
+        note_form=NoteForm(),
+        csrf_form=CSRFOnlyForm(),
+        ack_form=AcknowledgeForm(),
+        reopen_form=ReopenForm(),
     )
 
 
@@ -1134,7 +1097,11 @@ def triage_band_fragment(server_id: int, band: str) -> str:
         `Seite N von M · X Findings`). Ein COUNT-Query liefert den Total
         fuer `total_pages` und den Footer-Zaehler.
       - Sort: `is_kev DESC, severity ASC (CRITICAL=0), epss_score DESC NULLS LAST`.
-      - Projektion auf 13 Spalten — keine ORM-Hydration.
+      - Block AA (ADR-0041): volle ORM-`Finding`-Hydration mit
+        `selectinload(Finding.notes)` — der Inline-Body greift auf
+        `description`/`references`/`primary_url`/`notes` zu. Die ADR-0039-
+        Spalten-Projektion entfaellt (Paginations-Groesse 10 macht den
+        Performance-Vorteil vernachlaessigbar).
     """
     if band not in _RISK_BAND_SECTION_ORDER:
         abort(400)
@@ -1164,21 +1131,8 @@ def triage_band_fragment(server_id: int, band: str) -> str:
         page = total_pages
 
     stmt = (
-        select(
-            Finding.id,
-            Finding.identifier_key,
-            Finding.title,
-            Finding.package_name,
-            Finding.installed_version,
-            Finding.fixed_version,
-            Finding.epss_score,
-            Finding.cvss_v3_score,
-            Finding.severity,
-            Finding.is_kev,
-            Finding.risk_band_reason,
-            Finding.status,
-            Finding.finding_class,
-        )
+        select(Finding)
+        .options(selectinload(Finding.notes))
         .where(*base_where)
         .order_by(
             Finding.is_kev.desc(),
@@ -1188,7 +1142,7 @@ def triage_band_fragment(server_id: int, band: str) -> str:
         .limit(_TRIAGE_PAGE_SIZE)
         .offset((page - 1) * _TRIAGE_PAGE_SIZE)
     )
-    findings = list(sess.execute(stmt).all())
+    findings = list(sess.execute(stmt).scalars().all())
     return render_template(
         "servers/_partials/triage_findings_page.html",
         findings=findings,
@@ -1199,6 +1153,10 @@ def triage_band_fragment(server_id: int, band: str) -> str:
         total_pages=total_pages,
         has_prev=page > 1,
         has_next=page < total_pages,
+        note_form=NoteForm(),
+        csrf_form=CSRFOnlyForm(),
+        ack_form=AcknowledgeForm(),
+        reopen_form=ReopenForm(),
     )
 
 

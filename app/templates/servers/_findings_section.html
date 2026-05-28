@@ -62,22 +62,8 @@
     </a>
   </div>
 
-  {# Body-Switch: flache Liste wenn Filter aktiv, Suche gesetzt, nicht Default-Sort
-     oder ?flat=1. Sonst Group-Card-Ansicht. #}
-  {% set _filters_active = (
-       view_filter.status != 'open'
-       or view_filter.finding_class != 'both'
-       or view_filter.kev_only
-       or view_filter.search
-       or view_filter.risk_band is not none
-       or view_filter.action_required is not none
-       or view_filter.application_group_id is not none
-  ) %}
-  {% set _sort_default = view_filter.sort == 'risk' and view_filter.dir == 'desc' %}
-  {% set _force_flat = request.args.get('flat') == '1' %}
-  {% if _force_flat or _filters_active or not _sort_default %}
-    {% include "servers/_view_list.html" %}
-  {% else %}
-    {% include "servers/_view_groups.html" %}
-  {% endif %}
+  {# Block AA (ADR-0041): einziger Render-Pfad — Group-Card-Ansicht. Der
+     Flat-Switch und die flache Tabelle sind entfernt. Filter narrowen
+     weiterhin die Group-Drilldown-Anzeige. #}
+  {% include "servers/_view_groups.html" %}
 </section>

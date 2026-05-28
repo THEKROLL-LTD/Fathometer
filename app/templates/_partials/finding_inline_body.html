@@ -1,0 +1,145 @@
+{# Single-Source Inline-Body einer Finding-Row (Block AA, ADR-0041).
+
+   Diese Datei ist die EINZIGE Quelle fuer den aufgeklappten `<details>`-Body
+   in allen vier Listen-Templates (Group-Drilldown, Triage-Queue, Bucket-View,
+   Pending-Bucket). Initial-Render und HTMX-Fragment-Reload includieren dasselbe
+   Partial — strukturell identisches Markup, kein Drift moeglich
+   (CLAUDE.md §HTMX-OOB-Single-Source-Pattern).
+
+   Render-Vertrag:
+     - `finding`    : Finding (ORM, `notes` eager-loaded).
+     - `note_form`  : NoteForm.
+     - `csrf_form`  : CSRFOnlyForm.
+     - `ack_form`   : AcknowledgeForm.
+     - `reopen_form`: ReopenForm.
+
+   Alpine-State (`ackOpen`/`reopenOpen`) kommt vom umschliessenden
+   `<details x-data="{ ackOpen: false, reopenOpen: false }">`-Wrapper —
+   ein eigener Scope pro Row.
+
+   Sicherheit (ADR-0038 §G4 / ADR-0041 §Audit):
+     - `description`, `references`, `primary_url`, `risk_band_reason` werden
+       NIEMALS mit `|safe` gerendert — Jinja-Autoescape ist Pflicht.
+     - References + Primary-URL sind bereits per Pydantic auf `http(s)://`
+       whitelisted; das defensive Template-Re-Check (`startswith`) ist
+       Double-Defense.
+     - Notes nutzen weiter `markdown_safe` (nh3-Whitelist) im inkludierten
+       `_notes_thread.html`.
+#}
+<div class="sd-finding__body" data-test="finding-body-{{ finding.id }}">
+  {# 1. Body-Header: KI-Bewertung (links) + Action-Button (rechts). #}
+  <div class="sd-finding__bodyhead">
+    <div class="sd-finding__bodyhead-main">
+      {%- if finding.risk_band_reason -%}
+        <p class="sd-ai-eyebrow">KI-Bewertung</p>
+        <p class="sd-ai-text">{{ finding.risk_band_reason }}</p>
+      {%- else -%}
+        <p class="sd-ai-text sd-ai-text--pending"
+           data-test="finding-reason-pending-{{ finding.id }}">
+          KI-Bewertung steht aus — Pass 2 läuft asynchron.
+        </p>
+      {%- endif -%}
+    </div>
+    <div class="sd-finding__bodyhead-action">
+      {%- if finding.status.value == 'acknowledged' -%}
+        <button type="button"
+                class="sd-finding__action-btn"
+                @click="reopenOpen = true"
+                data-test="finding-action-btn-{{ finding.id }}"
+                aria-label="Finding {{ finding.identifier_key }} re-open">
+          Re-open …
+        </button>
+      {%- else -%}
+        <button type="button"
+                class="sd-finding__action-btn"
+                @click="ackOpen = true"
+                data-test="finding-action-btn-{{ finding.id }}"
+                aria-label="Finding {{ finding.identifier_key }} abhaken">
+          Abhaken …
+        </button>
+      {%- endif -%}
+    </div>
+  </div>
+
+  {# 2. Beschreibung — Plain-Text, autoescaped (kein |safe). #}
+  {%- if finding.description -%}
+  <div class="sd-finding__desc-block" data-test="finding-desc-{{ finding.id }}">
+    <p class="sd-ai-eyebrow">Beschreibung</p>
+    <p class="sd-finding__desc">{{ finding.description }}</p>
+  </div>
+  {%- endif -%}
+
+  {# 3. Quelle — Primary-URL als einzelner Link. Defensiver http(s)-Check. #}
+  {%- if finding.primary_url
+         and (finding.primary_url.startswith('https://')
+              or finding.primary_url.startswith('http://')) -%}
+  <div class="sd-finding__primary-block" data-test="finding-primary-{{ finding.id }}">
+    <p class="sd-ai-eyebrow">Quelle</p>
+    <a class="sd-finding__primary"
+       href="{{ finding.primary_url }}"
+       target="_blank"
+       rel="noopener noreferrer">{{ finding.primary_url }}</a>
+  </div>
+  {%- endif -%}
+
+  {# 4. References — nur http(s)-URLs (Pydantic-validiert; hier Double-Check). #}
+  {%- set _refs = [] -%}
+  {%- for url in (finding.references or []) -%}
+    {%- if url and (url.startswith('https://') or url.startswith('http://')) -%}
+      {%- set _ = _refs.append(url) -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {%- if _refs -%}
+  <div class="sd-finding__refs-block" data-test="finding-refs-{{ finding.id }}">
+    <p class="sd-ai-eyebrow">References ({{ _refs | length }})</p>
+    <ul class="sd-finding__refs">
+      {%- for url in _refs -%}
+        <li>
+          <a href="{{ url }}" target="_blank" rel="noopener noreferrer" title="{{ url }}">{{ url }}</a>
+        </li>
+      {%- endfor -%}
+    </ul>
+  </div>
+  {%- endif -%}
+
+  {# 5. Notizen — Single-Source Notes-Thread (markdown_safe / nh3). #}
+  <div class="sd-finding__notes">
+    {% include "findings/_notes_thread.html" %}
+  </div>
+
+  {# Ack-/Reopen-Modal — beibehalten, jetzt aus dem Inline-Body heraus
+     Alpine-getriggert (ackOpen/reopenOpen aus dem <details x-data>-Scope). #}
+  {%- if finding.status.value == 'acknowledged' -%}
+    <dialog class="modal" x-show="reopenOpen" x-cloak
+            :class="{'modal-open': reopenOpen}"
+            @keydown.escape.window="reopenOpen = false"
+            role="dialog" aria-modal="true"
+            aria-labelledby="reopen-title-{{ finding.id }}">
+      <div class="modal-box max-w-lg" @click.stop>
+        {% with action_url=url_for('findings.reopen', finding_id=finding.id),
+                title='Finding wieder oeffnen',
+                form_obj=reopen_form,
+                submit_label='Re-Open',
+                title_id='reopen-title-' ~ finding.id %}
+          {% include "findings/_status_change_modal.html" %}
+        {% endwith %}
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="reopenOpen = false">
+        <button type="button" aria-label="Schliessen">close</button>
+      </form>
+    </dialog>
+  {%- else -%}
+    <dialog class="modal" x-show="ackOpen" x-cloak
+            :class="{'modal-open': ackOpen}"
+            @keydown.escape.window="ackOpen = false"
+            role="dialog" aria-modal="true"
+            aria-labelledby="ack-title-{{ finding.id }}">
+      <div class="modal-box max-w-lg" @click.stop>
+        {% include "findings/_ack_modal.html" %}
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="ackOpen = false">
+        <button type="button" aria-label="Schliessen">close</button>
+      </form>
+    </dialog>
+  {%- endif -%}
+</div>

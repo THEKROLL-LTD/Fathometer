@@ -309,6 +309,10 @@ def bucket_fragment() -> str:
         group_id=group_id,
         filt=filt,
         filter_qs=filter_qs,
+        note_form=NoteForm(),
+        csrf_form=CSRFOnlyForm(),
+        ack_form=AcknowledgeForm(),
+        reopen_form=ReopenForm(),
     )
 
 
@@ -356,6 +360,10 @@ def pending_fragment() -> str:
         per_page=per_page,
         filt=filt,
         filter_qs=filter_qs,
+        note_form=NoteForm(),
+        csrf_form=CSRFOnlyForm(),
+        ack_form=AcknowledgeForm(),
+        reopen_form=ReopenForm(),
     )
 
 

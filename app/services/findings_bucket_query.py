@@ -393,6 +393,8 @@ def list_bucket_findings(
     base_stmt = select(Finding).options(
         selectinload(Finding.server).selectinload(Server.tag_links).selectinload(ServerTag.tag),
         selectinload(Finding.application_group),
+        # Block AA (ADR-0041): Notes fuer den Inline-Body eager-loaden.
+        selectinload(Finding.notes),
     )
 
     if server_id != 0:

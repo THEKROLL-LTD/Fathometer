@@ -1036,6 +1036,103 @@
 }
 
 /* ─────────────────────────────────────────────────────────────
+   Block AA (ADR-0041) — Inline-Finding-Body
+   AI-Reason + Action-Button, Beschreibung, Quelle, References, Notizen.
+   Single-Source-Partial: _partials/finding_inline_body.html.
+   Token-only; LLM-/Trivy-/User-Daten werden autoescaped gerendert.
+   ───────────────────────────────────────────────────────────── */
+
+/* Body-Header: KI-Bewertung (links) + Action-Button (rechts). */
+.sd-finding__bodyhead {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 4px;
+}
+.sd-finding__bodyhead-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.sd-finding__bodyhead-action {
+  flex-shrink: 0;
+  padding-left: 16px;
+}
+
+/* Pending-Fallback wenn risk_band_reason fehlt. */
+.sd-ai-text--pending { color: var(--text-tertiary); }
+
+/* Action-Button: Outline in --accent, Mono, Uppercase, 11px. */
+.sd-finding__action-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms var(--ease-materialize);
+}
+.sd-finding__action-btn:hover { background: var(--accent-glow); }
+
+/* Beschreibung. */
+.sd-finding__desc-block { margin-top: 18px; }
+.sd-finding__desc {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 78ch;
+  white-space: pre-line;
+}
+
+/* Quelle — Primary-URL als prominenter Akzent-Link. */
+.sd-finding__primary-block { margin-top: 18px; }
+.sd-finding__primary {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-glow);
+  padding-bottom: 1px;
+  word-break: break-all;
+}
+.sd-finding__primary:hover { border-bottom-color: var(--accent); }
+
+/* References — kompakte Liste, Ellipsis bei langen URLs. */
+.sd-finding__refs-block { margin-top: 18px; }
+.sd-finding__refs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-width: 78ch;
+}
+.sd-finding__refs li { margin: 0; padding: 0; }
+.sd-finding__refs a {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--border-visible);
+  padding-bottom: 1px;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sd-finding__refs a:hover { color: var(--accent); }
+
+/* Notizen-Wrapper. */
+.sd-finding__notes { margin-top: 18px; }
+
+/* ─────────────────────────────────────────────────────────────
    Skeleton-Zustaende (heartbeat / trend / tiles)
    ───────────────────────────────────────────────────────────── */
 

@@ -13,8 +13,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any
 
 from flask import Flask
+
+from app.forms import AcknowledgeForm, CSRFOnlyForm, NoteForm, ReopenForm
+from app.models import FindingStatus
 
 _EM_DASH = "—"
 
@@ -35,6 +39,11 @@ def _make_finding(
     server_id: int = 5,
     server_name: str = "srv-prod-01",
     first_seen_at: datetime | None = None,
+    status: FindingStatus = FindingStatus.OPEN,
+    description: str | None = None,
+    primary_url: str | None = None,
+    references: list[str] | None = None,
+    notes: list[Any] | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=finding_id,
@@ -50,6 +59,11 @@ def _make_finding(
         severity=severity,
         server=SimpleNamespace(id=server_id, name=server_name),
         first_seen_at=first_seen_at or datetime(2024, 5, 1, 12, 0, tzinfo=UTC),
+        status=status,
+        description=description,
+        primary_url=primary_url,
+        references=references,
+        notes=notes if notes is not None else [],
     )
 
 
@@ -72,6 +86,10 @@ def _render(
             page=page,
             per_page=per_page,
             filter_qs=filter_qs,
+            note_form=NoteForm(),
+            csrf_form=CSRFOnlyForm(),
+            ack_form=AcknowledgeForm(),
+            reopen_form=ReopenForm(),
         )
 
 
@@ -182,10 +200,13 @@ def test_checkbox_bulk_contract(app: Flask) -> None:
     assert "@click.stop" in html, html
 
 
-def test_no_daisyui_classes(app: Flask) -> None:
+def test_no_daisyui_classes_in_summary(app: Flask) -> None:
+    """Block AA (ADR-0041): nur die Summary-Row ist DaisyUI-frei — der gemeinsame
+    Inline-Body includet das beibehaltene Modal + Notes-Thread mit Legacy-Klassen."""
     html = _render(app, findings=[_make_finding(is_kev=True, risk_band_reason="x")])
+    summary = html[: html.index('<div class="sd-finding__body"')]
     for needle in ('class="badge ', " btn-", "table table", "link-hover", "checkbox checkbox"):
-        assert needle not in html, f"DaisyUI-Rest gefunden: {needle!r}"
+        assert needle not in summary, f"DaisyUI-Rest in Summary gefunden: {needle!r}"
 
 
 def test_no_quick_copy_clipboard_button(app: Flask) -> None:

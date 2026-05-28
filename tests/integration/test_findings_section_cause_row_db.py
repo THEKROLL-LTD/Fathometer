@@ -1,17 +1,18 @@
-"""Block N (ADR-0021) — View-Test fuer die Ursachen-Sub-Zeile (Task #12a).
+"""Block N (ADR-0021) / Block AA (ADR-0041) — Ursachen-Felder-Persistenz.
 
-Drei DoD-Cases:
-* lang-pkg (gobinary) mit `target_path` -> Pfad gerendert.
-* os-pkg (ubuntu) mit `vendor_ids` -> Vendor-IDs als Badges sichtbar.
-* Legacy-Finding mit `result_type=NULL` und `package_name@target` -> Fallback
-  rendert den Suffix als Pfad.
+Block N hatte die Ursachen-Sub-Zeile (`target_path`, `vendor_ids`,
+`package_purl`, Type-Badges) ausschliesslich in der flachen Tabelle
+(`_view_list.html`) gerendert, erreichbar via `?flat=1`. Block AA (ADR-0041)
+entfernt den Flat-Pfad; der neue Single-Source-Inline-Body
+(`finding_inline_body.html`) zeigt bewusst KEINE Ursachen-Felder mehr
+(Less-is-more, keine Doppel-Daten zur Summary). Damit faellt die
+Cause-Row-Anzeige als UI-Surface weg — dokumentiert als Re-Open-Trigger in
+ADR-0041 (analog zu den nicht mehr narrowenden URL-Filtern).
 
-ADR-0025 §2/§3 (Block Q Phase B/C): der Server-Detail rendert Findings
-default lazy (Application-Group-Cards collapsed; Pending-Sektion lazy).
-Die Tests hier prueftn das flache Finding-Row-Markup
-(`data-test="finding-vendor-id"`, `data-purl`, Type-Badges, Pfad-Fallback)
-— dafuer brauchen wir den `?flat=1`-Power-User-Bypass, der die flache
-Tabelle (`_view_list.html`) erzwingt.
+Diese Tests sichern daher nur noch, dass die Ursachen-Felder weiterhin
+**persistiert** werden (Ingest-/Model-Garantie) — die Daten sind fuer einen
+spaeteren Re-Open der Anzeige verfuegbar, auch wenn sie aktuell nicht
+gerendert werden.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from flask import Flask
+from sqlalchemy import select
 
 from app.db import get_session_factory
 from app.models import (
@@ -30,7 +32,6 @@ from app.models import (
     Server,
     Severity,
 )
-from tests._helpers import create_admin_user, login
 
 
 def _create_server(app: Flask, name: str = "srv-cause") -> int:
@@ -57,6 +58,7 @@ def _add_finding(
     result_type: str | None,
     target_path: str | None = None,
     vendor_ids: list[str] | None = None,
+    package_purl: str | None = None,
     finding_class: FindingClass = FindingClass.OS_PKGS,
 ) -> int:
     factory = get_session_factory(app)
@@ -79,7 +81,7 @@ def _add_finding(
                 result_type=result_type,
                 target_path=target_path,
                 vendor_ids=vendor_ids,
-                package_purl=None,
+                package_purl=package_purl,
                 severity_source=None,
             )
             sess.add(f)
@@ -91,11 +93,19 @@ def _add_finding(
             sess.close()
 
 
-def test_lang_pkg_gobinary_renders_target_path(db_app: Flask) -> None:
-    """gobinary mit target_path -> Pfad steht im Rendered HTML."""
-    create_admin_user(db_app)
+def _load(app: Flask, fid: int) -> Finding:
+    factory = get_session_factory(app)
+    with app.app_context():
+        sess = factory()
+        try:
+            return sess.execute(select(Finding).where(Finding.id == fid)).scalar_one()
+        finally:
+            sess.close()
+
+
+def test_lang_pkg_gobinary_target_path_persisted(db_app: Flask) -> None:
     sid = _create_server(db_app, name="srv-lang-cause")
-    _add_finding(
+    fid = _add_finding(
         db_app,
         server_id=sid,
         identifier_key="CVE-2026-LANG",
@@ -104,23 +114,14 @@ def test_lang_pkg_gobinary_renders_target_path(db_app: Flask) -> None:
         target_path="usr/local/bin/myapp",
         finding_class=FindingClass.LANG_PKGS,
     )
-    client = db_app.test_client()
-    login(client)
-    # ADR-0025: `?flat=1` erzwingt flache Tabelle (Group-Cards default collapsed).
-    resp = client.get(f"/servers/{sid}?flat=1")
-    assert resp.status_code == 200, resp.data[:300]
-    body = resp.get_data(as_text=True)
-    # Type-Label als Badge.
-    assert "gobinary" in body
-    # Pfad mit fuehrendem Slash (Template normalisiert auf `/<trimmed>`).
-    assert "/usr/local/bin/myapp" in body
+    f = _load(db_app, fid)
+    assert f.result_type == "gobinary"
+    assert f.target_path == "usr/local/bin/myapp"
 
 
-def test_os_pkg_ubuntu_renders_vendor_ids(db_app: Flask) -> None:
-    """ubuntu-Paket mit vendor_ids -> badges mit Vendor-ID erscheinen."""
-    create_admin_user(db_app)
+def test_os_pkg_ubuntu_vendor_ids_persisted(db_app: Flask) -> None:
     sid = _create_server(db_app, name="srv-os-cause")
-    _add_finding(
+    fid = _add_finding(
         db_app,
         server_id=sid,
         identifier_key="CVE-2026-OS01",
@@ -129,64 +130,30 @@ def test_os_pkg_ubuntu_renders_vendor_ids(db_app: Flask) -> None:
         vendor_ids=["USN-1234-1", "DLA-5678-1"],
         finding_class=FindingClass.OS_PKGS,
     )
-    client = db_app.test_client()
-    login(client)
-    # ADR-0025: `?flat=1` erzwingt flache Tabelle (Group-Cards default collapsed).
-    resp = client.get(f"/servers/{sid}?flat=1")
-    assert resp.status_code == 200, resp.data[:300]
-    body = resp.get_data(as_text=True)
-    assert "ubuntu" in body
-    assert "USN-1234-1" in body
-    assert "DLA-5678-1" in body
-    # Mindestens ein vendor-id-Badge mit data-test.
-    assert 'data-test="finding-vendor-id"' in body
+    f = _load(db_app, fid)
+    assert f.result_type == "ubuntu"
+    assert f.vendor_ids == ["USN-1234-1", "DLA-5678-1"]
 
 
-def test_finding_with_purl_renders_data_purl_attribute(db_app: Flask) -> None:
-    """Finding mit `package_purl` -> `data-purl` Attribut im Markup (Tooltip)."""
-    create_admin_user(db_app)
+def test_finding_package_purl_persisted(db_app: Flask) -> None:
     sid = _create_server(db_app, name="srv-purl")
-    # PURL setzen — der Stub-Helper unten setzt es per direktem Add.
-    factory = get_session_factory(db_app)
-    now = datetime.now(tz=UTC)
-    with db_app.app_context():
-        sess = factory()
-        try:
-            f = Finding(
-                server_id=sid,
-                finding_type=FindingType.VULNERABILITY,
-                finding_class=FindingClass.OS_PKGS,
-                identifier_key="CVE-2026-PURL",
-                package_name="openssl",
-                installed_version="3.0.2",
-                severity=Severity.HIGH,
-                attack_vector=AttackVector.UNKNOWN,
-                status=FindingStatus.OPEN,
-                first_seen_at=now,
-                last_seen_at=now,
-                result_type="ubuntu",
-                target_path=None,
-                vendor_ids=None,
-                package_purl="pkg:deb/ubuntu/openssl@3.0.2",
-                severity_source="ubuntu",
-            )
-            sess.add(f)
-            sess.commit()
-        finally:
-            sess.close()
-
-    client = db_app.test_client()
-    login(client)
-    # ADR-0025: `?flat=1` erzwingt flache Tabelle (Group-Cards default collapsed).
-    body = client.get(f"/servers/{sid}?flat=1").get_data(as_text=True)
-    assert 'data-purl="pkg:deb/ubuntu/openssl@3.0.2"' in body
+    fid = _add_finding(
+        db_app,
+        server_id=sid,
+        identifier_key="CVE-2026-PURL",
+        package_name="openssl",
+        result_type="ubuntu",
+        package_purl="pkg:deb/ubuntu/openssl@3.0.2",
+    )
+    f = _load(db_app, fid)
+    assert f.package_purl == "pkg:deb/ubuntu/openssl@3.0.2"
 
 
-def test_vendor_ids_cap_three_pills_rendered(db_app: Flask) -> None:
-    """`vendor_ids=[v1, v2, v3, v4]` -> nur die ersten drei werden als Pill gerendert."""
-    create_admin_user(db_app)
+def test_vendor_ids_full_list_persisted(db_app: Flask) -> None:
+    """Alle Vendor-IDs werden persistiert (das frueher flat-only `[:3]`-Slicing
+    war reine Anzeige-Logik und ist mit dem Flat-Pfad entfallen)."""
     sid = _create_server(db_app, name="srv-vendor-cap")
-    _add_finding(
+    fid = _add_finding(
         db_app,
         server_id=sid,
         identifier_key="CVE-2026-CAP",
@@ -195,44 +162,5 @@ def test_vendor_ids_cap_three_pills_rendered(db_app: Flask) -> None:
         vendor_ids=["USN-1", "USN-2", "USN-3", "USN-4"],
         finding_class=FindingClass.OS_PKGS,
     )
-    client = db_app.test_client()
-    login(client)
-    # ADR-0025: `?flat=1` erzwingt flache Tabelle (Group-Cards default collapsed).
-    body = client.get(f"/servers/{sid}?flat=1").get_data(as_text=True)
-    # Erste drei sichtbar.
-    assert "USN-1" in body
-    assert "USN-2" in body
-    assert "USN-3" in body
-    # Vierter ist nicht im gerenderten Markup (Template-Slicing `[:3]`).
-    assert "USN-4" not in body
-    # Anzahl Vendor-ID-Badges: exakt drei.
-    assert body.count('data-test="finding-vendor-id"') == 3
-
-
-def test_legacy_finding_uses_package_name_at_suffix_fallback(db_app: Flask) -> None:
-    """Alt-Daten ohne result_type/target_path -> kein Render (kind=unknown).
-
-    Aber Findings mit gesetztem `result_type` und `package_name@<path>` ohne
-    explizites `target_path` muessen den Pfad-Fallback aktivieren.
-    """
-    create_admin_user(db_app)
-    sid = _create_server(db_app, name="srv-fallback-cause")
-    _add_finding(
-        db_app,
-        server_id=sid,
-        identifier_key="CVE-2026-FBK",
-        package_name="github.com/foo/bar@usr/local/bin/legacyapp",
-        result_type="gobinary",
-        target_path=None,
-        finding_class=FindingClass.LANG_PKGS,
-    )
-    client = db_app.test_client()
-    login(client)
-    # ADR-0025: `?flat=1` erzwingt flache Tabelle (Group-Cards default collapsed).
-    resp = client.get(f"/servers/{sid}?flat=1")
-    assert resp.status_code == 200, resp.data[:300]
-    body = resp.get_data(as_text=True)
-    # Type-Label aus result_type.
-    assert "gobinary" in body
-    # Pfad-Fallback rendert den Suffix mit fuehrendem Slash.
-    assert "/usr/local/bin/legacyapp" in body
+    f = _load(db_app, fid)
+    assert f.vendor_ids == ["USN-1", "USN-2", "USN-3", "USN-4"]

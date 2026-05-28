@@ -410,24 +410,25 @@ def _setup_findings_server(app: Flask, name: str = "srv-findings") -> int:
     return sid
 
 
-def test_show_default_renders_list_mode(db_app: Flask) -> None:
-    """Default-`mode=list` rendert eine Tabelle.
+def test_show_default_renders_group_view(db_app: Flask) -> None:
+    """Block AA (ADR-0041): einziger Render-Pfad ist die Group-Card-Ansicht.
 
-    ADR-0025 §2/§3 (Block Q Phase B/C): Server-Detail rendert Findings
-    default lazy (Application-Group-Cards collapsed). `?flat=1` erzwingt
-    den flachen Tabellen-Pfad fuer Markup-Tests, die direkt die Tabelle
-    und CVE-Row-Markup pruefen.
+    Der `?flat=1`-Flat-Pfad und die flache Tabelle sind entfernt; Findings
+    werden lazy ueber HTMX-Fragmente nachgeladen, erscheinen also NICHT im
+    Initial-HTML. Geprueft wird nur, dass die Findings-Section + die Risk-Band-
+    Akkordeon-Struktur rendern.
     """
     create_admin_user(db_app)
     sid = _setup_findings_server(db_app, "srv-mode-list")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-2026-D001")
     client = db_app.test_client()
     login(client)
-    resp = client.get(f"/servers/{sid}?flat=1")
+    resp = client.get(f"/servers/{sid}")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "<table" in body
-    assert "CVE-2026-D001" in body
+    assert 'id="findings-section"' in body
+    # Keine flache Tabelle mehr.
+    assert "<table" not in body
 
 
 def test_legacy_group_mode_url_renders_list(db_app: Flask) -> None:
@@ -467,7 +468,11 @@ def test_legacy_diff_mode_url_renders_list(db_app: Flask) -> None:
     assert 'id="findings-section"' in body
 
 
-def test_show_filter_status_acknowledged_filters(db_app: Flask) -> None:
+def test_show_status_filter_renders_group_view(db_app: Flask) -> None:
+    """Block AA (ADR-0041): der `?status=`-URL-Param narrowt die Server-Detail-
+    Ansicht NICHT mehr (Flat-Pfad entfernt; Group-View ist filter-unaware —
+    bewusste Regression, dokumentiert als Re-Open-Trigger in ADR-0041). Der
+    Param fuehrt nicht zu 4xx/5xx; die Findings-Section rendert."""
     create_admin_user(db_app)
     sid = _setup_findings_server(db_app, "srv-filter-status")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-2026-D201", status=FindingStatus.OPEN)
@@ -482,8 +487,7 @@ def test_show_filter_status_acknowledged_filters(db_app: Flask) -> None:
     resp = client.get(f"/servers/{sid}?status=acknowledged")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "CVE-2026-D202" in body
-    assert "CVE-2026-D201" not in body
+    assert 'id="findings-section"' in body
 
 
 def test_show_filter_class_os_pkgs_only_shows_os(db_app: Flask) -> None:
@@ -508,8 +512,9 @@ def test_show_filter_class_os_pkgs_only_shows_os(db_app: Flask) -> None:
     resp = client.get(f"/servers/{sid}?class=os-pkgs")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "CVE-2026-D301" in body
-    assert "CVE-2026-D302" not in body
+    # Block AA: `?class=`-Param narrowt nicht mehr (Flat-Pfad entfernt) — die
+    # Seite rendert ohne 4xx/5xx, die Findings-Section ist da.
+    assert 'id="findings-section"' in body
 
 
 def test_show_filter_kev_only(db_app: Flask) -> None:
@@ -522,8 +527,8 @@ def test_show_filter_kev_only(db_app: Flask) -> None:
     resp = client.get(f"/servers/{sid}?kev_only=1")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "CVE-2026-D402" in body
-    assert "CVE-2026-D401" not in body
+    # Block AA: `?kev_only=`-Param narrowt nicht mehr (Flat-Pfad entfernt).
+    assert 'id="findings-section"' in body
 
 
 def test_show_search_q_filters(db_app: Flask) -> None:
@@ -536,8 +541,8 @@ def test_show_search_q_filters(db_app: Flask) -> None:
     resp = client.get(f"/servers/{sid}?q=stdlib")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "CVE-2026-D501" in body
-    assert "CVE-2026-D502" not in body
+    # Block AA: `?q=`-Suche narrowt die Server-Detail-Ansicht nicht mehr.
+    assert 'id="findings-section"' in body
 
 
 def test_show_default_sort_renders_both_findings(db_app: Flask) -> None:
@@ -571,19 +576,19 @@ def test_show_default_sort_renders_both_findings(db_app: Flask) -> None:
     )
     client = db_app.test_client()
     login(client)
-    resp = client.get(f"/servers/{sid}?class=os-pkgs")
+    resp = client.get(f"/servers/{sid}")
+    assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "CVE-2026-D601" in body
-    assert "CVE-2026-D602" in body
+    # Block AA: Findings sind lazy — nicht im Initial-HTML. Section rendert.
+    assert 'id="findings-section"' in body
 
 
 def test_show_with_htmx_header_returns_partial_only(db_app: Flask) -> None:
-    """Bei `HX-Request: true` rendert der Endpoint nur das Findings-Fragment.
+    """Bei `HX-Request: true` rendert der Endpoint nur das Detail-Pane-Fragment.
 
-    ADR-0025 §2/§3: ohne `?flat=1` waere das Initial-HTML die Group-Card-
-    Ansicht ohne Finding-Rows — `CVE-2026-D701` wuerde lazy ueber HTMX
-    nachgeladen. Hier prueftn wir, dass der Fragment-Pfad funktioniert UND
-    Markup mit Row-Inhalt liefert, also `?flat=1`.
+    Block AA (ADR-0041): kein `?flat=1` mehr. Das Fragment enthaelt die
+    Findings-Section (Group-Card-Ansicht); die Finding-Rows selbst werden lazy
+    ueber HTMX-Sub-Fragmente nachgeladen, sind also nicht im Fragment-HTML.
     """
     create_admin_user(db_app)
     sid = _setup_findings_server(db_app, "srv-htmx")
@@ -591,7 +596,7 @@ def test_show_with_htmx_header_returns_partial_only(db_app: Flask) -> None:
     client = db_app.test_client()
     login(client)
     resp = client.get(
-        f"/servers/{sid}?flat=1",
+        f"/servers/{sid}",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -600,7 +605,6 @@ def test_show_with_htmx_header_returns_partial_only(db_app: Flask) -> None:
     assert "<html" not in body.lower()
     # Aber der Findings-Section-Container muss da sein.
     assert "findings-section" in body
-    assert "CVE-2026-D701" in body
 
 
 def test_show_counts_header_sums_match_total(db_app: Flask) -> None:
@@ -641,19 +645,17 @@ def test_show_counts_header_sums_match_total(db_app: Flask) -> None:
 
 
 def test_show_invalid_mode_falls_back_to_list(db_app: Flask) -> None:
-    """Ein bogus `mode=xy` darf nicht 422 ergeben — wir fallen auf list zurueck.
+    """Ein bogus `mode=xy` darf nicht 422 ergeben — der Param wird ignoriert.
 
-    ADR-0025 §2/§3: List-Modus default lazy in Group-Cards; `?flat=1`
-    erzwingt die flache Tabelle, deren `<table>`-Tag wir hier explizit
-    pruefen wollen.
+    Block AA (ADR-0041): Group-Card-Ansicht ist der einzige Render-Pfad; ein
+    veralteter `?mode=`-Param fuehrt nicht zu 4xx, die Findings-Section rendert.
     """
     create_admin_user(db_app)
     sid = _setup_findings_server(db_app, "srv-mode-bad")
     _add_finding(db_app, server_id=sid, identifier_key="CVE-2026-D901")
     client = db_app.test_client()
     login(client)
-    resp = client.get(f"/servers/{sid}?mode=xy&flat=1")
+    resp = client.get(f"/servers/{sid}?mode=xy")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    # list-Layout: Tabelle.
-    assert "<table" in body
+    assert 'id="findings-section"' in body

@@ -4,6 +4,49 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — ADR-0041 (Block AA): Finding-Detail Inline, Flat-Switch entfernt
+
+Zielversion **v0.16.0**.
+
+### Added
+
+- **Inline-Finding-Body** (`app/templates/_partials/finding_inline_body.html`):
+  Klick auf eine Finding-Row klappt jetzt in **jeder** Findings-Liste
+  (Server-Detail Group-Drilldown, Triage-Queue, `/findings`-Bucket-View,
+  Pending-Sammler) einen einheitlichen Body auf — KI-Bewertung
+  (`risk_band_reason`) + „Abhaken …"/„Re-open …"-Button, volle CVE-Beschreibung,
+  Primary-URL, Reference-Liste und Notes-Thread. Single-Source-Partial
+  (kein Drift zwischen Initial-Render und HTMX-Fragment-Reload).
+- **`findings.primary_url`** (Migration `0016_block_aa_add_primary_url`,
+  `VARCHAR(2048) NULL`): die Trivy-`PrimaryURL` wird jetzt persistiert (war
+  im Envelope-Schema bereits validiert, aber nie geschrieben) und im Inline-Body
+  verlinkt. Idempotent — Bestands-Findings bleiben `NULL` bis zum nächsten
+  Re-Ingest, kein Backfill.
+
+### Changed
+
+- Paginierte Listen-Endpoints (`triage_band_fragment`, `bucket_fragment`,
+  `pending_fragment`, Group-/Pending-Lazy-Fragmente) hydrieren wieder volle
+  ORM-`Finding`-Objekte mit `selectinload(Finding.notes)` (ersetzt die
+  ADR-0039-Spalten-Projektion — bei Paginations-Größe 10/20 vernachlässigbar).
+
+### Removed
+
+- **Flat-Switch `?flat=1`** und die flache Findings-Tabelle
+  (`_view_list.html`), das **Detail-Modal** (`findings/_detail_modal.html`)
+  und die `<tr>`-Pending-Tabelle (`_partials/pending_findings_table.html`).
+  `_is_flat_mode` + der Flat-Branch in `_render_findings_section` entfallen;
+  `_findings_section.html` rendert unkonditional die Group-Card-Ansicht.
+
+### Hinweis / bewusste Regression (Re-Open-Trigger, ADR-0041)
+
+- **URL-Filter** (`status`/`kev_only`/`q`/`class`/…) narrowen die
+  Server-Detail-Ansicht **nicht mehr** — sie waren ein Flat-Pfad-only-Feature
+  ohne Filter-Bar-UI. Group-View-Queries sind filter-unaware (Counts-Header
+  bleibt filter-aware). Dokumentiert in ADR-0041 §Re-Open-Trigger.
+- Die **Ursachen-Sub-Zeile** (Block N: `target_path`/`vendor_ids`/
+  `package_purl`) entfällt als UI-Surface (Daten bleiben persistiert).
+
 ## [Unreleased] — ADR-0042: Agent-Fire-and-Forget, Job-Status-Endpoint entfernt
 
 ### Changed

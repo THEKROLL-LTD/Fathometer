@@ -1,6 +1,6 @@
 ## ADR-0025 — Server-Detail- und Dashboard-Entschlackung, dedizierte Findings-Seite
 
-**Status:** Akzeptiert · **Datum:** 2026-05-21 · **Bezug:** ADR-0018 (Server-Detail-Redesign), ADR-0020 (Dashboard-Cross-Server-Findings), ADR-0023 (LLM-Risk-Reviewer und Application-Grouping) werden in fünf Punkten **amendet/teilweise abgelöst**. Der visuelle Sockel aus ADR-0018 (Header-Layout, KPI-Sparklines, Trend, sortierbare Spaltenheader, KPI-Card-Pattern) und der KPI-Teil aus ADR-0020 bleiben gültig; die unten benannten Stellen werden präzise überschrieben. ADR-0019 (Polling) bleibt unverändert.
+**Status:** Akzeptiert — Flat-Switch (`?flat=1` + flache Tabelle) **Superseded by ADR-0041** (Block AA, 2026-05-28) · **Datum:** 2026-05-21 · **Bezug:** ADR-0018 (Server-Detail-Redesign), ADR-0020 (Dashboard-Cross-Server-Findings), ADR-0023 (LLM-Risk-Reviewer und Application-Grouping) werden in fünf Punkten **amendet/teilweise abgelöst**. Der visuelle Sockel aus ADR-0018 (Header-Layout, KPI-Sparklines, Trend, sortierbare Spaltenheader, KPI-Card-Pattern) und der KPI-Teil aus ADR-0020 bleiben gültig; die unten benannten Stellen werden präzise überschrieben. ADR-0019 (Polling) bleibt unverändert.
 
 ## Kontext
 

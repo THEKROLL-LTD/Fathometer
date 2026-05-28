@@ -67,8 +67,17 @@ def _make_row(
     risk_band_reason: str | None = None,
     status: FindingStatus = FindingStatus.OPEN,
     finding_class: FindingClass = FindingClass.OS_PKGS,
+    description: str | None = None,
+    references: list[str] | None = None,
+    primary_url: str | None = None,
+    notes: list[Any] | None = None,
 ) -> SimpleNamespace:
-    """Imitiert ein SQLAlchemy-Row mit Attribut-Zugriff."""
+    """Imitiert ein ORM-`Finding`-Objekt mit Attribut-Zugriff.
+
+    Block AA (ADR-0041): triage_band_fragment hydratisiert volle ORM-Findings,
+    der Inline-Body greift auf `description`/`references`/`primary_url`/`notes`
+    zu — daher hier mitmodelliert.
+    """
     return SimpleNamespace(
         id=fid,
         identifier_key=identifier_key,
@@ -83,6 +92,10 @@ def _make_row(
         risk_band_reason=risk_band_reason,
         status=status,
         finding_class=finding_class,
+        description=description,
+        references=references,
+        primary_url=primary_url,
+        notes=notes if notes is not None else [],
     )
 
 
@@ -112,6 +125,9 @@ def _patch_session_returning(
         captured.append(stmt)
         result = MagicMock()
         result.all.return_value = list(rows)
+        # Block AA (ADR-0041): Findings-Query laeuft jetzt ueber
+        # `.scalars().all()` (volle ORM-Hydration statt Spalten-Projektion).
+        result.scalars.return_value.all.return_value = list(rows)
         result.scalar.return_value = _total
         return result
 
@@ -308,43 +324,44 @@ def test_triage_band_fragment_empty_band(app: Flask, monkeypatch: pytest.MonkeyP
 
 
 # ---------------------------------------------------------------------------
-# Projektion: 13 Spalten in der SELECT-Clause
+# ORM-Hydration (Block AA, ADR-0041) — ersetzt die ADR-0039-Spalten-Projektion
 # ---------------------------------------------------------------------------
 
 
-def test_triage_band_fragment_projection_columns(
+def test_triage_band_fragment_orm_hydration_columns(
     app: Flask, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verifiziert, dass die SELECT-Clause genau die 13 Spec-Spalten enthaelt
-    (ADR-0039 §4) — keine ORM-Hydration."""
+    """Block AA (ADR-0041): die Findings-Query ist ein volles `select(Finding)`
+    — die Inline-Body-Felder description/references/primary_url sind als
+    Spalten Teil der Selektion (keine 13-Spalten-Projektion mehr)."""
     _stub_load_server(monkeypatch, _make_server(1))
     _sess, captured = _patch_session_returning(monkeypatch, [])
     _call_inner(app, "/servers/1/triage/escalate?page=1", 1, "escalate")
-    # Zwei Statements: [0] COUNT-Query, [-1] projizierte Findings-Query.
+    # Zwei Statements: [0] COUNT-Query, [-1] ORM-Findings-Query.
     assert len(captured) == 2, (
         f"Erwartet 2 SQL-Statements (COUNT + Findings), captured: {len(captured)}"
     )
     stmt = captured[-1]
-    # SQLAlchemy `Select`-Objekte exposen die ausgewaehlten Columns via
-    # `selected_columns`. Wir extrahieren die Column-Namen.
     col_names = {c.name for c in stmt.selected_columns}
-    expected = {
-        "id",
-        "identifier_key",
-        "title",
-        "package_name",
-        "installed_version",
-        "fixed_version",
-        "epss_score",
-        "cvss_v3_score",
-        "severity",
-        "is_kev",
-        "risk_band_reason",
-        "status",
-        "finding_class",
-    }
-    assert col_names == expected, (
-        f"Projektion-Drift. Erwartet: {sorted(expected)}, gefunden: {sorted(col_names)}"
+    # Volle ORM-Hydration: die fuer den Inline-Body noetigen Spalten sind dabei.
+    for needed in ("id", "description", "references", "primary_url", "risk_band_reason"):
+        assert needed in col_names, (
+            f"ORM-Hydration unvollstaendig — {needed!r} fehlt in {sorted(col_names)}"
+        )
+
+
+def test_triage_band_fragment_eager_loads_notes(
+    app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """selectinload(Finding.notes) ist als Loader-Option gesetzt (kein N+1)."""
+    _stub_load_server(monkeypatch, _make_server(1))
+    _sess, captured = _patch_session_returning(monkeypatch, [])
+    _call_inner(app, "/servers/1/triage/escalate?page=1", 1, "escalate")
+    stmt = captured[-1]
+    # Loader-Optionen tragen das Ziel-Attribut im `path`-Repr.
+    opts_repr = " ".join(str(getattr(o, "path", o)) for o in stmt._with_options)
+    assert "Finding.notes" in opts_repr, (
+        f"selectinload(Finding.notes) fehlt in Loader-Optionen: {opts_repr}"
     )
 
 
