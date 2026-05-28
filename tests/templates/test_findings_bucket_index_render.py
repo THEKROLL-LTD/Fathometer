@@ -35,6 +35,9 @@ from app.services.findings_bucket_query import BucketHeader
 
 # Minimal-Stub fuer base_app.html: nur der `detail_pane`-Block wird gerendert.
 # So muss der Test nicht die echte App-Shell (Sidebar, Topbar, Footer) mocken.
+# Multiplikationszeichen (U+00D7), das die Chip-Remove-Links rendern.
+_X_MARK = "\u00d7"
+
 _BASE_APP_STUB = """<!doctype html>
 <html><body>
 {% block detail_pane %}{% endblock %}
@@ -364,3 +367,152 @@ def test_index_csv_export_link_still_present(app: Flask) -> None:
 
     assert 'data-test="findings-csv-export"' in html, "CSV-Export-Link fehlt"
     assert "/findings/export.csv" in html, "CSV-Export-URL fehlt"
+
+
+# ---------------------------------------------------------------------------
+# Filter-Chips (Track Findings-Redesign)
+# ---------------------------------------------------------------------------
+
+
+def test_index_filter_chips_render_when_filter_active(app: Flask) -> None:
+    """Mit aktivem Filter (q + risk_band) erscheinen Chips mit Remove-Links."""
+    filt = DashboardFilter(q="openssl", risk_band="escalate")
+    assert filt.is_active, "Vorbedingung: filt muss aktiv sein"
+    html = _render_findings_index(
+        app,
+        is_filtered=True,
+        buckets=[],
+        pending_bucket=None,
+        filt=filt,
+    )
+
+    assert 'data-test="findings-filter-chips"' in html, f"Chip-Region fehlt: {html[:800]}"
+    assert "ff-chip" in html, "ff-chip-Markup fehlt"
+    # Je ein Chip-Wert fuer q und risk-band.
+    assert "openssl" in html, "q-Chip-Wert fehlt"
+    assert "escalate" in html, "risk-band-Chip-Wert fehlt"
+    # Remove-Link je Chip: <a ... class="ff-chip__x" ...>{x-mark}</a>.
+    # `_X_MARK` ist das im Template gerenderte Multiplikationszeichen (U+00D7).
+    assert "ff-chip__x" in html, "Chip-Remove-Link fehlt"
+    assert f">{_X_MARK}</a>" in html, "Remove-Mark im Chip-Link fehlt"
+    # Remove-URL zeigt auf findings.index (request.args ist hier leer -> Basis-URL).
+    assert "/findings" in html, "Remove-Link zeigt nicht auf findings.index"
+
+
+def test_index_filter_chips_absent_when_filter_inactive(app: Flask) -> None:
+    """Mit Default-Filter (nicht aktiv) erscheint die Chip-Region NICHT."""
+    filt = DashboardFilter()
+    assert not filt.is_active, "Vorbedingung: Default-Filter ist inaktiv"
+    html = _render_findings_index(
+        app,
+        is_filtered=False,
+        buckets=[],
+        pending_bucket=None,
+        filt=filt,
+    )
+
+    assert 'data-test="findings-filter-chips"' not in html, (
+        "Chip-Region darf bei inaktivem Filter NICHT erscheinen"
+    )
+
+
+# ---------------------------------------------------------------------------
+# KEV-/Stale-Toggles (Alpine-Pill statt DaisyUI-Checkbox)
+# ---------------------------------------------------------------------------
+
+
+def test_index_kev_stale_toggles_are_alpine_buttons(app: Flask) -> None:
+    """KEV/Stale-Toggles sind <button class="ff-toggle"> mit :aria-pressed + Hidden-Input."""
+    html = _render_findings_index(
+        app,
+        is_filtered=False,
+        buckets=[],
+        pending_bucket=None,
+    )
+
+    # KEV-Toggle.
+    kev_idx = html.find('data-test="filter-kev-only"')
+    assert kev_idx != -1, "KEV-Toggle-Marker fehlt"
+    kev_open = html.rfind("<button", 0, kev_idx)
+    kev_tag = html[kev_open : html.find(">", kev_idx)]
+    assert "ff-toggle" in kev_tag, f"KEV-Toggle muss class ff-toggle tragen: {kev_tag!r}"
+    assert ":aria-pressed" in kev_tag, f"KEV-Toggle muss :aria-pressed (Alpine) tragen: {kev_tag!r}"
+    assert 'name="kev_only"' in html, "Hidden-Input kev_only fehlt"
+
+    # Stale-Toggle.
+    stale_idx = html.find('data-test="filter-stale-only"')
+    assert stale_idx != -1, "Stale-Toggle-Marker fehlt"
+    stale_open = html.rfind("<button", 0, stale_idx)
+    stale_tag = html[stale_open : html.find(">", stale_idx)]
+    assert "ff-toggle" in stale_tag, f"Stale-Toggle muss class ff-toggle tragen: {stale_tag!r}"
+    assert ":aria-pressed" in stale_tag, f"Stale-Toggle muss :aria-pressed tragen: {stale_tag!r}"
+    assert 'name="stale_only"' in html, "Hidden-Input stale_only fehlt"
+
+    # KEINE DaisyUI-Checkbox mehr.
+    assert "checkbox checkbox-sm" not in html, "DaisyUI-checkbox-sm darf nicht mehr im Markup sein"
+
+
+# ---------------------------------------------------------------------------
+# Empty-State zwei Zeilen
+# ---------------------------------------------------------------------------
+
+
+def test_index_empty_state_two_lines(app: Flask) -> None:
+    """Empty-State (is_filtered=False): zwei findings__empty-line, zeigt total_findings."""
+    html = _render_findings_index(
+        app,
+        is_filtered=False,
+        buckets=[],
+        pending_bucket=None,
+        total_findings=4242,
+        visible_servers=9,
+    )
+
+    assert 'data-test="findings-empty-state"' in html, "Empty-State-Marker fehlt"
+    assert html.count("findings__empty-line") == 2, f"Erwartet 2 findings__empty-line: {html}"
+    assert "4242" in html, "total_findings-Zahl fehlt im Empty-State"
+
+
+# ---------------------------------------------------------------------------
+# DaisyUI-Absence auf der gerenderten Index-Seite
+# ---------------------------------------------------------------------------
+
+
+def test_index_no_daisyui_classes(app: Flask) -> None:
+    """Kein DaisyUI-Markup mehr im gerenderten findings/index.html."""
+    html = _render_findings_index(
+        app,
+        is_filtered=True,
+        buckets=[
+            BucketHeader(
+                server_id=1,
+                group_id=2,
+                server_name="srv",
+                group_label="grp",
+                risk_band="escalate",
+                finding_count=1,
+            ),
+        ],
+        pending_bucket=None,
+        filt=DashboardFilter(q="x"),
+    )
+
+    # Scope: nur das index.html-eigene Markup (Header, Filter-Bar, Chips,
+    # Empty-State, Bucket-Liste). Das include `bucket_bulk_ack_modal.html` ist
+    # NICHT Teil des Findings-Redesigns (eigene Komponente) und traegt noch
+    # DaisyUI-`btn-`-Klassen — daher von der Pruefung ausgeschlossen.
+    modal_idx = html.find('data-test="bucket-bulk-ack-modal"')
+    scoped = html if modal_idx == -1 else html[:modal_idx]
+
+    for needle in (
+        "select-bordered",
+        "input-bordered",
+        "card-body",
+        " btn-",
+        "badge-info",
+        "badge-ghost",
+    ):
+        assert needle not in scoped, (
+            f"DaisyUI-Rest '{needle}' im index-eigenen Markup gefunden (vor dem Modal): "
+            f"{scoped[-600:]!r}"
+        )
