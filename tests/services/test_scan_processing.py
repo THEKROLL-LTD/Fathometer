@@ -265,6 +265,72 @@ class TestProcessScanEnvelopeCallOrder:
         session.commit.assert_not_called()
 
 
+class TestPass2EnqueueDelegation:
+    """TICKET-007 Etappe 2: der Block-P-Pfad delegiert das Pass-2-Enqueue an
+    ``enqueue_pass2_for_server`` (trigger=``scan_ingest``); kein depends_on,
+    kein eigener affected_groups-Loop mehr."""
+
+    def _drive(self, monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMock]:
+        fake_result = _make_fake_ingest_result()
+        monkeypatch.setattr("app.services.scan_processing.run_ingest", lambda *a, **kw: fake_result)
+        monkeypatch.setattr(
+            "app.services.scan_processing.pretriage",
+            lambda f, s, snap: MagicMock(
+                band=MagicMock(value="medium"), reason="r", computed_at=datetime.now(UTC)
+            ),
+        )
+        # LLM-Mode != off, damit der Block-P-Pfad ueberhaupt laeuft.
+        fake_settings_row = MagicMock()
+        fake_settings_row.block_p_llm_mode = "live"
+        monkeypatch.setattr(
+            "app.services.scan_processing.get_settings_row", lambda s: fake_settings_row
+        )
+        monkeypatch.setattr(
+            "app.services.scan_processing._get_settings",
+            lambda: MagicMock(llm_pass1_findings_per_batch=50),
+        )
+        monkeypatch.setattr("app.services.scan_processing.GroupMatcher", MagicMock())
+        monkeypatch.setattr(
+            "app.services.scan_processing.apply_matches_for_server", lambda *a, **kw: None
+        )
+        monkeypatch.setattr(
+            "app.services.scan_processing.inherit_group_risk_to_findings", lambda *a, **kw: 0
+        )
+
+        mock_log = MagicMock()
+        monkeypatch.setattr("app.services.scan_processing.log_event", mock_log)
+        mock_enqueue = MagicMock(return_value=3)
+        monkeypatch.setattr("app.services.scan_processing.enqueue_pass2_for_server", mock_enqueue)
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = []
+        # Ungrouped-PENDING-Query liefert leer -> keine Pass-1-Jobs.
+        session.execute.return_value.scalars.return_value.all.return_value = []
+
+        process_scan_envelope(session, _make_fake_server(), _make_minimal_envelope_bytes())
+        return mock_enqueue, mock_log
+
+    def test_delegates_to_helper_with_scan_ingest_trigger(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_enqueue, _ = self._drive(monkeypatch)
+        mock_enqueue.assert_called_once()
+        args, kwargs = mock_enqueue.call_args
+        # (session, server_id) positional, trigger kw.
+        assert args[1] == 1
+        assert kwargs["trigger"] == "scan_ingest"
+
+    def test_helper_return_flows_into_jobs_queued_audit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, mock_log = self._drive(monkeypatch)
+        jobs_queued_calls = [
+            c for c in mock_log.call_args_list if c.args and c.args[0] == "llm.jobs_queued"
+        ]
+        assert len(jobs_queued_calls) == 1
+        assert jobs_queued_calls[0].kwargs["metadata"]["pass2_queued"] == 3
+
+
 class TestProcessScanEnvelopeResult:
     """Ergebnis-Counts sind korrekt gemapt."""
 

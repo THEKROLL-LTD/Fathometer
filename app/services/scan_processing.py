@@ -27,8 +27,6 @@ from sqlalchemy.orm import Session
 from app.audit import log_event
 from app.config import Settings, load_settings
 from app.models import (
-    ApplicationGroup,
-    ApplicationGroupEvaluation,
     Finding,
     FindingStatus,
     LLMJob,
@@ -43,7 +41,7 @@ from app.services.group_matcher import (
     apply_matches_for_server,
 )
 from app.services.host_state_ingest import persist_host_state
-from app.services.llm_fingerprints import group_findings_fingerprint
+from app.services.pass2_enqueue import enqueue_pass2_for_server
 from app.services.risk_engine import RiskBand, pretriage
 from app.settings_service import get_settings_row
 
@@ -267,7 +265,6 @@ def process_scan_envelope(
 
         cfg = _get_settings()
         batch_size = cfg.llm_pass1_findings_per_batch
-        pass1_job_id: int | None = None
         pass1_batches_count = 0
 
         if ungrouped:
@@ -276,83 +273,23 @@ def process_scan_envelope(
             batches = [
                 sorted_ids[i : i + batch_size] for i in range(0, len(sorted_ids), batch_size)
             ]
-            last_job: LLMJob | None = None
             for batch_ids in batches:
-                job = LLMJob(
-                    job_type="group_detection",
-                    server_id=server.id,
-                    payload={"finding_ids": batch_ids},
+                session.add(
+                    LLMJob(
+                        job_type="group_detection",
+                        server_id=server.id,
+                        payload={"finding_ids": batch_ids},
+                    )
                 )
-                session.add(job)
-                session.flush()
-                last_job = job
-            pass1_job_id = last_job.id if last_job is not None else None
+            session.flush()
             pass1_batches_count = len(batches)
 
-        # Betroffene Groups → Pass-2-Jobs (Fingerprint-Check)
-        # Block T (ADR-0028): Junction-Lookup pro (group, server). Heutige
-        # Skip-Logik ``grp.group_findings_fingerprint == new_fp and
-        # grp.risk_band is not None`` ist nicht mehr direkt anwendbar — Eval
-        # liegt jetzt in ``application_group_evaluations``. Batch-SELECT
-        # vermeidet N+1.
-        affected_groups = list(
-            session.execute(
-                select(ApplicationGroup)
-                .join(Finding, Finding.application_group_id == ApplicationGroup.id)
-                .where(
-                    Finding.server_id == server.id,
-                    Finding.status == FindingStatus.OPEN,
-                )
-                .distinct()
-            )
-            .scalars()
-            .all()
-        )
-
-        # Junction-Rows fuer alle affected_groups dieses Servers vorab laden.
-        evaluations_by_group_id: dict[int, ApplicationGroupEvaluation] = {}
-        if affected_groups:
-            affected_ids = [grp.id for grp in affected_groups]
-            evaluations_by_group_id = {
-                ev.group_id: ev
-                for ev in session.execute(
-                    select(ApplicationGroupEvaluation).where(
-                        ApplicationGroupEvaluation.server_id == server.id,
-                        ApplicationGroupEvaluation.group_id.in_(affected_ids),
-                    )
-                )
-                .scalars()
-                .all()
-            }
-
-        pass2_queued = 0
-        for grp in affected_groups:
-            findings_in_group = list(
-                session.execute(
-                    select(Finding).where(
-                        Finding.server_id == server.id,
-                        Finding.application_group_id == grp.id,
-                        Finding.status == FindingStatus.OPEN,
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            if not findings_in_group:
-                continue
-            new_fp = group_findings_fingerprint(findings_in_group)
-            existing_eval = evaluations_by_group_id.get(grp.id)
-            if existing_eval is not None and existing_eval.group_findings_fingerprint == new_fp:
-                # Junction-Row existiert und Fingerprint stimmt — kein Pass-2 noetig.
-                continue
-            pass2_job = LLMJob(
-                job_type="risk_evaluation",
-                server_id=server.id,
-                payload={"group_id": grp.id, "server_id": server.id},
-                depends_on=pass1_job_id,
-            )
-            session.add(pass2_job)
-            pass2_queued += 1
+        # Betroffene Groups → Pass-2-Jobs. TICKET-007: zentraler idempotenter
+        # Helper (Fingerprint-Skip via application_group_evaluations-Junction +
+        # NOT-EXISTS-Guard gegen Doppel-Jobs). Kein ``depends_on`` mehr — die
+        # Sibling-Wait-Semantik in der Pickup-SQL ist die alleinige Gate-
+        # Bedingung (ein failed Pass-1 darf Pass-2 nicht ewig blockieren).
+        pass2_queued = enqueue_pass2_for_server(session, server.id, trigger="scan_ingest")
 
         log_event(
             "llm.jobs_queued",
