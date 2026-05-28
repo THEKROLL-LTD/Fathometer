@@ -1,0 +1,37 @@
+{# Bucket-Body-Skeleton (Spec §7): Platzhalter solange der HTMX-Lazy-Slot die
+   Findings-Tabelle noch nicht geladen hat. 5 Rows mit sd-skel-frame-Scan-Probe-
+   Sweep (gleiche Klasse wie Sidebar-Heartbeat-/KPI-Tile-Skel). Pager rendert als
+   `— · —` bis echte Daten landen.
+
+   Wird vom Initial-Lazy-Slot in `bucket_card.html` / `pending_bucket_card.html`
+   includet und durch das `bucket_findings_table.html`-Fragment ersetzt
+   (hx-swap="innerHTML"). Reines Markup, keine Variablen. #}
+<div class="bucket-findings-head" aria-hidden="true">
+  <span></span>
+  <span>CVE / Titel</span>
+  <span>Paket</span>
+  <span class="bucket-findings-head__right">EPSS</span>
+  <span class="bucket-findings-head__right">CVSS</span>
+  <span class="bucket-findings-head__right">Severity</span>
+  <span class="bucket-findings-head__right">Erstmals</span>
+</div>
+<div class="bucket-skel-rows sd-skel-frame" data-test="bucket-findings-skeleton">
+  {% for _ in range(5) %}
+    <div class="bucket-skel-row">
+      <span class="bucket-skel-bar bucket-skel-bar--short" style="width: 14px"></span>
+      <span class="bucket-skel-bar bucket-skel-bar--full"></span>
+      <span class="bucket-skel-bar bucket-skel-bar--mid"></span>
+      <span class="bucket-skel-bar bucket-skel-bar--short"></span>
+      <span class="bucket-skel-bar bucket-skel-bar--short"></span>
+      <span class="bucket-skel-bar bucket-skel-bar--short"></span>
+      <span class="bucket-skel-bar bucket-skel-bar--short"></span>
+    </div>
+  {% endfor %}
+</div>
+<div class="bucket-card__footer">
+  <span>— · —</span>
+  <span class="bucket-card__pager">
+    <button type="button" disabled aria-label="Vorherige Seite">‹</button>
+    <button type="button" disabled aria-label="Nächste Seite">›</button>
+  </span>
+</div>

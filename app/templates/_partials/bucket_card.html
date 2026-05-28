@@ -1,5 +1,5 @@
 {# Bucket-Card fuer die Cross-Server Bucket-View auf `/findings`
-   (ADR-0037 §(2), TICKET-006 Etappe 3).
+   (ADR-0037 §(2), TICKET-006 Etappe 3; Design-Adoption Spec §5).
 
    Render-Vertrag:
      - `bucket`    : BucketHeader (siehe `app/services/findings_bucket_query.py`)
@@ -11,11 +11,16 @@
    Default-Verhalten:
      - `<details>` ohne `open`-Attribut: collapsed. Aufklappen triggert den
        HTMX-`hx-get` des inneren Lazy-Slots (`toggle once from:closest
-       details`), der `_partials/bucket_findings_table.html` einrendert.
+       details`), der `_partials/bucket_findings_table.html` einrendert. Bis
+       dahin steht das `bucket_skeleton.html` im Slot (Spec §7).
      - Header-Checkbox markiert den GANZEN Bucket fuer Bulk-Ack
        (Alpine-State `bucketBulkSelection`, siehe
        `static/js/bucket_bulk_ack.js`). Der `@click.stop` verhindert dass
-       das Klicken der Checkbox das `<details>` toggelt.
+       das Klicken der Checkbox das `<details>` toggelt; der `@click.stop` auf
+       dem Server-Link verhindert dasselbe fuer die Navigation.
+
+   Visuelles: sd-* aus server-detail.css (sd-badge--<band>-Pill, sd-checkbox);
+   bucket-card* aus findings.css. KEIN DaisyUI.
 
    Sicherheit:
      - `server_name`, `group_label` sind autoescaped (DB-Werte aus Pass-1-
@@ -23,14 +28,13 @@
      - `filter_qs` ist serverseitig durch `DashboardFilter.to_query_string()`
        kanonisiert (Whitelist-Felder, deterministische Reihenfolge).
      - Der `@change`-Alpine-Handler liest die Datenwerte ausschliesslich aus
-       `event.target.dataset.*` — KEINE String-Interpolation von User-Daten
-       in den Inline-Expression.
+       `event.target.dataset.*` — KEINE String-Interpolation von User-Daten.
 #}
-<details class="card bg-base-200/40 rounded-box p-3 mb-3"
+<details class="bucket-card"
          data-test="bucket-card-{{ bucket.server_id }}-{{ bucket.group_id }}">
-  <summary class="cursor-pointer select-none flex items-center gap-3 flex-wrap">
+  <summary class="bucket-card__head">
     <input type="checkbox"
-           class="checkbox checkbox-sm"
+           class="sd-checkbox"
            data-bucket-server="{{ bucket.server_id }}"
            data-bucket-group="{{ bucket.group_id }}"
            data-bucket-filter="{{ filter_qs }}"
@@ -39,34 +43,31 @@
            @change="toggleBucket($event.target.dataset.bucketServer, $event.target.dataset.bucketGroup, $event.target.dataset.bucketFilter, $event.target.checked)"
            aria-label="Bucket {{ bucket.server_name }} / {{ bucket.group_label }} fuer Bulk auswaehlen"
            data-test="bucket-card-checkbox">
-    {% with band_value=bucket.risk_band, as_link=false, compact=true, show_count=false %}
-      {% include "_partials/risk_band_pill.html" %}
-    {% endwith %}
+    <span class="sd-badge sd-badge--{{ bucket.risk_band or 'unknown' }}">{{ (bucket.risk_band or 'unknown') | upper }}</span>
     <a href="{{ url_for('server_detail.show', server_id=bucket.server_id) }}"
        hx-get="{{ url_for('server_detail.show', server_id=bucket.server_id) }}"
        hx-target="#detail-pane"
        hx-swap="outerHTML"
        hx-push-url="true"
        @click.stop
-       class="link link-hover font-mono text-sm font-semibold truncate"
+       class="bucket-card__server"
        data-test="bucket-server-link">
       {{ bucket.server_name }}
     </a>
-    <span class="font-mono text-sm truncate" data-test="bucket-group-label">
+    <span class="bucket-card__group" data-test="bucket-group-label">
       {{ bucket.group_label }}
     </span>
-    <span class="badge badge-ghost badge-sm ml-auto" data-test="bucket-finding-count">
-      {{ bucket.finding_count }} {% if bucket.finding_count == 1 %}finding{% else %}findings{% endif %}
+    <span>
+      <span class="bucket-card__count" data-test="bucket-finding-count">{{ bucket.finding_count }}</span>
+      <span class="bucket-card__count-label">{% if bucket.finding_count == 1 %}finding{% else %}findings{% endif %}</span>
     </span>
+    <span class="bucket-card__chev" aria-hidden="true">›</span>
   </summary>
-  <div class="mt-3"
+  <div class="bucket-card__body"
        hx-get="{{ url_for('findings.bucket_fragment', group_id=bucket.group_id, server_id=bucket.server_id, page=1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
        hx-trigger="toggle once from:closest details"
        hx-swap="innerHTML"
        data-test="bucket-findings-lazy-slot">
-    <div class="opacity-60 text-xs italic px-3 py-2">
-      <span class="loading loading-spinner loading-xs align-middle mr-1"></span>
-      Lade Findings...
-    </div>
+    {% include "_partials/bucket_skeleton.html" %}
   </div>
 </details>

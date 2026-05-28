@@ -76,13 +76,14 @@ def test_bucket_card_renders_risk_band_pill_and_count(app: Flask) -> None:
 
     html = _render_bucket_card(app, bucket)
 
-    # Risk-Pille mit dem `escalate`-Marker (siehe risk_band_pill.html).
-    assert 'data-test="risk-band-pill-escalate"' in html, (
-        f"Risk-Pille fuer 'escalate' fehlt: {html[:600]}"
+    # Risk-Pille als sd-badge mit Band-Modifier (Design-Adoption: sd-badge--<band>
+    # ersetzt den DaisyUI-risk_band_pill-Include).
+    assert "sd-badge sd-badge--escalate" in html, (
+        f"sd-badge--escalate-Pille fuer 'escalate' fehlt: {html[:600]}"
     )
-    # Count-Badge.
+    # Count-Badge (Wert in <span class="bucket-card__count">, Wort separat).
     assert 'data-test="bucket-finding-count"' in html, "Count-Badge-Marker fehlt"
-    assert "3 findings" in html, f"Count-Text '3 findings' fehlt: {html}"
+    assert ">3</span>" in html and "findings" in html, f"Count-Text '3 findings' fehlt: {html}"
 
 
 def test_bucket_card_singular_finding_word(app: Flask) -> None:
@@ -98,17 +99,12 @@ def test_bucket_card_singular_finding_word(app: Flask) -> None:
 
     html = _render_bucket_card(app, bucket)
 
-    # Singular "1 finding" muss erscheinen — Whitespace zwischen Text und
-    # schliessendem `</span>` kann variieren (Jinja-Indent), daher Substring-Check.
-    assert "1 finding" in html, f"Singular 'finding' bei count=1 erwartet: {html}"
-    assert "1 findings" not in html, "Plural darf bei count=1 nicht auftauchen"
-    # Zusatz-Sanity: der Count-Badge enthaelt genau das Singular-Token.
-    badge_start = html.find('data-test="bucket-finding-count"')
-    badge_end = html.find("</span>", badge_start)
-    badge_text = html[badge_start:badge_end]
-    assert " finding" in badge_text and " findings" not in badge_text, (
-        f"Count-Badge muss Singular 'finding' fuehren: {badge_text!r}"
-    )
+    # Singular: das Count-Label rendert "finding" (nicht "findings"). Wert und
+    # Label sind getrennte Spans (Design-Adoption: gebolderter Count + Label).
+    assert ">finding<" in html, f"Singular 'finding' bei count=1 erwartet: {html}"
+    assert ">findings<" not in html, "Plural darf bei count=1 nicht auftauchen"
+    # Count-Wert ist 1.
+    assert ">1</span>" in html, f"Count-Wert 1 erwartet: {html}"
 
 
 def test_bucket_card_lazy_slot_url_includes_filter_qs(app: Flask) -> None:
@@ -252,10 +248,10 @@ def test_pending_bucket_card_uses_pending_risk_pill(app: Flask) -> None:
 
     html = _render_pending_bucket_card(app, bucket)
 
-    assert 'data-test="risk-band-pill-pending"' in html, (
-        f"Pending-Card muss IMMER pending-Pille zeigen: {html[:600]}"
+    assert "sd-badge sd-badge--pending" in html, (
+        f"Pending-Card muss IMMER die sd-badge--pending-Pille zeigen: {html[:600]}"
     )
-    assert 'data-test="risk-band-pill-escalate"' not in html, (
+    assert "sd-badge--escalate" not in html, (
         "Pending-Card darf KEINE escalate-Pille rendern (auch wenn das Bucket-Feld so waere)"
     )
 

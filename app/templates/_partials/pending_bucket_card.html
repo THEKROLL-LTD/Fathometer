@@ -1,5 +1,5 @@
 {# Pending-Bucket-Card (Cross-Server-Sammler ohne Group) fuer `/findings`
-   (ADR-0037 §(2), TICKET-006 Etappe 3).
+   (ADR-0037 §(2), TICKET-006 Etappe 3; Design-Adoption Spec §6).
 
    Render-Vertrag:
      - `bucket`    : BucketHeader fuer den Pending-Sammler. `server_id == 0`
@@ -7,19 +7,25 @@
                      (`findings_bucket_query.pending_bucket_header()`).
      - `filter_qs` : str — kanonischer Filter-Querystring der Outer-Page.
 
-   Im Header steht "cross-server" statt eines Server-Namens und das Group-
-   Label ist serverseitig "(ohne Group)". Der HTMX-Lazy-Slot ruft den
-   `findings.pending_fragment`-Endpoint auf, der die Tabelle MIT zusaetzlicher
-   Server-Spalte rendert (Operator muss erkennen koennen, woher das Finding
-   kommt).
+   Strukturell identisch zur regulaeren Bucket-Card, mit zwei Unterschieden
+   (Spec §6):
+     - Die Risk-Band-Pill rendert als gedaempftes graues "PENDING"
+       (sd-badge--pending).
+     - Statt eines Server-Links steht ein neutraler "cross-server"-Marker; das
+       Group-Label ist serverseitig "(ohne Group)". Der HTMX-Lazy-Slot ruft den
+       `findings.pending_fragment`-Endpoint auf, der die Tabelle MIT
+       zusaetzlicher Server-Spalte rendert.
 
-   Sicherheit/Conventions: analog `bucket_card.html`.
+   Die `.pending-bucket`-Klasse aktiviert das 8-Spalten-Grid (mit Server-Spalte)
+   in findings.css.
+
+   Sicherheit/Conventions: analog `bucket_card.html`. KEIN DaisyUI.
 #}
-<details class="card bg-base-200/40 rounded-box p-3 mb-3"
+<details class="bucket-card pending-bucket"
          data-test="pending-bucket-card">
-  <summary class="cursor-pointer select-none flex items-center gap-3 flex-wrap">
+  <summary class="bucket-card__head">
     <input type="checkbox"
-           class="checkbox checkbox-sm"
+           class="sd-checkbox"
            data-bucket-server="0"
            data-bucket-group="0"
            data-bucket-filter="{{ filter_qs }}"
@@ -28,27 +34,26 @@
            @change="toggleBucket(0, 0, $event.target.dataset.bucketFilter, $event.target.checked)"
            aria-label="Pending-Bucket fuer Bulk auswaehlen"
            data-test="pending-bucket-checkbox">
-    {% with band_value='pending', as_link=false, compact=true, show_count=false %}
-      {% include "_partials/risk_band_pill.html" %}
-    {% endwith %}
-    <span class="font-mono text-sm opacity-65" data-test="pending-bucket-cross-server">
+    <span class="sd-badge sd-badge--pending">PENDING</span>
+    <span class="bucket-card__server bucket-card__server--static"
+          aria-label="Pending-Bucket"
+          data-test="pending-bucket-cross-server">
       cross-server
     </span>
-    <span class="font-mono text-sm" data-test="pending-bucket-group-label">
+    <span class="bucket-card__group" data-test="pending-bucket-group-label">
       {{ bucket.group_label }}
     </span>
-    <span class="badge badge-ghost badge-sm ml-auto" data-test="pending-bucket-finding-count">
-      {{ bucket.finding_count }} {% if bucket.finding_count == 1 %}finding{% else %}findings{% endif %}
+    <span>
+      <span class="bucket-card__count" data-test="pending-bucket-finding-count">{{ bucket.finding_count }}</span>
+      <span class="bucket-card__count-label">{% if bucket.finding_count == 1 %}finding{% else %}findings{% endif %}</span>
     </span>
+    <span class="bucket-card__chev" aria-hidden="true">›</span>
   </summary>
-  <div class="mt-3"
+  <div class="bucket-card__body"
        hx-get="{{ url_for('findings.pending_fragment', page=1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
        hx-trigger="toggle once from:closest details"
        hx-swap="innerHTML"
        data-test="pending-bucket-findings-lazy-slot">
-    <div class="opacity-60 text-xs italic px-3 py-2">
-      <span class="loading loading-spinner loading-xs align-middle mr-1"></span>
-      Lade Findings...
-    </div>
+    {% include "_partials/bucket_skeleton.html" %}
   </div>
 </details>
