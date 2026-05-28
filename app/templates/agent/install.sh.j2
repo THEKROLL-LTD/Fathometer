@@ -364,7 +364,12 @@ download_pinned_trivy() {
 
   local tmp
   tmp="$(mktemp -d -t secscan-trivy.XXXXXX)"
-  trap 'rm -rf "$tmp"' RETURN
+  # Self-clearing RETURN trap: ohne `set -o functrace` feuert ein in einer
+  # Funktion gesetzter RETURN-Trap auch beim Return der *aufrufenden* Funktion
+  # (setup_trivy) erneut — dort ist `$tmp` nicht mehr in Scope und `set -u`
+  # bricht mit "tmp: unbound variable" ab. `trap - RETURN` im Handler loescht
+  # den Trap nach dem ersten Feuern, sodass er nicht nach oben leakt.
+  trap 'rm -rf "$tmp"; trap - RETURN' RETURN
 
   local tarball="${tmp}/trivy.tar.gz"
   local checksums="${tmp}/checksums.txt"
