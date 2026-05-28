@@ -1,8 +1,12 @@
 """Gzip-Bomb-Schutz fuer `POST /api/scans` (ARCHITECTURE.md §9).
 
 Test-Cases:
-- 1 KB komprimiert -> 200 MB dekomprimiert -> 413 in <1s.
-- 200 MB Klartext durch gzip.compress() (kleiner aber laenger) -> auch 413.
+- 1 KB komprimiert -> ueber Bound dekomprimiert -> 413 in <1s.
+- Klassische Bomb-Form (winziges gzip, grosser Klartext) -> auch 413.
+
+Der Decompress-Bound (`max_decompressed_mb`) wird pro Test auf einen kleinen
+Wert gemockt, damit der Test default-unabhaengig ist und keinen mehrere-hundert-
+MB-Body im Speicher bauen muss.
 """
 
 from __future__ import annotations
@@ -10,22 +14,29 @@ from __future__ import annotations
 import gzip
 import time
 
+import pytest
 from flask import Flask
 
+from app.config import Settings
 from tests._helpers import register_test_server
 
 
-def test_gzip_bomb_decompress_limit_413(db_app: Flask) -> None:
-    """200 MB hochrepetitiv 'A' komprimiert -> sehr kleines gzip-Payload."""
+def test_gzip_bomb_decompress_limit_413(
+    db_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hochrepetitive Bytes komprimieren winzig, ueberschreiten aber den Bound."""
+    settings: Settings = db_app.config["SECSCAN_SETTINGS"]
+    monkeypatch.setattr(settings, "max_decompressed_mb", 1)
+
     _server_id, api_key = register_test_server(db_app, name="bomb-srv")
     client = db_app.test_client()
 
-    # 200 MB hochrepetitive Bytes -> komprimiert auf ~200 KB (kleiner Header,
-    # extrem hohe Kompressionsrate). gzip.compress() in einem Schwung — fuer
-    # Test ist das ok, der Punkt ist nur, dass das Wire-Format <10 MB ist.
-    payload = b"A" * (200 * 1024 * 1024)
+    # 4 MB hochrepetitive Bytes -> komprimiert auf wenige KB. Dekomprimiert
+    # ueberschreitet das auf 1 MB gesenkte Limit deutlich.
+    payload = b"A" * (4 * 1024 * 1024)
     compressed = gzip.compress(payload)
-    assert len(compressed) < 1_000_000, len(compressed)  # << 1 MB komprimiert.
+    assert len(compressed) < 1_000_000, len(compressed)
 
     start = time.monotonic()
     resp = client.post(
@@ -40,23 +51,24 @@ def test_gzip_bomb_decompress_limit_413(db_app: Flask) -> None:
 
     assert resp.status_code == 413, resp.get_data(as_text=True)
     assert resp.get_json()["error"]["code"] == "decompressed_too_large"
-    # Streaming-Abbruch muss schnell sein — wir haben 100 MB Bound.
+    # Streaming-Abbruch muss schnell sein.
     assert elapsed < 5.0, f"413 dauerte {elapsed:.2f}s (sollte schnell brechen)"
 
 
-def test_gzip_bomb_small_compressed_blows_up(db_app: Flask) -> None:
-    """Klassische gzip-Bomb-Form: 1 KB komprimiert -> > 100 MB dekomprimiert.
+def test_gzip_bomb_small_compressed_blows_up(
+    db_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Klassische gzip-Bomb-Form: winziges gzip -> ueber Bound dekomprimiert."""
+    settings: Settings = db_app.config["SECSCAN_SETTINGS"]
+    monkeypatch.setattr(settings, "max_decompressed_mb", 1)
 
-    Wir bauen einen verschachtelten Repeat: gzip.compress(b'A' * N) liefert
-    extreme Ratios. Bei N=110 MB -> Compress ~110 KB -> Decompress > 100 MB
-    triggert den Bound.
-    """
     _server_id, api_key = register_test_server(db_app, name="bomb-small")
     client = db_app.test_client()
 
-    payload = b"A" * (110 * 1024 * 1024)
+    payload = b"A" * (4 * 1024 * 1024)
     compressed = gzip.compress(payload)
-    # Compressed << 10 MB Body-Limit.
+    # Compressed << Body-Limit.
     assert len(compressed) < 5 * 1024 * 1024, len(compressed)
 
     resp = client.post(

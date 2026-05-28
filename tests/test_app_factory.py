@@ -2,7 +2,7 @@
 
 Prueft die Cross-Cutting-Defaults aus Block A:
 - Settings werden geladen (Pflicht-Env-Var `SECSCAN_ENCRYPTION_KEY`).
-- `MAX_CONTENT_LENGTH` ist 10 MB Default bzw. ueberschreibbar.
+- `MAX_CONTENT_LENGTH` ist 64 MB Default bzw. ueberschreibbar.
 - Jinja-Autoescape ist aktiv.
 - Fehlende Pflicht-Env-Var fuehrt zu `SystemExit`.
 """
@@ -40,14 +40,14 @@ def test_create_app_returns_flask_instance(clean_env: pytest.MonkeyPatch) -> Non
     assert isinstance(app, Flask), type(app)
 
 
-def test_default_max_content_length_is_10_mb(clean_env: pytest.MonkeyPatch) -> None:
+def test_default_max_content_length_is_64_mb(clean_env: pytest.MonkeyPatch) -> None:
     clean_env.setenv("SECSCAN_ENCRYPTION_KEY", "x" * 32)
     clean_env.setenv("SECSCAN_DATABASE_URL", "postgresql+psycopg://test:test@127.0.0.1:1/test")
 
     from app import create_app
 
     app = create_app()
-    assert app.config["MAX_CONTENT_LENGTH"] == 10 * 1024 * 1024, app.config["MAX_CONTENT_LENGTH"]
+    assert app.config["MAX_CONTENT_LENGTH"] == 64 * 1024 * 1024, app.config["MAX_CONTENT_LENGTH"]
 
 
 def test_jinja_autoescape_is_enabled(clean_env: pytest.MonkeyPatch) -> None:

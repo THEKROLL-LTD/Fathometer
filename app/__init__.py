@@ -5,7 +5,7 @@ Konfiguriert in dieser Reihenfolge:
 1. Settings laden (pydantic-settings) — Start-Refusal wenn
    `SECSCAN_ENCRYPTION_KEY` fehlt.
 2. Logging (structlog mit JSON-Output + Redaction-Filter).
-3. Flask-App mit `MAX_CONTENT_LENGTH=10 MB` Default und Jinja-Autoescape.
+3. Flask-App mit `MAX_CONTENT_LENGTH=64 MB` Default und Jinja-Autoescape.
 4. `flask-limiter` mit in-memory Backend und Default-Limits aus
    ARCHITECTURE.md §9.
 5. DB-Engine + Session-Factory.
@@ -317,7 +317,7 @@ def create_app() -> Flask:
 
     app.config.update(
         SECRET_KEY=settings.secret_key.get_secret_value() or "dev-only-insecure",
-        MAX_CONTENT_LENGTH=settings.max_body_bytes,  # 10 MB Default — §9.
+        MAX_CONTENT_LENGTH=settings.max_body_bytes,  # 64 MB Default — §9.
         SECSCAN_DATABASE_URL=settings.database_url,
         SECSCAN_SETTINGS=settings,
         AGENT_FILES_DIR=agent_files_dir,

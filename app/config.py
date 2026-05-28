@@ -64,8 +64,8 @@ class Settings(BaseSettings):
     )
 
     # ----- Body- und Decompress-Limits (siehe ARCHITECTURE.md §9) -----
-    max_body_mb: int = Field(default=10, ge=1, le=1024)
-    max_decompressed_mb: int = Field(default=100, ge=1, le=10240)
+    max_body_mb: int = Field(default=64, ge=1, le=1024)
+    max_decompressed_mb: int = Field(default=512, ge=1, le=10240)
 
     # ----- Rate-Limits (flask-limiter Format) -----
     ratelimit_register: str = Field(default="10/minute")
