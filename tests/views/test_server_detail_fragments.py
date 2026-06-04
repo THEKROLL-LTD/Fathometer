@@ -325,7 +325,7 @@ def test_trend_fragment_happy_path(app: Flask, monkeypatch: pytest.MonkeyPatch) 
     assert 'id="sd-stats-delta"' in html
     assert 'hx-swap-oob="outerHTML"' in html
     # Label-Text aus dem Tendency-Enum (STABLE).
-    assert "stabil" in html
+    assert "stable over 30 days" in html
 
 
 def test_trend_fragment_unknown_server_404(app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -48,9 +48,9 @@ class Tendency(StrEnum):
         vom Wahrheitsgehalt ab — fuer den MVP-Scope ist das vertretbar.
         """
         return {
-            Tendency.STABLE: "über 30 tage stabil",
-            Tendency.RISING: "über 30 tage steigend",
-            Tendency.FALLING: "über 30 tage fallend",
+            Tendency.STABLE: "stable over 30 days",
+            Tendency.RISING: "rising over 30 days",
+            Tendency.FALLING: "falling over 30 days",
         }[self]
 
 

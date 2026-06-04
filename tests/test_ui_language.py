@@ -11,6 +11,11 @@ Scope (was gescannt wird):
   - `app/static/js/*.js`       — nach Abzug von `// …` und `/* … */`
   - `app/views/*.py`           — nur String-Literale (keine Docstrings/Kommentare)
   - `app/forms.py`             — nur String-Literale (keine Docstrings/Kommentare)
+  - `app/services/trend.py`    — `Tendency.label` wird per `tendency_label`-Macro
+                                 direkt in der UI gerendert (Jinja-Filter-Output,
+                                 ADR-0045 §1). Andere `app/services/`-Module sind
+                                 Maschinen-/Agent-/LLM-Worker-Flaechen (ADR-0021/
+                                 0023/0043) und bewusst NICHT im Scan.
 
 Bewusst NICHT gescannt (ADR-0045 §Scope — bleiben deutsch):
   - Code-Kommentare, Docstrings, Jinja-/HTML-Kommentare.
@@ -255,8 +260,15 @@ def _violations() -> list[str]:
                 continue
             violations.append(f"{rel}:{lineno}: marker {token!r} -> {ctx}")
 
-    # Python: nur String-Literale in views/* + forms.py
-    py_files = [*sorted((_APP / "views").glob("*.py")), _APP / "forms.py"]
+    # Python: nur String-Literale in views/* + forms.py + UI-Label-Quellen.
+    # trend.py: `Tendency.label` wird via `tendency_label`-Macro in der UI
+    # gerendert; uebrige services/* sind Maschinen-/LLM-Flaechen (siehe Modul-
+    # Docstring) und absichtlich nicht im Scan.
+    py_files = [
+        *sorted((_APP / "views").glob("*.py")),
+        _APP / "forms.py",
+        _APP / "services" / "trend.py",
+    ]
     for path in py_files:
         rel = str(path.relative_to(_ROOT))
         for lineno, literal in _python_string_literals(path):

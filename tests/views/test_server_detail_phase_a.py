@@ -154,9 +154,9 @@ def test_tendency_quick_zero_zero_is_stable() -> None:
 
 def test_tendency_quick_label_matches_enum() -> None:
     """Tendency.label spiegelt den Enum-Wert."""
-    assert Tendency.RISING.label == "über 30 tage steigend"
-    assert Tendency.FALLING.label == "über 30 tage fallend"
-    assert Tendency.STABLE.label == "über 30 tage stabil"
+    assert Tendency.RISING.label == "rising over 30 days"
+    assert Tendency.FALLING.label == "falling over 30 days"
+    assert Tendency.STABLE.label == "stable over 30 days"
 
 
 # ---------------------------------------------------------------------------

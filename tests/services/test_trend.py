@@ -250,6 +250,6 @@ def test_threshold_grenzfall_above_returns_rising(db_app: Flask) -> None:
 def test_tendency_label_format() -> None:
     """Label entspricht dem Design-Mockup (Lowercase, 'ueber 30 tage <X>',
     ADR-0038 Fenster-Reduktion von 50 auf 30 Tage)."""
-    assert Tendency.STABLE.label == "über 30 tage stabil"
-    assert Tendency.RISING.label == "über 30 tage steigend"
-    assert Tendency.FALLING.label == "über 30 tage fallend"
+    assert Tendency.STABLE.label == "stable over 30 days"
+    assert Tendency.RISING.label == "rising over 30 days"
+    assert Tendency.FALLING.label == "falling over 30 days"
