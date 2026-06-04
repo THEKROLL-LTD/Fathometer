@@ -22,8 +22,8 @@
 <div class="sd-findings-stack">
   <div class="sd-findings-head" aria-hidden="true">
     <span></span>
-    <span>CVE / Titel</span>
-    <span>Paket</span>
+    <span>CVE / Title</span>
+    <span>Package</span>
     <span class="sd-findings-head__right">EPSS</span>
     <span class="sd-findings-head__right">CVSS</span>
     <span class="sd-findings-head__right">Severity</span>
@@ -39,7 +39,7 @@
         <input type="checkbox"
                class="sd-checkbox"
                value="{{ f.id }}"
-               aria-label="Finding {{ f.identifier_key }} auswaehlen"
+               aria-label="Select finding {{ f.identifier_key }}"
                data-bulk-id="true"
                x-data
                :checked="(window.__detailSelected || []).includes({{ f.id }})"
@@ -55,7 +55,7 @@
           <span class="sd-finding__cve-id">
             {{ f.identifier_key }}
             {{ kev_badge(f.is_kev, size='xs') }}
-            {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+            {{ quick_copy(f.identifier_key, label='Copy CVE ID') }}
           </span>
           {% if f.title %}
             <span class="sd-finding__title" title="{{ f.title }}">{{ f.title }}</span>
@@ -104,5 +104,5 @@
   {% endfor %}
 </div>
 {% else %}
-  <p class="sd-empty">Keine Findings in dieser Group.</p>
+  <p class="sd-empty">No findings in this group.</p>
 {% endif %}

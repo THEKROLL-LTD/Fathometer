@@ -19,7 +19,7 @@
 <div id="sd-heartbeat" data-test="heartbeat-fragment">
   {% if server.host_state_snapshot_at is none %}
     <div class="sd-heartbeat-frame sd-heartbeat-frame--empty" data-test="heartbeat-empty">
-      <p class="sd-empty">— noch nie gescannt</p>
+      <p class="sd-empty">— never scanned</p>
     </div>
   {% else %}
     {% with cells=cells, skel=False %}

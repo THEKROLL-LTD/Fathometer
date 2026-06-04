@@ -237,7 +237,7 @@ def test_heartbeat_fragment_never_scanned_empty_state(
     assert isinstance(html, str)
     assert 'id="sd-heartbeat"' in html
     assert "heartbeat-empty" in html
-    assert "noch nie gescannt" in html
+    assert "never scanned" in html
 
 
 def test_heartbeat_fragment_unknown_server_404(app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:

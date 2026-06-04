@@ -159,7 +159,7 @@ def test_index_zero_buckets_shows_no_match_hint(app: Flask) -> None:
         filt=filt,
     )
 
-    assert "Kein Treffer" in html, f"Empty-Match-Text fehlt: {html[:600]}"
+    assert "No match" in html, f"Empty-Match-Text fehlt: {html[:600]}"
     # Bucket-Section bleibt weg in diesem Pfad.
     assert 'data-test="findings-buckets-section"' not in html
 
@@ -199,9 +199,9 @@ def test_index_two_buckets_render_counter_and_cards(app: Flask) -> None:
 
     # Counter mit Plural-Suffix (Werte sind im Design in <b> gewrappt).
     assert 'data-test="findings-bucket-counter"' in html, "Counter-Marker fehlt"
-    assert "<b>2</b>" in html and "Gruppen" in html, f"'2 Gruppen' nicht im Counter: {html[:1000]}"
-    assert "<b>8</b>" in html and "Findings" in html, (
-        f"'8 Findings' (Summe) nicht im Counter: {html[:1000]}"
+    assert "<b>2</b>" in html and "groups" in html, f"'2 groups' nicht im Counter: {html[:1000]}"
+    assert "<b>8</b>" in html and "findings" in html, (
+        f"'8 findings' (Summe) nicht im Counter: {html[:1000]}"
     )
 
     # Bucket-Cards.
@@ -283,8 +283,8 @@ def test_index_pending_bucket_renders_after_buckets(app: Flask) -> None:
     )
 
     # Counter zaehlt Pending mit (1 + 1 = 2 Gruppen, 2 + 4 = 6 Findings).
-    assert "<b>2</b>" in html and "Gruppen" in html, "Counter muss Pending mitzaehlen"
-    assert "<b>6</b>" in html and "Findings" in html, "Counter-Summe inkl. Pending erwartet"
+    assert "<b>2</b>" in html and "groups" in html, "Counter muss Pending mitzaehlen"
+    assert "<b>6</b>" in html and "findings" in html, "Counter-Summe inkl. Pending erwartet"
 
 
 # ---------------------------------------------------------------------------

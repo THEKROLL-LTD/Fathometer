@@ -21,7 +21,7 @@
          @detail-selection-changed.window="selectionCount = $event.detail.count">
   <p class="sd-eyebrow">Triage queue · findings</p>
   <div class="sd-queue-head">
-    <h2 class="sd-h3 sd-queue-h3">{{ _open_total }} offen · sortiert nach Risk-Band</h2>
+    <h2 class="sd-h3 sd-queue-h3">{{ _open_total }} open · sorted by risk band</h2>
   </div>
 
   <div class="sd-queue-toolbar">
@@ -33,14 +33,14 @@
     <div x-data="bulkAckIds(() => (window.__detailSelected || []))" class="inline-flex">
       <button type="button"
               :disabled="selectionCount === 0"
-              :title="selectionCount === 0 ? 'Erst Findings auswaehlen' : 'Auswahl abhaken'"
+              :title="selectionCount === 0 ? 'Select findings first' : 'Acknowledge selection'"
               @click="openModal()"
               data-test="bulk-ack-toolbar">
-        Auswahl ack
+        Acknowledge selection
         <span x-show="selectionCount > 0"
               x-text="'(' + selectionCount + ')'"></span>
       </button>
-      {{ bulk_ack_modal(id='bulk-ack-modal-toolbar', title='Ausgewaehlte Findings abhaken') }}
+      {{ bulk_ack_modal(id='bulk-ack-modal-toolbar', title='Acknowledge selected findings') }}
     </div>
 
     {# CSV-Export — letztes Element, margin-left: auto via Layout #}
@@ -48,7 +48,7 @@
        download
        style="margin-left: auto"
        data-test="findings-csv-export">
-      ↓ CSV exportieren
+      ↓ Export CSV
     </a>
   </div>
 

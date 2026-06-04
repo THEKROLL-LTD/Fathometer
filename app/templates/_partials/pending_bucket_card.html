@@ -32,11 +32,11 @@
            data-bucket-count="{{ bucket.finding_count }}"
            @click.stop
            @change="toggleBucket(0, 0, $event.target.dataset.bucketFilter, $event.target.checked)"
-           aria-label="Pending-Bucket fuer Bulk auswaehlen"
+           aria-label="Select pending bucket for bulk"
            data-test="pending-bucket-checkbox">
     <span class="sd-badge sd-badge--pending">PENDING</span>
     <span class="bucket-card__server bucket-card__server--static"
-          aria-label="Pending-Bucket"
+          aria-label="Pending bucket"
           data-test="pending-bucket-cross-server">
       cross-server
     </span>

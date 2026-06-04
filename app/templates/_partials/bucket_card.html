@@ -41,7 +41,7 @@
            data-bucket-count="{{ bucket.finding_count }}"
            @click.stop
            @change="toggleBucket($event.target.dataset.bucketServer, $event.target.dataset.bucketGroup, $event.target.dataset.bucketFilter, $event.target.checked)"
-           aria-label="Bucket {{ bucket.server_name }} / {{ bucket.group_label }} fuer Bulk auswaehlen"
+           aria-label="Select bucket {{ bucket.server_name }} / {{ bucket.group_label }} for bulk"
            data-test="bucket-card-checkbox">
     <span class="sd-badge sd-badge--{{ bucket.risk_band or 'unknown' }}">{{ (bucket.risk_band or 'unknown') | upper }}</span>
     <a href="{{ url_for('server_detail.show', server_id=bucket.server_id) }}"

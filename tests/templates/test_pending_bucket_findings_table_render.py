@@ -102,7 +102,7 @@ def test_eight_column_header_includes_server(app: Flask) -> None:
     """8-Spalten-Header mit erster Daten-Spalte `Server`."""
     html = _render(app, findings=[_make_finding()])
     assert 'class="bucket-findings-head"' in html, html[:600]
-    for col in ("Server", "CVE / Titel", "Paket", "EPSS", "CVSS", "Severity", "Erstmals"):
+    for col in ("Server", "CVE / Title", "Package", "EPSS", "CVSS", "Severity", "First seen"):
         assert col in html, f"Spaltenkopf '{col}' fehlt: {html[:800]}"
     assert ">Status<" not in html and "Status</span>" not in html, "Keine Status-Spalte"
 
@@ -190,7 +190,7 @@ def test_inline_ai_reason_escaped(app: Flask) -> None:
     html = _render(app, findings=[_make_finding(risk_band_reason="<script>alert(1)</script>")])
     assert "<script>alert(1)</script>" not in html, html
     assert "&lt;script&gt;" in html, html
-    assert "KI-Bewertung" in html and "sd-ai-text" in html, html
+    assert "AI assessment" in html and "sd-ai-text" in html, html
 
 
 def test_checkbox_bulk_contract(app: Flask) -> None:

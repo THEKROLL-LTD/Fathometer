@@ -158,14 +158,14 @@
                   });
                   const data = await res.json();
                   if (!res.ok) {
-                    const msg = (data && (data.message || data.error)) || ('Fehler ' + res.status);
+                    const msg = (data && (data.message || data.error)) || ('Error ' + res.status);
                     this.$dispatch('toast', {msg: msg, kind: 'error'});
                     this.busy = false;
                     return;
                   }
                   window.location.href = '/chat/' + data.conversation_id;
                 } catch (e) {
-                  this.$dispatch('toast', {msg: 'Netzwerk-Fehler', kind: 'error'});
+                  this.$dispatch('toast', {msg: 'Network error', kind: 'error'});
                   this.busy = false;
                 }
               }
@@ -174,22 +174,22 @@
                   class="sd-ai-button"
                   @click="start()"
                   :disabled="busy"
-                  title="LLM-Bewertung anfordern (oder zur aktiven Conversation springen)">
+                  title="Request LLM assessment (or jump to the active conversation)">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" aria-hidden="true">
               <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
             </svg>
-            <span x-show="!busy">KI-Bewertung anfordern</span>
-            <span x-show="busy">startet&#x2026;</span>
+            <span x-show="!busy">Request AI assessment</span>
+            <span x-show="busy">starting&#x2026;</span>
           </button>
         </div>
       {% elif is_active %}
         <a href="{{ url_for('llm_settings.show') }}"
            class="sd-ai-button"
-           title="LLM-Provider ist noch nicht konfiguriert.">
+           title="LLM provider is not configured yet.">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" aria-hidden="true">
             <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
           </svg>
-          <span>KI-Bewertung (Provider fehlt)</span>
+          <span>AI assessment (provider missing)</span>
         </a>
       {% endif %}
       <a class="sd-icon-button"
@@ -197,8 +197,8 @@
          hx-get="{{ url_for('server_settings.show', server_id=server.id) }}"
          hx-target="#detail-pane"
          hx-push-url="true"
-         title="Server-Einstellungen (Tags, Gruppe, Scan-Intervall)"
-         aria-label="Einstellungen"
+         title="Server settings (tags, group, scan interval)"
+         aria-label="Settings"
          data-test="server-settings-link">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
           <circle cx="12" cy="12" r="3" />
@@ -278,7 +278,7 @@
           <span id="sd-stats-delta" class="sd-stats__delta">{{ tendency.label }}</span>
         {% endif %}
       </div>
-      <p class="sd-stats__total">von {{ total_findings_count | default(0) }} Findings gesamt</p>
+      <p class="sd-stats__total">of {{ total_findings_count | default(0) }} findings total</p>
     </div>
     {# Block Y Phase B (ADR-0039 §2): KPI-Tiles-Skeleton. Der Sparklines-
        Fragment-Endpoint ersetzt diesen DIV (inkl. Sparklines) per
@@ -312,8 +312,8 @@
      kommt aus dem Heartbeat-Fragment-Endpoint (Phase B). Bei never-scanned
      bleibt der Empty-State erhalten (kein Fragment-Trigger noetig). #}
   <section class="sd-section" data-test="heartbeat-section">
-    <p class="sd-eyebrow">Lebenszeichen · 30 Tage</p>
-    <h2 class="sd-h3">Tägliche Scans · Worst-Risk-Band pro Tag</h2>
+    <p class="sd-eyebrow">Heartbeat · 30 days</p>
+    <h2 class="sd-h3">Daily scans · worst risk band per day</h2>
     {# Block Y Phase B (ADR-0039 §2): Heartbeat-Skeleton. Das Fragment
        liefert entweder den --empty-State (never-scanned) oder die volle
        Heartbeat-Bar und ersetzt diesen DIV per outerHTML. #}
@@ -323,7 +323,7 @@
          hx-swap="outerHTML">
       {% if server.host_state_snapshot_at is none %}
         <div class="sd-heartbeat-frame sd-heartbeat-frame--empty" data-test="heartbeat-empty">
-          <p class="sd-empty">— noch nie gescannt</p>
+          <p class="sd-empty">— never scanned</p>
         </div>
       {% else %}
         {% with cells=[], skel=True %}
@@ -338,10 +338,10 @@
      Endpoint (Phase B). Initial-Render rendert das Chart-Skeleton mit
      30 leeren Spalten und ohne Legende. #}
   <section class="sd-section" data-test="trend-section">
-    <p class="sd-eyebrow">Severity trend · pro Tag</p>
+    <p class="sd-eyebrow">Severity trend · per day</p>
     <h2 class="sd-h3">
-      Verteilung der offenen Findings über
-      <span x-text="trendRange === '24h' ? '24 Stunden' : trendRange === '7T' ? '7 Tage' : '30 Tage'"></span>
+      Distribution of open findings over
+      <span x-text="trendRange === '24h' ? '24 hours' : trendRange === '7T' ? '7 days' : '30 days'"></span>
     </h2>
     {# Block Y Phase B (ADR-0039 §2): Trend-Skeleton. Das Fragment liefert
        das volle Chart + Legende und ersetzt diesen DIV per outerHTML.

@@ -28,12 +28,12 @@
 #}
 {% from "_macros.html" import kev_badge, quick_copy %}
 {%- if not findings -%}
-  <p class="sd-empty" data-test="triage-empty-{{ band }}">Keine Findings in diesem Band.</p>
+  <p class="sd-empty" data-test="triage-empty-{{ band }}">No findings in this band.</p>
 {%- else -%}
 <div class="sd-findings-head" aria-hidden="true">
   <span></span>
-  <span>CVE / Titel</span>
-  <span>Paket</span>
+  <span>CVE / Title</span>
+  <span>Package</span>
   <span class="sd-findings-head__right">EPSS</span>
   <span class="sd-findings-head__right">CVSS</span>
   <span class="sd-findings-head__right">Severity</span>
@@ -47,7 +47,7 @@
       <input type="checkbox"
              class="sd-checkbox"
              value="{{ f.id }}"
-             aria-label="Finding {{ f.identifier_key }} auswaehlen"
+             aria-label="Select finding {{ f.identifier_key }}"
              data-bulk-id="true"
              x-data
              :checked="(window.__detailSelected || []).includes({{ f.id }})"
@@ -62,7 +62,7 @@
         <span class="sd-finding__cve-id">
           {{ f.identifier_key }}
           {{ kev_badge(f.is_kev, size='xs') }}
-          {{ quick_copy(f.identifier_key, label='CVE-ID kopieren') }}
+          {{ quick_copy(f.identifier_key, label='Copy CVE ID') }}
         </span>
         {% if f.title %}
           <span class="sd-finding__title" title="{{ f.title }}">{{ f.title }}</span>
@@ -107,10 +107,10 @@
 {% endfor %}
 {%- set _body_target = "#risk-band-" ~ band ~ "-body" -%}
 <div class="workflow-card__footer sd-band__footer" data-test="triage-pager-{{ band }}">
-  <span>Seite {{ page }} von {{ total_pages }} · {{ total }} Findings</span>
+  <span>Page {{ page }} of {{ total_pages }} · {{ total }} findings</span>
   <span class="workflow-card__pager">
     <button type="button"
-            aria-label="Vorherige Seite"
+            aria-label="Previous page"
             data-test="triage-pager-prev-{{ band }}"
             {% if has_prev %}
             hx-get="{{ url_for('server_detail.triage_band_fragment', server_id=server.id, band=band, page=page - 1) }}"
@@ -119,7 +119,7 @@
             hx-disabled-elt="this"
             {% else %}disabled{% endif %}>&#x2039;</button>
     <button type="button"
-            aria-label="Nächste Seite"
+            aria-label="Next page"
             data-test="triage-pager-next-{{ band }}"
             {% if has_next %}
             hx-get="{{ url_for('server_detail.triage_band_fragment', server_id=server.id, band=band, page=page + 1) }}"

@@ -35,7 +35,7 @@
 
   {% if evaluation and evaluation.risk_band_reason %}
     <div class="sd-app-group__reason" data-test="group-risk-reason">
-      <p class="sd-ai-eyebrow">KI-Bewertung</p>
+      <p class="sd-ai-eyebrow">AI assessment</p>
       <p class="sd-ai-text">{{ evaluation.risk_band_reason }}</p>
     </div>
   {% endif %}
@@ -64,7 +64,7 @@
          hx-trigger="toggle once from:closest details, click once from:closest summary"
          hx-swap="innerHTML"
          data-test="group-findings-lazy-slot">
-      <p class="sd-empty">Lade Findings…</p>
+      <p class="sd-empty">Loading findings…</p>
     </div>
   </details>
 </div>

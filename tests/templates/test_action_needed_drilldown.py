@@ -407,8 +407,8 @@ def test_no_pagination_stub_when_25_groups_or_fewer(app: Flask) -> None:
     html = _render_section(app, [card])
 
     # Bei 25 Groups: 1 Seite (25/25 = 1 ganze Seite, kein Rest)
-    assert "Seite 1 von 1" in html, (
-        f"Bei 25 Groups soll Footer 'Seite 1 von 1' zeigen. HTML: {html[:800]!r}"
+    assert "page 1 of 1" in html, (
+        f"Bei 25 Groups soll Footer 'page 1 of 1' zeigen. HTML: {html[:800]!r}"
     )
 
 
@@ -426,7 +426,7 @@ def test_pagination_stub_renders_when_26_groups(app: Flask) -> None:
     html = _render_section(app, [card])
 
     # Seiten-Text: 26 Groups / 25 pro Seite = 2 Seiten (1 Rest).
-    assert "Seite 1 von 2" in html, f"'Seite 1 von 2' fehlt bei 26 Groups. HTML: {html!r}"
+    assert "page 1 of 2" in html, f"'page 1 of 2' fehlt bei 26 Groups. HTML: {html!r}"
 
     # Footer-Container vorhanden (kein separates pagination-Element mehr).
     assert 'class="workflow-card__footer"' in html, (
@@ -434,21 +434,21 @@ def test_pagination_stub_renders_when_26_groups(app: Flask) -> None:
     )
 
     # Beide disabled Buttons (deutscher aria-label: "Vorherige Seite" / "Nächste Seite").
-    assert 'aria-label="Vorherige Seite"' in html, (
-        f"'aria-label=\"Vorherige Seite\"' fehlt im Pager. HTML: {html!r}"
+    assert 'aria-label="Previous page"' in html, (
+        f"'aria-label=\"Previous page\"' fehlt im Pager. HTML: {html!r}"
     )
-    assert 'aria-label="Nächste Seite"' in html, (
-        f"'aria-label=\"Nächste Seite\"' fehlt im Pager. HTML: {html!r}"
+    assert 'aria-label="Next page"' in html, (
+        f"'aria-label=\"Next page\"' fehlt im Pager. HTML: {html!r}"
     )
 
 
 @pytest.mark.parametrize(
     "num_groups, expected_text",
     [
-        (50, "Seite 1 von 2"),  # 50 // 25 = 2, kein Rest -> genau 2 Seiten
-        (51, "Seite 1 von 3"),  # 51 // 25 = 2 + 1 Rest -> 3 Seiten
-        (100, "Seite 1 von 4"),  # 100 // 25 = 4, kein Rest -> genau 4 Seiten
-        (101, "Seite 1 von 5"),  # 101 // 25 = 4 + 1 Rest -> 5 Seiten
+        (50, "page 1 of 2"),  # 50 // 25 = 2, kein Rest -> genau 2 Seiten
+        (51, "page 1 of 3"),  # 51 // 25 = 2 + 1 Rest -> 3 Seiten
+        (100, "page 1 of 4"),  # 100 // 25 = 4, kein Rest -> genau 4 Seiten
+        (101, "page 1 of 5"),  # 101 // 25 = 4 + 1 Rest -> 5 Seiten
     ],
 )
 def test_pagination_total_pages_calculation(

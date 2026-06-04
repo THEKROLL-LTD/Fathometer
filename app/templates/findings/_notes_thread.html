@@ -18,14 +18,14 @@
 #}
 <section class="space-y-3 notes-thread"
          id="notes-thread-{{ finding.id }}">
-  <h4 class="text-xs uppercase tracking-wide opacity-60">Notizen</h4>
+  <h4 class="text-xs uppercase tracking-wide opacity-60">Notes</h4>
 
   {% set live_notes = finding.notes | rejectattr('deleted_at') | list %}
   {# Neueste zuerst — `sort` mit `created_at` als Key, dann reverse. #}
   {% set ordered_notes = live_notes | sort(attribute='created_at', reverse=true) %}
 
   {% if not ordered_notes %}
-    <p class="text-sm opacity-60">Noch keine Notizen.</p>
+    <p class="text-sm opacity-60">No notes yet.</p>
   {% else %}
     <ul class="space-y-2">
       {% for note in ordered_notes %}
@@ -62,8 +62,8 @@
                 {{ csrf_form.csrf_token }}
                 <button type="submit"
                         class="link link-hover text-xs opacity-60 hover:text-error"
-                        aria-label="Notiz loeschen">
-                  loeschen
+                        aria-label="Delete note">
+                  delete
                 </button>
               </form>
             {% endif %}
@@ -86,16 +86,16 @@
     {{ note_form.csrf_token }}
     <label class="form-control w-full">
       <span class="label-text text-xs opacity-70 pb-1">
-        Neue Notiz (Markdown-Subset: **fett**, *kursiv*, `code`, Listen, ``` Fences ```)
+        New note (Markdown subset: **bold**, *italic*, `code`, lists, ``` fences ```)
       </span>
       {{ note_form.body(
         class_='textarea textarea-bordered w-full',
         rows=3,
-        placeholder='Hinweis fuer das Team…',
-        **{'aria-label': 'Notiz-Text'}) }}
+        placeholder='Note for the team…',
+        **{'aria-label': 'Note text'}) }}
     </label>
     <div class="text-right">
-      <button type="submit" class="btn btn-sm">Note hinzufuegen</button>
+      <button type="submit" class="btn btn-sm">Add note</button>
     </div>
   </form>
 </section>

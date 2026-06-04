@@ -17,8 +17,8 @@
 {%- set _total_nonempty = (risk_band_header_counts | dictsort | selectattr('1', '>', 0) | list | length) -%}
 {% if _total_nonempty == 0 %}
   <div class="sd-empty-block" data-test="findings-empty">
-    <p class="sd-empty">— Keine offenen Findings auf diesem Server</p>
-    <p class="sd-empty">Filter pruefen oder Status auf "alle" stellen.</p>
+    <p class="sd-empty">— No open findings on this server</p>
+    <p class="sd-empty">Check the filters or set status to "all".</p>
   </div>
 {% else %}
   <div data-test="risk-band-sections">
@@ -36,6 +36,6 @@
     {% endfor %}
   </div>
   <div class="sd-queue-footer" data-test="findings-total-footer">
-    {{ total_findings_count | default(0) }} Findings gesamt
+    {{ total_findings_count | default(0) }} findings total
   </div>
 {% endif %}

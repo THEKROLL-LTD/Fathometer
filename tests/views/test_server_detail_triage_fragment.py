@@ -269,8 +269,8 @@ def test_triage_band_fragment_page_1_of_many(app: Flask, monkeypatch: pytest.Mon
     assert "sd-findings-head" in html
     # Pager-Footer mit korrektem Seiten-/Total-Text
     assert 'data-test="triage-pager-escalate"' in html
-    assert "Seite 1 von 3" in html
-    assert "30 Findings" in html
+    assert "Page 1 of 3" in html
+    assert "30 findings" in html
     # Next-Button aktiv (zeigt auf page=2), Prev-Button disabled (page=1)
     assert 'data-test="triage-pager-next-escalate"' in html
     assert "page=2" in html
@@ -291,7 +291,7 @@ def test_triage_band_fragment_last_page_next_disabled(
     assert html.count('data-test="triage-finding-row-') == 6
     # Kopf rendert auf jeder Seite
     assert "sd-findings-head" in html
-    assert "Seite 3 von 3" in html
+    assert "Page 3 of 3" in html
     # Prev aktiv -> page=2, Next disabled -> kein page=4
     assert "page=2" in html
     assert "page=4" not in html
@@ -306,7 +306,7 @@ def test_triage_band_fragment_single_page_both_disabled(
     _patch_session_returning(monkeypatch, rows, total=8)
     html = _call_inner(app, "/servers/1/triage/escalate?page=1", 1, "escalate")
     assert isinstance(html, str)
-    assert "Seite 1 von 1 · 8 Findings" in html
+    assert "Page 1 of 1 · 8 findings" in html
     # Keine Navigation moeglich -> weder page=0 noch page=2 als hx-get
     assert "page=0" not in html
     assert "page=2" not in html

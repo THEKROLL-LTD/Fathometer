@@ -23,7 +23,7 @@
     <button type="button"
             class="sd-flyout__close"
             @click="open = null"
-            aria-label="Schließen">×</button>
+            aria-label="Close">×</button>
   </div>
   <div class="sd-flyout__body">
     {% if _listeners %}
@@ -53,7 +53,7 @@
         </tbody>
       </table>
     {% else %}
-      <p class="sd-flyout__empty" data-test="pill-listeners-empty">— Keine offenen Listener auf diesem Host</p>
+      <p class="sd-flyout__empty" data-test="pill-listeners-empty">— No open listeners on this host</p>
     {% endif %}
   </div>
 </div>

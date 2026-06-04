@@ -253,9 +253,7 @@ def test_empty_state_when_all_slots_empty(app: Flask) -> None:
     )
     assert "sd-empty" in html, f"'sd-empty'-Klasse fehlt im Empty-State. HTML: {html!r}"
     # Text-Inhalt: Schluessel-Substring genuegt (kein Punkt am Ende im neuen Markup).
-    assert "Keine offenen Findings" in html, (
-        f"Empty-State-Text 'Keine offenen Findings' fehlt. HTML: {html!r}"
-    )
+    assert "No open findings" in html, f"Empty-State-Text 'No open findings' fehlt. HTML: {html!r}"
 
     # Kein <details>-Tag im Output.
     assert "<details" not in html, f"Kein <details>-Tag erwartet bei leerem State. HTML: {html!r}"

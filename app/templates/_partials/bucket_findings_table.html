@@ -41,12 +41,12 @@
      data-per-page="{{ per_page }}">
   <div class="bucket-findings-head" aria-hidden="true">
     <span></span>
-    <span>CVE / Titel</span>
-    <span>Paket</span>
+    <span>CVE / Title</span>
+    <span>Package</span>
     <span class="bucket-findings-head__right">EPSS</span>
     <span class="bucket-findings-head__right">CVSS</span>
     <span class="bucket-findings-head__right">Severity</span>
-    <span class="bucket-findings-head__right">Erstmals</span>
+    <span class="bucket-findings-head__right">First seen</span>
   </div>
 
   {% for f in findings %}
@@ -62,7 +62,7 @@
                value="{{ f.id }}"
                @click.stop
                @change="toggleFinding({{ f.id }}, $event.target.checked)"
-               aria-label="Finding {{ f.identifier_key }} fuer Bulk auswaehlen">
+               aria-label="Select finding {{ f.identifier_key }} for bulk">
 
         <div class="sd-finding__cve">
           <span class="sd-finding__cve-id">
@@ -114,10 +114,10 @@
 
 {%- set _total_pages = ((total + per_page - 1) // per_page) if per_page > 0 else 1 -%}
 <div class="bucket-card__footer" data-test="bucket-pager">
-  <span>Seite {{ page }} von {{ _total_pages }} · {{ total }} {% if total == 1 %}Finding{% else %}Findings{% endif %}</span>
+  <span>Page {{ page }} of {{ _total_pages }} · {{ total }} {% if total == 1 %}finding{% else %}findings{% endif %}</span>
   <span class="bucket-card__pager">
     <button type="button"
-            aria-label="Vorherige Seite"
+            aria-label="Previous page"
             data-test="bucket-pager-prev"
             {% if page > 1 %}
             hx-get="{{ url_for('findings.bucket_fragment', group_id=group_id, server_id=server_id, page=page - 1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
@@ -126,7 +126,7 @@
             hx-disabled-elt="this"
             {% else %}disabled{% endif %}>‹</button>
     <button type="button"
-            aria-label="Nächste Seite"
+            aria-label="Next page"
             data-test="bucket-pager-next"
             {% if page < _total_pages %}
             hx-get="{{ url_for('findings.bucket_fragment', group_id=group_id, server_id=server_id, page=page + 1) }}{% if filter_qs %}&{{ filter_qs }}{% endif %}"
@@ -137,5 +137,5 @@
   </span>
 </div>
 {% else %}
-<p class="sd-empty" data-test="bucket-findings-empty">Keine Findings in diesem Bucket.</p>
+<p class="sd-empty" data-test="bucket-findings-empty">No findings in this bucket.</p>
 {% endif %}

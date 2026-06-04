@@ -63,8 +63,8 @@ def _render_body(app: Flask, finding: SimpleNamespace) -> str:
 
 def test_reason_and_ack_button_for_open(app: Flask) -> None:
     html = _render_body(app, _finding(status=FindingStatus.OPEN))
-    assert "KI-Bewertung" in html
-    assert "Abhaken" in html
+    assert "AI assessment" in html
+    assert "Acknowledge" in html
     assert "Re-open" not in html
 
 
@@ -83,7 +83,7 @@ def test_action_button_has_data_test(app: Flask) -> None:
 def test_pending_fallback_when_reason_none(app: Flask) -> None:
     html = _render_body(app, _finding(risk_band_reason=None))
     assert "sd-ai-text--pending" in html
-    assert "Pass 2" in html
+    assert "pass 2" in html
     # Body ist trotzdem aufklappbar (Action-Button rendert).
     assert "sd-finding__action-btn" in html
 
@@ -93,7 +93,7 @@ def test_pending_fallback_when_reason_none(app: Flask) -> None:
 
 def test_description_rendered_when_present(app: Flask) -> None:
     html = _render_body(app, _finding(description="A clear description text."))
-    assert "Beschreibung" in html
+    assert "Description" in html
     assert "A clear description text." in html
     assert "sd-finding__desc" in html
 
@@ -108,7 +108,7 @@ def test_no_description_block_when_absent(app: Flask) -> None:
 
 def test_primary_url_rendered_when_present(app: Flask) -> None:
     html = _render_body(app, _finding(primary_url="https://avd.aquasec.com/x"))
-    assert "Quelle" in html
+    assert "Source" in html
     assert 'href="https://avd.aquasec.com/x"' in html
     assert 'rel="noopener noreferrer"' in html
     assert 'target="_blank"' in html
@@ -156,7 +156,7 @@ def test_no_refs_block_when_empty(app: Flask) -> None:
 def test_notes_thread_included(app: Flask) -> None:
     html = _render_body(app, _finding())
     assert "notes-thread-4711" in html
-    assert "Notizen" in html
+    assert "Notes" in html
 
 
 # --- IDs / structure -------------------------------------------------------

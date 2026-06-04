@@ -127,7 +127,7 @@ def test_seven_column_header_without_status(app: Flask) -> None:
     html = _render(app, findings=[_make_finding()])
 
     assert 'class="bucket-findings-head"' in html, html[:600]
-    for col in ("CVE / Titel", "Paket", "EPSS", "CVSS", "Severity", "Erstmals"):
+    for col in ("CVE / Title", "Package", "EPSS", "CVSS", "Severity", "First seen"):
         assert col in html, f"Spaltenkopf '{col}' fehlt: {html[:800]}"
     # Status-Spalte ist gedroppt (Design-Adoption analog Server-Detail-Triage).
     assert ">Status<" not in html, f"Status-Spaltenkopf darf NICHT auftauchen: {html}"
@@ -211,7 +211,7 @@ def test_inline_ai_reason_rendered_when_set(app: Flask) -> None:
     html = _render(app, findings=[_make_finding(risk_band_reason=reason)])
     assert "sd-finding__body" in html, html
     assert "sd-ai-eyebrow" in html, html
-    assert "KI-Bewertung" in html, html
+    assert "AI assessment" in html, html
     assert "sd-ai-text" in html, html
     assert reason in html, html
 
@@ -221,7 +221,7 @@ def test_inline_ai_reason_pending_fallback_when_none(app: Flask) -> None:
     html = _render(app, findings=[_make_finding(risk_band_reason=None)])
     assert "sd-finding__body" in html, html
     assert "sd-ai-text--pending" in html, html
-    assert "Pass 2" in html, html
+    assert "pass 2" in html, html
 
 
 def test_inline_ai_reason_pending_fallback_when_empty(app: Flask) -> None:

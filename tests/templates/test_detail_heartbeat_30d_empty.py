@@ -129,9 +129,9 @@ def test_eyebrow_says_30_tage() -> None:
     """detail.html-Source enthaelt '30 Tage' als Lebenszeichen-Eyebrow."""
     source = _load_detail_source()
 
-    assert "30 Tage" in source, (
-        "'30 Tage' fehlt in detail.html. "
-        "Lebenszeichen-Eyebrow soll '30 Tage' zeigen (Phase E, ADR-0038 §5)."
+    assert "30 days" in source, (
+        "'30 days' fehlt in detail.html. "
+        "Lebenszeichen-Eyebrow soll '30 days' zeigen (Phase E, ADR-0038 §5)."
     )
 
 
@@ -183,10 +183,8 @@ def test_empty_state_when_snapshot_at_is_none(app: Flask) -> None:
     """
     html = _render_heartbeat_section(app, snapshot_at=None)
 
-    assert "— noch nie gescannt" in html, (
-        f"'— noch nie gescannt' fehlt im Empty-State-Output. "
-        f"Track A hat den Text auf Deutsch umgestellt (von '— never scanned'). "
-        f"HTML: {html!r}"
+    assert "— never scanned" in html, (
+        f"'— never scanned' fehlt im Empty-State-Output. HTML: {html!r}"
     )
 
     assert 'data-test="heartbeat-empty"' in html, (

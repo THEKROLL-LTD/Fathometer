@@ -21,7 +21,7 @@
     <button type="button"
             class="sd-flyout__close"
             @click="open = null"
-            aria-label="Schließen">×</button>
+            aria-label="Close">×</button>
   </div>
   <div class="sd-flyout__body">
     {% if _services %}
@@ -31,7 +31,7 @@
         {% endfor %}
       </div>
     {% else %}
-      <p class="sd-flyout__empty" data-test="pill-services-empty">— Keine aktiven systemd-Units</p>
+      <p class="sd-flyout__empty" data-test="pill-services-empty">— No active systemd units</p>
     {% endif %}
   </div>
 </div>

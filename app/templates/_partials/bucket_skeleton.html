@@ -8,12 +8,12 @@
    (hx-swap="innerHTML"). Reines Markup, keine Variablen. #}
 <div class="bucket-findings-head" aria-hidden="true">
   <span></span>
-  <span>CVE / Titel</span>
-  <span>Paket</span>
+  <span>CVE / Title</span>
+  <span>Package</span>
   <span class="bucket-findings-head__right">EPSS</span>
   <span class="bucket-findings-head__right">CVSS</span>
   <span class="bucket-findings-head__right">Severity</span>
-  <span class="bucket-findings-head__right">Erstmals</span>
+  <span class="bucket-findings-head__right">First seen</span>
 </div>
 <div class="bucket-skel-rows sd-skel-frame" data-test="bucket-findings-skeleton">
   {% for _ in range(5) %}
@@ -31,7 +31,7 @@
 <div class="bucket-card__footer">
   <span>— · —</span>
   <span class="bucket-card__pager">
-    <button type="button" disabled aria-label="Vorherige Seite">‹</button>
-    <button type="button" disabled aria-label="Nächste Seite">›</button>
+    <button type="button" disabled aria-label="Previous page">‹</button>
+    <button type="button" disabled aria-label="Next page">›</button>
   </span>
 </div>

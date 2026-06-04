@@ -114,7 +114,7 @@ def test_inline_reason_rendered_when_risk_band_reason_set(
     reason_text = "vendor (redhat) severity HIGH"
     finding = _make_finding(risk_band_reason=reason_text)
     html = _render_findings_table(app, monkeypatch, [finding])
-    assert "KI-Bewertung" in html
+    assert "AI assessment" in html
     assert reason_text in html
     assert "sd-finding__body" in html
     assert "sd-ai-text" in html
@@ -128,7 +128,7 @@ def test_body_renders_pending_fallback_when_reason_none(
     finding = _make_finding(risk_band_reason=None)
     html = _render_findings_table(app, monkeypatch, [finding])
     assert "sd-finding__body" in html
-    assert "Pass 2" in html
+    assert "pass 2" in html
     assert "sd-ai-text--pending" in html
 
 

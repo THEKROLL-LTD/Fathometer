@@ -50,9 +50,9 @@
     </div>
     {% if is_filtered and total_buckets > 0 %}
       <div class="findings__counter" data-test="findings-bucket-counter">
-        <b>{{ total_buckets }}</b> {% if total_buckets == 1 %}Gruppe{% else %}Gruppen{% endif %}
+        <b>{{ total_buckets }}</b> {% if total_buckets == 1 %}group{% else %}groups{% endif %}
         <span class="findings__counter-sep" aria-hidden="true">·</span>
-        <b>{{ total_findings_in_buckets }}</b> {% if total_findings_in_buckets == 1 %}Finding{% else %}Findings{% endif %}
+        <b>{{ total_findings_in_buckets }}</b> {% if total_findings_in_buckets == 1 %}finding{% else %}findings{% endif %}
       </div>
     {% endif %}
   </header>
@@ -68,39 +68,39 @@
         x-data="{ kev: {{ 'true' if filt.kev_only else 'false' }}, stale: {{ 'true' if filt.stale_only else 'false' }} }"
         data-test="findings-filter-form">
     <input class="ff-input ff-q" type="search" name="q" value="{{ filt.q or '' }}"
-           placeholder="suche CVE, paket, titel, server…"
+           placeholder="search CVE, package, title, server…"
            maxlength="128" autocomplete="off"
-           aria-label="Suche" data-test="filter-q">
+           aria-label="Search" data-test="filter-q">
 
     <select class="ff-select" name="tag" aria-label="Tag" data-test="filter-tag">
-      <option value="">tag · alle</option>
+      <option value="">tag · all</option>
       {% for t in available_tags %}
         <option value="{{ t.name }}" {% if t.name in filt.tags %}selected{% endif %}>tag · {{ t.name }}</option>
       {% endfor %}
     </select>
 
     <select class="ff-select" name="risk_band" aria-label="Risk-Band" data-test="filter-risk-band">
-      <option value="">risk-band · alle</option>
+      <option value="">risk-band · all</option>
       {% for b in ['escalate','act','mitigate','pending','unknown','monitor','noise'] %}
         <option value="{{ b }}" {% if filt.risk_band == b %}selected{% endif %}>risk-band · {{ b }}</option>
       {% endfor %}
     </select>
 
     <select class="ff-select" name="application_group" aria-label="Application-Group" data-test="filter-application-group">
-      <option value="">app-group · alle</option>
+      <option value="">app-group · all</option>
       {% for g in available_application_groups %}
         <option value="{{ g.id }}" {% if filt.application_group_id == g.id %}selected{% endif %}>app-group · {{ g.label }}</option>
       {% endfor %}
     </select>
 
     <select class="ff-select" name="action_required" aria-label="Action required" data-test="filter-action-required">
-      <option value="">action · alle</option>
+      <option value="">action · all</option>
       <option value="yes" {% if filt.action_required == 'yes' %}selected{% endif %}>action · required</option>
       <option value="no"  {% if filt.action_required == 'no'  %}selected{% endif %}>action · none</option>
     </select>
 
     <select class="ff-select" name="severity" aria-label="Severity min" data-test="filter-severity">
-      <option value="">severity · alle</option>
+      <option value="">severity · all</option>
       {% for sev in ['critical','high','medium','low'] %}
         <option value="{{ sev }}" {% if filt.severity and filt.severity.value == sev %}selected{% endif %}>severity ≥ {{ sev }}</option>
       {% endfor %}
@@ -128,7 +128,7 @@
       <span>filter</span>
       <span aria-hidden="true">→</span>
     </button>
-    <a href="{{ url_for('findings.index') }}" class="ff-reset" data-test="findings-reset">zurücksetzen</a>
+    <a href="{{ url_for('findings.index') }}" class="ff-reset" data-test="findings-reset">reset</a>
 
     {# CSV-Export: filter-scoped, alle Seiten (ADR-0020 unveraendert). Bleibt in
        der Filter-Bar (immer erreichbar), nicht in der nur-bei-Selektion
@@ -139,50 +139,50 @@
            stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
         <path d="M12 3v14" /><path d="M6 11l6 6 6-6" /><path d="M4 21h16" />
       </svg>
-      <span>csv exportieren</span>
+      <span>export csv</span>
     </a>
   </form>
 
   {# Aktive-Filter-Chips: nur wenn ein Filter aktiv ist. Jeder Chip linkt mit ×
      auf den Filter ohne diesen Key. #}
   {% if filt.is_active %}
-    <div class="findings__filter-chips" role="region" aria-label="Aktive Filter" data-test="findings-filter-chips">
+    <div class="findings__filter-chips" role="region" aria-label="Active filters" data-test="findings-filter-chips">
       {% if filt.q %}
         <span class="ff-chip"><b>q</b><span>{{ filt.q }}</span>
-          <a class="ff-chip__x" href="{{ chip_url(['q']) }}" aria-label="Filter q entfernen">×</a></span>
+          <a class="ff-chip__x" href="{{ chip_url(['q']) }}" aria-label="Remove filter q">×</a></span>
       {% endif %}
       {% if filt.tags %}
         <span class="ff-chip"><b>tag</b><span>{{ filt.tags | join(', ') }}</span>
-          <a class="ff-chip__x" href="{{ chip_url(['tag','tags']) }}" aria-label="Filter tag entfernen">×</a></span>
+          <a class="ff-chip__x" href="{{ chip_url(['tag','tags']) }}" aria-label="Remove filter tag">×</a></span>
       {% endif %}
       {% if filt.risk_band %}
         <span class="ff-chip"><b>risk-band</b><span>{{ filt.risk_band }}</span>
-          <a class="ff-chip__x" href="{{ chip_url(['risk_band']) }}" aria-label="Filter risk-band entfernen">×</a></span>
+          <a class="ff-chip__x" href="{{ chip_url(['risk_band']) }}" aria-label="Remove filter risk-band">×</a></span>
       {% endif %}
       {% if filt.application_group_id %}
         {%- set _ag_label = (available_application_groups | selectattr('id', 'equalto', filt.application_group_id) | map(attribute='label') | first) or filt.application_group_id -%}
         <span class="ff-chip"><b>app-group</b><span>{{ _ag_label }}</span>
-          <a class="ff-chip__x" href="{{ chip_url(['application_group']) }}" aria-label="Filter app-group entfernen">×</a></span>
+          <a class="ff-chip__x" href="{{ chip_url(['application_group']) }}" aria-label="Remove filter app-group">×</a></span>
       {% endif %}
       {% if filt.action_required %}
         <span class="ff-chip"><b>action</b><span>{{ filt.action_required }}</span>
-          <a class="ff-chip__x" href="{{ chip_url(['action_required']) }}" aria-label="Filter action entfernen">×</a></span>
+          <a class="ff-chip__x" href="{{ chip_url(['action_required']) }}" aria-label="Remove filter action">×</a></span>
       {% endif %}
       {% if filt.severity %}
         <span class="ff-chip"><b>severity</b><span>{{ filt.severity.value }}</span>
-          <a class="ff-chip__x" href="{{ chip_url(['severity']) }}" aria-label="Filter severity entfernen">×</a></span>
+          <a class="ff-chip__x" href="{{ chip_url(['severity']) }}" aria-label="Remove filter severity">×</a></span>
       {% endif %}
       {% if filt.status != 'open' %}
         <span class="ff-chip"><b>status</b><span>{{ filt.status }}</span>
-          <a class="ff-chip__x" href="{{ chip_url(['status']) }}" aria-label="Filter status entfernen">×</a></span>
+          <a class="ff-chip__x" href="{{ chip_url(['status']) }}" aria-label="Remove filter status">×</a></span>
       {% endif %}
       {% if filt.kev_only %}
         <span class="ff-chip"><b>kev</b><span>on</span>
-          <a class="ff-chip__x" href="{{ chip_url(['kev_only']) }}" aria-label="Filter kev entfernen">×</a></span>
+          <a class="ff-chip__x" href="{{ chip_url(['kev_only']) }}" aria-label="Remove filter kev">×</a></span>
       {% endif %}
       {% if filt.stale_only %}
         <span class="ff-chip"><b>stale</b><span>on</span>
-          <a class="ff-chip__x" href="{{ chip_url(['stale_only']) }}" aria-label="Filter stale entfernen">×</a></span>
+          <a class="ff-chip__x" href="{{ chip_url(['stale_only']) }}" aria-label="Remove filter stale">×</a></span>
       {% endif %}
     </div>
   {% endif %}
@@ -192,16 +192,16 @@
        `>`-Prefix via CSS, zentriert. #}
     <div class="findings__empty" role="status" data-test="findings-empty-state">
       <p class="findings__empty-line">
-        <b>{{ total_findings }}</b> findings im fleet, <b>{{ visible_servers }}</b> servers.
+        <b>{{ total_findings }}</b> findings in the fleet, <b>{{ visible_servers }}</b> servers.
       </p>
       <p class="findings__empty-line">
-        setze einen filter oder suche nach CVE, paket oder server.
+        set a filter or search for CVE, package or server.
       </p>
     </div>
   {% elif total_buckets == 0 %}
     <div class="findings__empty" role="status" data-test="findings-no-match">
-      <p class="findings__empty-line">Kein Treffer für diesen Filter.</p>
-      <p class="findings__empty-line">Filter lockern oder zurücksetzen.</p>
+      <p class="findings__empty-line">No match for this filter.</p>
+      <p class="findings__empty-line">Loosen or reset the filter.</p>
     </div>
   {% else %}
     {# Bucket-Liste mit Alpine-State fuer Bucket+Finding-Selektion. Bulk-Toolbar,
@@ -214,20 +214,20 @@
            x-show="total > 0"
            x-cloak
            role="region"
-           aria-label="Bulk-Aktionen"
+           aria-label="Bulk actions"
            data-test="bucket-bulk-bar">
-        <span class="ff-bulk-count"><b x-text="total"></b> ausgewählt</span>
+        <span class="ff-bulk-count"><b x-text="total"></b> selected</span>
         <button type="button"
                 class="ff-bulk-ack"
                 @click="openModal()"
                 data-test="bucket-bulk-toolbar">
-          <span>Auswahl ack</span>
+          <span>Acknowledge selection</span>
           <span aria-hidden="true">→</span>
         </button>
         <button type="button"
                 class="ff-bulk-link ff-bulk-link--right"
                 @click="clearAll()"
-                data-test="bucket-bulk-clear">Auswahl aufheben</button>
+                data-test="bucket-bulk-clear">Clear selection</button>
       </div>
 
       <div class="findings__list">
