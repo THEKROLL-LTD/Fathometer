@@ -25,6 +25,16 @@
  *   - Globaler `/`-Shortcut respektiert `INPUT`/`TEXTAREA`/contenteditable,
  *     damit Tippen im Form-Feld die Sidebar-Suche nicht ueberraschend
  *     uebernimmt.
+ *
+ * Block AC (ADR-0046): Persistenter Group-Aufklapp-Zustand.
+ *   - Delegierter `toggle`-Listener in der Capture-Phase (das `toggle`-Event
+ *     bubbelt NICHT, deshalb Capture statt Bubble). Bei jedem User-Toggle einer
+ *     Sidebar-Gruppe wird der Aufklapp-Zustand frisch aus dem DOM eingesammelt
+ *     und das Cookie `sidebar_open_groups` komplett neu geschrieben — kein
+ *     inkrementelles Add/Remove, damit Cookie und DOM nie divergieren. Der
+ *     Server liest das Cookie in `build_sidebar_context()` und rendert `open`
+ *     direkt; nach HTMX-Swaps kommt der Zustand also korrekt vom Server, ein
+ *     Re-Apply im Client ist nicht noetig.
  */
 
 (function () {
@@ -206,6 +216,58 @@
     root.addEventListener("focusout", delegatedOut, true);
     root.dataset.heartbeatBound = "1";
   }
+
+  // ---- Group-Open-State -> Cookie (Block AC, ADR-0046) --------------------
+
+  var OPEN_GROUPS_COOKIE = "sidebar_open_groups";
+  var OPEN_GROUPS_MAX_AGE = 31536000; // 1 Jahr in Sekunden.
+
+  // Sammelt die IDs aller aktuell offenen Sidebar-Gruppen frisch aus dem DOM.
+  function collectOpenGroupIds() {
+    var nodes = document.querySelectorAll("#server-list details.hostgroup[open]");
+    var ids = [];
+    nodes.forEach(function (el) {
+      var m = /^hostgroup-(\d+)$/.exec(el.id || "");
+      if (m) ids.push(m[1]);
+    });
+    return ids;
+  }
+
+  // Schreibt das Cookie komplett neu aus dem DOM-Ist-Zustand (kein
+  // inkrementelles Add/Remove). `Secure` nur ueber HTTPS — analog zur
+  // Session-Cookie-Config (in Produktion hinter dem Reverse-Proxy).
+  function writeOpenGroupsCookie() {
+    var value = collectOpenGroupIds().join(",");
+    var secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie =
+      OPEN_GROUPS_COOKIE +
+      "=" +
+      value +
+      "; Max-Age=" +
+      OPEN_GROUPS_MAX_AGE +
+      "; Path=/; SameSite=Lax" +
+      secure;
+  }
+
+  // `toggle` bubbelt nicht -> Capture-Phase. Reagiert nur auf echte
+  // Sidebar-Gruppen innerhalb #server-list (Klassen-/Container-Filter).
+  function onDetailsToggle(e) {
+    var el = e.target;
+    if (!el || typeof el.matches !== "function") return;
+    if (!el.matches("details.hostgroup")) return;
+    if (!el.closest || !el.closest("#server-list")) return;
+
+    // aria-expanded auf dem zugehoerigen <summary> nachziehen (Drive-by-Fix
+    // gegen das frueher harte aria-expanded="false").
+    var summary = el.querySelector(":scope > summary.hostgroup__header");
+    if (summary) summary.setAttribute("aria-expanded", el.open ? "true" : "false");
+
+    writeOpenGroupsCookie();
+  }
+
+  // Global registriert (Capture). Ueberlebt HTMX-Swaps der Server-Liste, weil
+  // der Listener am document haengt, nicht an ausgetauschten Knoten.
+  document.addEventListener("toggle", onDetailsToggle, true);
 
   function init() {
     bindHeartbeatTooltips();
