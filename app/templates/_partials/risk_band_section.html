@@ -25,14 +25,26 @@
       <span class="sd-band__chev" aria-hidden="true">›</span>
       <span class="sd-badge sd-badge--{{ section.band }}">{{ section.band | upper }}</span>
       <span aria-hidden="true"></span>
-      {% if _band_ackable %}
-        <label class="sd-band__ackall"
-               data-test="band-ack-all-{{ section.band }}"
-               @click.prevent.stop="openModal()">
-          <input type="checkbox" tabindex="-1" aria-hidden="true">
-          <span>Acknowledge all</span>
-        </label>
-      {% endif %}
+      {# Actions-Slot immer rendern (leer fuer pending) — haelt das
+         5-Spalten-Grid (auto auto 1fr auto auto) fuer alle Baender
+         deckungsgleich, damit Badge-Einrueckung und Count-Ausrichtung
+         bandunabhaengig sind (ADR-0044 §(3), Design ServerDetail.jsx). #}
+      <span class="sd-band__actions">
+        {% if _band_ackable %}
+          <button type="button"
+                  class="sd-band-ack"
+                  data-test="band-ack-all-{{ section.band }}"
+                  @click.prevent.stop="openModal()">
+            <span class="sd-band-ack__check" aria-hidden="true">
+              <svg width="9" height="9" viewBox="0 0 12 12" fill="none"
+                   stroke="currentColor" stroke-width="1.6">
+                <path d="M2.5 6.5 5 9l4.5-5.5" stroke-linecap="square" />
+              </svg>
+            </span>
+            Acknowledge all
+          </button>
+        {% endif %}
+      </span>
       <span class="sd-band__count"><b>{{ section.total_count }}</b>findings</span>
     </summary>
     <div class="sd-band__body"

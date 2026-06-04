@@ -814,7 +814,7 @@
 .sd-band__summary {
   list-style: none;
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
+  grid-template-columns: auto auto 1fr auto auto;
   align-items: center;
   gap: 14px;
   padding: 14px 0;
@@ -842,39 +842,62 @@
 }
 .sd-band__count b { color: var(--text-primary); font-weight: 700; margin-right: 4px; }
 
-/* Per-Band "Acknowledge all"-Hover-Control (ADR-0044 §(3)).
-   visibility statt display:none → kein Layout-Sprung im Summary-Grid.
-   Mono-Uppercase-Stil analog .sd-band__count, default grau. */
-.sd-band__ackall {
-  visibility: hidden;
+/* Per-Band "Acknowledge all"-Hover-Control (ADR-0044 §(3), Design
+   ServerDetail.jsx). Der Actions-Slot ist die vierte Grid-Spalte und
+   immer praesent (leer fuer pending) — so bleibt die Count-Spalte
+   bandunabhaengig rechtsbuendig. Der Button ist default unsichtbar
+   (opacity 0 + leichter Versatz) und wird nur bei Hover/Fokus ueber der
+   Band-Zeile eingeblendet; grau → cyan nur bei direktem Hover ueber dem
+   Control selbst. Die Checkbox ist rein visuell (SVG im Box-Span), kein
+   echtes Input. */
+.sd-band__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.sd-band-ack {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  background: none;
+  border: 0;
+  padding: 4px 2px;
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   cursor: pointer;
-  user-select: none;
   white-space: nowrap;
-  justify-self: end;
-}
-.sd-band__ackall input {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 13px; height: 13px;
-  margin: 0;
-  border: 1px solid var(--border-visible);
-  background: transparent;
-  pointer-events: none;
+  opacity: 0;
+  transform: translateX(6px);
+  transition: opacity var(--dur-hover) var(--ease-materialize),
+              transform var(--dur-hover) var(--ease-materialize),
+              color var(--dur-hover) var(--ease-drift);
 }
 /* Reveal bei Hover ueber der Band-Zeile bzw. Keyboard-Fokus im Summary. */
-.sd-band__summary:hover .sd-band__ackall,
-.sd-band__summary:focus-within .sd-band__ackall { visibility: visible; }
+.sd-band__summary:hover .sd-band-ack,
+.sd-band__summary:focus-within .sd-band-ack {
+  opacity: 1;
+  transform: translateX(0);
+}
 /* grau → cyan nur bei direktem Hover ueber dem Control. */
-.sd-band__ackall:hover span { color: var(--accent); }
-.sd-band__ackall:hover input { border-color: var(--accent); }
+.sd-band-ack:hover { color: var(--accent); }
+.sd-band-ack:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  opacity: 1;
+  transform: none;
+}
+.sd-band-ack__check {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+}
 
 .sd-band__body { animation: sd-flyout-in 260ms var(--ease-materialize); }
 
