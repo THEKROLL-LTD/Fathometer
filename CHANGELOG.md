@@ -4,6 +4,59 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — ADR-0047 (Block AD): Settings-Redesign (horizontale Tab-Nav + `s-*`-Schicht)
+
+Zielversion **v0.19.0**. Reines Restyling — keine Routen-/Schema-/Render-Helper-
+Änderung, keine Migration, kein neuer Endpoint. Phasen 0→E mit je einem Commit
+(Phase C in C1/C2 geteilt). `app/views/_settings_shell.py`, `settings.py` und
+`llm_settings.py` unangetastet.
+
+### Changed
+
+- **Settings-Sekundär-Navigation: vertikale 224px-Nav → horizontale Sticky-Tab-
+  Leiste** (`.settings-tabs`, ADR-0047). Sieben Tabs in Mockup-Reihenfolge
+  (Servers, Tags, Groups, LLM Provider, LLM Reviewer, Master-Key + Badge „new",
+  About). HTMX-Vertrag 1:1 erhalten (`hx-get`/`hx-target="#settings-content"`/
+  `hx-swap="innerHTML"`/`hx-push-url`/`hx-headers` + `href`-Fallback); aktiver
+  Tab via `settings-tabs__item--active` + `aria-selected`.
+- **Alle sieben Settings-Subseiten auf die `s-*`-Komponentenschicht** portiert
+  (`frontend/src/css/components/settings.css`, 1:1-Port aus `docs/design/settings.css`,
+  Token-only). DaisyUI/Tailwind raus aus den Settings-Surfaces:
+  - `servers.html` → `s-table`/`s-servers__*`/`s-pill`/`s-overflow` (Aktionsmenü
+    Alpine); Revoke/Retire-Forms + CSRF + Confirm unverändert.
+  - `tags.html` → `s-table`/`s-tags__*`/`s-empty`; Color-Picker als Alpine-Palette-
+    Popover + nativer Picker; Rename/Color/Delete-Forms unverändert.
+  - `groups.html` → `s-table`/`s-groups__*` inkl. Reorder-Pfeile; Move/Rename/
+    Delete-Forms unverändert.
+  - `llm_provider.html` → `s-card`/`s-fields-grid`/`s-actions`/`s-feeds`;
+    `llmProviderForm`-Alpine-API unverändert, Confirm-Modal als token-Overlay.
+  - `llm_reviewer.html` → `s-statusbar`/`s-slider-row`/`s-kpis`/`s-twoup`/`s-kv`/
+    `s-subtabs`/`s-table`; drei Master-Key-Modals als token-Overlays.
+  - `llm_debug_log.html` → `s-log`/`s-subtabs`, expandierbare Request/Response/
+    Reasoning-Einträge.
+  - `master_key.html` → `s-key-status`/`s-warning`/`s-key-reveal`; Rotate-Confirm
+    als nativer `confirm()`-Dialog.
+  - `about.html` → `s-about-grid`.
+- **Profile-Dropdown** markiert „Settings" als aktiv (`profile-menu__item--active`)
+  wenn der Pfad unter `/settings` liegt; der entsprechende CSS-Block wurde aus
+  dem Mockup-CSS nach `profile-menu.css` (Topbar-Scope) verschoben.
+
+### Removed
+
+- **`frontend/src/css/components/settings-manage.css`** (ADR-0040-`sd-manage-*`-
+  Schicht) gelöscht — durch `s-table`/`s-tags__*`/`s-groups__*` ersetzt;
+  `@import` aus `app.css` entfernt.
+- `tests/templates/test_settings_legacy_still_renders.py` (Dual-Stack-DaisyUI-
+  Smoke) gelöscht — durch `test_settings_nav.py` + `test_settings_subpages_smoke.py`
+  ersetzt.
+
+### Notes
+
+- **Mockup-Features ohne Backend weggelassen** (kein Halb-Bau): Debug-Log-Filter/
+  Level/Pause/Copy/Live-Stream (TD-017), Tag-Usage-Zählung in der Tags-Ansicht
+  (TD-016, View-Vertrag liefert keine Zählung). Eyebrow-Nummerierung „01 / 07"
+  bewusst weggelassen (User-Entscheidung).
+
 ## [Unreleased] — ADR-0046 (Block AC): Persistenter Sidebar-Group-Aufklapp-Zustand
 
 Zielversion **v0.18.0**. Kein Schema, kein neuer Endpoint, keine Migration,

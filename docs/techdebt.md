@@ -696,6 +696,49 @@ Querverweis: Block X Phase B6, ADR-0038 §(2).
 
 ---
 
+## TD-016 — Tag-Usage-Zaehlung fehlt in der Settings-Tags-Ansicht
+
+**Was:** `settings/tags.html` (Block AD) hat im Mockup eine „Usage"-Spalte
+(„N servers" pro Tag). Der View-Vertrag `settings.tags_list` liefert aber nur
+`tags` (id/name/color) ohne Member-Zaehlung — die Spalte zeigt daher einen
+Platzhalter („—").
+
+**Warum:** Block AD ist reines Restyling — die View (`app/views/settings.py`)
+durfte nicht angefasst werden. Eine Zaehlung haette eine View-Aenderung
+(JOIN/Aggregat ueber `server_tags`) erfordert.
+
+**Loesung:** In `tags_list` ein LEFT-JOIN-Aggregat (analog `groups_list.member_count`)
+ergaenzen und in `settings/tags.html` den Platzhalter durch `tag.usage_count`
+ersetzen.
+
+**Aufwand:** ~30 Min. (Query + Template-Zeile + ein Pure-Unit-Test).
+
+**Wann:** Folge-PR; kein Blocker. Querverweis: Block AD / ADR-0047.
+
+---
+
+## TD-017 — LLM-Debug-Log: Filter/Level/Pause/Copy/Live-Stream nicht gebaut
+
+**Was:** Das Settings-Mockup (`docs/design/settings.css` / `settings-panels-2.jsx`)
+zeigt im Debug-Log eine Filter-Zeile (`s-log-filters`: Text-Filter + Level-Select
++ Pause + Copy) und ein streamendes Terminal. `settings/llm_debug_log.html`
+(Block AD) rendert stattdessen die real existierenden Eintraege (expandierbar)
+ohne Filter/Level/Pause/Copy/Live-Stream.
+
+**Warum:** Es gibt heute keinen Backend-Filter und keinen Stream-Endpoint;
+Block AD baut keine neue Funktionalitaet (ADR-0047 §Out of Scope). Die
+Mockup-Buttons ohne Backend wurden bewusst weggelassen statt halb gebaut.
+
+**Loesung:** Falls gewuenscht — Server-seitige Level-/Text-Filter-Query-Params
++ optional ein SSE/Polling-Stream-Endpoint. Client-seitiger Copy-Button waere
+trivial nachruestbar, wenn der Operator ihn anfordert.
+
+**Aufwand:** Filter ~1 h, Live-Stream ~halber Tag (eigener Block).
+
+**Wann:** Eigener Block bei Bedarf. Querverweis: Block AD / ADR-0047 §Out of Scope.
+
+---
+
 ## Konventionen fuer neue Eintraege
 
 - ID: `TD-NNN`, fortlaufend.
