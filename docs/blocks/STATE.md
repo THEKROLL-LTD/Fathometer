@@ -4,6 +4,8 @@ Single source of truth für den Implementierungs-Fortschritt. Wird von der Haupt
 
 ## Status
 
+**Block AC geplant 2026-06-04 — Sidebar Group State (ADR-0046).** Aufgeklappte Sidebar-Gruppen bleiben persistent offen (Polling-Swap, Reload, Browser-Sessions): Cookie `sidebar_open_groups` (JS schreibt aus DOM-Ist-Zustand), Server liest in `build_sidebar_context()` und rendert `open` direkt — kein Schema, kein Endpoint, kein localStorage. Branch `feat/block-ac-sidebar-group-state`, Zielversion v0.18.0, drei Phasen (A Server-Read+Render+Tests · B Client-Write · C Doku). Spec: `docs/blocks/AC-sidebar-group-state.md`, Prompt: `docs/blocks/AC-prompt.md`. **Abhängigkeit:** Block AB fasst `sidebar.js` parallel an — Merge-Reihenfolge beachten (Spec §Konflikt-Hinweis).
+
 **Block AB abgeschlossen 2026-06-04 — English UI Migration (ADR-0045).** Branch `feat/block-ab-english-ui`, Zielversion v0.17.0, **kein Markup-/Logik-/CSS-Umbau, keine Migration** — reiner String-Touch in sechs Phasen mit je einem Commit. Default-`pytest` 2208 passed / 201 skipped / 658 deselected (2207 Baseline + neuer Sprach-Sweep-Test), `ruff`/`ruff format`/`mypy app/` grün. Umsetzung Hauptsession (A/B/F) + parallele Implementer-Agenten (C/D/E, disjunkte Dateien). User reviewt den PR; Operator-Browser-Smoke steht beim User an.
 
 - **Phase A — `292a875`** — Querschnitt: `relative_time`-Filter englisch (`5m ago`/`just now`/`never`), `app/forms.py` Validator-Messages + Feld-Labels, `_macros.html` bulk_ack_modal, `_empty/no_findings|no_audit`.

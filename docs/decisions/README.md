@@ -51,6 +51,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0043](0043-llm-risk-band-exploitability-model.md) | Risk-Band als LLM-Angreifbarkeits-Urteil (3-Schichten-Exposure × Wirkungs-Klasse W1–W6), Scores als Gewichte, Fix-Verfügbarkeit aus dem Band entkoppelt (`action_type` Backend-abgeleitet) — amendet ADR-0023 §Pass-2 | Akzeptiert |
 | [0044](0044-server-scoped-bulk-ack-per-band.md) | Server-scoped Bulk-Acknowledge pro Risk-Band: `server_scope`-Flavor statt ID-Transport (50er-Limit weg), Per-Band-Hover-Control statt Noise-Link, `pending` server-seitig verboten — löst ADR-0022 §Bulk-Ack-Noise und ADR-0039 §2 `fragments/noise` ab | Akzeptiert |
 | [0045](0045-english-only-ui.md) | English-only UI: gesamte UI englisch in einem dedizierten Block (AB), Sprach-Sweep-Test statt Soft-Policy, keine i18n-Infrastruktur — löst ADR-0033 §8 Phase-2-Strategie ab; Doc-Sprache bleibt deutsch | Akzeptiert |
+| [0046](0046-sidebar-group-state-cookie.md) | Sidebar-Group-Aufklapp-Zustand persistent via Cookie `sidebar_open_groups` + Server-Render des `open`-Attributs (Block AC) — Default collapsed aus ADR-0034 bleibt Fallback ohne Cookie | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 
