@@ -51,7 +51,7 @@ Tendency-Pfeil steht im Header und muss im Initial-Render da sein. Statt der vol
 | `GET /<id>/fragments/heartbeat` | `hx-trigger="load"` | Heartbeat-Bar-Partial |
 | `GET /<id>/fragments/host-snapshot` | `hx-trigger="load"` | Listeners/Services/Processes-Panels |
 | `GET /<id>/fragments/trend` | `hx-trigger="load"` | Trend-Chart + Tendency (volle Aggregation) |
-| `GET /<id>/fragments/noise` | Modal-Open-Event | Noise-Count + Preview-Liste (max 50) |
+| `GET /<id>/fragments/noise` | Modal-Open-Event | Noise-Count + Preview-Liste (max 50) — **entfallen per ADR-0044** |
 | `GET /<id>/triage/<band>?page=1` | Akkordeon-Expand | Paginierte Findings für ein Risk-Band |
 
 Die `load`-Trigger feuern sofort nach Initial-Paint — der Browser rendert die Seite instant, die Sektionen füllen sich parallel nach. Triage-Findings laden erst bei Klick.

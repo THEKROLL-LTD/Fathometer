@@ -1004,58 +1004,6 @@ def trend_fragment(server_id: int) -> str:
     )
 
 
-@server_detail_bp.get("/<int:server_id>/fragments/noise")
-@login_required
-def noise_fragment(server_id: int) -> str:
-    """HTMX-Fragment: Bulk-Ack-Noise-Toolbar + Modal.
-
-    Liefert den Toolbar-Slot in `_findings_section.html`. Wenn kein Noise
-    existiert, ist das Fragment leer (Slot bleibt im DOM, aber unsichtbar).
-    Pragmatischer Phase-B-Pfad: die Bulk-Ack-Noise-Alpine-Komponente lebt
-    erst nach dem Swap im DOM — Re-Init via `htmx:afterSwap` ist
-    Folge-Schritt.
-
-    Block Y Phase D Hinweis: ``select(Finding)`` ist hier bewusst beibehalten
-    — das Bulk-Ack-Noise-Modal rendert volle Finding-Karten mit Severity-
-    Display, Package-Links und Note-Status; eine Projektion wuerde die
-    Modal-Schnittstelle brechen. Limit 50 deckelt die Hydrations-Kosten.
-    """
-    server = _load_active_server_or_404(server_id)
-    sess = get_session()
-    noise_total = (
-        sess.execute(
-            select(func.count(Finding.id)).where(
-                Finding.server_id == server.id,
-                Finding.status == FindingStatus.OPEN,
-                Finding.risk_band == "noise",
-            )
-        ).scalar()
-        or 0
-    )
-    noise_findings: list[Finding] = []
-    if noise_total > 0:
-        noise_findings = list(
-            sess.execute(
-                select(Finding)
-                .where(
-                    Finding.server_id == server.id,
-                    Finding.status == FindingStatus.OPEN,
-                    Finding.risk_band == "noise",
-                )
-                .order_by(Finding.identifier_key.asc())
-                .limit(50)
-            )
-            .scalars()
-            .all()
-        )
-    return render_template(
-        "servers/_partials/noise_fragment.html",
-        server=server,
-        noise_total=int(noise_total),
-        noise_findings=noise_findings,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Block Y / ADR-0039 Phase C: Triage-Queue Lazy + Paginated
 # ---------------------------------------------------------------------------

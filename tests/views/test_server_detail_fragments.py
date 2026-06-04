@@ -1,12 +1,11 @@
 """Pure-Unit-Tests fuer die HTMX-Fragment-Endpoints (Block Y Phase B, ADR-0039).
 
-Prueft die fuenf neuen Fragment-Endpoints in `app/views/server_detail.py`:
+Prueft die Fragment-Endpoints in `app/views/server_detail.py`:
 
   - GET /servers/<id>/fragments/sparklines
   - GET /servers/<id>/fragments/heartbeat
   - GET /servers/<id>/fragments/host-snapshot
   - GET /servers/<id>/fragments/trend
-  - GET /servers/<id>/fragments/noise
 
 Pro Endpoint: Happy-Path, 404 bei unbekanntem Server, 404 bei revoked,
 404 bei retired. Auth-Guard wird zentral pro Endpoint geprueft (302).
@@ -104,13 +103,12 @@ _FRAGMENT_ROUTES = (
     "/servers/<int:server_id>/fragments/heartbeat",
     "/servers/<int:server_id>/fragments/host-snapshot",
     "/servers/<int:server_id>/fragments/trend",
-    "/servers/<int:server_id>/fragments/noise",
 )
 
 
 @pytest.mark.parametrize("rule", _FRAGMENT_ROUTES)
 def test_fragment_route_registered(app: Flask, rule: str) -> None:
-    """Jede der fuenf Fragment-Routes muss in der URL-Map mit GET stehen."""
+    """Jede Fragment-Route muss in der URL-Map mit GET stehen."""
     rules = {r.rule: list(r.methods or []) for r in app.url_map.iter_rules()}
     assert rule in rules, f"Route {rule!r} fehlt. Vorhandene: {sorted(rules)}"
     assert "GET" in rules[rule], f"GET fehlt fuer {rule!r}: {rules[rule]}"
@@ -128,7 +126,6 @@ def test_fragment_route_registered(app: Flask, rule: str) -> None:
         "/servers/1/fragments/heartbeat",
         "/servers/1/fragments/host-snapshot",
         "/servers/1/fragments/trend",
-        "/servers/1/fragments/noise",
     ],
 )
 def test_fragment_endpoint_requires_auth(client: FlaskClient, url: str) -> None:
@@ -350,43 +347,6 @@ def test_trend_fragment_retired_404(app: Flask, monkeypatch: pytest.MonkeyPatch)
 
 
 # ---------------------------------------------------------------------------
-# Noise-Fragment
-# ---------------------------------------------------------------------------
-
-
-def test_noise_fragment_happy_path_zero(app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Wenn kein Noise vorhanden ist, liefert das Fragment einen leeren Slot."""
-    _stub_load_server(monkeypatch, _make_server(1))
-    sess = _patch_session(monkeypatch)
-    # scalar() -> 0
-    sess.execute.return_value.scalar.return_value = 0
-    html = _call_inner(app, "noise_fragment", "/servers/1/fragments/noise", 1)
-    assert isinstance(html, str), f"Erwartet HTML-String, erhalten: {type(html)!r}"
-    assert 'id="sd-noise-toolbar"' in html
-    assert 'data-noise-total="0"' in html
-    # Kein Bulk-Ack-Button bei noise_total=0.
-    assert "bulk-ack-noise-button" not in html
-
-
-def test_noise_fragment_unknown_server_404(app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_load_server(monkeypatch, None)
-    result = _call_inner(app, "noise_fragment", "/servers/999/fragments/noise", 999)
-    assert isinstance(result, HTTPException) and result.code == 404
-
-
-def test_noise_fragment_revoked_404(app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_load_server(monkeypatch, _make_server(1, revoked_at=datetime.now(UTC)))
-    result = _call_inner(app, "noise_fragment", "/servers/1/fragments/noise", 1)
-    assert isinstance(result, HTTPException) and result.code == 404
-
-
-def test_noise_fragment_retired_404(app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_load_server(monkeypatch, _make_server(1, retired_at=datetime.now(UTC)))
-    result = _call_inner(app, "noise_fragment", "/servers/1/fragments/noise", 1)
-    assert isinstance(result, HTTPException) and result.code == 404
-
-
-# ---------------------------------------------------------------------------
 # Template-Smoke: Initial-Render wired die Fragment-URLs
 # ---------------------------------------------------------------------------
 
@@ -394,7 +354,7 @@ def test_noise_fragment_retired_404(app: Flask, monkeypatch: pytest.MonkeyPatch)
 def test_detail_initial_render_wires_fragment_urls(
     app: Flask, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`GET /servers/<id>` enthaelt hx-get fuer alle fuenf Fragment-URLs.
+    """`GET /servers/<id>` enthaelt hx-get fuer alle Fragment-URLs.
 
     Pruef-Strategie: das Detail-Template wird mit minimalen, geseedeten
     Werten direkt via Flask `render_template` gerendert. Wir bauen einen
@@ -480,9 +440,7 @@ def test_detail_initial_render_wires_fragment_urls(
     )
     # Trend
     assert "/servers/1/fragments/trend" in html, "Trend-Fragment-URL fehlt im Initial-Render"
-    # Noise (im findings_section.html-Include).
-    assert "/servers/1/fragments/noise" in html, "Noise-Fragment-URL fehlt im Initial-Render"
 
     # Anker-IDs muessen vorhanden sein damit der outerHTML-Swap greift.
-    for anchor in ("sd-tiles", "sd-heartbeat", "sd-host-snapshot", "sd-trend", "sd-noise-toolbar"):
+    for anchor in ("sd-tiles", "sd-heartbeat", "sd-host-snapshot", "sd-trend"):
         assert f'id="{anchor}"' in html, f"Anker-ID id={anchor!r} fehlt im Initial-Render"

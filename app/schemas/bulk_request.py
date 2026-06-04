@@ -134,8 +134,6 @@ class BulkAckRequest(BaseModel):
     server_scope: BulkAckServerScope | None = None
     dry_run: bool = True
     comment: str | None = Field(default=None, max_length=_COMMENT_MAX_LEN)
-    # deprecated, entfaellt mit ADR-0044 Etappe 3 (zusammen mit bulk_ack_noise.js)
-    risk_band_filter: Literal["noise"] | None = None
 
     @model_validator(mode="after")
     def _exactly_one_flavor(self) -> BulkAckRequest:

@@ -4,6 +4,26 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — ADR-0044 (TICKET-009): Per-Band Bulk-Acknowledge
+
+### Server-Detail
+
+- Jedes Risk-Band (ausser `pending`) hat ein "Acknowledge all"-Hover-Control
+  am Band-Header (ADR-0044). Klick oeffnet ein generisches Modal mit Count und
+  max. 5 Beispiel-Findings aus der `dry_run`-Antwort.
+- Bulk-Ack wirkt jetzt auf **ALLE** offenen Findings des Bands auf diesem
+  Server — der Server resolved den Scope selbst (`server_scope`-Flavor C, kein
+  ID-Transport durch den Client). Das 50er-Limit des Noise-Workflows entfaellt.
+- `pending`/`unknown` sind server-seitig (`risk_band`-Whitelist, 422) vom
+  Bulk-Ack ausgenommen — ein Urteil ohne Pass-2-Bewertung bleibt verboten.
+
+### Removed
+
+- "Acknowledge all noise on this host"-Toolbar-Link, das Noise-Fragment
+  (`GET /<id>/fragments/noise`), `app/static/js/bulk_ack_noise.js`, das
+  Noise-Modal und das Schema-Feld `risk_band_filter` entfallen ersatzlos
+  (abgeloest durch ADR-0044, vorher ADR-0022 §Bulk-Ack-Noise / ADR-0039 §2).
+
 ## [Unreleased] — ADR-0041 (Block AA): Finding-Detail Inline, Flat-Switch entfernt
 
 Zielversion **v0.16.0**.

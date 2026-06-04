@@ -13,8 +13,6 @@
      - `csrf_form`              : CSRFOnlyForm
      - `quick_counts`           : dict[str,int] (total_open + per-severity)
      - `total_findings_count`   : int — Gesamt-Findings (alle Status)
-     - `noise_total`            : int
-     - `noise_findings`         : list[Finding]
 #}
 {% from "_macros.html" import bulk_ack_modal %}
 {%- set _open_total = (quick_counts.total_open if quick_counts else 0) -%}
@@ -44,14 +42,6 @@
       </button>
       {{ bulk_ack_modal(id='bulk-ack-modal-toolbar', title='Ausgewaehlte Findings abhaken') }}
     </div>
-
-    {# Block Y Phase B (ADR-0039 §2): Bulk-Ack-Noise lebt im Noise-Fragment.
-       Der Slot bleibt im Initial-Render leer; das Fragment ersetzt ihn per
-       outerHTML mit Button + Modal (oder leerem DIV wenn noise_total=0). #}
-    <div id="sd-noise-toolbar"
-         hx-get="{{ url_for('server_detail.noise_fragment', server_id=server.id) }}"
-         hx-trigger="load"
-         hx-swap="outerHTML"></div>
 
     {# CSV-Export — letztes Element, margin-left: auto via Layout #}
     <a href="{{ url_for('findings.export_csv') }}?server_id={{ server.id }}&{{ view_filter.to_query_string() }}"
