@@ -66,7 +66,7 @@ def login() -> Any:
                 session=sess,
             )
             sess.commit()
-            flash("Login fehlgeschlagen.", "error")
+            flash("Login failed.", "error")
             return make_response(render_template("login.html", form=form), 401)
 
         assert row is not None  # fuer mypy/Logik bereits geprueft.
@@ -104,7 +104,7 @@ def logout() -> Any:
     )
     sess.commit()
     logout_user()
-    flash("Abgemeldet.", "success")
+    flash("Logged out.", "success")
     return redirect(url_for("auth.login"))
 
 

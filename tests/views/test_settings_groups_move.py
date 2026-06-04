@@ -149,7 +149,7 @@ def test_move_up_at_top_is_noop(no_csrf_app: Flask, monkeypatch: pytest.MonkeyPa
     assert not any(c["action"] == "group.moved" for c in audit), audit
     sess.commit.assert_not_called()
     assert any(cat == "info" for _, cat in flashes), f"info-Flash erwartet: {flashes}"
-    assert any("oben" in msg for msg, _ in flashes), flashes
+    assert any("top" in msg for msg, _ in flashes), flashes
 
 
 # ===========================================================================
@@ -171,7 +171,7 @@ def test_move_down_at_bottom_is_noop(no_csrf_app: Flask, monkeypatch: pytest.Mon
     assert group.position == 99, f"position unveraendert erwartet: {group.position}"
     assert not any(c["action"] == "group.moved" for c in audit), audit
     sess.commit.assert_not_called()
-    assert any("unten" in msg for msg, _ in flashes), flashes
+    assert any("bottom" in msg for msg, _ in flashes), flashes
 
 
 # ===========================================================================
@@ -258,7 +258,7 @@ def test_move_unknown_id_flashes_redirect(
     resp = _call_move(no_csrf_app, group_id=9999, direction="up")
 
     assert resp.status_code == 302, resp
-    assert any("nicht gefunden" in msg for msg, _ in flashes), flashes
+    assert any("not found" in msg for msg, _ in flashes), flashes
     assert not any(c["action"] == "group.moved" for c in audit), audit
     sess.commit.assert_not_called()
 

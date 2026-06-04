@@ -50,17 +50,17 @@ def list_servers() -> Any:
 def revoke_server(server_id: int) -> WerkzeugResponse:
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
+        flash("Invalid CSRF token.", "error")
         return redirect(url_for("servers.list_servers"))
 
     sess = get_session()
     server = sess.execute(select(Server).where(Server.id == server_id)).scalar_one_or_none()
     if server is None:
-        flash("Server nicht gefunden.", "error")
+        flash("Server not found.", "error")
         return redirect(url_for("servers.list_servers"))
 
     if server.revoked_at is not None:
-        flash(f"Server '{server.name}' ist bereits widerrufen.", "warning")
+        flash(f"Server '{server.name}' is already revoked.", "warning")
         return redirect(url_for("servers.list_servers"))
 
     now = datetime.now(tz=UTC)
@@ -77,7 +77,7 @@ def revoke_server(server_id: int) -> WerkzeugResponse:
         session=sess,
     )
     sess.commit()
-    flash(f"Server '{server.name}' widerrufen.", "success")
+    flash(f"Server '{server.name}' revoked.", "success")
     return redirect(url_for("servers.list_servers"))
 
 
@@ -86,17 +86,17 @@ def revoke_server(server_id: int) -> WerkzeugResponse:
 def retire_server(server_id: int) -> WerkzeugResponse:
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
+        flash("Invalid CSRF token.", "error")
         return redirect(url_for("servers.list_servers"))
 
     sess = get_session()
     server = sess.execute(select(Server).where(Server.id == server_id)).scalar_one_or_none()
     if server is None:
-        flash("Server nicht gefunden.", "error")
+        flash("Server not found.", "error")
         return redirect(url_for("servers.list_servers"))
 
     if server.retired_at is not None:
-        flash(f"Server '{server.name}' ist bereits stillgelegt.", "warning")
+        flash(f"Server '{server.name}' is already decommissioned.", "warning")
         return redirect(url_for("servers.list_servers"))
 
     now = datetime.now(tz=UTC)
@@ -133,7 +133,7 @@ def retire_server(server_id: int) -> WerkzeugResponse:
     )
     sess.commit()
     flash(
-        f"Server '{server.name}' stillgelegt. {len(affected_ids)} offene Findings auf 'resolved' gesetzt.",
+        f"Server '{server.name}' decommissioned. {len(affected_ids)} open findings set to 'resolved'.",
         "success",
     )
     return redirect(url_for("servers.list_servers"))

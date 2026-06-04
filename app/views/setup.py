@@ -89,7 +89,7 @@ def step1() -> Any:
 
         existing = sess.execute(select(User).where(User.username == username)).scalar_one_or_none()
         if existing is not None:
-            flash("Benutzername existiert bereits.", "error")
+            flash("Username already exists.", "error")
             return render_template("setup/step1.html", form=form)
 
         user = User(username=username, password_hash=hash_password(password))
@@ -193,7 +193,7 @@ def step3() -> Any:
         for key in (_S_STEP1_DONE, _S_STEP2_DONE, _S_PENDING_MASTER_KEY):
             session.pop(key, None)
         log.info("setup.completed")
-        flash("Setup abgeschlossen — bitte einloggen.", "success")
+        flash("Setup complete — log in.", "success")
         return redirect(url_for("auth.login"))
 
     return render_template("setup/step3.html", form=form)

@@ -121,12 +121,12 @@ def tags_rename(tag_id: int) -> Any:
             for err in errors:
                 flash(f"{field_name}: {err}", "error")
         if not form.errors:
-            flash("Ungueltiger CSRF-Token.", "error")
+            flash("Invalid CSRF token.", "error")
         return redirect(url_for("settings.tags_list"))
 
     tag = sess.execute(select(Tag).where(Tag.id == tag_id)).scalar_one_or_none()
     if tag is None:
-        flash("Tag nicht gefunden.", "error")
+        flash("Tag not found.", "error")
         return redirect(url_for("settings.tags_list"))
 
     new_name = cast(str, form.name.data)
@@ -150,7 +150,7 @@ def tags_rename(tag_id: int) -> Any:
         session=sess,
     )
     sess.commit()
-    flash(f"Tag '{old_name}' in '{new_name}' umbenannt.", "success")
+    flash(f"Tag '{old_name}' renamed to '{new_name}'.", "success")
     return redirect(url_for("settings.tags_list"))
 
 
@@ -168,12 +168,12 @@ def tags_color(tag_id: int) -> Any:
             for err in errors:
                 flash(f"{field_name}: {err}", "error")
         if not form.errors:
-            flash("Ungueltiger CSRF-Token.", "error")
+            flash("Invalid CSRF token.", "error")
         return redirect(url_for("settings.tags_list"))
 
     tag = sess.execute(select(Tag).where(Tag.id == tag_id)).scalar_one_or_none()
     if tag is None:
-        flash("Tag nicht gefunden.", "error")
+        flash("Tag not found.", "error")
         return redirect(url_for("settings.tags_list"))
 
     new_color = cast(str, form.color.data)
@@ -190,7 +190,7 @@ def tags_color(tag_id: int) -> Any:
         session=sess,
     )
     sess.commit()
-    flash(f"Farbe von Tag '{tag.name}' geaendert.", "success")
+    flash(f"Color of tag '{tag.name}' changed.", "success")
     return redirect(url_for("settings.tags_list"))
 
 
@@ -199,13 +199,13 @@ def tags_color(tag_id: int) -> Any:
 def tags_delete(tag_id: int) -> Any:
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
+        flash("Invalid CSRF token.", "error")
         return redirect(url_for("settings.tags_list"))
 
     sess = get_session()
     tag = sess.execute(select(Tag).where(Tag.id == tag_id)).scalar_one_or_none()
     if tag is None:
-        flash("Tag nicht gefunden.", "error")
+        flash("Tag not found.", "error")
         return redirect(url_for("settings.tags_list"))
 
     name = tag.name
@@ -218,7 +218,7 @@ def tags_delete(tag_id: int) -> Any:
         session=sess,
     )
     sess.commit()
-    flash(f"Tag '{name}' geloescht.", "success")
+    flash(f"Tag '{name}' deleted.", "success")
     return redirect(url_for("settings.tags_list"))
 
 
@@ -290,12 +290,12 @@ def groups_rename(group_id: int) -> Any:
             for err in errors:
                 flash(f"{field_name}: {err}", "error")
         if not form.errors:
-            flash("Ungueltiger CSRF-Token.", "error")
+            flash("Invalid CSRF token.", "error")
         return redirect(url_for("settings.groups_list"))
 
     group = sess.execute(select(ServerGroup).where(ServerGroup.id == group_id)).scalar_one_or_none()
     if group is None:
-        flash("Gruppe nicht gefunden.", "error")
+        flash("Group not found.", "error")
         return redirect(url_for("settings.groups_list"))
 
     new_name = cast(str, form.name.data).strip()
@@ -319,7 +319,7 @@ def groups_rename(group_id: int) -> Any:
         session=sess,
     )
     sess.commit()
-    flash(f"Gruppe '{old_name}' in '{new_name}' umbenannt.", "success")
+    flash(f"Group '{old_name}' renamed to '{new_name}'.", "success")
     return redirect(url_for("settings.groups_list"))
 
 
@@ -334,13 +334,13 @@ def groups_delete(group_id: int) -> Any:
     """
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
+        flash("Invalid CSRF token.", "error")
         return redirect(url_for("settings.groups_list"))
 
     sess = get_session()
     group = sess.execute(select(ServerGroup).where(ServerGroup.id == group_id)).scalar_one_or_none()
     if group is None:
-        flash("Gruppe nicht gefunden.", "error")
+        flash("Group not found.", "error")
         return redirect(url_for("settings.groups_list"))
 
     member_count = int(
@@ -356,7 +356,7 @@ def groups_delete(group_id: int) -> Any:
         session=sess,
     )
     sess.commit()
-    flash(f"Gruppe '{name}' geloescht ({member_count} Server jetzt ungrouped).", "success")
+    flash(f"Group '{name}' deleted ({member_count} servers now ungrouped).", "success")
     return redirect(url_for("settings.groups_list"))
 
 
@@ -372,12 +372,12 @@ def groups_move(group_id: int) -> Any:
     sess = get_session()
     form = GroupMoveForm()
     if not form.validate_on_submit():
-        flash("Ungueltige Richtung.", "error")
+        flash("Invalid direction.", "error")
         return redirect(url_for("settings.groups_list"))
 
     group = sess.execute(select(ServerGroup).where(ServerGroup.id == group_id)).scalar_one_or_none()
     if group is None:
-        flash("Gruppe nicht gefunden.", "error")
+        flash("Group not found.", "error")
         return redirect(url_for("settings.groups_list"))
 
     direction = form.direction.data
@@ -397,8 +397,8 @@ def groups_move(group_id: int) -> Any:
         ).scalar_one_or_none()
 
     if neighbor is None:
-        edge = "oben" if direction == "up" else "unten"
-        flash(f"Gruppe ist bereits ganz {edge}.", "info")
+        edge = "top" if direction == "up" else "bottom"
+        flash(f"Group is already at the {edge}.", "info")
         return redirect(url_for("settings.groups_list"))
 
     old_position = group.position
@@ -497,7 +497,7 @@ def master_key_rotate() -> Any:
     sess = get_session()
     form = MasterKeyRotateForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
+        flash("Invalid CSRF token.", "error")
         # 400 statt 302, damit der Client den Submit als Fehler erkennt
         # und nicht stillschweigend einen neuen GET ausloest.
         last = _last_master_key_rotation_at(sess)
@@ -706,7 +706,7 @@ def llm_reviewer_change_mode() -> Any:
     sess = get_session()
     form = LlmReviewerModeForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token oder Pflichtfelder fehlen.", "error")
+        flash("Invalid CSRF token or required fields missing.", "error")
         stats = _llm_reviewer_stats(sess)
         return make_response(
             render_settings(
@@ -795,7 +795,7 @@ def llm_reviewer_change_concurrency() -> Any:
             for err in errors:
                 flash(f"{field_name}: {err}", "error")
         if not form.errors:
-            flash("Ungueltiger CSRF-Token oder Pflichtfelder fehlen.", "error")
+            flash("Invalid CSRF token or required fields missing.", "error")
         stats = _llm_reviewer_stats(sess)
         return make_response(
             render_settings(
@@ -909,7 +909,7 @@ def llm_reviewer_requeue_backlog() -> Any:
     sess = get_session()
     form = LlmReviewerRequeueForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
+        flash("Invalid CSRF token.", "error")
         return redirect(url_for("settings.llm_reviewer_view"))
 
     setting_row = get_settings_row(sess)

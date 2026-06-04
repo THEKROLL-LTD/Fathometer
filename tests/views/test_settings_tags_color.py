@@ -164,7 +164,7 @@ def test_color_unknown_id_flashes_redirect(
     resp = _call_color(no_csrf_app, tag_id=9999, color="#ff0000")
 
     assert resp.status_code == 302, resp
-    assert any("nicht gefunden" in msg for msg, _ in flashes), flashes
+    assert any("not found" in msg for msg, _ in flashes), flashes
     assert not any(c["action"] == "tag.color_changed" for c in audit), audit
     sess.commit.assert_not_called()
 

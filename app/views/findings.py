@@ -384,7 +384,7 @@ def _parse_json_list(raw: str | None) -> list[Any]:
     try:
         value = json.loads(raw)
     except json.JSONDecodeError:
-        abort(400, description="JSON-Payload konnte nicht geparst werden")
+        abort(400, description="JSON payload could not be parsed")
     if not isinstance(value, list):
         abort(400, description="JSON-Payload muss eine Liste sein")
     return value
@@ -466,7 +466,7 @@ def bulk_acknowledge() -> WerkzeugResponse | str:
     try:
         validate_csrf(token)
     except CSRFError:
-        abort(400, description="CSRF-Token ungueltig oder fehlt")
+        abort(400, description="CSRF token invalid or missing")
 
     raw_buckets = _parse_json_list(request.form.get("bucket_selections"))
     raw_finding_ids = _parse_json_list(request.form.get("finding_ids"))
@@ -498,7 +498,7 @@ def bulk_acknowledge() -> WerkzeugResponse | str:
         redirect_target = f"{redirect_target}?{redirect_qs}"
 
     if not final_ids:
-        flash("Keine offenen Findings ausgewaehlt.", "info")
+        flash("No open findings selected.", "info")
         if _is_htmx_request():
             response = Response("", status=204)
             response.headers["HX-Redirect"] = redirect_target
@@ -598,7 +598,7 @@ def _is_htmx_request() -> bool:
 def acknowledge(finding_id: int) -> WerkzeugResponse | str:
     form = AcknowledgeForm()
     if not form.validate_on_submit():
-        flash("Ungueltige Eingabe.", "error")
+        flash("Invalid input.", "error")
         finding = _load_finding(finding_id)
         if finding is None:
             abort(404)
@@ -656,7 +656,7 @@ def acknowledge(finding_id: int) -> WerkzeugResponse | str:
 def reopen(finding_id: int) -> WerkzeugResponse | str:
     form = ReopenForm()
     if not form.validate_on_submit():
-        flash("Ungueltige Eingabe.", "error")
+        flash("Invalid input.", "error")
         finding = _load_finding(finding_id)
         if finding is None:
             abort(404)
@@ -711,7 +711,7 @@ def reopen(finding_id: int) -> WerkzeugResponse | str:
 def add_note(finding_id: int) -> WerkzeugResponse | str:
     form = NoteForm()
     if not form.validate_on_submit():
-        flash("Notiz darf nicht leer sein.", "error")
+        flash("Note must not be empty.", "error")
         finding = _load_finding(finding_id)
         if finding is None:
             abort(404)
@@ -724,7 +724,7 @@ def add_note(finding_id: int) -> WerkzeugResponse | str:
     sess = get_session()
     body = (form.body.data or "").strip()
     if not body:
-        flash("Notiz darf nicht leer sein.", "error")
+        flash("Note must not be empty.", "error")
         return redirect(_back_url(finding))
 
     user_id_value = getattr(current_user, "id", None)
@@ -756,7 +756,7 @@ def add_note(finding_id: int) -> WerkzeugResponse | str:
 def delete_note(finding_id: int, note_id: int) -> WerkzeugResponse | str:
     csrf_form = CSRFOnlyForm()
     if not csrf_form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
+        flash("Invalid CSRF token.", "error")
         return redirect(url_for("server_detail.show", server_id=0))
 
     finding = _load_finding(finding_id)
@@ -785,7 +785,7 @@ def delete_note(finding_id: int, note_id: int) -> WerkzeugResponse | str:
             note_author=note.author,
             reason="system_note",
         )
-        abort(403, description="System-generierte Notes koennen nicht geloescht werden")
+        abort(403, description="System-generated notes cannot be deleted")
 
     # Fremde Note: 404 (defensiv — Existenz fremder Notes nicht enthuellen).
     if note.author != actor:
@@ -831,7 +831,7 @@ def group_acknowledge() -> WerkzeugResponse | str:
     """
     form = GroupAcknowledgeForm()
     if not form.validate_on_submit():
-        flash("Ungueltige Eingabe.", "error")
+        flash("Invalid input.", "error")
         return redirect(url_for("dashboard.index"))
 
     server_id_data = form.server_id.data
@@ -857,7 +857,7 @@ def group_acknowledge() -> WerkzeugResponse | str:
     affected_ids = [f.id for f in affected]
 
     if not affected_ids:
-        flash("Keine offenen Findings fuer dieses Paket gefunden.", "info")
+        flash("No open findings found for this package.", "info")
         return redirect(url_for("server_detail.show", server_id=server_id))
 
     now = datetime.now(tz=UTC)

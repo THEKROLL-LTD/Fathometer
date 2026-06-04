@@ -188,7 +188,7 @@ def add_tag(server_id: int) -> str | WerkzeugResponse:
     """
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
+        flash("Invalid CSRF token.", "error")
         return redirect(url_for("server_detail.show", server_id=server_id))
 
     server = _load_server_with_settings(server_id)
@@ -197,14 +197,14 @@ def add_tag(server_id: int) -> str | WerkzeugResponse:
 
     raw_name = (request.form.get("tag_name") or "").strip().lower()
     if not raw_name or not TAG_NAME_REGEX.match(raw_name):
-        flash("Ungueltiger Tag-Name.", "error")
+        flash("Invalid tag name.", "error")
         return _redirect_to_settings(server_id)
 
     sess = get_session()
     tag = sess.execute(select(Tag).where(Tag.name == raw_name)).scalar_one_or_none()
     if tag is None:
         flash(
-            f"Tag '{raw_name}' existiert nicht. Lege ihn zuerst unter Settings an.",
+            f"Tag '{raw_name}' does not exist. Create it under Settings first.",
             "error",
         )
         return _redirect_to_settings(server_id)
@@ -245,7 +245,7 @@ def remove_tag(server_id: int, tag_id: int) -> str | WerkzeugResponse:
     """
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger CSRF-Token.", "error")
+        flash("Invalid CSRF token.", "error")
         return redirect(url_for("server_detail.show", server_id=server_id))
 
     server = _load_server_with_settings(server_id)
@@ -288,14 +288,14 @@ def update_group(server_id: int) -> str | WerkzeugResponse:
     available = list(sess.execute(select(ServerGroup).order_by(ServerGroup.name)).scalars().all())
     form = ServerGroupForm(available_groups=available)
     if not form.validate_on_submit():
-        flash("Ungueltige Group-Auswahl.", "error")
+        flash("Invalid group selection.", "error")
         return _redirect_to_settings(server_id)
 
     new_group_id: int | None = form.group_id.data
 
     # Whitelist: None ODER ID muss in available existieren.
     if new_group_id is not None and not any(g.id == new_group_id for g in available):
-        flash("Gewaehlte Group existiert nicht (mehr).", "error")
+        flash("Selected group no longer exists.", "error")
         return _redirect_to_settings(server_id)
 
     old_group_id = server.group_id
@@ -328,7 +328,7 @@ def update_scan_interval(server_id: int) -> str | WerkzeugResponse:
 
     form = ServerScanIntervalForm()
     if not form.validate_on_submit():
-        flash("Scan-Intervall muss zwischen 1 und 168 Stunden liegen.", "error")
+        flash("Scan interval must be between 1 and 168 hours.", "error")
         return _redirect_to_settings(server_id)
 
     new_interval: int = form.scan_interval_h.data
@@ -367,7 +367,7 @@ def save_all(server_id: int) -> str | WerkzeugResponse:
     available = list(sess.execute(select(ServerGroup).order_by(ServerGroup.name)).scalars().all())
     form = ServerSettingsForm(available_groups=available)
     if not form.validate_on_submit():
-        flash("Ungueltige Eingaben. Bitte Felder pruefen.", "error")
+        flash("Invalid input. Check the fields.", "error")
         return _redirect_to_settings(server_id)
 
     new_group_id: int | None = form.group_id.data
@@ -375,7 +375,7 @@ def save_all(server_id: int) -> str | WerkzeugResponse:
 
     # Whitelist-Check: group_id muss None ODER eine bekannte ID sein.
     if new_group_id is not None and not any(g.id == new_group_id for g in available):
-        flash("Gewaehlte Group existiert nicht (mehr).", "error")
+        flash("Selected group no longer exists.", "error")
         return _redirect_to_settings(server_id)
 
     changed = False
@@ -410,7 +410,7 @@ def save_all(server_id: int) -> str | WerkzeugResponse:
     if changed:
         sess.commit()
 
-    flash("Einstellungen gespeichert.", "success")
+    flash("Settings saved.", "success")
     return _redirect_to_settings(server_id)
 
 
@@ -442,7 +442,7 @@ def group_create(server_id: int) -> str | WerkzeugResponse:
 
     form = ServerGroupCreateForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger Gruppen-Name.", "error")
+        flash("Invalid group name.", "error")
         return _redirect_to_settings(server_id)
 
     name = (form.name.data or "").strip()
@@ -506,7 +506,7 @@ def tag_create(server_id: int) -> str | WerkzeugResponse:
 
     form = ServerTagCreateForm()
     if not form.validate_on_submit():
-        flash("Ungueltiger Tag-Name.", "error")
+        flash("Invalid tag name.", "error")
         return _redirect_to_settings(server_id)
 
     name = (form.name.data or "").strip()

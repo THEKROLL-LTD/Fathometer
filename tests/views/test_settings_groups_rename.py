@@ -222,7 +222,7 @@ def test_rename_unknown_id_flashes_redirect(
     resp = _call_rename(no_csrf_app, monkeypatch, group_id=9999, name="whatever")
 
     assert resp.status_code == 302, resp
-    assert any("nicht gefunden" in msg for msg, _ in flashes), flashes
+    assert any("not found" in msg for msg, _ in flashes), flashes
     assert not any(c["action"] == "group.renamed" for c in audit), audit
     sess.commit.assert_not_called()
 

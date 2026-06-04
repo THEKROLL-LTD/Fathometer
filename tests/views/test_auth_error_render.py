@@ -146,7 +146,7 @@ def test_login_renders_access_denied_on_flash_error(
     html = _render_login_with_flash(
         app,
         monkeypatch,
-        flash_messages=[("error", "Login fehlgeschlagen.")],
+        flash_messages=[("error", "Login failed.")],
     )
 
     assert "auth__status--error" in html, (

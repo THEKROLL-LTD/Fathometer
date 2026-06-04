@@ -221,10 +221,10 @@ def update() -> Any:
         session=sess,
     )
     sess.commit()
-    flash("LLM-Einstellungen gespeichert.", "success")
+    flash("LLM settings saved.", "success")
     if provider_changed and archived_ids:
         flash(
-            f"{len(archived_ids)} aktive Bewertungen archiviert wegen Provider-/Modell-Wechsel.",
+            f"{len(archived_ids)} active evaluations archived due to provider/model change.",
             "info",
         )
     return redirect(url_for("llm_settings.show"))
@@ -242,7 +242,7 @@ def test_connection() -> Any:
             {
                 "success": False,
                 "error": "llm_not_configured",
-                "message": "Bitte erst Provider-Settings speichern.",
+                "message": "Save provider settings first.",
             }
         ), 400
 

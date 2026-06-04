@@ -189,7 +189,7 @@ def test_delete_unknown_id_flashes_redirect(
 
     assert resp.status_code == 302, resp
     sess.delete.assert_not_called()
-    assert any("nicht gefunden" in msg for msg, _ in flashes), flashes
+    assert any("not found" in msg for msg, _ in flashes), flashes
     assert not any(c["action"] == "group.deleted" for c in audit), audit
     sess.commit.assert_not_called()
 

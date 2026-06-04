@@ -402,8 +402,8 @@ def test_add_tag_invalid_tag_name_flashes_and_redirects(
     assert resp.status_code == 302, (
         f"add_tag soll 302 liefern bei ungueltigem Namen, got {resp.status_code}"
     )
-    assert any("Ungueltiger Tag-Name" in msg for msg, _ in captured_flashes), (
-        f"Flash-Message 'Ungueltiger Tag-Name' erwartet. Flashes: {captured_flashes}"
+    assert any("Invalid tag name" in msg for msg, _ in captured_flashes), (
+        f"Flash-Message 'Invalid tag name' erwartet. Flashes: {captured_flashes}"
     )
 
 
@@ -441,8 +441,8 @@ def test_add_tag_nonexistent_tag_flashes(
         resp = inner(server_id=42)
 
     assert resp.status_code == 302, f"add_tag soll 302 liefern, got {resp.status_code}"
-    assert any("existiert nicht" in msg for msg, _ in captured_flashes), (
-        f"Flash 'existiert nicht' erwartet. Flashes: {captured_flashes}"
+    assert any("does not exist" in msg for msg, _ in captured_flashes), (
+        f"Flash 'does not exist' erwartet. Flashes: {captured_flashes}"
     )
 
 
