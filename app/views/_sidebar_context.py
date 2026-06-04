@@ -6,6 +6,7 @@ Variablen-Vertrag — initialer Page-Render (Context-Processor-Pfad):
   - active_server_id   : int | None  (vom View gesetzt)
   - sidebar_groups     : list[ServerGroup]  (sortiert nach position, name)
   - server_group_aggregates : dict[int | None, GroupCounts]
+  - sidebar_open_group_ids  : set[int]  (offene Gruppen aus Cookie, ADR-0046)
 
 Teure Aggregate (Heartbeats, Risk-Counts, Header-Counter) werden NICHT
 mehr im Context-Processor gebaut. Sie erscheinen ausschliesslich im
@@ -29,7 +30,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from flask import Blueprint, abort, render_template, request
+from flask import Blueprint, abort, has_request_context, render_template, request
 from flask_login import login_required
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -40,6 +41,55 @@ from app.models import Server, ServerGroup, ServerTag
 from app.services.heartbeat_aggregation import heartbeats_for_servers
 from app.services.sidebar_group_aggregates import group_counts
 from app.services.sidebar_risk_counts import escalate_act_counts_by_server
+
+# Block AC (ADR-0046): Persistenter Aufklapp-Zustand der Sidebar-Gruppen via
+# Cookie. JS schreibt `sidebar_open_groups` aus dem DOM-Ist-Zustand, der Server
+# liest es hier und rendert `open` direkt — single-source ueber beide Render-Pfade
+# (Context-Processor + Polling-Endpoint), weil beide durch build_sidebar_context()
+# laufen.
+_SIDEBAR_OPEN_GROUPS_COOKIE = "sidebar_open_groups"
+_SIDEBAR_OPEN_GROUPS_MAX_RAW_LEN = 512
+_SIDEBAR_OPEN_GROUPS_MAX_IDS = 64
+
+
+def _parse_open_group_ids(raw: str) -> set[int]:
+    """Parst das `sidebar_open_groups`-Cookie defensiv zu einem `set[int]`.
+
+    Vertrag (ADR-0046): kommaseparierte ganzzahlige Group-IDs (z.B. `"1,5,12"`).
+    Defense-in-Depth gegen manipulierte/ueberlange Cookies:
+      - Roh-String laenger als 512 Zeichen -> leeres Set (kein Parsing von Garbage).
+      - Maximal 64 IDs uebernehmen, Rest ignorieren.
+      - Nicht-parsebare Tokens still verwerfen — niemals eine Exception/500.
+
+    Negative oder unbekannte IDs sind harmlos: sie matchen schlicht keine echte
+    `group.id` und bleiben damit ohne Render-Effekt.
+    """
+    if not raw or len(raw) > _SIDEBAR_OPEN_GROUPS_MAX_RAW_LEN:
+        return set()
+    ids: set[int] = set()
+    for token in raw.split(","):
+        if len(ids) >= _SIDEBAR_OPEN_GROUPS_MAX_IDS:
+            break
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            ids.add(int(token))
+        except ValueError:
+            continue
+    return ids
+
+
+def _read_open_group_ids() -> set[int]:
+    """Liest die offenen Gruppen-IDs aus dem Request-Cookie (beide Render-Pfade).
+
+    Ausserhalb eines aktiven Request-Kontexts (isolierte Pure-Unit-Tests von
+    `build_sidebar_context()` ohne Test-Request-Context) liefert die Funktion
+    bewusst ein leeres Set, statt zu werfen.
+    """
+    if not has_request_context():
+        return set()
+    return _parse_open_group_ids(request.cookies.get(_SIDEBAR_OPEN_GROUPS_COOKIE, ""))
 
 
 def build_sidebar_context(
@@ -86,6 +136,8 @@ def build_sidebar_context(
         "active_server_id": None,
         "sidebar_groups": sidebar_groups,
         "server_group_aggregates": aggregates,
+        # Block AC (ADR-0046): persistente Aufklapp-Gruppen aus dem Cookie.
+        "sidebar_open_group_ids": _read_open_group_ids(),
     }
 
 

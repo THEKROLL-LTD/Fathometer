@@ -10,16 +10,21 @@
      - `active_server_id`       : int | None
 
    Default: <details> ohne open-Attribut = eingeklappt (ADR-0034 §Sidebar-Verhalten).
-   Auto-Expand bei Filter-Suche wird via Alpine / sidebar.js gesteuert.
+   Block AC (ADR-0046): `sidebar_open_group_ids` (set[int]) steuert `open` +
+   `aria-expanded`. Die IDs stammen aus dem Cookie `sidebar_open_groups`, das
+   `build_sidebar_context()` fuer beide Render-Pfade parst. Ohne Cookie/Variable
+   bleibt die Gruppe collapsed (`(sidebar_open_group_ids or ())`-Form deckt den
+   Undefined-Fallback ab).
 #}
 {% set agg = server_group_aggregates.get(group.id, {}) %}
 {% set escalate_count = agg.get('escalate', 0) %}
 {% set act_count = agg.get('act', 0) %}
 {% set host_count = group_servers | length %}
+{% set is_open = group.id in (sidebar_open_group_ids or ()) %}
 
-<details class="hostgroup" id="hostgroup-{{ group.id }}">
+<details class="hostgroup" id="hostgroup-{{ group.id }}"{% if is_open %} open{% endif %}>
   <summary class="hostgroup__header"
-           aria-expanded="false">
+           aria-expanded="{{ 'true' if is_open else 'false' }}">
     <span class="hostgroup__chevron" aria-hidden="true">
       <svg viewBox="0 0 12 12" width="10" height="10"
            fill="none" stroke="currentColor"
