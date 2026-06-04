@@ -1,0 +1,120 @@
+{# Bulk-Ack-Band-Modal (ADR-0044 §(3), TICKET-009 Etappe 2).
+
+   Generisches Per-Band-Modal — ersetzt funktional das Noise-only-Modal
+   (`servers/_bulk_ack_noise_modal.html`). KEIN server-gerendertes
+   Findings-Listing: die Beispiele kommen aus der dry_run-Response des
+   Flavor-C-Endpoints (`/api/findings/bulk-acknowledge`) via Alpine
+   `x-for` ueber `examples` (max. 5) plus "… and N more".
+
+   Erwartet einen umgebenden Alpine-Scope `bulkAckBand(...)` (siehe
+   `static/js/bulk_ack_band.js`) mit:
+     - `open` (bool), `busy` (bool), `comment` (string),
+     - `confirm` (bool), `previewCount`, `examples` (array), `error`,
+     - `truncatedCount` (getter), `canApply` (getter),
+     - `openModal()`, `closeModal()`, `runDryRun()`, `apply()`.
+
+   Variablen (gesetzt vom Caller, risk_band_section.html):
+     - `server`  : Server-ORM.
+     - `section` : dict mit `band`, `total_count`.
+#}
+<dialog class="modal"
+        x-show="open"
+        x-cloak
+        :class="{'modal-open': open}"
+        @keydown.escape.window="closeModal()"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bulk-ack-band-title-{{ section.band }}"
+        data-test="bulk-ack-band-modal">
+  <div class="modal-box max-w-2xl" @click.stop>
+    <h3 id="bulk-ack-band-title-{{ section.band }}" class="text-lg font-semibold">
+      Acknowledge all {{ section.band | upper }} on this server
+    </h3>
+
+    <p class="text-sm opacity-70 mt-2">
+      Es werden ausschliesslich offene Findings mit
+      <span class="badge badge-ghost badge-xs font-mono">risk_band={{ section.band }}</span>
+      auf diesem Server acknowledged.
+    </p>
+
+    <div class="mt-3 space-y-3 text-sm">
+      <template x-if="busy && previewCount === null">
+        <p class="opacity-70">Vorschau wird ermittelt…</p>
+      </template>
+
+      <template x-if="!busy && previewCount !== null && !error">
+        <div class="space-y-2">
+          <p>
+            <span class="font-semibold" x-text="previewCount"></span>
+            {{ section.band }}-Findings werden auf
+            <span class="badge badge-info badge-sm">acknowledged</span> gesetzt.
+          </p>
+        </div>
+      </template>
+
+      <template x-if="error">
+        <div class="alert alert-error">
+          <span x-text="error"></span>
+        </div>
+      </template>
+
+      {# Beispiel-Liste (max. 5) aus der dry_run-Response — kein
+         server-gerendertes Listing. #}
+      <template x-if="!error && examples.length > 0">
+        <div class="rounded-box bg-base-200/40 border border-base-300 px-3 py-2 max-h-56 overflow-y-auto">
+          <ul class="font-mono text-xs space-y-1" data-test="bulk-ack-band-examples">
+            <template x-for="ex in examples" :key="ex.identifier_key">
+              <li class="flex items-baseline gap-2">
+                <span class="opacity-70" x-text="ex.identifier_key"></span>
+                <span class="opacity-50 truncate" x-text="ex.package_name"></span>
+              </li>
+            </template>
+          </ul>
+          <template x-if="truncatedCount > 0">
+            <p class="text-[10px] opacity-50 mt-2"
+               data-test="bulk-ack-band-truncation">
+              … and <span x-text="truncatedCount"></span> more
+            </p>
+          </template>
+        </div>
+      </template>
+
+      {# Pflicht-Bestaetigung. Comment bleibt OPTIONAL (ADR-0006). #}
+      <label class="label cursor-pointer justify-start gap-2 py-0">
+        <input type="checkbox"
+               class="checkbox checkbox-sm checkbox-warning"
+               x-model="confirm"
+               data-test="bulk-ack-band-confirm-check" />
+        <span>Ich bestaetige: alle offenen {{ section.band }}-Findings auf diesem Server abhaken.</span>
+      </label>
+
+      <label class="form-control">
+        <span class="label-text text-xs opacity-70 pb-1">Kommentar (optional)</span>
+        <textarea x-model="comment"
+                  class="textarea textarea-bordered textarea-sm"
+                  rows="2"
+                  maxlength="8192"
+                  placeholder="Kurze Notiz fuer den Audit-Log…"></textarea>
+      </label>
+    </div>
+
+    <div class="modal-action">
+      <button type="button"
+              class="btn btn-sm btn-ghost"
+              @click="closeModal()"
+              :disabled="busy">
+        Abbrechen
+      </button>
+      <button type="button"
+              class="btn btn-sm btn-primary"
+              @click="apply()"
+              :disabled="!canApply"
+              data-test="bulk-ack-band-confirm">
+        Bestaetigen
+      </button>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop" @click="closeModal()">
+    <button type="button" aria-label="Schliessen">close</button>
+  </form>
+</dialog>

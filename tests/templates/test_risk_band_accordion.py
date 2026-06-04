@@ -309,3 +309,9 @@ def test_total_count_rendered_in_summary(app: Flask) -> None:
         f"Track F hat 'sd-risk-band-section__count' auf 'sd-band__count' umbenannt. "
         f"HTML: {html!r}"
     )
+
+    # TICKET-009 Etappe 2 (ADR-0044): ackable Bands (hier act) tragen das
+    # Per-Band „Acknowledge all"-Hover-Control im Summary.
+    assert 'data-test="band-ack-all-act"' in html, (
+        f"Hover-Control 'band-ack-all-act' fehlt im Summary-Markup (ADR-0044). HTML: {html!r}"
+    )

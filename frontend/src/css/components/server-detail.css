@@ -842,6 +842,40 @@
 }
 .sd-band__count b { color: var(--text-primary); font-weight: 700; margin-right: 4px; }
 
+/* Per-Band "Acknowledge all"-Hover-Control (ADR-0044 §(3)).
+   visibility statt display:none → kein Layout-Sprung im Summary-Grid.
+   Mono-Uppercase-Stil analog .sd-band__count, default grau. */
+.sd-band__ackall {
+  visibility: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  justify-self: end;
+}
+.sd-band__ackall input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 13px; height: 13px;
+  margin: 0;
+  border: 1px solid var(--border-visible);
+  background: transparent;
+  pointer-events: none;
+}
+/* Reveal bei Hover ueber der Band-Zeile bzw. Keyboard-Fokus im Summary. */
+.sd-band__summary:hover .sd-band__ackall,
+.sd-band__summary:focus-within .sd-band__ackall { visibility: visible; }
+/* grau → cyan nur bei direktem Hover ueber dem Control. */
+.sd-band__ackall:hover span { color: var(--accent); }
+.sd-band__ackall:hover input { border-color: var(--accent); }
+
 .sd-band__body { animation: sd-flyout-in 260ms var(--ease-materialize); }
 
 /* Pager-Footer der Triage-Band-Seiten: Innenabstand wie die Finding-Rows

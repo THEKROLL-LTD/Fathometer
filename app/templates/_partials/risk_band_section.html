@@ -16,24 +16,36 @@
    beschraenkt (_RISK_BAND_SECTION_ORDER), kein User-Input.
 #}
 {%- if not section.is_empty -%}
-<details class="sd-band"
-         data-test="risk-band-{{ section.band }}"
-         {% if section.default_open %}open{% endif %}>
-  <summary class="sd-band__summary">
-    <span class="sd-band__chev" aria-hidden="true">›</span>
-    <span class="sd-badge sd-badge--{{ section.band }}">{{ section.band | upper }}</span>
-    <span aria-hidden="true"></span>
-    <span class="sd-band__count"><b>{{ section.total_count }}</b>findings</span>
-  </summary>
-  <div class="sd-band__body"
-       id="risk-band-{{ section.band }}-body"
-       data-test="risk-band-body-{{ section.band }}"
-       hx-get="{{ url_for('server_detail.triage_band_fragment', server_id=server.id, band=section.band, page=1) }}"
-       {% if section.default_open %}hx-trigger="load"{% else %}hx-trigger="toggle from:closest details once"{% endif %}
-       hx-swap="innerHTML">
-    <div class="sd-skel-frame" data-test="risk-band-skel-{{ section.band }}">
-      <p class="sd-empty">Lade Findings …</p>
+{%- set _band_ackable = section.band != "pending" -%}
+<div {% if _band_ackable %}x-data="bulkAckBand({{ server.id }}, '{{ section.band }}', {{ section.total_count }})"{% endif %}>
+  <details class="sd-band"
+           data-test="risk-band-{{ section.band }}"
+           {% if section.default_open %}open{% endif %}>
+    <summary class="sd-band__summary">
+      <span class="sd-band__chev" aria-hidden="true">›</span>
+      <span class="sd-badge sd-badge--{{ section.band }}">{{ section.band | upper }}</span>
+      <span aria-hidden="true"></span>
+      {% if _band_ackable %}
+        <label class="sd-band__ackall"
+               data-test="band-ack-all-{{ section.band }}"
+               @click.prevent.stop="openModal()">
+          <input type="checkbox" tabindex="-1" aria-hidden="true">
+          <span>Acknowledge all</span>
+        </label>
+      {% endif %}
+      <span class="sd-band__count"><b>{{ section.total_count }}</b>findings</span>
+    </summary>
+    <div class="sd-band__body"
+         id="risk-band-{{ section.band }}-body"
+         data-test="risk-band-body-{{ section.band }}"
+         hx-get="{{ url_for('server_detail.triage_band_fragment', server_id=server.id, band=section.band, page=1) }}"
+         {% if section.default_open %}hx-trigger="load"{% else %}hx-trigger="toggle from:closest details once"{% endif %}
+         hx-swap="innerHTML">
+      <div class="sd-skel-frame" data-test="risk-band-skel-{{ section.band }}">
+        <p class="sd-empty">Lade Findings …</p>
+      </div>
     </div>
-  </div>
-</details>
+  </details>
+  {% if _band_ackable %}{% include "_partials/bulk_ack_band_modal.html" %}{% endif %}
+</div>
 {%- endif -%}
