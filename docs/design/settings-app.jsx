@@ -2,7 +2,8 @@
    Topbar (with Settings added to nav), left settings subnav, main panel slot, footer.
    Tweaks panel switches active subtab + a few state variants. */
 
-const { useState: saUseState, useMemo: saUseMemo } = React;
+const { useState: saUseState, useMemo: saUseMemo, useRef: saUseRef, useEffect: saUseEffect } = React;
+const { FLEET: SA_FLEET, heartbeat: saHeartbeat } = window.SECSCAN_DATA;
 
 const SA_TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "tab": "servers",
@@ -31,6 +32,67 @@ function SALogo({ className = 'topbar__logo' }) {
   );
 }
 
+function SAProfileMenu() {
+  const [open, setOpen] = saUseState(false);
+  const wrapRef = saUseRef(null);
+  saUseEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="topbar__profile">
+      <button
+        type="button"
+        className={`topbar__user ${open ? 'topbar__user--open' : ''}`}
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Profile menu"
+      >SK</button>
+      {open && (
+        <div className="profile-menu" role="menu">
+          <div className="profile-menu__user">
+            <div className="profile-menu__label">Angemeldet als</div>
+            <div className="profile-menu__name">sven.kroll</div>
+          </div>
+          <button type="button" className="profile-menu__item profile-menu__item--active" role="menuitem" aria-current="page">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03Z" />
+            </svg>
+            <span>Settings</span>
+          </button>
+          <button type="button" className="profile-menu__item" role="menuitem">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" aria-hidden="true">
+              <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+              <path d="M14 3v6h6" />
+              <path d="M8 13h8" />
+              <path d="M8 17h5" />
+            </svg>
+            <span>Audit</span>
+          </button>
+          <button type="button" className="profile-menu__item profile-menu__item--danger" role="menuitem">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" aria-hidden="true">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <path d="M16 17l5-5-5-5" />
+              <path d="M21 12H9" />
+            </svg>
+            <span>Logout</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SATopBar() {
   return (
     <header className="topbar">
@@ -45,17 +107,65 @@ function SATopBar() {
         <nav className="topbar__nav">
           <button className="topbar__navitem">Dashboard</button>
           <button className="topbar__navitem">Findings</button>
-          <button className="topbar__navitem topbar__navitem--active">Settings</button>
         </nav>
-        <div className="topbar__profile">
-          <button type="button" className="topbar__user" aria-label="Profile menu">SK</button>
-        </div>
+        <SAProfileMenu />
       </div>
     </header>
   );
 }
 
-// ── Settings subnav (left rail) ────────────────────────────────────────
+// ── Fleet sidebar (verbatim pattern from Findings / Dashboard shell) ───
+function SAHeartbeatStrip({ host, ticks = 30 }) {
+  const beats = saUseMemo(() => saHeartbeat(host, ticks), [host.host, ticks]);
+  return (
+    <div className="host__beat">
+      {beats.map((b, i) => (
+        <div key={i} className={`host__beat-tick beat--${b}`} />
+      ))}
+    </div>
+  );
+}
+
+function SAFleetSidebar() {
+  const visible = SA_FLEET.slice(0, 8);
+  return (
+    <aside className="sidebar" data-screen-label="Fleet sidebar">
+      <div className="sidebar__filter">
+        <input
+          className="sidebar__input"
+          placeholder="filter hosts                                                ( / )"
+          readOnly
+        />
+      </div>
+      <div className="sidebar__meta">
+        <span><b>{SA_FLEET.length}</b> hosts · <span style={{ color: 'var(--accent)' }}>fleet view</span></span>
+      </div>
+      <div className="sidebar__colhead">
+        <span></span>
+        <span>host</span>
+        <span>escalate</span>
+        <span>act</span>
+      </div>
+      <div className="sidebar__list">
+        {visible.map(h => (
+          <div key={h.host} className="host">
+            <div className="host__top">
+              <span className={`host__dot host__dot--${h.state}`} />
+              <div className="host__name">{h.host}</div>
+              <div className={`host__count ${h.critical ? 'host__count--crit' : 'host__count--zero'}`}>{h.critical || '—'}</div>
+              <div className={`host__count ${h.high ? '' : 'host__count--zero'}`}>{h.high || '—'}</div>
+            </div>
+            <div className="host__os">{h.os} · {h.kernel} · {h.arch}</div>
+            <SAHeartbeatStrip host={h} ticks={30} />
+            <div className="host__beat-axis"><span>-30d</span><span>today</span></div>
+          </div>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+// ── Settings tab nav (horizontal, top of the .main column) ─────────────
 const SA_NAV = [
   { id: 'servers',     label: 'Servers' },
   { id: 'tags',        label: 'Tags' },
@@ -66,24 +176,23 @@ const SA_NAV = [
   { id: 'about',       label: 'About' },
 ];
 
-function SASubnav({ tab, onSelect }) {
+function SATabs({ tab, onSelect }) {
   return (
-    <aside className="sidebar settings-nav" data-screen-label="Settings · subnav">
-      <div className="settings-nav__eyebrow">Settings</div>
-      <div className="settings-nav__list">
-        {SA_NAV.map(item => (
-          <button
-            key={item.id}
-            type="button"
-            className={`settings-nav__item ${tab === item.id ? 'settings-nav__item--active' : ''}`}
-            onClick={() => onSelect(item.id)}
-          >
-            <span>{item.label}</span>
-            {item.badge && <span className="settings-nav__badge">{item.badge}</span>}
-          </button>
-        ))}
-      </div>
-    </aside>
+    <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
+      {SA_NAV.map(item => (
+        <button
+          key={item.id}
+          type="button"
+          role="tab"
+          aria-selected={tab === item.id}
+          className={`settings-tabs__item ${tab === item.id ? 'settings-tabs__item--active' : ''}`}
+          onClick={() => onSelect(item.id)}
+        >
+          <span>{item.label}</span>
+          {item.badge && <span className="settings-tabs__badge">{item.badge}</span>}
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -129,10 +238,11 @@ function SAApp() {
   return (
     <>
       <div className="bg-grid" />
-      <div className="app app--settings">
+      <div className="app">
         <SATopBar />
-        <SASubnav tab={t.tab} onSelect={(id) => setTweak('tab', id)} />
+        <SAFleetSidebar />
         <main className="main" data-screen-label={`Settings · ${t.tab}`}>
+          <SATabs tab={t.tab} onSelect={(id) => setTweak('tab', id)} />
           <div className="settings">
             {/* Remount on tab change so each panel gets fresh state. */}
             <SAPanel key={t.tab + ':' + t.reviewerSubtab + ':' + t.tagsEmpty + ':' + t.groupsEmpty + ':' + t.masterKeyRevealed} tab={t.tab} t={t} />
