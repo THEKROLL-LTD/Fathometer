@@ -43,7 +43,7 @@ import structlog
 from flask import jsonify, request
 from flask_login import current_user, login_required
 from pydantic import ValidationError
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, insert, or_, select, update
 from werkzeug.wrappers import Response
 
 from app import limiter
@@ -59,7 +59,17 @@ from app.models import (
     ServerTag,
     Tag,
 )
-from app.schemas.bulk_request import BulkAckMatchCriterion, BulkAckRequest
+from app.schemas.bulk_request import (
+    BulkAckMatchCriterion,
+    BulkAckRequest,
+    BulkAckServerScope,
+)
+
+# Maximale Anzahl IDs in `metadata.finding_ids` (ADR-0044 §(4); Praezedenz
+# llm_worker.py). `metadata.count` traegt immer die volle Zahl.
+_AUDIT_FINDING_IDS_CAP = 50
+# Maximale Anzahl Beispiel-Findings in der Flavor-C-dry_run-Response.
+_FLAVOR_C_EXAMPLES_LIMIT = 5
 
 log = structlog.get_logger(__name__)
 
@@ -128,6 +138,84 @@ def _build_ids_query(finding_ids: list[int]) -> Any:
     return select(Finding).where(Finding.id.in_(finding_ids))
 
 
+def _build_server_scope_query(scope: BulkAckServerScope) -> Any:
+    """Baut die SELECT-Query fuer Flavor C (server-scoped Per-Band).
+
+    Wirkt ausschliesslich auf offene Findings genau dieses Servers und
+    Bands. **Kein** `.limit()` — der Scope ist die Begrenzung (ADR-0044
+    §Entscheidung (1)).
+    """
+    return select(Finding).where(
+        Finding.server_id == scope.server_id,
+        Finding.status == FindingStatus.OPEN,
+        Finding.risk_band == scope.risk_band,
+    )
+
+
+def _active_server_guard(sess: Any, server_id: int) -> Response | None:
+    """JSON-404-Guard fuer Flavor C: aktiver Server oder `server_not_found`.
+
+    Nachbau der HTML-Guard-Logik aus `server_detail._load_active_server_or_404`
+    (existiert, revoked_at IS NULL, retired_at IS NULL), aber als JSON-Antwort
+    statt `abort(404)` — dieser Endpoint ist ein JSON-Endpoint. Gibt `None`
+    zurueck wenn der Server aktiv ist, sonst die fertige Fehler-Antwort.
+    """
+    row = sess.execute(
+        select(Server.id).where(
+            Server.id == server_id,
+            Server.revoked_at.is_(None),
+            Server.retired_at.is_(None),
+        )
+    ).first()
+    if row is None:
+        return json_error(
+            404,
+            "server_not_found",
+            "Server existiert nicht oder ist revoked/retired",
+        )
+    return None
+
+
+def _insert_bulk_notes(
+    sess: Any,
+    finding_ids: list[int],
+    comment_text: str,
+    user_id_int: int | None,
+    now: datetime,
+) -> list[int]:
+    """Haengt `comment_text` als EINE Bulk-Insert-Operation an alle Findings.
+
+    Statt N-fach `sess.add` (ADR-0044 §(4)) — bei tausenden Findings sonst
+    tausende Einzel-Statements. Gibt die neu erzeugten Note-IDs zurueck.
+    """
+    if not finding_ids:
+        return []
+    rows = [
+        {
+            "finding_id": fid,
+            "author": "system-bulk-ack",
+            "author_user_id": user_id_int,
+            "text": comment_text,
+        }
+        for fid in finding_ids
+    ]
+    sess.execute(insert(FindingNote), rows)
+    sess.flush()
+    new_notes = (
+        sess.execute(
+            select(FindingNote.id).where(
+                FindingNote.finding_id.in_(finding_ids),
+                FindingNote.author == "system-bulk-ack",
+                FindingNote.text == comment_text,
+                FindingNote.created_at >= now,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(new_notes)
+
+
 def _ack_rate_limit() -> str:
     """30 Bulk-Acks pro Minute und IP — bewusst eng."""
     return "30/minute"
@@ -162,6 +250,10 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
         )
 
     sess = get_session()
+
+    # ---- Flavor C: server-scoped Per-Band (eigener Pfad, ADR-0044) ---------
+    if req.server_scope is not None:
+        return _handle_server_scope(sess, req, req.server_scope)
 
     # ---- Phase 1: Findings sammeln (gilt fuer dry_run und apply) -----------
     if req.finding_ids:
@@ -277,30 +369,10 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
     comment_text = req.clean_comment()
     note_ids: list[int] = []
     if comment_text is not None and open_ids:
-        for fid in open_ids:
-            note = FindingNote(
-                finding_id=fid,
-                author="system-bulk-ack",
-                author_user_id=user_id_int,
-                text=comment_text,
-            )
-            sess.add(note)
-        sess.flush()
-        new_notes = (
-            sess.execute(
-                select(FindingNote.id).where(
-                    FindingNote.finding_id.in_(open_ids),
-                    FindingNote.author == "system-bulk-ack",
-                    FindingNote.text == comment_text,
-                    FindingNote.created_at >= now,
-                )
-            )
-            .scalars()
-            .all()
-        )
-        note_ids = list(new_notes)
+        note_ids = _insert_bulk_notes(sess, open_ids, comment_text, user_id_int, now)
 
-    # EIN gemeinsamer Audit-Event mit allen IDs.
+    # EIN gemeinsamer Audit-Event. `finding_ids` ist auf die ersten 50 IDs
+    # gecappt (ADR-0044 §(4)); `count` traegt die volle Zahl.
     log_event(
         "finding.bulk_acknowledged",
         target_type="finding",
@@ -309,7 +381,7 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
         metadata={
             "count": len(open_ids),
             "server_count": len({f.server_id for f in findings if f.id in set(open_ids)}),
-            "finding_ids": open_ids,
+            "finding_ids": open_ids[:_AUDIT_FINDING_IDS_CAP],
             "skipped": skipped,
             "has_comment": comment_text is not None,
             "match": match_meta,
@@ -349,6 +421,139 @@ def _ok(body: dict[str, Any]) -> Response:
     resp = jsonify(body)
     resp.status_code = 200
     return resp
+
+
+def _handle_server_scope(sess: Any, req: BulkAckRequest, scope: BulkAckServerScope) -> Response:
+    """Flavor-C-Pfad: server-scoped Per-Band-Bulk-Ack (ADR-0044).
+
+    Resolved die Findings server-seitig ueber `(server_id, risk_band,
+    status=OPEN)`. dry_run liefert `count` + max. 5 `examples` + `server_scope`
+    (KEIN `finding_ids`-Array). Apply fuehrt ein direktes UPDATE ueber den
+    WHERE-Scope aus (keine ORM-Hydration) und liefert die betroffene Anzahl
+    aus `result.rowcount`.
+    """
+    guard = _active_server_guard(sess, scope.server_id)
+    if guard is not None:
+        return guard
+
+    actor = getattr(current_user, "username", "unknown")
+    scope_echo = {"server_id": scope.server_id, "risk_band": scope.risk_band}
+
+    # Single Source des WHERE-Scopes (server_id, status=OPEN, risk_band).
+    # Count, Beispiele und der Note-ID-Scope leiten sich davon ab; das Apply-
+    # UPDATE traegt denselben WHERE inline (klare SQL-Shape, kein Subquery).
+    scope_subq = _build_server_scope_query(scope).with_only_columns(Finding.id).subquery()
+
+    # ---- Phase 2a: dry_run -> echter COUNT + max. 5 Beispiele -------------
+    if req.dry_run:
+        count_stmt = select(func.count()).select_from(scope_subq)
+        count = int(sess.execute(count_stmt).scalar_one())
+
+        example_rows = sess.execute(
+            _build_server_scope_query(scope)
+            .with_only_columns(Finding.identifier_key, Finding.package_name)
+            .order_by(Finding.identifier_key.asc())
+            .limit(_FLAVOR_C_EXAMPLES_LIMIT)
+        ).all()
+        examples = [{"identifier_key": ident, "package_name": pkg} for ident, pkg in example_rows]
+
+        log.info(
+            "bulk_ack.dry_run",
+            count=count,
+            server_count=1 if count else 0,
+            scope_server_id=scope.server_id,
+            scope_risk_band=scope.risk_band,
+            actor=actor,
+        )
+        return _ok(
+            {
+                "dry_run": True,
+                "count": count,
+                "examples": examples,
+                "server_scope": scope_echo,
+            }
+        )
+
+    # ---- Phase 2b: Apply --------------------------------------------------
+    now = datetime.now(tz=UTC)
+    user_id_value = getattr(current_user, "id", None)
+    user_id_int: int | None = int(user_id_value) if user_id_value is not None else None
+
+    comment_text = req.clean_comment()
+
+    # IDs VOR dem UPDATE einsammeln (danach matcht der OPEN-Scope nicht mehr).
+    # Schmale Projektion, keine ORM-Hydration. Das Audit-Event traegt IMMER bis
+    # zu 50 betroffene `finding_ids` (TICKET-009 §52 / DoD 4/9), unabhaengig
+    # vom Kommentar.
+    #   - mit Kommentar: ALLE open-IDs (deterministisch sortiert) — wird fuer
+    #     den Notes-Bulk-Insert gebraucht; fuers Audit `[:50]`.
+    #   - ohne Kommentar: nur bis zu 50 IDs fuers Audit (deterministisch).
+    open_ids: list[int] = []
+    audit_finding_ids: list[int] = []
+    id_scope = _build_server_scope_query(scope).with_only_columns(Finding.id).order_by(Finding.id)
+    if comment_text is not None:
+        open_ids = list(sess.execute(id_scope).scalars().all())
+        audit_finding_ids = open_ids[:_AUDIT_FINDING_IDS_CAP]
+    else:
+        audit_finding_ids = list(
+            sess.execute(id_scope.limit(_AUDIT_FINDING_IDS_CAP)).scalars().all()
+        )
+
+    result = sess.execute(
+        update(Finding)
+        .where(
+            Finding.server_id == scope.server_id,
+            Finding.status == FindingStatus.OPEN,
+            Finding.risk_band == scope.risk_band,
+        )
+        .values(
+            status=FindingStatus.ACKNOWLEDGED,
+            acknowledged_at=now,
+            acknowledged_by=user_id_int,
+        )
+    )
+    count = int(result.rowcount or 0)
+
+    note_ids: list[int] = []
+    if comment_text is not None and open_ids:
+        note_ids = _insert_bulk_notes(sess, open_ids, comment_text, user_id_int, now)
+
+    log_event(
+        "finding.bulk_acknowledged",
+        target_type="finding",
+        target_id=None,
+        comment=comment_text,
+        metadata={
+            "count": count,
+            "server_count": 1 if count else 0,
+            "finding_ids": audit_finding_ids,
+            "skipped": 0,
+            "has_comment": comment_text is not None,
+            "note_ids": note_ids,
+            "server_scope": scope_echo,
+        },
+        session=sess,
+    )
+    sess.commit()
+
+    log.info(
+        "bulk_ack.applied",
+        count=count,
+        skipped=0,
+        server_count=1 if count else 0,
+        scope_server_id=scope.server_id,
+        scope_risk_band=scope.risk_band,
+        actor=actor,
+    )
+
+    return _ok(
+        {
+            "dry_run": False,
+            "applied": True,
+            "count": count,
+            "server_scope": scope_echo,
+        }
+    )
 
 
 # Aliases / type hints to keep ruff happy about the unused-ish imports.

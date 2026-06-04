@@ -1,12 +1,15 @@
 """Pydantic-Schemas fuer `POST /api/findings/bulk-acknowledge`.
 
-ARCHITECTURE.md §6 und Block F-Plan: zwei Flavors.
+ARCHITECTURE.md §6 und Block F-Plan: drei Flavors.
 
 - **Flavor A** — `finding_ids: list[int]` (explizite Auswahl, z.B. aus
   Checkbox-Selection im Server-Detail-View).
 - **Flavor B** — `match: BulkAckMatchCriterion` mit `cve_id` und/oder
   `package_name`, optionalem Tag- und Status-Filter (genutzt von der
   globalen Suche fuer "Alle Vorkommen abhaken").
+- **Flavor C** — `server_scope: BulkAckServerScope` mit `server_id` und
+  `risk_band` (server-scoped Per-Band-Bulk-Ack, ADR-0044). Der Server
+  resolved die Findings selbst, kein ID-Transport durch den Client.
 
 `dry_run` ist Pflicht-Bool mit Default `True` — der Caller muss explizit
 `false` setzen um die Aktion wirklich auszufuehren.
@@ -26,7 +29,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.forms import TAG_NAME_REGEX
 
@@ -47,6 +50,15 @@ _MAX_FINDING_IDS = 10_000
 
 
 BulkAckStatusFilter = Literal["open", "acknowledged", "resolved"]
+
+# Single Source der bulk-abhakbaren Risk-Bands (ADR-0044 §Entscheidung (1)).
+# `pending`/`unknown` fehlen bewusst — ein Bulk-Ack auf nicht bewertete
+# Findings waere ein Urteil ohne Grundlage (ADR-0044 §Kontext). Diese Konstante
+# wird von Tests und Template als Whitelist konsumiert; das `Literal` in
+# `BulkAckServerScope.risk_band` muss literal bleiben (Pydantic kann es nicht
+# aus der Konstante ableiten) und ist daher eine getrennte, deckungsgleiche
+# Aufzaehlung.
+BULK_ACK_BANDS: tuple[str, ...] = ("escalate", "act", "mitigate", "monitor", "noise")
 
 
 class BulkAckMatchCriterion(BaseModel):
@@ -82,33 +94,60 @@ class BulkAckMatchCriterion(BaseModel):
         return self
 
 
+class BulkAckServerScope(BaseModel):
+    """Scope-Kriterium fuer Flavor C (server-scoped Per-Band-Bulk-Ack).
+
+    Der Endpoint resolved die betroffenen Findings server-seitig anhand von
+    `(server_id, risk_band)` — es wird **keine** ID-Liste durch den Client
+    transportiert (ADR-0044 §Entscheidung (1)). `risk_band` ist auf die
+    Whitelist :data:`BULK_ACK_BANDS` beschraenkt; `pending`/`unknown`
+    scheitern damit bereits an Pydantic (422).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    server_id: int
+    risk_band: Literal["escalate", "act", "mitigate", "monitor", "noise"]
+
+    @field_validator("server_id")
+    @classmethod
+    def _server_id_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("server_id muss eine positive Ganzzahl sein")
+        return value
+
+
 class BulkAckRequest(BaseModel):
     """Request-Body fuer `POST /api/findings/bulk-acknowledge`.
 
-    Block O (ADR-0022) erweitert das Schema um `risk_band_filter`. Wenn
-    gesetzt, filtert der Endpoint **server-side** hart auf den genannten
-    Band — eingeschleuste IDs anderer Baender werden gedropped und in
-    `skipped_non_noise_ids` reportet. Aktuell nur `"noise"` zugelassen
-    (Bulk-Ack-Noise-Workflow, siehe ADR-0022 §UI-Redesign).
+    Drei Flavors, von denen genau **einer** befuellt sein muss:
+
+    - **Flavor A** — `finding_ids` (explizite Auswahl).
+    - **Flavor B** — `match` (Flotten-Match per CVE/Package).
+    - **Flavor C** — `server_scope` (server-scoped Per-Band, ADR-0044).
     """
 
     model_config = ConfigDict(extra="ignore")
 
     finding_ids: list[int] | None = None
     match: BulkAckMatchCriterion | None = None
+    server_scope: BulkAckServerScope | None = None
     dry_run: bool = True
     comment: str | None = Field(default=None, max_length=_COMMENT_MAX_LEN)
+    # deprecated, entfaellt mit ADR-0044 Etappe 3 (zusammen mit bulk_ack_noise.js)
     risk_band_filter: Literal["noise"] | None = None
 
     @model_validator(mode="after")
-    def _xor_finding_ids_and_match(self) -> BulkAckRequest:
-        """Entweder `finding_ids` ODER `match` — nicht beide, nicht keiner."""
+    def _exactly_one_flavor(self) -> BulkAckRequest:
+        """Genau einer von `finding_ids`/`match`/`server_scope` (XOR)."""
         has_ids = self.finding_ids is not None and len(self.finding_ids) > 0
         has_match = self.match is not None
-        if has_ids and has_match:
-            raise ValueError("finding_ids und match duerfen nicht zusammen gesetzt sein")
-        if not has_ids and not has_match:
-            raise ValueError("Entweder finding_ids oder match ist Pflicht")
+        has_scope = self.server_scope is not None
+        flavor_count = sum((has_ids, has_match, has_scope))
+        if flavor_count > 1:
+            raise ValueError("genau einer von finding_ids/match/server_scope darf gesetzt sein")
+        if flavor_count == 0:
+            raise ValueError("einer von finding_ids/match/server_scope ist Pflicht")
         if has_ids:
             assert self.finding_ids is not None
             if len(self.finding_ids) > _MAX_FINDING_IDS:
@@ -130,7 +169,9 @@ class BulkAckRequest(BaseModel):
 
 
 __all__ = [
+    "BULK_ACK_BANDS",
     "BulkAckMatchCriterion",
     "BulkAckRequest",
+    "BulkAckServerScope",
     "BulkAckStatusFilter",
 ]
