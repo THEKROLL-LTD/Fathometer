@@ -52,7 +52,7 @@ def test_settings_index_follow_redirects_renders_servers_page(
     body = resp.get_data(as_text=True)
     # Server-Verwaltung enthaelt die Settings-Nav mit "Server-Verwaltung"-
     # Eintrag und einen Marker fuer den aktiven Tab.
-    assert "Server-Verwaltung" in body
+    assert "Server management" in body
     # Settings-Nav muss da sein.
     assert 'id="settings-nav"' in body or "settings-nav" in body
 
@@ -69,4 +69,4 @@ def test_settings_index_without_trailing_slash_also_redirects(
     resp = client.get("/settings", follow_redirects=True)
     assert resp.status_code == 200, resp.get_data(as_text=True)[:400]
     body = resp.get_data(as_text=True)
-    assert "Server-Verwaltung" in body
+    assert "Server management" in body

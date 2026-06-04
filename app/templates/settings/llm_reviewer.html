@@ -28,8 +28,8 @@
   <header>
     <h1 class="text-2xl font-semibold">LLM Risk Reviewer</h1>
     <p class="opacity-70 text-sm mt-1">
-      Asynchroner LLM-Worker fuer Application-Grouping und Risiko-Bewertung
-      (ADR-0023). Wechsel des Modes erfordert die Master-Key-Bestaetigung.
+      Asynchronous LLM worker for application grouping and risk assessment
+      (ADR-0023). Changing the mode requires master key confirmation.
     </p>
   </header>
 
@@ -67,11 +67,11 @@
         <div>
           <h2 class="card-title">Mode</h2>
           <p class="text-sm opacity-70 mt-1">
-            Aktueller Mode:
+            Current mode:
             <strong class="font-mono ml-1" data-test="llm-current-mode">{{ current_mode }}</strong>
           </p>
           <p class="text-xs opacity-70 mt-1">
-            Aktives Modell:
+            Active model:
             <code class="font-mono ml-1" data-test="llm-active-model">{{ active_model or "—" }}</code>
           </p>
         </div>
@@ -79,7 +79,7 @@
                 class="btn btn-warning btn-sm"
                 @click="modeOpen = true; privacyAcked = false"
                 data-test="llm-mode-change-button">
-          Mode aendern...
+          Change mode...
         </button>
       </div>
     </div>
@@ -93,23 +93,23 @@
     <div class="card-body">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 class="card-title">Worker-Concurrency</h2>
+          <h2 class="card-title">Worker concurrency</h2>
           <p class="text-sm opacity-70 mt-1">
-            Parallele LLM-Jobs im Worker:
+            Parallel LLM jobs in the worker:
             <strong class="font-mono ml-1" data-test="llm-current-concurrency">{{ current_concurrency }}</strong>
             <span class="opacity-60 text-xs">(1..200)</span>
           </p>
           <p class="text-xs opacity-60 mt-1">
-            Hot-Reload binnen 30 s nach AEnderung. Pod-Restart nicht noetig.
-            Live-Werte (<code class="font-mono">in_flight</code>, Durchsatz) im
-            Container-Log via <code class="font-mono">llm_worker.status</code>.
+            Hot reload within 30 s of the change. No pod restart needed.
+            Live values (<code class="font-mono">in_flight</code>, throughput) in the
+            container log via <code class="font-mono">llm_worker.status</code>.
           </p>
         </div>
         <button type="button"
                 class="btn btn-warning btn-sm"
                 @click="concurrencyOpen = true"
                 data-test="llm-concurrency-change-button">
-          Concurrency aendern...
+          Change concurrency...
         </button>
       </div>
     </div>
@@ -118,7 +118,7 @@
   {# Queue-Stats. #}
   <div class="card bg-base-200 shadow-sm" data-test="llm-queue-stats-card">
     <div class="card-body">
-      <h2 class="card-title">Job-Queue</h2>
+      <h2 class="card-title">Job queue</h2>
       <dl class="grid grid-cols-4 gap-2 text-sm mt-2">
         <div class="bg-base-300/40 rounded p-3">
           <dt class="text-[10px] uppercase tracking-wider opacity-65">queued</dt>
@@ -142,10 +142,10 @@
         <div class="alert alert-info text-sm mt-3" role="status"
              data-test="observation-backlog-info">
           <span>
-            Observation-Backlog:
+            Observation backlog:
             <strong class="font-mono">{{ would_call_count }}</strong>
             {% if would_call_count == 1 %}job{% else %}jobs{% endif %}
-            mit <code class="font-mono">would_call=true</code>.
+            with <code class="font-mono">would_call=true</code>.
           </span>
         </div>
       {% endif %}
@@ -156,7 +156,7 @@
                   class="btn btn-warning btn-sm"
                   @click="requeueOpen = true"
                   data-test="llm-requeue-button">
-            Re-queue Observation-Backlog ({{ would_call_count }} Jobs)
+            Re-queue observation backlog ({{ would_call_count }} jobs)
           </button>
         </div>
       {% endif %}
@@ -166,11 +166,11 @@
   {# Library-Stats. #}
   <div class="card bg-base-200 shadow-sm" data-test="llm-library-stats-card">
     <div class="card-body">
-      <h2 class="card-title">Application-Group-Library</h2>
+      <h2 class="card-title">Application group library</h2>
       <p class="text-sm opacity-70">
         Total:
         <strong class="font-mono" data-test="groups-total">{{ groups_total }}</strong>
-        {% if groups_total == 1 %}Group{% else %}Groups{% endif %}.
+        {% if groups_total == 1 %}group{% else %}groups{% endif %}.
       </p>
       {% if top_groups %}
         {# Block T (ADR-0028): Risk-Band ist jetzt per-(group, server) und
@@ -184,8 +184,8 @@
             <thead>
               <tr>
                 <th class="text-[10px] uppercase tracking-wider opacity-65">Label</th>
-                <th class="text-[10px] uppercase tracking-wider opacity-65">Group-Kind</th>
-                <th class="text-[10px] uppercase tracking-wider opacity-65">Zuletzt benutzt</th>
+                <th class="text-[10px] uppercase tracking-wider opacity-65">Group kind</th>
+                <th class="text-[10px] uppercase tracking-wider opacity-65">Last used</th>
               </tr>
             </thead>
             <tbody>
@@ -212,7 +212,7 @@
           </table>
         </div>
       {% else %}
-        <p class="text-xs opacity-50 italic mt-2">Noch keine Groups in der Library.</p>
+        <p class="text-xs opacity-50 italic mt-2">No groups in the library yet.</p>
       {% endif %}
     </div>
   </div>
@@ -220,14 +220,14 @@
   {# Cache-Stats. #}
   <div class="card bg-base-200 shadow-sm" data-test="llm-cache-stats-card">
     <div class="card-body">
-      <h2 class="card-title">Risk-Cache</h2>
+      <h2 class="card-title">Risk cache</h2>
       <p class="text-sm opacity-70">
-        Eintraege:
+        Entries:
         <strong class="font-mono" data-test="cache-total">{{ cache_total }}</strong>
       </p>
       <p class="text-xs opacity-50">
-        Hit-Rate (7d): <span class="font-mono">N/A</span>
-        <span class="opacity-60">— Audit-basierte Cache-Trefferquote wird in einem spaeteren Block ergaenzt.</span>
+        Hit rate (7d): <span class="font-mono">N/A</span>
+        <span class="opacity-60">— audit-based cache hit rate will be added in a later block.</span>
       </p>
     </div>
   </div>
@@ -235,18 +235,18 @@
   {# Token-Budget. #}
   <div class="card bg-base-200 shadow-sm" data-test="llm-token-budget-card">
     <div class="card-body">
-      <h2 class="card-title">Token-Budget</h2>
+      <h2 class="card-title">Token budget</h2>
       <dl class="text-sm space-y-1 mt-2">
         <div class="flex justify-between">
-          <dt class="opacity-60">verbraucht heute</dt>
+          <dt class="opacity-60">used today</dt>
           <dd class="font-mono" data-test="budget-used">{{ token_budget.used_today }}</dd>
         </div>
         <div class="flex justify-between">
-          <dt class="opacity-60">Tages-Limit</dt>
+          <dt class="opacity-60">daily limit</dt>
           <dd class="font-mono" data-test="budget-limit">{{ token_budget.daily_limit }}</dd>
         </div>
         <div class="flex justify-between">
-          <dt class="opacity-60">Reset</dt>
+          <dt class="opacity-60">reset</dt>
           <dd class="font-mono text-xs" data-test="budget-resets-at">
             {% if token_budget.resets_at %}
               {{ token_budget.resets_at.strftime('%Y-%m-%d %H:%M UTC') }}
@@ -270,7 +270,7 @@
           <span class="badge badge-warning badge-sm" data-test="worker-status-stale">stale</span>
         {% endif %}
         <span class="text-sm opacity-70">
-          letzter Heartbeat:
+          last heartbeat:
           <strong class="font-mono ml-1" data-test="worker-heartbeat">
             {% if heartbeat_at %}
               {{ heartbeat_at | humanize_delta }}
@@ -296,7 +296,7 @@
     <div class="modal-box max-w-xl"
          x-data="{ newMode: '{{ current_mode }}' }">
       <h3 id="llm-mode-modal-title" class="text-lg font-semibold">
-        LLM-Mode aendern
+        Change LLM mode
       </h3>
       <form method="post"
             action="{{ url_for('settings.llm_reviewer_change_mode') }}"
@@ -304,7 +304,7 @@
         {{ mode_form.csrf_token }}
 
         <label class="form-control">
-          <span class="label-text text-sm">Neuer Mode</span>
+          <span class="label-text text-sm">New mode</span>
           <select name="new_mode"
                   class="select select-bordered select-sm"
                   x-model="newMode"
@@ -324,13 +324,12 @@
              role="alert"
              data-test="llm-privacy-notice">
           <div>
-            <p class="font-semibold">DSGVO-Hinweis</p>
+            <p class="font-semibold">GDPR notice</p>
             <p class="text-xs mt-1">
-              Im <code>live</code>-Mode werden Snapshot-Daten (Listeners,
-              Services, Paketnamen, Pfade) an den konfigurierten LLM-Provider
-              gesendet. Stelle sicher, dass der Provider mit deinen
-              Datenschutz-Anforderungen vereinbar ist (z.B. EU-Hosting oder
-              lokales Modell).
+              In <code>live</code> mode, snapshot data (listeners, services,
+              package names, paths) is sent to the configured LLM provider.
+              Make sure the provider is compatible with your data protection
+              requirements (e.g. EU hosting or a local model).
             </p>
             <label class="label cursor-pointer justify-start gap-2 mt-2">
               <input type="checkbox"
@@ -338,8 +337,7 @@
                      x-model="privacyAcked"
                      data-test="llm-privacy-checkbox">
               <span class="label-text text-xs">
-                Ich habe den DSGVO-Hinweis verstanden und uebernehme die
-                Verantwortung.
+                I have understood the GDPR notice and accept responsibility.
               </span>
             </label>
           </div>
@@ -361,13 +359,13 @@
           <button type="button"
                   class="btn btn-ghost btn-sm"
                   @click="modeOpen = false">
-            Abbrechen
+            Cancel
           </button>
           <button type="submit"
                   class="btn btn-warning btn-sm"
                   :disabled="newMode === 'live' && !privacyAcked"
                   data-test="llm-mode-submit">
-            Mode setzen
+            Set mode
           </button>
         </div>
       </form>
@@ -387,13 +385,13 @@
           data-test="llm-requeue-modal">
     <div class="modal-box max-w-lg">
       <h3 id="llm-requeue-modal-title" class="text-lg font-semibold">
-        Observation-Backlog wieder einreihen
+        Re-queue observation backlog
       </h3>
       <p class="text-sm opacity-70 mt-2">
-        Setzt alle <code>done</code>-Jobs mit
-        <code class="font-mono">result.would_call=true</code> zurueck auf
-        <code>queued</code>. Worker arbeitet sie ab — Token-Verbrauch
-        entsteht beim naechsten Pickup.
+        Resets all <code>done</code> jobs with
+        <code class="font-mono">result.would_call=true</code> back to
+        <code>queued</code>. The worker processes them — token usage occurs
+        at the next pickup.
       </p>
       <form method="post"
             action="{{ url_for('settings.llm_reviewer_requeue_backlog') }}"
@@ -414,12 +412,12 @@
           <button type="button"
                   class="btn btn-ghost btn-sm"
                   @click="requeueOpen = false">
-            Abbrechen
+            Cancel
           </button>
           <button type="submit"
                   class="btn btn-warning btn-sm"
                   data-test="llm-requeue-submit">
-            Re-queue ausfuehren
+            Run re-queue
           </button>
         </div>
       </form>
@@ -440,13 +438,13 @@
     <div class="modal-box max-w-lg"
          x-data="{ newConcurrency: {{ current_concurrency }} }">
       <h3 id="llm-concurrency-modal-title" class="text-lg font-semibold">
-        Worker-Concurrency aendern
+        Change worker concurrency
       </h3>
       <p class="text-sm opacity-70 mt-2">
-        Anzahl gleichzeitig laufender LLM-Jobs im
+        Number of concurrently running LLM jobs in
         <code class="font-mono">secscan-llm-worker</code>. Default
-        <strong>1</strong>, Maximum <strong>200</strong>. Empfehlung: in
-        5er-/10er-Schritten hochregeln und das Container-Log beobachten.
+        <strong>1</strong>, maximum <strong>200</strong>. Recommendation:
+        ramp up in steps of 5 or 10 and watch the container log.
       </p>
       <form method="post"
             action="{{ url_for('settings.llm_reviewer_change_concurrency') }}"
@@ -455,7 +453,7 @@
 
         <label class="form-control">
           <span class="label-text text-sm">
-            Neuer Wert: <strong class="font-mono ml-1" x-text="newConcurrency"></strong>
+            New value: <strong class="font-mono ml-1" x-text="newConcurrency"></strong>
           </span>
           <input type="range"
                  name="concurrency"
@@ -484,12 +482,12 @@
           <button type="button"
                   class="btn btn-ghost btn-sm"
                   @click="concurrencyOpen = false">
-            Abbrechen
+            Cancel
           </button>
           <button type="submit"
                   class="btn btn-warning btn-sm"
                   data-test="llm-concurrency-submit">
-            Concurrency setzen
+            Set concurrency
           </button>
         </div>
       </form>

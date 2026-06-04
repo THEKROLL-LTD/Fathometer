@@ -32,15 +32,15 @@
           <button type="submit"
                   class="badge badge-outline gap-1 cursor-pointer hover:badge-error font-mono"
                   style="border-color: {{ link.tag.color }}; color: {{ link.tag.color }};"
-                  title="Tag '{{ link.tag.name }}' entfernen"
-                  aria-label="Tag {{ link.tag.name }} entfernen">
+                  title="Remove tag '{{ link.tag.name }}'"
+                  aria-label="Remove tag {{ link.tag.name }}">
             <span>{{ link.tag.name }}</span>
             <span aria-hidden="true" class="font-bold">×</span>
           </button>
         </form>
       {% endfor %}
     {% else %}
-      <span class="text-xs opacity-60">Keine Tags vergeben.</span>
+      <span class="text-xs opacity-60">No tags assigned.</span>
     {% endif %}
   </div>
 
@@ -59,10 +59,10 @@
     <input type="text"
            name="tag_name"
            list="available-tag-options"
-           placeholder="Tag hinzufuegen…"
+           placeholder="Add tag…"
            autocomplete="off"
            class="input input-sm input-bordered flex-1"
-           aria-label="Tag-Name eingeben oder auswaehlen" />
+           aria-label="Enter or select tag name" />
     <datalist id="available-tag-options">
       {% for tag in available_tags %}
         {% if tag.id not in assigned_ids %}
@@ -70,6 +70,6 @@
         {% endif %}
       {% endfor %}
     </datalist>
-    <button type="submit" class="btn btn-sm btn-primary">Hinzufuegen</button>
+    <button type="submit" class="btn btn-sm btn-primary">Add</button>
   </form>
 </div>

@@ -32,7 +32,7 @@
 #}
 {% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
 
-{% block title %}Einstellungen · {{ server.name }} · secscan{% endblock %}
+{% block title %}Settings · {{ server.name }} · secscan{% endblock %}
 
 {% block detail_pane %}
 <div class="server-detail" data-test="server-settings-root">
@@ -44,12 +44,12 @@
        hx-get="{{ url_for('server_detail.show', server_id=server.id) }}"
        hx-target="#detail-pane"
        hx-push-url="true"
-       aria-label="Zurück zur Server-Detail-Ansicht">
+       aria-label="Back to server detail view">
       <span class="sd-back__arrow" aria-hidden="true">&#x2190;</span>
-      <span>Zurück</span>
+      <span>Back</span>
     </a>
     <h1 class="sd-settings-title">
-      Einstellungen · <b>{{ server.name }}</b>
+      Settings · <b>{{ server.name }}</b>
     </h1>
     <span aria-hidden="true"></span>
   </div>
@@ -72,7 +72,7 @@
               <button type="submit"
                       form="tag-remove-{{ tag.id }}"
                       class="sd-tag__x"
-                      aria-label="Tag #{{ tag.name }} entfernen">&#x00D7;</button>
+                      aria-label="Remove tag #{{ tag.name }}">&#x00D7;</button>
             </span>
           {% endfor %}
         </div>
@@ -81,9 +81,9 @@
           <select class="sd-select"
                   name="tag_name"
                   form="tag-add-form"
-                  aria-label="Tag wählen"
+                  aria-label="Choose tag"
                   data-test="tag-add-select">
-            <option value="">+ Tag wählen…</option>
+            <option value="">+ Choose tag…</option>
             {% for tag in available_tags %}
               {% if tag not in current_tags %}
                 <option value="{{ tag.name }}">#{{ tag.name }}</option>
@@ -93,7 +93,7 @@
           <button type="submit"
                   form="tag-add-form"
                   class="sd-add-btn"
-                  data-test="tag-add-submit">Hinzufügen</button>
+                  data-test="tag-add-submit">Add</button>
         </div>
 
         <div class="sd-inline-create">
@@ -103,21 +103,21 @@
                  form="tag-create-form"
                  maxlength="32"
                  pattern="^[a-z0-9][a-z0-9._-]{0,31}$"
-                 placeholder="Neuen Tag anlegen…"
-                 aria-label="Neuen Tag-Namen eingeben"
+                 placeholder="Create new tag…"
+                 aria-label="Enter new tag name"
                  data-test="tag-inline-create-input">
           <button type="submit"
                   form="tag-create-form"
                   class="sd-add-btn"
-                  data-test="tag-inline-create-submit">+ Anlegen</button>
+                  data-test="tag-inline-create-submit">+ Create</button>
         </div>
-        <p class="sd-settings-section__hint">Tags helfen beim Filtern in der Server-Liste. Neue Tags entstehen direkt hier und werden diesem Server zugewiesen.</p>
+        <p class="sd-settings-section__hint">Tags help with filtering in the server list. New tags are created right here and assigned to this server.</p>
       </section>
 
       {# ── Gruppe ── #}
       <section class="sd-settings-section" data-test="settings-section-group">
-        <h2 class="sd-settings-section__title">Gruppe</h2>
-        {{ settings_form.group_id(class="sd-select", **{"data-test": "settings-group-select", "aria-label": "Server-Gruppe wählen"}) }}
+        <h2 class="sd-settings-section__title">Group</h2>
+        {{ settings_form.group_id(class="sd-select", **{"data-test": "settings-group-select", "aria-label": "Choose server group"}) }}
 
         <div class="sd-inline-create">
           <input class="sd-input"
@@ -126,31 +126,31 @@
                  form="group-create-form"
                  maxlength="64"
                  pattern="^[A-Za-z0-9 _.-]+$"
-                 placeholder="Neue Gruppe anlegen…"
-                 aria-label="Neuen Gruppen-Namen eingeben"
+                 placeholder="Create new group…"
+                 aria-label="Enter new group name"
                  data-test="group-inline-create-input">
           <button type="submit"
                   form="group-create-form"
                   class="sd-add-btn"
-                  data-test="group-inline-create-submit">+ Neue Gruppe anlegen</button>
+                  data-test="group-inline-create-submit">+ Create new group</button>
         </div>
-        <p class="sd-settings-section__hint">Gruppen helfen beim Bündeln von Servern für Bulk-Aktionen. Eine neue Gruppe entsteht direkt hier und wird diesem Server zugewiesen.</p>
+        <p class="sd-settings-section__hint">Groups help with bundling servers for bulk actions. A new group is created right here and assigned to this server.</p>
       </section>
 
       {# ── Scan-Intervall ── #}
       <section class="sd-settings-section" data-test="settings-section-interval">
-        <h2 class="sd-settings-section__title">Scan-Intervall</h2>
+        <h2 class="sd-settings-section__title">Scan interval</h2>
         <div class="sd-number-wrap">
-          {{ settings_form.scan_interval_h(class="sd-input", type="number", min="1", max="168", **{"data-test": "settings-interval-input", "aria-label": "Scan-Intervall in Stunden"}) }}
-          <span class="sd-number-wrap__suffix">Stunden</span>
+          {{ settings_form.scan_interval_h(class="sd-input", type="number", min="1", max="168", **{"data-test": "settings-interval-input", "aria-label": "Scan interval in hours"}) }}
+          <span class="sd-number-wrap__suffix">hours</span>
         </div>
-        <p class="sd-settings-section__hint">Wird vom Agent beim Install gesetzt. Erwartet zwischen 1 und 168 Stunden.</p>
+        <p class="sd-settings-section__hint">Set by the agent at install time. Expected between 1 and 168 hours.</p>
       </section>
 
     </div>
 
     <div class="sd-settings-footer">
-      <button type="submit" class="sd-save" data-test="settings-save-button">Speichern</button>
+      <button type="submit" class="sd-save" data-test="settings-save-button">Save</button>
     </div>
   </form>
 

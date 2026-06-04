@@ -133,7 +133,7 @@ def test_empty_state_no_table(csrf_app: Flask) -> None:
     html = _render(csrf_app, [])
     assert 'data-test="groups-empty"' in html
     assert 'data-test="groups-table"' not in html
-    assert "Noch keine Gruppen" in html
+    assert "No groups yet" in html
 
 
 # ===========================================================================
@@ -150,7 +150,7 @@ def test_no_create_form(csrf_app: Flask) -> None:
         list_url = url_for("settings.groups_list")
     assert f'action="{list_url}"' not in html
     # Hint-Block lenkt auf den Inline-Create-Pfad im Server-Detail-Settings.
-    assert "im Server-Detail-Settings" in html
+    assert "in the server detail settings" in html
 
 
 # ===========================================================================

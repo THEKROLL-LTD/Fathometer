@@ -70,7 +70,7 @@ def _two_tags() -> list[_FakeTag]:
 def test_no_create_form_hint_present(csrf_app: Flask) -> None:
     html = _render(csrf_app, _two_tags())
     # Hint lenkt auf den Inline-Create-Pfad im Server-Detail-Settings.
-    assert "Tags entstehen, indem du im Server-Detail-Settings" in html
+    assert "Tags are created by assigning a new tag in the server detail settings" in html
     # Kein Create-Form: weder "Anlegen"-Text noch eine Create-Section-Ueberschrift.
     assert "Anlegen" not in html
     assert "Neuen Tag anlegen" not in html
@@ -124,4 +124,4 @@ def test_empty_state_no_table(csrf_app: Flask) -> None:
     html = _render(csrf_app, [])
     assert 'data-test="tags-empty"' in html
     assert 'data-test="tags-table"' not in html
-    assert "Noch keine Tags" in html
+    assert "No tags yet" in html

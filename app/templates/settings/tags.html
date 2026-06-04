@@ -28,11 +28,11 @@
   <header class="sd-manage-head">
     <h1 class="sd-settings-section__title">Tags</h1>
     <p class="sd-settings-section__hint">
-      Tags gruppieren Server für Filter und Dashboard-Übersichten. Hier
-      verwaltest du Farben, Namen und Löschung.
+      Tags group servers for filters and dashboard overviews. Manage colors,
+      names and deletion here.
     </p>
     <p class="sd-settings-section__hint">
-      Tags entstehen, indem du im Server-Detail-Settings einen neuen Tag zuweist.
+      Tags are created by assigning a new tag in the server detail settings.
     </p>
   </header>
 
@@ -40,9 +40,9 @@
     <table class="sd-manage-table" data-test="tags-table">
       <thead>
         <tr>
-          <th>Farbe</th>
+          <th>Color</th>
           <th>Name</th>
-          <th>Aktion</th>
+          <th>Action</th>
         </tr>
       </thead>
       <tbody>
@@ -58,11 +58,11 @@
                        name="color"
                        value="{{ tag.color }}"
                        class="sd-input sd-color-input"
-                       aria-label="Farbe von Tag {{ tag.name }}"
+                       aria-label="Color of tag {{ tag.name }}"
                        data-test="tag-color-input-{{ tag.id }}">
                 <button type="submit"
                         class="sd-add-btn"
-                        data-test="tag-color-submit-{{ tag.id }}">Speichern</button>
+                        data-test="tag-color-submit-{{ tag.id }}">Save</button>
               </form>
             </td>
             <td>
@@ -79,24 +79,24 @@
                        value="{{ tag.name }}"
                        maxlength="32"
                        pattern="^[a-z0-9][a-z0-9._-]{0,31}$"
-                       title="a-z, 0-9, '.', '_', '-' (Start mit Buchstabe/Ziffer, max 32 Zeichen)"
-                       aria-label="Tag {{ tag.name }} umbenennen"
+                       title="a-z, 0-9, '.', '_', '-' (start with letter/digit, max 32 characters)"
+                       aria-label="Rename tag {{ tag.name }}"
                        data-test="tag-rename-input-{{ tag.id }}">
                 <button type="submit"
                         class="sd-add-btn"
-                        data-test="tag-rename-submit-{{ tag.id }}">Umbenennen</button>
+                        data-test="tag-rename-submit-{{ tag.id }}">Rename</button>
               </form>
             </td>
             <td>
               <form method="post"
                     action="{{ url_for('settings.tags_delete', tag_id=tag.id) }}"
                     x-data
-                    @submit="if (!confirm('Tag wirklich löschen?')) $event.preventDefault();">
+                    @submit="if (!confirm('Really delete this tag?')) $event.preventDefault();">
                 {{ delete_form.csrf_token }}
                 <button type="submit"
                         class="sd-danger-btn"
                         data-test="tag-delete-{{ tag.id }}"
-                        aria-label="Tag {{ tag.name }} löschen">Löschen</button>
+                        aria-label="Delete tag {{ tag.name }}">Delete</button>
               </form>
             </td>
           </tr>
@@ -105,8 +105,8 @@
     </table>
   {% else %}
     <p class="sd-manage-empty" data-test="tags-empty">
-      Noch keine Tags. Lege deinen ersten Tag im Server-Detail-Settings an,
-      indem du einem Server einen Tag zuweist.
+      No tags yet. Create your first tag in the server detail settings by
+      assigning a tag to a server.
     </p>
   {% endif %}
 </div>

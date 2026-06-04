@@ -15,7 +15,7 @@
 #}
 <nav id="settings-nav"
      class="settings-nav w-56 shrink-0 border-r border-base-300 bg-base-100 py-4"
-     aria-label="Settings-Navigation">
+     aria-label="Settings navigation">
   <div class="px-4 pb-2 text-xs uppercase opacity-50 tracking-wide">Settings</div>
   <ul class="menu menu-sm w-full px-2">
     <li>
@@ -37,7 +37,7 @@
          hx-push-url="true"
          hx-headers='{"HX-Target": "settings-content"}'
          class="{% if active == 'groups' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
-        Gruppen
+        Groups
       </a>
     </li>
     <li>
@@ -48,7 +48,7 @@
          hx-push-url="true"
          hx-headers='{"HX-Target": "settings-content"}'
          class="{% if active == 'llm' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
-        LLM-Provider
+        LLM Provider
       </a>
     </li>
     <li>
@@ -70,7 +70,7 @@
          hx-push-url="true"
          hx-headers='{"HX-Target": "settings-content"}'
          class="{% if active == 'servers' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
-        Server-Verwaltung
+        Server management
       </a>
     </li>
     <li>
@@ -82,7 +82,7 @@
          hx-headers='{"HX-Target": "settings-content"}'
          class="flex items-center {% if active == 'master_key' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
         <span>Master-Key</span>
-        <span class="badge badge-xs badge-warning ml-auto">neu</span>
+        <span class="badge badge-xs badge-warning ml-auto">new</span>
       </a>
     </li>
     <li>

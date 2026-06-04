@@ -19,9 +19,9 @@
   <header>
     <h1 class="text-2xl font-semibold">Master-Key</h1>
     <p class="opacity-70 text-sm mt-1">
-      Der Master-Key authentifiziert die Registrierung neuer Server und
-      die Rotation von Server-Keys. Er wird nur einmalig im Klartext
-      angezeigt — bitte sicher notieren.
+      The master key authenticates registration of new servers and the
+      rotation of server keys. It is shown in cleartext only once — note it
+      down securely.
     </p>
   </header>
 
@@ -33,21 +33,21 @@
             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
     <span>
-      Bei Rotation: alte Server-Keys bleiben gueltig. Neue Registrierungen
-      brauchen ab sofort den neuen Master-Key.
+      On rotation: existing server keys stay valid. New registrations
+      require the new master key from now on.
     </span>
   </div>
 
   <div class="bg-base-200 rounded-box p-4 space-y-1">
-    <div class="text-xs opacity-60">Aktueller Master-Key</div>
+    <div class="text-xs opacity-60">Current master key</div>
     <div class="text-sm">
-      Letzte Rotation:
+      Last rotation:
       <strong class="font-mono">
-        {% if last_rotated_at %}{{ last_rotated_at | relative_time }}{% else %}noch nie{% endif %}
+        {% if last_rotated_at %}{{ last_rotated_at | relative_time }}{% else %}never{% endif %}
       </strong>
     </div>
     <div class="text-xs opacity-50">
-      Audit-Event <code class="font-mono">master_key.rotated</code>.
+      Audit event <code class="font-mono">master_key.rotated</code>.
     </div>
   </div>
 
@@ -61,17 +61,17 @@
              if (navigator.clipboard && navigator.clipboard.writeText) {
                navigator.clipboard.writeText(text).then(() => {
                  window.dispatchEvent(new CustomEvent('toast', {
-                   detail: { kind: 'success', msg: 'Master-Key in die Zwischenablage kopiert.' }
+                   detail: { kind: 'success', msg: 'Master key copied to clipboard.' }
                  }));
                });
              }
            }
          }">
       <div class="flex-1">
-        <p class="font-semibold">Neuer Master-Key generiert.</p>
+        <p class="font-semibold">New master key generated.</p>
         <p class="text-sm mt-1">
-          Bitte sofort notieren — dieser Schlüssel wird <strong>nicht</strong>
-          erneut angezeigt.
+          Note it down now — this key will <strong>not</strong> be shown
+          again.
         </p>
         <code id="new-master-key"
               class="block mt-3 p-3 bg-base-300 text-base-content border border-base-300
@@ -80,12 +80,12 @@
           <button type="button"
                   class="btn btn-sm btn-ghost"
                   @click="copyKey()"
-                  aria-label="Master-Key kopieren">
-            Kopieren
+                  aria-label="Copy master key">
+            Copy
           </button>
           <span class="text-xs opacity-70">
-            Einmalige Anzeige — bei Verlust nur durch erneute Rotation
-            wiederherstellbar.
+            Shown only once — if lost, recoverable only through another
+            rotation.
           </span>
         </div>
       </div>
@@ -94,16 +94,16 @@
 
   <div class="card bg-base-200 shadow-sm">
     <div class="card-body">
-      <h2 class="card-title">Neuen Master-Key generieren</h2>
+      <h2 class="card-title">Generate new master key</h2>
       <p class="text-sm opacity-70">
-        Bestehende Server-Keys bleiben gueltig. Nur neue Registrierungen
-        brauchen den neuen Master-Key.
+        Existing server keys stay valid. Only new registrations require the
+        new master key.
       </p>
       <div class="card-actions mt-3">
         <button type="button"
                 class="btn btn-warning"
                 @click="confirmOpen = true">
-          Neuen Master-Key generieren
+          Generate new master key
         </button>
       </div>
     </div>
@@ -120,12 +120,12 @@
           @keydown.escape.window="confirmOpen = false">
     <div class="modal-box max-w-lg">
       <h3 id="master-key-confirm-title" class="text-lg font-semibold">
-        Master-Key rotieren?
+        Rotate master key?
       </h3>
       <p class="py-3 text-sm">
-        Alte Server-Keys bleiben gültig. Neue Registrierungen brauchen den
-        neuen Master-Key. Der neue Schlüssel wird nur einmal im Klartext
-        angezeigt — du musst ihn sofort sicher notieren. Fortfahren?
+        Existing server keys stay valid. New registrations require the new
+        master key. The new key is shown in cleartext only once — note it
+        down securely right away. Continue?
       </p>
       <form method="post"
             action="{{ url_for('settings.master_key_rotate') }}"
@@ -134,10 +134,10 @@
         <button type="button"
                 class="btn btn-ghost btn-sm"
                 @click="confirmOpen = false">
-          Abbrechen
+          Cancel
         </button>
         <button type="submit" class="btn btn-warning btn-sm">
-          Bestaetigen und rotieren
+          Confirm and rotate
         </button>
       </form>
     </div>

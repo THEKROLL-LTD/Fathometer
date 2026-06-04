@@ -17,16 +17,16 @@
 #}
 <div class="p-6 space-y-6">
   <header>
-    <h1 class="text-2xl font-semibold">Server-Verwaltung</h1>
+    <h1 class="text-2xl font-semibold">Server management</h1>
     <p class="opacity-70 text-sm mt-1">
-      Registrierte Server. Revoke macht den API-Key sofort unbrauchbar;
-      Retire stilllegt den Server und resolved alle offenen Findings.
+      Registered servers. Revoke makes the API key unusable immediately;
+      retire decommissions the server and resolves all open findings.
     </p>
   </header>
 
   <div class="card bg-base-200 shadow-sm">
     <div class="card-body">
-      <h2 class="card-title">Registrierte Server</h2>
+      <h2 class="card-title">Registered servers</h2>
 
       {% if servers %}
         <div class="overflow-x-auto mt-2">
@@ -35,9 +35,9 @@
               <tr>
                 <th>Name</th>
                 <th>Tags</th>
-                <th>Letzter Scan</th>
+                <th>Last scan</th>
                 <th>Status</th>
-                <th class="text-right">Aktionen</th>
+                <th class="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -88,20 +88,20 @@
                           {{ srv.last_scan_at | relative_time }}
                         </time>
                       {% else %}
-                        <span class="opacity-60">noch nie</span>
+                        <span class="opacity-60">never</span>
                       {% endif %}
                     </div>
                     <div class="mt-1 flex flex-wrap gap-1">
                       {% if scan_stale %}
                         <span class="badge badge-error badge-sm"
-                              title="Letzter Scan aelter als erwarteter Interval ({{ srv.expected_scan_interval_h }}h).">
+                              title="Last scan older than the expected interval ({{ srv.expected_scan_interval_h }}h).">
                           stale
                         </span>
                       {% endif %}
                       {% if trivy_db_stale %}
                         <span class="badge badge-warning badge-sm"
-                              title="Trivy-DB aelter als 7 Tage (Stand: {{ srv.trivy_db_updated_at.strftime('%Y-%m-%d') }}).">
-                          trivy-db veraltet
+                              title="Trivy DB older than 7 days (as of {{ srv.trivy_db_updated_at.strftime('%Y-%m-%d') }}).">
+                          trivy-db stale
                         </span>
                       {% endif %}
                     </div>
@@ -110,12 +110,12 @@
                   <td>
                     {% if srv.revoked_at %}
                       <span class="badge badge-error"
-                            title="Widerrufen am {{ srv.revoked_at.strftime('%Y-%m-%d %H:%M') }}">
+                            title="Revoked at {{ srv.revoked_at.strftime('%Y-%m-%d %H:%M') }}">
                         revoked
                       </span>
                     {% elif srv.retired_at %}
                       <span class="badge badge-neutral"
-                            title="Stillgelegt am {{ srv.retired_at.strftime('%Y-%m-%d %H:%M') }}">
+                            title="Retired at {{ srv.retired_at.strftime('%Y-%m-%d %H:%M') }}">
                         retired
                       </span>
                     {% else %}
@@ -128,16 +128,16 @@
                       <div class="dropdown dropdown-end">
                         <button tabindex="0"
                                 class="btn btn-ghost btn-sm"
-                                aria-label="Aktionen fuer {{ srv.name }}">
-                          ... Mehr
+                                aria-label="Actions for {{ srv.name }}">
+                          ... More
                         </button>
                         <ul tabindex="0"
                             class="dropdown-content menu bg-base-100 rounded-box shadow-md w-64 z-50 p-2">
                           <li>
                             <div class="flex flex-col items-start gap-1 cursor-default">
-                              <span class="font-medium">Key rotieren</span>
+                              <span class="font-medium">Rotate key</span>
                               <span class="text-xs opacity-70">
-                                Per <code class="font-mono">secscan-register.sh</code> auf dem Host.
+                                Via <code class="font-mono">secscan-register.sh</code> on the host.
                               </span>
                             </div>
                           </li>
@@ -145,11 +145,11 @@
                             <form method="post"
                                   action="{{ url_for('servers.revoke_server', server_id=srv.id) }}"
                                   x-data
-                                  @submit="if (!confirm('Server-Key revoken? Der Agent kann danach keine Scans mehr pushen.')) $event.preventDefault();">
+                                  @submit="if (!confirm('Revoke server key? The agent can no longer push scans afterwards.')) $event.preventDefault();">
                               {{ revoke_form.csrf_token }}
                               <button type="submit"
                                       class="text-warning w-full text-left"
-                                      aria-label="Server {{ srv.name }} widerrufen">
+                                      aria-label="Revoke server {{ srv.name }}">
                                 Revoke
                               </button>
                             </form>
@@ -158,11 +158,11 @@
                             <form method="post"
                                   action="{{ url_for('servers.retire_server', server_id=srv.id) }}"
                                   x-data
-                                  @submit="if (!confirm('Server stilllegen? Alle offenen Findings werden als resolved markiert.')) $event.preventDefault();">
+                                  @submit="if (!confirm('Retire server? All open findings are marked as resolved.')) $event.preventDefault();">
                               {{ retire_form.csrf_token }}
                               <button type="submit"
                                       class="text-error w-full text-left"
-                                      aria-label="Server {{ srv.name }} stilllegen">
+                                      aria-label="Retire server {{ srv.name }}">
                                 Retire
                               </button>
                             </form>
@@ -170,7 +170,7 @@
                         </ul>
                       </div>
                     {% else %}
-                      <span class="opacity-60 text-sm">keine Aktionen</span>
+                      <span class="opacity-60 text-sm">no actions</span>
                     {% endif %}
                   </td>
                 </tr>
@@ -181,18 +181,18 @@
       {% else %}
         <div class="mt-2 space-y-3">
           <p class="opacity-70">
-            Noch keine Server registriert.
+            No servers registered yet.
           </p>
           <p class="text-sm opacity-70">
-            Auf dem Ziel-Host registrieren mit
+            Register on the target host with
             <code class="font-mono">agent/secscan-register.sh</code>:
           </p>
-          <pre class="bg-base-300 text-base-content rounded-md p-3 text-xs overflow-x-auto"><code>SECSCAN_MASTER_KEY="&lt;dein-master-key&gt;" \
+          <pre class="bg-base-300 text-base-content rounded-md p-3 text-xs overflow-x-auto"><code>SECSCAN_MASTER_KEY="&lt;your-master-key&gt;" \
   ./secscan-register.sh https://secscan.example.com prod-web-01 24 \
   | install -m 600 /dev/stdin /etc/secscan/api-key</code></pre>
           <p class="text-xs opacity-60">
-            Der Server-Key wird nur einmal ausgegeben. Bei Verlust per
-            <code class="font-mono">secscan-register.sh</code> neu rotieren.
+            The server key is shown only once. If lost, rotate it again via
+            <code class="font-mono">secscan-register.sh</code>.
           </p>
         </div>
       {% endif %}

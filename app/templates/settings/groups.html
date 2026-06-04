@@ -23,13 +23,13 @@
 #}
 <div class="sd-manage">
   <header class="sd-manage-head">
-    <h1 class="sd-settings-section__title">Gruppen</h1>
+    <h1 class="sd-settings-section__title">Groups</h1>
     <p class="sd-settings-section__hint">
-      Gruppen bündeln Server für die Sidebar-Übersicht. Hier verwaltest du
-      Reihenfolge, Namen und Löschung.
+      Groups bundle servers for the sidebar overview. Manage order, names and
+      deletion here.
     </p>
     <p class="sd-settings-section__hint">
-      Gruppen entstehen, indem du im Server-Detail-Settings eine neue Gruppe zuweist.
+      Groups are created by assigning a new group in the server detail settings.
     </p>
   </header>
 
@@ -37,10 +37,10 @@
     <table class="sd-manage-table" data-test="groups-table">
       <thead>
         <tr>
-          <th>Reihenfolge</th>
+          <th>Order</th>
           <th>Name</th>
-          <th>Server</th>
-          <th>Aktion</th>
+          <th>Servers</th>
+          <th>Action</th>
         </tr>
       </thead>
       <tbody>
@@ -56,7 +56,7 @@
                           value="up"
                           class="sd-move-btn"
                           data-test="group-move-up-{{ g.id }}"
-                          aria-label="Gruppe {{ g.name }} nach oben"
+                          aria-label="Move group {{ g.name }} up"
                           {% if loop.first %}disabled{% endif %}>&#x2191;</button>
                 </form>
                 <form method="post"
@@ -67,7 +67,7 @@
                           value="down"
                           class="sd-move-btn"
                           data-test="group-move-down-{{ g.id }}"
-                          aria-label="Gruppe {{ g.name }} nach unten"
+                          aria-label="Move group {{ g.name }} down"
                           {% if loop.last %}disabled{% endif %}>&#x2193;</button>
                 </form>
               </div>
@@ -83,12 +83,12 @@
                        value="{{ g.name }}"
                        maxlength="64"
                        pattern="^[A-Za-z0-9 _.-]+$"
-                       title="Buchstaben, Ziffern, Leerzeichen, '_', '.', '-' (max 64 Zeichen)"
-                       aria-label="Gruppe {{ g.name }} umbenennen"
+                       title="Letters, digits, spaces, '_', '.', '-' (max 64 characters)"
+                       aria-label="Rename group {{ g.name }}"
                        data-test="group-rename-input-{{ g.id }}">
                 <button type="submit"
                         class="sd-add-btn"
-                        data-test="group-rename-submit-{{ g.id }}">Umbenennen</button>
+                        data-test="group-rename-submit-{{ g.id }}">Rename</button>
               </form>
             </td>
             <td>
@@ -99,12 +99,12 @@
               <form method="post"
                     action="{{ url_for('settings.groups_delete', group_id=g.id) }}"
                     x-data
-                    @submit="if (!confirm('{{ g.member_count }} Server fallen in ungrouped zurück — wirklich löschen?')) $event.preventDefault();">
+                    @submit="if (!confirm('{{ g.member_count }} servers fall back to ungrouped — really delete?')) $event.preventDefault();">
                 {{ delete_form.csrf_token }}
                 <button type="submit"
                         class="sd-danger-btn"
                         data-test="group-delete-{{ g.id }}"
-                        aria-label="Gruppe {{ g.name }} löschen">Löschen</button>
+                        aria-label="Delete group {{ g.name }}">Delete</button>
               </form>
             </td>
           </tr>
@@ -113,8 +113,8 @@
     </table>
   {% else %}
     <p class="sd-manage-empty" data-test="groups-empty">
-      Noch keine Gruppen. Lege deine erste Gruppe im Server-Detail-Settings an,
-      indem du einem Server eine Gruppe zuweist.
+      No groups yet. Create your first group in the server detail settings by
+      assigning a group to a server.
     </p>
   {% endif %}
 </div>

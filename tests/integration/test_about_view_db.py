@@ -49,9 +49,9 @@ def test_about_contains_all_required_version_labels(db_app: Flask) -> None:
     # Keys (`app_version` etc.) werden hier nicht direkt im HTML benutzt
     # — stattdessen `{{ about.app_version }}` mit lesbarem Label.
     for label in (
-        "App-Version",
-        "Build-Revision",
-        "DB-Schema",
+        "App version",
+        "Build revision",
+        "DB schema",
         "Python",
         "Flask",
         "SQLAlchemy",
@@ -76,7 +76,7 @@ def test_about_build_revision_defaults_to_dev(db_app: Flask) -> None:
     # `Build-Revision` Label und der Wert "dev" sollen beide auftauchen.
     # Wir matchen das per Regex auf die `<dt>Build-Revision</dt><dd ...>dev</dd>`-
     # Struktur (Template rendert `<dt>` + `<dd class="font-mono">dev</dd>`).
-    m = re.search(r"Build-Revision</dt>\s*<dd[^>]*>([^<]+)</dd>", body)
+    m = re.search(r"Build revision</dt>\s*<dd[^>]*>([^<]+)</dd>", body)
     assert m is not None, "Build-Revision-DD nicht gefunden"
     assert m.group(1).strip() == "dev", m.group(0)
 
@@ -169,7 +169,7 @@ def test_about_build_revision_uses_env_when_set(db_app: Flask) -> None:
         resp = client.get("/settings/about")
         body = resp.get_data(as_text=True)
 
-        m = re.search(r"Build-Revision</dt>\s*<dd[^>]*>([^<]+)</dd>", body)
+        m = re.search(r"Build revision</dt>\s*<dd[^>]*>([^<]+)</dd>", body)
         assert m is not None
         value = m.group(1).strip()
         assert value == sentinel, value

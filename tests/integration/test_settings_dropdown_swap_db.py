@@ -39,9 +39,9 @@ SETTINGS_ROUTES: list[tuple[str, str, str]] = [
     # (Pfad, aktiver-Tab-Bezeichner-Substring, eindeutiger Content-Marker)
     ("/settings/tags", "tags", "Tag-Name"),
     ("/settings/llm/", "llm", "Base-URL"),
-    ("/settings/servers/", "servers", "Server-Verwaltung"),
-    ("/settings/master-key", "master-key", "Letzte Rotation"),
-    ("/settings/about", "about", "App-Version"),
+    ("/settings/servers/", "servers", "Server management"),
+    ("/settings/master-key", "master-key", "Last rotation"),
+    ("/settings/about", "about", "App version"),
 ]
 
 

@@ -20,8 +20,8 @@
     <div>
       <h1 class="text-2xl font-semibold">LLM Risk Reviewer</h1>
       <p class="opacity-70 text-sm mt-1">
-        Debug-Log der letzten LLM-Calls (Read-only).
-        Eviction laeuft im Worker — siehe ADR-0023 §e.
+        Debug log of the most recent LLM calls (read-only).
+        Eviction runs in the worker — see ADR-0023 §e.
       </p>
     </div>
   </header>
@@ -60,15 +60,15 @@
      Auditor-Note. #}
   <div class="alert alert-warning" role="note" data-test="llm-debug-log-privacy-notice">
     <span class="text-xs">
-      <strong>Privacy-Hinweis:</strong> Request- und Response-Bodies enthalten Host-Snapshot-Daten
-      (Listener-Adressen, Process-Commands, Kernel-Module, aktive Services). Vor dem Teilen
-      mit Externen (Bug-Reports, Provider-Support) sensible Felder pruefen.
+      <strong>Privacy notice:</strong> request and response bodies contain host snapshot data
+      (listener addresses, process commands, kernel modules, active services). Before sharing
+      with third parties (bug reports, provider support), review sensitive fields.
     </span>
   </div>
 
   {% if not debug_log_entries %}
     <div class="alert alert-info" role="status" data-test="llm-debug-log-empty">
-      <span>Noch keine LLM-Debug-Log-Eintraege vorhanden.</span>
+      <span>No LLM debug log entries yet.</span>
     </div>
   {% else %}
     <div class="overflow-x-auto" data-test="llm-debug-log-table-wrap">
@@ -76,7 +76,7 @@
         <thead>
           <tr>
             <th class="text-[10px] uppercase tracking-wider opacity-65">Created</th>
-            <th class="text-[10px] uppercase tracking-wider opacity-65">Job-Type</th>
+            <th class="text-[10px] uppercase tracking-wider opacity-65">Job type</th>
             <th class="text-[10px] uppercase tracking-wider opacity-65">Group</th>
             <th class="text-[10px] uppercase tracking-wider opacity-65">Model</th>
             <th class="text-[10px] uppercase tracking-wider opacity-65">Status</th>
@@ -146,7 +146,7 @@
                       {% if entry.response_body is none %}
                         <p class="text-xs opacity-50 italic"
                            data-test="llm-debug-log-response-empty-{{ entry.id }}">
-                          Kein Response-Body (Call ist fehlgeschlagen bevor eine Antwort einlief).
+                          No response body (the call failed before a response arrived).
                         </p>
                       {% else %}
                         <pre class="bg-base-200/60 rounded p-3 text-xs overflow-auto max-h-96"

@@ -139,7 +139,7 @@ def test_master_key_view_renders_for_logged_in_user(
     # `setup_completed_at` ausgefuellt; sollte daher nicht "noch nie" zeigen.
     # Beide Faelle akzeptabel — wir asserten nur dass der "Letzte Rotation"-
     # Block existiert.
-    assert "Letzte Rotation" in body
+    assert "Last rotation" in body
 
 
 # ---------------------------------------------------------------------------
