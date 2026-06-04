@@ -1133,8 +1133,8 @@ def test_server_group_form_choices_built_from_available_groups(no_csrf_app: Flas
     choices = form.group_id.choices
     assert choices is not None, "ServerGroupForm.group_id.choices darf nicht None sein"
 
-    assert choices[0] == ("none", "— keine —"), (
-        f"Erste Choice soll ('none', '— keine —') sein, ist: {choices[0]}"
+    assert choices[0] == ("none", "— none —"), (
+        f"Erste Choice soll ('none', '— none —') sein, ist: {choices[0]}"
     )
     assert ("1", "prod") in choices, f"('1', 'prod') soll in choices sein. Choices: {choices}"
     assert ("2", "dev") in choices, f"('2', 'dev') soll in choices sein. Choices: {choices}"

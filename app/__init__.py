@@ -63,37 +63,37 @@ csrf: CSRFProtect = CSRFProtect()
 
 
 def _relative_time(value: datetime | None) -> str:
-    """Formatiere einen Zeitstempel als deutsche Relativangabe.
+    """Formatiere einen Zeitstempel als kurze Relativangabe (englischer Output).
 
-    Beispiele: "gerade eben", "vor 5min", "vor 2h", "vor 3 Tagen". Bei `None`
-    gibt der Filter "noch nie" zurueck. Naive datetimes werden als UTC
+    Beispiele: "just now", "5m ago", "2h ago", "3d ago". Bei `None`
+    gibt der Filter "never" zurueck. Naive datetimes werden als UTC
     interpretiert (defensive).
     """
     if value is None:
-        return "noch nie"
+        return "never"
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     delta = datetime.now(tz=UTC) - value
     seconds = int(delta.total_seconds())
     if seconds < 0:
-        # Zukunft — selten (Clock-Skew). Wir zeigen "gerade eben".
-        return "gerade eben"
+        # Zukunft — selten (Clock-Skew). Wir zeigen "just now".
+        return "just now"
     if seconds < 60:
-        return "gerade eben"
+        return "just now"
     minutes = seconds // 60
     if minutes < 60:
-        return f"vor {minutes}min"
+        return f"{minutes}m ago"
     hours = minutes // 60
     if hours < 24:
-        return f"vor {hours}h"
+        return f"{hours}h ago"
     days = hours // 24
     if days < 30:
-        return f"vor {days} Tag" + ("" if days == 1 else "en")
+        return f"{days}d ago"
     months = days // 30
     if months < 12:
-        return f"vor {months} Monat" + ("" if months == 1 else "en")
+        return f"{months}mo ago"
     years = days // 365
-    return f"vor {years} Jahr" + ("" if years == 1 else "en")
+    return f"{years}y ago"
 
 
 def _iso_or_empty(value: datetime | None) -> str:

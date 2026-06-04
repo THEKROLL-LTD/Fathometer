@@ -7,13 +7,13 @@
 <div class="p-6">
   <div class="card bg-base-100 shadow-sm max-w-2xl" data-empty="no_findings">
     <div class="card-body">
-      <h2 class="card-title text-base">Keine offenen Findings</h2>
+      <h2 class="card-title text-base">No open findings</h2>
       <p class="text-sm opacity-80">
         {% if server %}
-          Server <span class="font-mono">{{ server.name }}</span> hat keine
-          offenen Findings ueber der aktuellen Severity-Schwelle.
+          Server <span class="font-mono">{{ server.name }}</span> has no
+          open findings above the current severity threshold.
         {% else %}
-          Keine offenen Findings ueber der aktuellen Severity-Schwelle.
+          No open findings above the current severity threshold.
         {% endif %}
       </p>
       {% if server %}
@@ -22,7 +22,7 @@
              hx-get="{{ url_for('server_detail.show', server_id=server.id) }}?status=all"
              hx-target="#detail-pane"
              hx-push-url="true"
-             class="btn btn-sm btn-ghost">Alle Findings anzeigen</a>
+             class="btn btn-sm btn-ghost">Show all findings</a>
         </div>
       {% endif %}
     </div>

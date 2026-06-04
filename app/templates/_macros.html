@@ -197,7 +197,7 @@
    Aufruf: `{{ bulk_ack_modal(id="bulk-modal-cve", title="Alle Findings abhaken") }}`
    Das `id`-Attribut ist optional und dient nur dem `aria-labelledby`-Anker.
 #}
-{% macro bulk_ack_modal(id="bulk-ack-modal", title="Findings abhaken") -%}
+{% macro bulk_ack_modal(id="bulk-ack-modal", title="Acknowledge findings") -%}
 {# `x-show="open"` setzt `display: none` inline wenn `open === false` —
    bulletproof gegen alle CSS-Cache-/DaisyUI-Variations-Probleme.
    `x-cloak` verhindert das Modal-Flash vor Alpine-Init (Regel in
@@ -218,7 +218,7 @@
     <div class="mt-3 space-y-3 text-sm">
       {# Phase 1: dry_run laeuft / Vorschau leer. #}
       <template x-if="busy && previewCount === null">
-        <p class="opacity-70">Vorschau wird ermittelt…</p>
+        <p class="opacity-70">Computing preview…</p>
       </template>
 
       {# Phase 2: Vorschau erhalten. #}
@@ -226,15 +226,15 @@
         <div class="space-y-2">
           <p>
             <span class="font-semibold" x-text="previewCount"></span>
-            <span x-text="previewCount === 1 ? 'Finding' : 'Findings'"></span>
-            auf
+            <span x-text="previewCount === 1 ? 'finding' : 'findings'"></span>
+            on
             <span class="font-semibold" x-text="previewServerCount"></span>
-            <span x-text="previewServerCount === 1 ? 'Server' : 'Servern'"></span>
-            werden auf <span class="badge badge-info badge-sm">acknowledged</span> gesetzt.
+            <span x-text="previewServerCount === 1 ? 'server' : 'servers'"></span>
+            will be set to <span class="badge badge-info badge-sm">acknowledged</span>.
           </p>
           <p class="text-xs opacity-60">
-            Nur offene Findings (`status=open`) werden geaendert. Bereits
-            acknowledged oder resolved bleibt unangetastet.
+            Only open findings (`status=open`) are changed. Already
+            acknowledged or resolved stays untouched.
           </p>
         </div>
       </template>
@@ -248,12 +248,12 @@
 
       {# Comment-Feld — bewusst optional (ADR-0006). #}
       <label class="form-control">
-        <span class="label-text text-xs opacity-70 pb-1">Kommentar (optional)</span>
+        <span class="label-text text-xs opacity-70 pb-1">Comment (optional)</span>
         <textarea x-model="comment"
                   class="textarea textarea-bordered textarea-sm"
                   rows="2"
                   maxlength="8192"
-                  placeholder="Kurze Notiz fuer den Audit-Log…"></textarea>
+                  placeholder="Short note for the audit log…"></textarea>
       </label>
     </div>
 
@@ -262,19 +262,19 @@
               class="btn btn-sm btn-ghost"
               @click="closeModal()"
               :disabled="busy">
-        Abbrechen
+        Cancel
       </button>
       <button type="button"
               class="btn btn-sm btn-primary"
               @click="apply()"
               :disabled="!canApply"
               data-test="bulk-ack-confirm">
-        Bestaetigen
+        Confirm
       </button>
     </div>
   </div>
   <form method="dialog" class="modal-backdrop" @click="closeModal()">
-    <button type="button" aria-label="Schliessen">close</button>
+    <button type="button" aria-label="Close">close</button>
   </form>
 </dialog>
 {%- endmacro %}

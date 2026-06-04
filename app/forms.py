@@ -56,27 +56,25 @@ class SetupStep1Form(FlaskForm):
     """Admin-Account anlegen."""
 
     username = StringField(
-        "Benutzername",
+        "Username",
         validators=[
             DataRequired(),
             Length(min=3, max=64),
-            Regexp(
-                USERNAME_REGEX, message="Erlaubt: a-z, A-Z, 0-9, Punkt, Unter- und Bindestrich."
-            ),
+            Regexp(USERNAME_REGEX, message="Allowed: a-z, A-Z, 0-9, dot, underscore and hyphen."),
         ],
     )
     password = PasswordField(
-        "Passwort",
+        "Password",
         validators=[
             DataRequired(),
-            Length(min=12, max=256, message="Mindestens 12 Zeichen."),
+            Length(min=12, max=256, message="At least 12 characters."),
         ],
     )
     password_confirm = PasswordField(
-        "Passwort bestaetigen",
+        "Confirm password",
         validators=[
             DataRequired(),
-            EqualTo("password", message="Passwoerter stimmen nicht ueberein."),
+            EqualTo("password", message="Passwords do not match."),
         ],
     )
 
@@ -85,8 +83,8 @@ class SetupStep2Form(FlaskForm):
     """Master-Key-Bestaetigung. Der Key selbst wird vom View generiert."""
 
     confirmed = BooleanField(
-        "Ich habe den Master-Key notiert und sicher abgelegt.",
-        validators=[DataRequired(message="Bitte Notiz bestaetigen.")],
+        "I have noted and securely stored the master key.",
+        validators=[DataRequired(message="Confirmation required.")],
     )
 
 
@@ -94,18 +92,18 @@ class SetupStep3Form(FlaskForm):
     """Defaults setzen (Severity-Schwelle, Stale-Thresholds)."""
 
     severity_threshold = SelectField(
-        "Severity-Schwelle",
+        "Severity threshold",
         choices=SEVERITY_CHOICES,
         default="high",
         validators=[DataRequired()],
     )
     stale_threshold_h = IntegerField(
-        "Stale-Server nach (Stunden)",
+        "Stale server after (hours)",
         default=48,
         validators=[DataRequired(), NumberRange(min=1, max=720)],
     )
     stale_trivy_db_threshold_h = IntegerField(
-        "Stale Trivy-DB nach (Stunden)",
+        "Stale Trivy DB after (hours)",
         default=30,
         validators=[DataRequired(), NumberRange(min=1, max=720)],
     )
@@ -115,11 +113,11 @@ class LoginForm(FlaskForm):
     """Login-Form fuer den Admin-Account."""
 
     username = StringField(
-        "Benutzername",
+        "Username",
         validators=[DataRequired(), Length(min=3, max=64)],
     )
     password = PasswordField(
-        "Passwort",
+        "Password",
         validators=[DataRequired(), Length(min=1, max=256)],
     )
 
@@ -128,11 +126,11 @@ class TagForm(FlaskForm):
     """Neues Tag anlegen."""
 
     name = StringField(
-        "Tag-Name",
+        "Tag name",
         validators=[DataRequired(), Length(min=1, max=32)],
     )
     color = StringField(
-        "Farbe (Hex, z.B. #6b7280)",
+        "Color (hex, e.g. #6b7280)",
         default="#6b7280",
         validators=[DataRequired(), Length(min=7, max=7)],
     )
@@ -141,13 +139,13 @@ class TagForm(FlaskForm):
         """Pattern-Check fuer Tag-Namen — siehe §10."""
         if not field.data or not TAG_NAME_REGEX.match(field.data):
             raise ValidationError(
-                "Ungueltiger Tag-Name. Erlaubt: a-z, 0-9, '.', '_', '-' "
-                "(Start mit Buchstabe/Ziffer, max 32 Zeichen)."
+                "Invalid tag name. Allowed: a-z, 0-9, '.', '_', '-' "
+                "(start with letter/digit, max 32 characters)."
             )
 
     def validate_color(self, field: StringField) -> None:
         if not field.data or not TAG_COLOR_REGEX.match(field.data):
-            raise ValidationError("Farbe muss im Format #rrggbb sein.")
+            raise ValidationError("Color must be in #rrggbb format.")
 
 
 class TagRenameForm(FlaskForm):
@@ -158,15 +156,15 @@ class TagRenameForm(FlaskForm):
     """
 
     name = StringField(
-        "Neuer Name",
+        "New name",
         validators=[DataRequired(), Length(min=1, max=32)],
     )
 
     def validate_name(self, field: StringField) -> None:
         if not field.data or not TAG_NAME_REGEX.match(field.data):
             raise ValidationError(
-                "Ungueltiger Tag-Name. Erlaubt: a-z, 0-9, '.', '_', '-' "
-                "(Start mit Buchstabe/Ziffer, max 32 Zeichen)."
+                "Invalid tag name. Allowed: a-z, 0-9, '.', '_', '-' "
+                "(start with letter/digit, max 32 characters)."
             )
 
 
@@ -177,13 +175,13 @@ class TagColorForm(FlaskForm):
     """
 
     color = StringField(
-        "Farbe (Hex, z.B. #6b7280)",
+        "Color (hex, e.g. #6b7280)",
         validators=[DataRequired(), Length(min=7, max=7)],
     )
 
     def validate_color(self, field: StringField) -> None:
         if not field.data or not TAG_COLOR_REGEX.match(field.data):
-            raise ValidationError("Farbe muss im Format #rrggbb sein.")
+            raise ValidationError("Color must be in #rrggbb format.")
 
 
 class CSRFOnlyForm(FlaskForm):
@@ -212,7 +210,7 @@ class LlmReviewerModeForm(FlaskForm):
     """
 
     new_mode = SelectField(
-        "Neuer Mode",
+        "New mode",
         choices=[
             ("off", "off"),
             ("observation", "observation"),
@@ -221,7 +219,7 @@ class LlmReviewerModeForm(FlaskForm):
         validators=[DataRequired()],
     )
     master_key = PasswordField(
-        "Master-Key",
+        "Master key",
         validators=[
             DataRequired(),
             Length(min=10, max=128),
@@ -247,11 +245,11 @@ class LlmReviewerConcurrencyForm(FlaskForm):
         "Concurrency",
         validators=[
             DataRequired(),
-            NumberRange(min=1, max=200, message="Concurrency muss zwischen 1 und 200 liegen."),
+            NumberRange(min=1, max=200, message="Concurrency must be between 1 and 200."),
         ],
     )
     master_key = PasswordField(
-        "Master-Key",
+        "Master key",
         validators=[
             DataRequired(),
             Length(min=10, max=128),
@@ -268,7 +266,7 @@ class LlmReviewerRequeueForm(FlaskForm):
     """
 
     master_key = PasswordField(
-        "Master-Key",
+        "Master key",
         validators=[
             DataRequired(),
             Length(min=10, max=128),
@@ -291,7 +289,7 @@ class AcknowledgeForm(FlaskForm):
 
     # Bewusst KEIN DataRequired/InputRequired — nur Laengen-Cap.
     comment = TextAreaField(
-        "Kommentar (optional)",
+        "Comment (optional)",
         validators=[OptionalValidator(), Length(max=NOTE_TEXT_MAX_LEN)],
     )
 
@@ -300,7 +298,7 @@ class ReopenForm(FlaskForm):
     """Re-Open-Action — analog zu Acknowledge. Comment optional."""
 
     comment = TextAreaField(
-        "Kommentar (optional)",
+        "Comment (optional)",
         validators=[OptionalValidator(), Length(max=NOTE_TEXT_MAX_LEN)],
     )
 
@@ -315,9 +313,9 @@ class NoteForm(FlaskForm):
     """
 
     body = TextAreaField(
-        "Notiz",
+        "Note",
         validators=[
-            DataRequired(message="Notiz darf nicht leer sein."),
+            DataRequired(message="Note must not be empty."),
             Length(min=1, max=NOTE_TEXT_MAX_LEN),
         ],
     )
@@ -336,23 +334,23 @@ class LlmSettingsForm(FlaskForm):
     """
 
     provider_name = StringField(
-        "Anzeigename",
+        "Display name",
         validators=[OptionalValidator(), Length(max=64)],
     )
     base_url = StringField(
-        "Base-URL",
+        "Base URL",
         validators=[DataRequired(), Length(max=256)],
     )
     api_key = PasswordField(
-        "API-Key (leer lassen, um den bestehenden zu behalten)",
+        "API key (leave empty to keep the existing one)",
         validators=[OptionalValidator(), Length(max=512)],
     )
     model = StringField(
-        "Modell-Name",
+        "Model name",
         validators=[DataRequired(), Length(max=128)],
     )
     daily_token_cap = IntegerField(
-        "Tages-Token-Cap",
+        "Daily token cap",
         validators=[DataRequired(), NumberRange(min=1, max=10_000_000_000)],
     )
 
@@ -362,14 +360,14 @@ class LlmSettingsForm(FlaskForm):
         candidate = field.data.strip()
         if not TAG_NAME_REGEX.match(candidate):
             raise ValidationError(
-                "Erlaubt: a-z, 0-9, '.', '_', '-' (Start mit Buchstabe/Ziffer, max 32 Zeichen)."
+                "Allowed: a-z, 0-9, '.', '_', '-' (start with letter/digit, max 32 characters)."
             )
 
     def validate_base_url(self, field: StringField) -> None:
         from app.services.llm_client import validate_base_url as _vbu
 
         if not field.data:
-            raise ValidationError("Base-URL erforderlich.")
+            raise ValidationError("Base URL required.")
         try:
             _vbu(field.data.strip())
         except ValueError as exc:
@@ -378,11 +376,11 @@ class LlmSettingsForm(FlaskForm):
     def validate_model(self, field: StringField) -> None:
         value = (field.data or "").strip()
         if not value:
-            raise ValidationError("Modell-Name erforderlich.")
+            raise ValidationError("Model name required.")
         # Druckbares ASCII (0x20-0x7E), kein Whitespace am Anfang/Ende
         # nach strip() bereits eliminiert.
         if any(ord(ch) < 0x20 or ord(ch) > 0x7E for ch in value):
-            raise ValidationError("Nur druckbares ASCII erlaubt.")
+            raise ValidationError("Only printable ASCII allowed.")
 
 
 class BulkActionForm(FlaskForm):
@@ -408,11 +406,11 @@ class GroupAcknowledgeForm(FlaskForm):
         validators=[DataRequired(), NumberRange(min=1)],
     )
     package_name = StringField(
-        "Paket",
+        "Package",
         validators=[DataRequired(), Length(min=1, max=256)],
     )
     comment = TextAreaField(
-        "Kommentar (optional)",
+        "Comment (optional)",
         validators=[OptionalValidator(), Length(max=NOTE_TEXT_MAX_LEN)],
     )
 
@@ -437,7 +435,7 @@ class ServerGroupForm(FlaskForm):
         **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)
-        choices: list[tuple[str, str]] = [("none", "— keine —")]
+        choices: list[tuple[str, str]] = [("none", "— none —")]
         if available_groups:
             choices.extend((str(g.id), g.name) for g in available_groups)
         self.group_id.choices = choices
@@ -450,7 +448,7 @@ class ServerScanIntervalForm(FlaskForm):
     """
 
     scan_interval_h = IntegerField(
-        "Scan-Intervall (h)",
+        "Scan interval (h)",
         validators=[DataRequired(), NumberRange(min=1, max=168)],
     )
 
@@ -475,7 +473,7 @@ class ServerSettingsForm(FlaskForm):
         validators=[OptionalValidator()],
     )
     scan_interval_h = IntegerField(
-        "Scan-Intervall (h)",
+        "Scan interval (h)",
         validators=[DataRequired(), NumberRange(min=1, max=168)],
     )
 
@@ -486,7 +484,7 @@ class ServerSettingsForm(FlaskForm):
         **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)
-        choices: list[tuple[str, str]] = [("none", "— keine —")]
+        choices: list[tuple[str, str]] = [("none", "— none —")]
         if available_groups:
             choices.extend((str(g.id), g.name) for g in available_groups)
         self.group_id.choices = choices
@@ -502,13 +500,13 @@ class ServerGroupCreateForm(FlaskForm):
     """
 
     name = StringField(
-        "Gruppen-Name",
+        "Group name",
         validators=[
             DataRequired(),
             Length(min=1, max=64),
             Regexp(
                 SERVER_GROUP_NAME_REGEX,
-                message="Erlaubt: A-Z, a-z, 0-9, Leerzeichen, '_', '.', '-' (max 64 Zeichen).",
+                message="Allowed: A-Z, a-z, 0-9, spaces, '_', '.', '-' (max 64 characters).",
             ),
         ],
     )
@@ -524,7 +522,7 @@ class ServerGroupCreateForm(FlaskForm):
         Form-seitig abfangen, damit Form-Akzeptanz die DB-CHECKs deckt.
         """
         if not field.data or not field.data.strip():
-            raise ValidationError("Gruppen-Name darf nicht nur aus Leerzeichen bestehen.")
+            raise ValidationError("Group name must not be only spaces.")
 
 
 class GroupRenameForm(FlaskForm):
@@ -537,20 +535,20 @@ class GroupRenameForm(FlaskForm):
     """
 
     name = StringField(
-        "Neuer Name",
+        "New name",
         validators=[
             DataRequired(),
             Length(min=1, max=64),
             Regexp(
                 SERVER_GROUP_NAME_REGEX,
-                message="Erlaubt: A-Z, a-z, 0-9, Leerzeichen, '_', '.', '-' (max 64 Zeichen).",
+                message="Allowed: A-Z, a-z, 0-9, spaces, '_', '.', '-' (max 64 characters).",
             ),
         ],
     )
 
     def validate_name(self, field: StringField) -> None:
         if not field.data or not field.data.strip():
-            raise ValidationError("Gruppen-Name darf nicht nur aus Leerzeichen bestehen.")
+            raise ValidationError("Group name must not be only spaces.")
 
 
 class GroupMoveForm(FlaskForm):
@@ -561,7 +559,7 @@ class GroupMoveForm(FlaskForm):
     """
 
     direction = SelectField(
-        "Richtung",
+        "Direction",
         choices=[("up", "up"), ("down", "down")],
         validators=[DataRequired()],
     )
@@ -576,15 +574,15 @@ class ServerTagCreateForm(FlaskForm):
     """
 
     name = StringField(
-        "Tag-Name",
+        "Tag name",
         validators=[
             DataRequired(),
             Length(min=1, max=32),
             Regexp(
                 TAG_NAME_REGEX,
                 message=(
-                    "Ungueltiger Tag-Name. Erlaubt: a-z, 0-9, '.', '_', '-' "
-                    "(Start mit Buchstabe/Ziffer, max 32 Zeichen)."
+                    "Invalid tag name. Allowed: a-z, 0-9, '.', '_', '-' "
+                    "(start with letter/digit, max 32 characters)."
                 ),
             ),
         ],
