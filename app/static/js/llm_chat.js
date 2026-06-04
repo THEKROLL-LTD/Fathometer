@@ -81,8 +81,8 @@
             this.closeStream();
             return;
           }
-          this.error = "Stream-Fehler";
-          this.$dispatch("toast", { msg: "Stream-Fehler", kind: "error" });
+          this.error = "Stream error";
+          this.$dispatch("toast", { msg: "Stream error", kind: "error" });
           this.closeStream();
           void ev;
         });
@@ -121,7 +121,7 @@
           if (!res.ok) {
             const msg =
               (payload && (payload.message || payload.error)) ||
-              `Fehler ${res.status}`;
+              `Error ${res.status}`;
             throw new Error(msg);
           }
           this.draft = "";
@@ -130,7 +130,7 @@
           this.connect(nextStreamUrl);
         } catch (e) {
           this.streaming = false;
-          this.error = e.message || "Unbekannter Fehler";
+          this.error = e.message || "Unknown error";
           this.$dispatch("toast", { msg: this.error, kind: "error" });
         }
       },

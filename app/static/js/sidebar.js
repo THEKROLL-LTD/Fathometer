@@ -143,7 +143,7 @@
     } else if (scan) {
       parts.push("clean");
     } else {
-      parts.push("kein Scan");
+      parts.push("no scan");
     }
     if (kev > 0) parts.push(kev + " KEV");
     return parts.join(" · ");

@@ -4,6 +4,48 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — ADR-0045 (Block AB): English-only UI
+
+Zielversion **v0.17.0**. Reiner String-Touch — kein Markup-, Logik-, CSS- oder
+Schema-Umbau, keine Migration. Sechs Phasen (A–F), je ein Commit.
+
+### Changed
+
+- **Gesamte operator-sichtbare UI ist jetzt ausschliesslich englisch**
+  (ADR-0045, loest ADR-0033 §8 Phase-2-Strategie ab). Betroffen:
+  - Jinja-Templates (`app/templates/**` — Settings, Server-Detail, Findings,
+    Audit, Setup-Wizard, Chat, Dashboard-Restdeutsch, Partials, Empty-States,
+    Modals, `_macros.html`).
+  - Flash-Messages und View-lokale Fehlertexte in allen `app/views/*.py`
+    (inkl. `abort(...)`-Descriptions und Workflow-Card-Labels in
+    `server_detail.py`) gemaess verbindlichem Glossar.
+  - WTForms-Validator-Messages und Feld-Labels (`app/forms.py`).
+  - JS-Strings (`app/static/js/*.js`): Toasts, Confirm-Texte, Error-States,
+    der client-seitige Relative-Time-Mirror in `stale.js`.
+  - Relative-Time-Filter `relative_time` in `app/__init__.py`
+    (`vor 5min` -> `5m ago`, `noch nie` -> `never`).
+  - Chat-LLM-System-Prompt (`app/services/llm_prompt.py`): Antworten jetzt auf
+    Englisch; Marker-Konstanten `TRIVY_DATA_START`/`TRIVY_DATA_END`,
+    Daten-Block-Aufbau und Finding-Line-Keys byte-identisch (Prompt-Injection-
+    Defense unveraendert). Pass-2-Prompts (`llm_prompts.py`) unberuehrt.
+  - Chat-JSON-Error-`message`-Werte in `app/api/llm_chat.py` (maschinelle
+    `error`-Codes unveraendert).
+
+### Added
+
+- **Sprach-Sweep-Test** `tests/test_ui_language.py` (Pure-Unit, Teil des
+  Default-`pytest`): scannt Templates, ausgelieferte JS und String-Literale in
+  `app/views/*.py` + `app/forms.py` (Kommentare/Docstrings ausgenommen) gegen
+  eine deutsche Marker-Wortliste (Umlaute + `ae/oe/ue`-Transliterationen +
+  Wortgrenzen-Marker) und schlaegt bei jedem neuen deutschen UI-String fehl.
+  Explizite `_ALLOWLIST` als Ausnahme-Mechanismus.
+
+### Notes
+
+- **Doc-Sprache, Code-Kommentare, Docstrings, ADRs bleiben deutsch**
+  (ADR-0045 §Scope). Keine i18n-Infrastruktur, kein Daten-Rollout
+  persistierter deutscher Strings (Audit-Metadata/Notes-Bestand).
+
 ## [Unreleased] — ADR-0044 (TICKET-009): Per-Band Bulk-Acknowledge
 
 ### Server-Detail

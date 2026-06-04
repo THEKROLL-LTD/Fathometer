@@ -139,7 +139,7 @@ def tags_rename(tag_id: int) -> Any:
         sess.flush()
     except IntegrityError:
         sess.rollback()
-        flash(f"Name '{new_name}' ist bereits vergeben.", "error")
+        flash(f"Name '{new_name}' is already taken.", "error")
         return redirect(url_for("settings.tags_list"))
 
     log_event(
@@ -308,7 +308,7 @@ def groups_rename(group_id: int) -> Any:
         sess.flush()
     except IntegrityError:
         sess.rollback()
-        flash(f"Name '{new_name}' ist bereits vergeben.", "error")
+        flash(f"Name '{new_name}' is already taken.", "error")
         return redirect(url_for("settings.groups_list"))
 
     log_event(
@@ -735,7 +735,7 @@ def llm_reviewer_change_mode() -> Any:
         )
 
     if not _verify_master_key_from_form(sess, form.master_key.data):
-        flash("Master-Key falsch.", "error")
+        flash("Master key incorrect.", "error")
         stats = _llm_reviewer_stats(sess)
         return make_response(
             render_settings(
@@ -751,7 +751,7 @@ def llm_reviewer_change_mode() -> Any:
     setting_row = get_settings_row(sess)
     old_mode = setting_row.block_p_llm_mode
     if old_mode == new_mode:
-        flash(f"Mode ist bereits '{new_mode}'.", "info")
+        flash(f"Mode is already '{new_mode}'.", "info")
         return redirect(url_for("settings.llm_reviewer_view"))
 
     setting_row.block_p_llm_mode = new_mode
@@ -763,7 +763,7 @@ def llm_reviewer_change_mode() -> Any:
         session=sess,
     )
     sess.commit()
-    flash(f"LLM-Mode auf '{new_mode}' gesetzt.", "success")
+    flash(f"LLM mode set to '{new_mode}'.", "success")
     return redirect(url_for("settings.llm_reviewer_view"))
 
 
@@ -811,7 +811,7 @@ def llm_reviewer_change_concurrency() -> Any:
         )
 
     if not _verify_master_key_from_form(sess, form.master_key.data):
-        flash("Master-Key falsch.", "error")
+        flash("Master key incorrect.", "error")
         stats = _llm_reviewer_stats(sess)
         return make_response(
             render_settings(
@@ -830,7 +830,7 @@ def llm_reviewer_change_concurrency() -> Any:
     setting_row = get_settings_row(sess)
     old_value = int(setting_row.llm_worker_job_concurrency)
     if old_value == new_value:
-        flash(f"Concurrency ist bereits '{new_value}'.", "info")
+        flash(f"Concurrency is already '{new_value}'.", "info")
         return redirect(url_for("settings.llm_reviewer_view"))
 
     setting_row.llm_worker_job_concurrency = new_value
@@ -843,7 +843,7 @@ def llm_reviewer_change_concurrency() -> Any:
     )
     sess.commit()
     flash(
-        f"Concurrency auf '{new_value}' gesetzt — Worker uebernimmt binnen 30 s.",
+        f"Concurrency set to '{new_value}' — worker picks it up within 30 s.",
         "success",
     )
     return redirect(url_for("settings.llm_reviewer_view"))
@@ -915,13 +915,13 @@ def llm_reviewer_requeue_backlog() -> Any:
     setting_row = get_settings_row(sess)
     if setting_row.block_p_llm_mode != "live":
         flash(
-            "Re-queue ist nur im 'live'-Mode erlaubt. Schalte erst auf live.",
+            "Re-queue is only allowed in 'live' mode. Switch to live first.",
             "error",
         )
         return redirect(url_for("settings.llm_reviewer_view"))
 
     if not _verify_master_key_from_form(sess, form.master_key.data):
-        flash("Master-Key falsch.", "error")
+        flash("Master key incorrect.", "error")
         return redirect(url_for("settings.llm_reviewer_view"))
 
     # Welche Jobs sind "would_call"? — done + result.would_call=true.
@@ -932,7 +932,7 @@ def llm_reviewer_requeue_backlog() -> Any:
     target_ids = [int(row) for row in sess.execute(target_ids_stmt).scalars().all()]
 
     if not target_ids:
-        flash("Kein Observation-Backlog zum Re-queuen vorhanden.", "info")
+        flash("No observation backlog to re-queue.", "info")
         return redirect(url_for("settings.llm_reviewer_view"))
 
     # Reset: status=queued, attempts=0, result=NULL. `next_attempt_at` setzen

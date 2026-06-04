@@ -55,7 +55,7 @@
     if (!res.ok) {
       const msg =
         (payload && (payload.detail || payload.error || payload.message)) ||
-        `Fehler ${res.status}`;
+        `Error ${res.status}`;
       const err = new Error(msg);
       err.status = res.status;
       err.payload = payload;
@@ -93,7 +93,7 @@
           });
           const n = typeof data.count === "number" ? data.count : 0;
           this.$dispatch("toast", {
-            msg: `${n} ${band}-Finding${n === 1 ? "" : "s"} abgehakt`,
+            msg: `${n} ${band} finding${n === 1 ? "" : "s"} acknowledged`,
             kind: "success",
           });
           this.armed = false;
@@ -101,7 +101,7 @@
             window.location.reload();
           }, 400);
         } catch (e) {
-          this.error = e.message || "Fehler beim Anwenden";
+          this.error = e.message || "Apply failed";
           this.$dispatch("toast", { msg: this.error, kind: "error" });
         } finally {
           this.busy = false;

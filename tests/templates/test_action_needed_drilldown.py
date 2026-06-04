@@ -84,7 +84,7 @@ def _make_single_entry_card(
     )
     return {
         "id": card_id,
-        "label": "ESCALATE · Distro patchen",
+        "label": "ESCALATE · Patch distro",
         "variant": "escalate-distro",
         "filter": ("escalate", "patch", "os_package"),
         "count": 1,
@@ -113,7 +113,7 @@ def _make_pagination_card(num_groups: int, card_id: str = "escalate-distro-patch
     ]
     return {
         "id": card_id,
-        "label": "ESCALATE · Distro patchen",
+        "label": "ESCALATE · Patch distro",
         "variant": "escalate-distro",
         "filter": ("escalate", "patch", "os_package"),
         "count": num_groups,
@@ -290,7 +290,7 @@ def test_drilldown_row_em_dash_when_reason_missing(app: Flask) -> None:
     # Wir setzen evaluation komplett auf None via dem _make_single_entry_card-Helper.
     card = {
         "id": "escalate-distro-patch",
-        "label": "ESCALATE · Distro patchen",
+        "label": "ESCALATE · Patch distro",
         "variant": "escalate-distro",
         "filter": ("escalate", "patch", "os_package"),
         "count": 1,

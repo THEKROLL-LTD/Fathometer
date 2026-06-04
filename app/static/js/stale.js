@@ -26,21 +26,21 @@
   "use strict";
 
   function relativeTime(iso) {
-    if (!iso) return "noch nie";
+    if (!iso) return "never";
     const dt = new Date(iso).getTime();
-    if (Number.isNaN(dt)) return "noch nie";
+    if (Number.isNaN(dt)) return "never";
     const diffSec = Math.max(0, (Date.now() - dt) / 1000);
-    if (diffSec < 60) return "gerade eben";
+    if (diffSec < 60) return "just now";
     if (diffSec < 3600) {
       const m = Math.round(diffSec / 60);
-      return `vor ${m}min`;
+      return `${m}m ago`;
     }
     if (diffSec < 86400) {
       const h = Math.round(diffSec / 3600);
-      return `vor ${h}h`;
+      return `${h}h ago`;
     }
     const d = Math.round(diffSec / 86400);
-    return `vor ${d} Tag${d === 1 ? "" : "en"}`;
+    return `${d}d ago`;
   }
 
   function staleTick() {

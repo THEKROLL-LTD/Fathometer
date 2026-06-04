@@ -103,10 +103,10 @@
      reicht, dazu kommt das HTML-Quote-Escaping aus `|forceescape`. #}
   <button type="button"
           class="btn btn-ghost btn-xs px-1 align-middle {{ classes }}"
-          aria-label="{{ label or ('Kopieren: ' ~ value) }}"
-          title="In Zwischenablage kopieren"
+          aria-label="{{ label or ('Copy: ' ~ value) }}"
+          title="Copy to clipboard"
           x-data
-          @click.stop.prevent="navigator.clipboard.writeText({{ value | tojson | forceescape }}).then(() => $dispatch('toast', {msg: 'Kopiert: ' + {{ value | tojson | forceescape }}, kind: 'success'})).catch(() => $dispatch('toast', {msg: 'Kopieren fehlgeschlagen', kind: 'error'}))">
+          @click.stop.prevent="navigator.clipboard.writeText({{ value | tojson | forceescape }}).then(() => $dispatch('toast', {msg: 'Copied: ' + {{ value | tojson | forceescape }}, kind: 'success'})).catch(() => $dispatch('toast', {msg: 'Copy failed', kind: 'error'}))">
     {# Heroicons "clipboard" (outline, 16px). Reines SVG, keine externe Abh. #}
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
          fill="none" stroke="currentColor" stroke-width="1.8"
@@ -153,7 +153,7 @@
     {%- elif pct >= 1  -%}{%- set cls = 'badge-info' -%}
     {%- endif -%}
     <span class="badge badge-sm {{ cls }} font-mono"
-          title="EPSS — Wahrscheinlichkeit einer Ausnutzung in den naechsten 30 Tagen.">
+          title="EPSS — probability of exploitation in the next 30 days.">
       {{ '%.1f%%' | format(pct) }}
     </span>
   {%- else -%}

@@ -164,8 +164,8 @@ def test_rename_duplicate_name_rolls_back(
     sess.rollback.assert_called_once()
     assert not any(c["action"] == "tag.renamed" for c in audit), audit
     sess.commit.assert_not_called()
-    assert any("bereits vergeben" in msg for msg, _ in flashes), (
-        f"Flash 'bereits vergeben' erwartet. Flashes: {flashes}"
+    assert any("already taken" in msg for msg, _ in flashes), (
+        f"Flash 'already taken' erwartet. Flashes: {flashes}"
     )
 
 

@@ -44,7 +44,7 @@
     if (!res.ok) {
       const msg =
         (payload && (payload.detail || payload.error || payload.message)) ||
-        `Fehler ${res.status}`;
+        `Error ${res.status}`;
       const err = new Error(msg);
       err.status = res.status;
       err.payload = payload;
@@ -98,7 +98,7 @@
           this.previewServerCount =
             typeof data.server_count === "number" ? data.server_count : 0;
         } catch (e) {
-          this.error = e.message || "Vorschau fehlgeschlagen";
+          this.error = e.message || "Preview failed";
           this.$dispatch("toast", { msg: this.error, kind: "error" });
         } finally {
           this.busy = false;
@@ -118,7 +118,7 @@
           const data = await postBulk(payload);
           const n = typeof data.count === "number" ? data.count : 0;
           this.$dispatch("toast", {
-            msg: `${n} Finding${n === 1 ? "" : "s"} abgehakt`,
+            msg: `${n} finding${n === 1 ? "" : "s"} acknowledged`,
             kind: "success",
           });
           this.open = false;
@@ -127,7 +127,7 @@
             window.location.reload();
           }, 400);
         } catch (e) {
-          this.error = e.message || "Fehler beim Anwenden";
+          this.error = e.message || "Apply failed";
           this.$dispatch("toast", { msg: this.error, kind: "error" });
         } finally {
           this.busy = false;

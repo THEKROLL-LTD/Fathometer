@@ -177,7 +177,7 @@ def _validate_bucket_id(raw: Any, *, allow_zero: bool = False) -> int:
     try:
         value = int(raw)
     except (TypeError, ValueError):
-        abort(400, description="Parameter muss eine Ganzzahl sein")
+        abort(400, description="Parameter must be an integer")
     minimum = 0 if allow_zero else 1
     if value < minimum:
         abort(400, description="Parameter ausserhalb des erlaubten Bereichs")
@@ -386,7 +386,7 @@ def _parse_json_list(raw: str | None) -> list[Any]:
     except json.JSONDecodeError:
         abort(400, description="JSON payload could not be parsed")
     if not isinstance(value, list):
-        abort(400, description="JSON-Payload muss eine Liste sein")
+        abort(400, description="JSON payload must be a list")
     return value
 
 
@@ -411,7 +411,7 @@ def _normalize_bucket_selections(raw: list[Any]) -> list[tuple[int, int, str]]:
         if not isinstance(filter_qs_raw, str):
             abort(400, description="Bucket-Selektion erwartet String-Filter")
         if server_id < 0 or group_id < 0:
-            abort(400, description="Bucket-IDs muessen >= 0 sein")
+            abort(400, description="Bucket IDs must be >= 0")
         result.append((server_id, group_id, filter_qs_raw))
     return result
 
@@ -423,9 +423,9 @@ def _normalize_finding_ids(raw: list[Any]) -> list[int]:
         try:
             fid = int(entry)
         except (TypeError, ValueError):
-            abort(400, description="finding_ids muss eine Liste von Ganzzahlen sein")
+            abort(400, description="finding_ids must be a list of integers")
         if fid < 1:
-            abort(400, description="finding_ids muessen >= 1 sein")
+            abort(400, description="finding_ids must be >= 1")
         result.append(fid)
     return result
 

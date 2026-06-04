@@ -345,7 +345,7 @@ def _build_action_sections(
     card_specs: list[dict[str, Any]] = [
         {
             "id": "escalate-distro-patch",
-            "label": "ESCALATE · Distro patchen",
+            "label": "ESCALATE · Patch distro",
             "variant": "escalate-distro",
             "risk_band": "escalate",
             "action_type": "patch",
@@ -354,7 +354,7 @@ def _build_action_sections(
         },
         {
             "id": "escalate-app-update",
-            "label": "ESCALATE · App-Update einspielen",
+            "label": "ESCALATE · Apply app update",
             "variant": "escalate-app",
             "risk_band": "escalate",
             "action_type": "patch",
@@ -363,7 +363,7 @@ def _build_action_sections(
         },
         {
             "id": "escalate-mitigate",
-            "label": "ESCALATE · Kein Patch — mitigieren",
+            "label": "ESCALATE · No patch — mitigate",
             "variant": "escalate-mitigate",
             "risk_band": "escalate",
             "action_type": "mitigate",
@@ -372,7 +372,7 @@ def _build_action_sections(
         },
         {
             "id": "act-distro-patch",
-            "label": "ACT · Distro patchen (normal cycle)",
+            "label": "ACT · Patch distro (normal cycle)",
             "variant": "act-distro",
             "risk_band": "act",
             "action_type": "patch",
@@ -381,7 +381,7 @@ def _build_action_sections(
         },
         {
             "id": "act-app-update",
-            "label": "ACT · App-Update einspielen (normal cycle)",
+            "label": "ACT · Apply app update (normal cycle)",
             "variant": "act-app",
             "risk_band": "act",
             "action_type": "patch",
