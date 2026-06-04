@@ -1,16 +1,17 @@
-"""Pure-Unit Template-Tests: /settings/tags Manage-Only-Seite (Block Z, Phase D, ADR-0040).
+"""Pure-Unit Template-Tests: /settings/tags Manage-Only-Seite (Block AD, ADR-0047).
 
-Verifiziert dass `settings/tags.html` auf Manage-Only + `sd-*`-Markup
-refactored wurde:
-  - KEIN Anlege-Form mehr (kein `tags_create`-Endpoint, kein "Anlegen"-Submit),
-    stattdessen Hint-Block der auf den Inline-Create im Server-Detail lenkt,
-  - `sd-*`-Klassen statt DaisyUI (kein `card`/`btn`/`badge`/`table`/`input-bordered`),
-  - befuellter State (Color-/Rename-/Delete-Hooks pro Row) + Empty-State.
+Verifiziert dass `settings/tags.html` auf die `s-*`-Komponentenschicht
+(Block AD) umgestellt ist und Manage-Only bleibt (ADR-0040):
+  - KEIN Anlege-Form mehr (kein Create-Submit), stattdessen Hinweis im Lede
+    der auf den Inline-Create im Server-Detail lenkt,
+  - `s-*`-Klassen statt DaisyUI/`sd-manage-*` (kein
+    `card`/`btn`/`badge`/`table`/`input-bordered`/`form-control`),
+  - befuellter State (Color-Picker-/Rename-/Delete-Hooks pro Row) + Empty-State.
 
-Render-Strategie analog `tests/views/test_settings_groups_template.py` (Phase C):
-Content-Only-Template direkt via `flask.render_template` im App-Context, Context =
-Liste echter Tag-aehnlicher Objekte (id/name/color) plus echte Form-Instanzen.
-CSRF aktiv → `csrf_token` rendert ein echtes Hidden-Input. Kein DB-Zugriff.
+Render-Strategie: Content-Only-Template direkt via `flask.render_template` im
+App-Context, Context = Liste Tag-aehnlicher Objekte (id/name/color) plus echte
+Form-Instanzen. CSRF aktiv → `csrf_token` rendert ein echtes Hidden-Input.
+Kein DB-Zugriff.
 """
 
 from __future__ import annotations
@@ -55,6 +56,12 @@ def _render(app: Flask, tags: list[_FakeTag]) -> str:
         )
 
 
+def _norm(html: str) -> str:
+    """Whitespace-normalisiert (Zeilenumbrueche im Template sollen Substring-
+    Checks nicht brechen)."""
+    return " ".join(html.split())
+
+
 def _two_tags() -> list[_FakeTag]:
     return [
         _FakeTag(id=1, name="prod", color="#ff8800"),
@@ -63,13 +70,13 @@ def _two_tags() -> list[_FakeTag]:
 
 
 # ===========================================================================
-# 1. KEIN Anlege-Form: Hint-Block vorhanden, kein Create-Submit/DaisyUI
+# 1. KEIN Anlege-Form: Hinweis vorhanden, kein Create-Submit/Anlegen-Text
 # ===========================================================================
 
 
 def test_no_create_form_hint_present(csrf_app: Flask) -> None:
-    html = _render(csrf_app, _two_tags())
-    # Hint lenkt auf den Inline-Create-Pfad im Server-Detail-Settings.
+    html = _norm(_render(csrf_app, _two_tags()))
+    # Hinweis lenkt auf den Inline-Create-Pfad im Server-Detail-Settings.
     assert "Tags are created by assigning a new tag in the server detail settings" in html
     # Kein Create-Form: weder "Anlegen"-Text noch eine Create-Section-Ueberschrift.
     assert "Anlegen" not in html
@@ -77,20 +84,22 @@ def test_no_create_form_hint_present(csrf_app: Flask) -> None:
 
 
 # ===========================================================================
-# 2. sd-*-Markup statt DaisyUI
+# 2. s-*-Markup statt DaisyUI / sd-manage-*
 # ===========================================================================
 
 
-def test_sd_markup_not_daisyui(csrf_app: Flask) -> None:
+def test_s_layer_markup_not_daisyui(csrf_app: Flask) -> None:
     html = _render(csrf_app, _two_tags())
-    assert "sd-manage-table" in html
+    assert "s-tags__table" in html
+    assert "s-table__row" in html
     assert 'data-test="tags-table"' in html
-    # Keine DaisyUI-Komponenten-Klassen mehr.
+    # Keine DaisyUI-Komponenten-Klassen und keine alte sd-manage-Schicht mehr.
     assert 'class="card' not in html
     assert 'class="btn' not in html
     assert "badge" not in html
     assert "input-bordered" not in html
     assert "form-control" not in html
+    assert "sd-manage" not in html
 
 
 # ===========================================================================
@@ -103,7 +112,6 @@ def test_filled_state_row_hooks(csrf_app: Flask) -> None:
     for tid in (1, 2):
         assert f'data-test="tag-row-{tid}"' in html
         assert f'data-test="tag-color-input-{tid}"' in html
-        assert f'data-test="tag-color-submit-{tid}"' in html
         assert f'data-test="tag-rename-input-{tid}"' in html
         assert f'data-test="tag-rename-submit-{tid}"' in html
         assert f'data-test="tag-delete-{tid}"' in html

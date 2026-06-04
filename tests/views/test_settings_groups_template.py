@@ -56,6 +56,11 @@ def _render(app: Flask, groups: list[dict[str, object]]) -> str:
         )
 
 
+def _norm(html: str) -> str:
+    """Whitespace-normalisiert (Zeilenumbrueche sollen Substring-Checks nicht brechen)."""
+    return " ".join(html.split())
+
+
 def _two_groups() -> list[dict[str, object]]:
     return [
         {"id": 1, "name": "prod-eu", "position": 0, "member_count": 3},
@@ -149,8 +154,8 @@ def test_no_create_form(csrf_app: Flask) -> None:
 
         list_url = url_for("settings.groups_list")
     assert f'action="{list_url}"' not in html
-    # Hint-Block lenkt auf den Inline-Create-Pfad im Server-Detail-Settings.
-    assert "in the server detail settings" in html
+    # Hinweis lenkt auf den Inline-Create-Pfad im Server-Detail-Settings.
+    assert "in the server detail settings" in _norm(html)
 
 
 # ===========================================================================

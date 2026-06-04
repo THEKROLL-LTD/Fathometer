@@ -1,14 +1,9 @@
-{# Tag-Verwaltung Content (Block Z, Phase D / ADR-0040).
+{# Tag-Verwaltung Content (Block AD / ADR-0047 — Restyling auf s-*-Schicht).
 
-   Manage-Only-Seite: Color-Edit, Rename, Delete. KEIN Anlege-Form —
-   Tags entstehen inline im Server-Detail-Settings (Phase A/B). Symmetrisch
-   zu `settings/groups.html` (Phase C): gleiche `sd-manage-*`-Struktur,
-   gleiche Hint-/Empty-State-Logik.
-
-   Wird ueber `render_settings(active="tags", ...)` in einem von drei Modi
-   gerendert (Vollseite / Detail-Pane-Fragment / Content-Only). Daher KEIN
-   `extends`, KEIN `block` — Content-only-Template. Ausschliesslich
-   `sd-*`-Klassen (kein DaisyUI/Tailwind: kein card/btn/badge/table/input-bordered).
+   Manage-Only-Seite (ADR-0040): Color-Edit, Rename, Delete. KEIN Anlege-Form —
+   Tags entstehen inline im Server-Detail-Settings. Wird ueber
+   `render_settings(active="tags", ...)` als Content-Markup gerendert (KEIN
+   `extends`), includiert in `#settings-content.settings`.
 
    Variablen-Vertrag (gesetzt von `app/views/settings.py:tags_list`):
      - `tags`        : Iterable[Tag] mit id, name, color (#rrggbb).
@@ -16,97 +11,138 @@
      - `color_form`  : TagColorForm   (Feld color + csrf_token).
      - `delete_form` : CSRFOnlyForm   (nur csrf_token).
 
+   Hinweis: der Backend-Vertrag liefert keine Usage-Zahl pro Tag (anders als
+   Gruppen) — die Usage-Spalte zeigt daher einen Platzhalter (siehe TD-016).
+
    Sicherheit:
      - Kein `|safe` auf User-Daten. `tag.name` rendert unter Jinja-Autoescape.
      - `tag.color` ist serverseitig auf #rrggbb-Regex validiert und wird nur
-       in CSS-Werten (style="background-color/border-color/color") gerendert.
+       in CSS-Werten (style="background"/"--swatch-color") gerendert.
      - CSRF-Token in jeder state-changing Form.
      - Kein Pflicht-Kommentarfeld (ADR-0006). Delete-Confirm ist ein
        client-seitiger Bestaetigungs-Dialog, kein Pflicht-Feld.
 #}
-<div class="sd-manage">
-  <header class="sd-manage-head">
-    <h1 class="sd-settings-section__title">Tags</h1>
-    <p class="sd-settings-section__hint">
-      Tags group servers for filters and dashboard overviews. Manage colors,
-      names and deletion here.
-    </p>
-    <p class="sd-settings-section__hint">
-      Tags are created by assigning a new tag in the server detail settings.
-    </p>
-  </header>
+{% set _palette = ['#7B8794', '#00E5FF', '#39FF14', '#FF9500', '#FF4444', '#B388FF', '#FFD600'] %}
+<p class="settings__eyebrow">Settings</p>
+<h1 class="settings__title">Tags</h1>
+<p class="settings__lede">
+  Tags group servers for filters and dashboard overviews. Manage color, name
+  and deletion here. Tags are created by assigning a new tag in the server
+  detail settings.
+</p>
+
+<section class="s-section">
+  <div class="s-section__head">
+    <h2 class="s-section__label">All tags</h2>
+    {% if tags %}
+      <span class="s-section__meta">{{ tags | length }} tag{{ '' if tags | length == 1 else 's' }}</span>
+    {% endif %}
+  </div>
 
   {% if tags %}
-    <table class="sd-manage-table" data-test="tags-table">
-      <thead>
-        <tr>
-          <th>Color</th>
-          <th>Name</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for tag in tags %}
-          <tr class="sd-manage-row" data-test="tag-row-{{ tag.id }}">
-            <td>
-              {# tag.color ist serverseitig auf #rrggbb-Regex validiert. #}
-              <form method="post"
-                    action="{{ url_for('settings.tags_color', tag_id=tag.id) }}"
-                    class="sd-manage-actions">
-                {{ color_form.csrf_token }}
+    <div class="s-table s-tags__table" data-test="tags-table">
+      <div class="s-table__head s-tags__head">
+        <span>Color</span>
+        <span>Name</span>
+        <span>Usage</span>
+        <span class="s-table__cell--right">Actions</span>
+      </div>
+
+      {% for tag in tags %}
+        <div class="s-table__row s-tags__row" data-test="tag-row-{{ tag.id }}">
+          {# Color: Swatch oeffnet ein Palette-Popover (s-overflow-Pattern).
+             Palette-Klick + nativer Picker schreiben das Hidden-`color`-Feld
+             und submitten die Color-Form sofort. tag.color ist #rrggbb-regex-
+             validiert (serverseitig) und nur in CSS-Werten verwendet. #}
+          <div class="s-overflow"
+               x-data="{ open: false }"
+               :class="{ 's-overflow--open': open }"
+               @click.outside="open = false"
+               @keydown.escape.window="open = false"
+               style="justify-content: flex-start;">
+            <button type="button"
+                    class="s-tags__swatch"
+                    style="--swatch-color: {{ tag.color }};"
+                    @click="open = !open"
+                    :aria-expanded="open ? 'true' : 'false'"
+                    aria-label="Pick color for tag {{ tag.name }}"></button>
+            <form method="post"
+                  action="{{ url_for('settings.tags_color', tag_id=tag.id) }}"
+                  x-ref="colorForm">
+              {{ color_form.csrf_token }}
+              <input type="hidden"
+                     name="color"
+                     value="{{ tag.color }}"
+                     x-ref="colorValue">
+              <div class="s-overflow__menu"
+                   role="menu"
+                   x-show="open"
+                   x-cloak
+                   style="left: 0; right: auto; min-width: 0; padding: 10px; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px;">
+                {% for c in _palette %}
+                  <button type="button"
+                          @click="$refs.colorValue.value = '{{ c }}'; $refs.colorForm.requestSubmit();"
+                          style="width: 20px; height: 20px; padding: 0; cursor: pointer; background: {{ c }}; border: 1px solid {% if c | lower == tag.color | lower %}var(--accent){% else %}var(--border-visible){% endif %};"
+                          aria-label="Set color {{ c }}"></button>
+                {% endfor %}
                 <input type="color"
-                       name="color"
                        value="{{ tag.color }}"
-                       class="sd-input sd-color-input"
-                       aria-label="Color of tag {{ tag.name }}"
-                       data-test="tag-color-input-{{ tag.id }}">
-                <button type="submit"
-                        class="sd-add-btn"
-                        data-test="tag-color-submit-{{ tag.id }}">Save</button>
-              </form>
-            </td>
-            <td>
-              <form method="post"
-                    action="{{ url_for('settings.tags_rename', tag_id=tag.id) }}"
-                    class="sd-manage-actions">
-                {{ rename_form.csrf_token }}
-                <span class="sd-tag"
-                      style="border-color: {{ tag.color }}; color: {{ tag.color }};"
-                      data-test="tag-chip-{{ tag.id }}">{{ tag.name }}</span>
-                <input class="sd-input"
-                       type="text"
-                       name="name"
-                       value="{{ tag.name }}"
-                       maxlength="32"
-                       pattern="^[a-z0-9][a-z0-9._-]{0,31}$"
-                       title="a-z, 0-9, '.', '_', '-' (start with letter/digit, max 32 characters)"
-                       aria-label="Rename tag {{ tag.name }}"
-                       data-test="tag-rename-input-{{ tag.id }}">
-                <button type="submit"
-                        class="sd-add-btn"
-                        data-test="tag-rename-submit-{{ tag.id }}">Rename</button>
-              </form>
-            </td>
-            <td>
-              <form method="post"
-                    action="{{ url_for('settings.tags_delete', tag_id=tag.id) }}"
-                    x-data
-                    @submit="if (!confirm('Really delete this tag?')) $event.preventDefault();">
-                {{ delete_form.csrf_token }}
-                <button type="submit"
-                        class="sd-danger-btn"
-                        data-test="tag-delete-{{ tag.id }}"
-                        aria-label="Delete tag {{ tag.name }}">Delete</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+                       data-test="tag-color-input-{{ tag.id }}"
+                       @change="$refs.colorValue.value = $event.target.value; $refs.colorForm.requestSubmit();"
+                       aria-label="Custom color for tag {{ tag.name }}"
+                       style="grid-column: 1 / -1; width: 100%; height: 28px; margin-top: 4px; padding: 0; cursor: pointer; background: transparent; border: 1px solid var(--border-subtle);">
+              </div>
+            </form>
+          </div>
+
+          {# Name: Inline-Rename. Save erscheint nur bei Aenderung (Alpine).
+             Tag-Namen sind regex-validiert (^[a-z0-9][a-z0-9._-]{0,31}$) —
+             keine Anfuehrungszeichen moeglich, daher Inline-JS-String safe. #}
+          <form method="post"
+                action="{{ url_for('settings.tags_rename', tag_id=tag.id) }}"
+                class="s-tags__actions"
+                style="justify-content: flex-start; flex: 1;"
+                x-data="{ name: '{{ tag.name }}' }">
+            {{ rename_form.csrf_token }}
+            <input class="s-tags__name"
+                   type="text"
+                   name="name"
+                   value="{{ tag.name }}"
+                   x-model="name"
+                   maxlength="32"
+                   pattern="^[a-z0-9][a-z0-9._-]{0,31}$"
+                   title="a-z, 0-9, '.', '_', '-' (start with letter/digit, max 32 characters)"
+                   aria-label="Rename tag {{ tag.name }}"
+                   data-test="tag-rename-input-{{ tag.id }}">
+            <button type="submit"
+                    class="s-btn s-btn--primary s-btn--sm"
+                    x-show="name !== '{{ tag.name }}'"
+                    x-cloak
+                    data-test="tag-rename-submit-{{ tag.id }}">Save</button>
+          </form>
+
+          <div class="s-tags__count" style="color: var(--text-ghost);" title="Tag usage count is added in a later block (TD-016).">—</div>
+
+          <div class="s-tags__actions">
+            <form method="post"
+                  action="{{ url_for('settings.tags_delete', tag_id=tag.id) }}"
+                  x-data
+                  @submit="if (!confirm('Really delete this tag?')) $event.preventDefault();">
+              {{ delete_form.csrf_token }}
+              <button type="submit"
+                      class="s-btn s-btn--danger s-btn--sm"
+                      data-test="tag-delete-{{ tag.id }}"
+                      aria-label="Delete tag {{ tag.name }}">Delete</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
   {% else %}
-    <p class="sd-manage-empty" data-test="tags-empty">
-      No tags yet. Create your first tag in the server detail settings by
-      assigning a tag to a server.
-    </p>
+    <div class="s-empty" data-test="tags-empty">
+      <b>No tags yet.</b><br />
+      Tags are created in the server detail settings by assigning a tag to a
+      server.
+    </div>
   {% endif %}
-</div>
+</section>

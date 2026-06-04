@@ -103,15 +103,15 @@ def test_settings_template_servers_can_be_loaded(
     assert len(html) > 0, "settings/servers.html rendert leeren String"
 
 
-def test_settings_servers_template_uses_tailwind_classes(
+def test_settings_servers_template_uses_s_layer(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """settings/servers.html enthaelt noch DaisyUI-Klassen (Dual-Stack-Indikator).
+    """settings/servers.html nutzt die s-*-Schicht (Block AD), kein DaisyUI mehr.
 
-    Phase 1 hat Settings unangetastet gelassen — Tailwind/DaisyUI sind noch aktiv.
-    Indikator: 'class=\"card\"', 'class=\"btn\"', 'text-2xl', 'space-y' oder
-    andere DaisyUI/Tailwind-Klassen-Praefixe.
+    Nach dem Block-AD-Restyling traegt die Server-Liste das s-*-Markup
+    (settings__title, s-section, s-empty) und KEINE DaisyUI-Komponenten-Klassen
+    (card/btn/badge/table) mehr.
     """
     import app as app_module
 
@@ -127,16 +127,12 @@ def test_settings_servers_template_uses_tailwind_classes(
         template = app.jinja_env.get_template("settings/servers.html")
         html = template.render(**context)
 
-    # DaisyUI/Tailwind-Klassen-Indikatoren (mindestens einer muss vorhanden sein)
-    tailwind_indicators = ["card", "btn", "text-2xl", "space-y", "p-6", "font-semibold"]
-    found = [cls for cls in tailwind_indicators if cls in html]
-
-    assert found, (
-        f"Keine Tailwind/DaisyUI-Klassen gefunden in settings/servers.html. "
-        f"Geprueft: {tailwind_indicators}. "
-        f"HTML-Laenge: {len(html)}. "
-        f"Phase G haette Settings NICHT aendern sollen (Dual-Stack-Smoke)."
-    )
+    # s-*-Schicht-Indikatoren vorhanden.
+    assert "settings__title" in html
+    assert "s-section" in html
+    # DaisyUI/Tailwind-Komponenten-Klassen abwesend.
+    for forbidden in ('class="card', 'class="btn', "badge badge", "table-zebra"):
+        assert forbidden not in html, f"DaisyUI-Rest in servers.html: {forbidden}"
 
 
 def test_settings_llm_reviewer_template_can_be_loaded(

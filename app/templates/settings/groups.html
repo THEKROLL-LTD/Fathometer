@@ -1,12 +1,9 @@
-{# Gruppen-Verwaltung Content (Block Z, Phase C / ADR-0040).
+{# Gruppen-Verwaltung Content (Block AD / ADR-0047 — Restyling auf s-*-Schicht).
 
-   Manage-Only-Seite: Rename, Delete, Up/Down-Reorder. KEIN Anlege-Form —
-   Gruppen entstehen inline im Server-Detail-Settings (Phase A/B).
-
-   Wird ueber `render_settings(active="groups", ...)` in einem von drei
-   Modi gerendert (Vollseite / Detail-Pane-Fragment / Content-Only).
-   Daher KEIN `extends`, KEIN `block` — Content-only-Template, analog
-   `settings/tags.html`. Ausschliesslich `sd-*`-Klassen (kein DaisyUI/Tailwind).
+   Manage-Only-Seite (ADR-0040): Rename, Delete, Up/Down-Reorder. KEIN
+   Anlege-Form — Gruppen entstehen inline im Server-Detail-Settings. Wird
+   ueber `render_settings(active="groups", ...)` als Content-Markup gerendert
+   (KEIN `extends`), includiert in `#settings-content.settings`.
 
    Variablen-Vertrag (gesetzt von `app/views/settings.py:groups_list`):
      - `groups`      : list[dict] mit id, name, position, member_count.
@@ -21,100 +18,116 @@
      - Kein Pflicht-Kommentarfeld (ADR-0006). Delete-Confirm ist ein
        client-seitiger Bestaetigungs-Dialog, kein Pflicht-Feld.
 #}
-<div class="sd-manage">
-  <header class="sd-manage-head">
-    <h1 class="sd-settings-section__title">Groups</h1>
-    <p class="sd-settings-section__hint">
-      Groups bundle servers for the sidebar overview. Manage order, names and
-      deletion here.
-    </p>
-    <p class="sd-settings-section__hint">
-      Groups are created by assigning a new group in the server detail settings.
-    </p>
-  </header>
+<p class="settings__eyebrow">Settings</p>
+<h1 class="settings__title">Groups</h1>
+<p class="settings__lede">
+  Groups bundle servers for the sidebar overview. Manage order, name and
+  deletion here. Groups are created by assigning a new group in the server
+  detail settings.
+</p>
+
+<section class="s-section">
+  <div class="s-section__head">
+    <h2 class="s-section__label">All groups</h2>
+    {% if groups %}
+      <span class="s-section__meta">{{ groups | length }} group{{ '' if groups | length == 1 else 's' }}</span>
+    {% endif %}
+  </div>
 
   {% if groups %}
-    <table class="sd-manage-table" data-test="groups-table">
-      <thead>
-        <tr>
-          <th>Order</th>
-          <th>Name</th>
-          <th>Servers</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for g in groups %}
-          <tr class="sd-manage-row" data-test="group-row-{{ g.id }}">
-            <td>
-              <div class="sd-manage-actions">
-                <form method="post"
-                      action="{{ url_for('settings.groups_move', group_id=g.id) }}">
-                  {{ move_form.csrf_token }}
-                  <button type="submit"
-                          name="direction"
-                          value="up"
-                          class="sd-move-btn"
-                          data-test="group-move-up-{{ g.id }}"
-                          aria-label="Move group {{ g.name }} up"
-                          {% if loop.first %}disabled{% endif %}>&#x2191;</button>
-                </form>
-                <form method="post"
-                      action="{{ url_for('settings.groups_move', group_id=g.id) }}">
-                  {{ move_form.csrf_token }}
-                  <button type="submit"
-                          name="direction"
-                          value="down"
-                          class="sd-move-btn"
-                          data-test="group-move-down-{{ g.id }}"
-                          aria-label="Move group {{ g.name }} down"
-                          {% if loop.last %}disabled{% endif %}>&#x2193;</button>
-                </form>
-              </div>
-            </td>
-            <td>
-              <form method="post"
-                    action="{{ url_for('settings.groups_rename', group_id=g.id) }}"
-                    class="sd-manage-actions">
-                {{ rename_form.csrf_token }}
-                <input class="sd-input"
-                       type="text"
-                       name="name"
-                       value="{{ g.name }}"
-                       maxlength="64"
-                       pattern="^[A-Za-z0-9 _.-]+$"
-                       title="Letters, digits, spaces, '_', '.', '-' (max 64 characters)"
-                       aria-label="Rename group {{ g.name }}"
-                       data-test="group-rename-input-{{ g.id }}">
-                <button type="submit"
-                        class="sd-add-btn"
-                        data-test="group-rename-submit-{{ g.id }}">Rename</button>
-              </form>
-            </td>
-            <td>
-              <span class="sd-manage-count"
-                    data-test="group-member-count-{{ g.id }}">{{ g.member_count }}</span>
-            </td>
-            <td>
-              <form method="post"
-                    action="{{ url_for('settings.groups_delete', group_id=g.id) }}"
-                    x-data
-                    @submit="if (!confirm('{{ g.member_count }} servers fall back to ungrouped — really delete?')) $event.preventDefault();">
-                {{ delete_form.csrf_token }}
-                <button type="submit"
-                        class="sd-danger-btn"
-                        data-test="group-delete-{{ g.id }}"
-                        aria-label="Delete group {{ g.name }}">Delete</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="s-table s-groups__table" data-test="groups-table">
+      <div class="s-table__head s-groups__head">
+        <span>Order</span>
+        <span>Name</span>
+        <span>Servers</span>
+        <span class="s-table__cell--right">Actions</span>
+      </div>
+
+      {% for g in groups %}
+        <div class="s-table__row s-groups__row" data-test="group-row-{{ g.id }}">
+          <div class="s-groups__reorder">
+            <form method="post"
+                  action="{{ url_for('settings.groups_move', group_id=g.id) }}">
+              {{ move_form.csrf_token }}
+              <button type="submit"
+                      name="direction"
+                      value="up"
+                      class="s-groups__arrow"
+                      data-test="group-move-up-{{ g.id }}"
+                      aria-label="Move group {{ g.name }} up"
+                      {% if loop.first %}disabled{% endif %}>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                  <path d="M2 7l4-4 4 4" stroke-linecap="square" />
+                </svg>
+              </button>
+            </form>
+            <form method="post"
+                  action="{{ url_for('settings.groups_move', group_id=g.id) }}">
+              {{ move_form.csrf_token }}
+              <button type="submit"
+                      name="direction"
+                      value="down"
+                      class="s-groups__arrow"
+                      data-test="group-move-down-{{ g.id }}"
+                      aria-label="Move group {{ g.name }} down"
+                      {% if loop.last %}disabled{% endif %}>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                  <path d="M2 5l4 4 4-4" stroke-linecap="square" />
+                </svg>
+              </button>
+            </form>
+          </div>
+
+          {# Name: Inline-Rename. Save erscheint nur bei Aenderung (Alpine).
+             Gruppen-Namen sind regex-validiert (^[A-Za-z0-9 _.-]+$) — keine
+             Anfuehrungszeichen moeglich, daher Inline-JS-String safe. #}
+          <form method="post"
+                action="{{ url_for('settings.groups_rename', group_id=g.id) }}"
+                class="s-tags__actions"
+                style="justify-content: flex-start; flex: 1;"
+                x-data="{ name: '{{ g.name }}' }">
+            {{ rename_form.csrf_token }}
+            <input class="s-tags__name"
+                   type="text"
+                   name="name"
+                   value="{{ g.name }}"
+                   x-model="name"
+                   maxlength="64"
+                   pattern="^[A-Za-z0-9 _.-]+$"
+                   title="Letters, digits, spaces, '_', '.', '-' (max 64 characters)"
+                   aria-label="Rename group {{ g.name }}"
+                   data-test="group-rename-input-{{ g.id }}">
+            <button type="submit"
+                    class="s-btn s-btn--primary s-btn--sm"
+                    x-show="name !== '{{ g.name }}'"
+                    x-cloak
+                    data-test="group-rename-submit-{{ g.id }}">Save</button>
+          </form>
+
+          <div class="s-tags__count">
+            <span data-test="group-member-count-{{ g.id }}">{{ g.member_count }}</span>
+          </div>
+
+          <div class="s-tags__actions">
+            <form method="post"
+                  action="{{ url_for('settings.groups_delete', group_id=g.id) }}"
+                  x-data
+                  @submit="if (!confirm('{{ g.member_count }} servers fall back to ungrouped — really delete?')) $event.preventDefault();">
+              {{ delete_form.csrf_token }}
+              <button type="submit"
+                      class="s-btn s-btn--danger s-btn--sm"
+                      data-test="group-delete-{{ g.id }}"
+                      aria-label="Delete group {{ g.name }}">Delete</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
   {% else %}
-    <p class="sd-manage-empty" data-test="groups-empty">
-      No groups yet. Create your first group in the server detail settings by
-      assigning a group to a server.
-    </p>
+    <div class="s-empty" data-test="groups-empty">
+      <b>No groups yet.</b><br />
+      Groups are created in the server detail settings by assigning a group to
+      a server.
+    </div>
   {% endif %}
-</div>
+</section>
