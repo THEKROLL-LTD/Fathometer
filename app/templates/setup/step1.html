@@ -3,7 +3,7 @@
 {% extends "base.html" %}
 {% from "setup/_wizard.html" import step_indicator %}
 
-{% block title %}Setup · Schritt 1 · secscan{% endblock %}
+{% block title %}Setup · step 1 · secscan{% endblock %}
 
 {% block content %}
 <section class="max-w-2xl mx-auto">
@@ -11,9 +11,9 @@
 
   <div class="card bg-base-200 shadow-sm">
     <div class="card-body">
-      <h1 class="card-title text-2xl">Admin-Account anlegen</h1>
+      <h1 class="card-title text-2xl">Create admin account</h1>
       <p class="opacity-70">
-        Lege das einmalige Administrator-Konto fuer diese secscan-Instanz an.
+        Create the single administrator account for this secscan instance.
       </p>
 
       <form method="post"
@@ -39,7 +39,7 @@
               autocomplete="new-password",
               class="input input-bordered w-full"
           ) }}
-          <p class="text-xs opacity-60 mt-1">Mindestens 12 Zeichen.</p>
+          <p class="text-xs opacity-60 mt-1">At least 12 characters.</p>
           {% for err in form.password.errors %}
             <p class="text-error text-sm mt-1">{{ err }}</p>
           {% endfor %}
@@ -57,7 +57,7 @@
         </div>
 
         <div class="card-actions justify-end pt-2">
-          <button type="submit" class="btn btn-primary">Weiter</button>
+          <button type="submit" class="btn btn-primary">Next</button>
         </div>
       </form>
     </div>

@@ -40,8 +40,8 @@
     </div>
   </div>
   <div class="chat-header text-xs opacity-70 mb-1">
-    {% if is_user %}Du
-    {% elif is_assistant %}Assistent
+    {% if is_user %}You
+    {% elif is_assistant %}Assistant
     {% else %}System{% endif %}
     <time class="ml-1"
           datetime="{{ message.created_at.isoformat() }}"
@@ -62,7 +62,7 @@
   </div>
   {% if total_t > 0 %}
     <div class="chat-footer text-xs opacity-60 mt-1 font-mono">
-      prompt {{ prompt_t }} + completion {{ completion_t }} = {{ total_t }} Token
+      prompt {{ prompt_t }} + completion {{ completion_t }} = {{ total_t }} tokens
     </div>
   {% endif %}
 </div>

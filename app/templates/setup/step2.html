@@ -5,7 +5,7 @@
 {% extends "base.html" %}
 {% from "setup/_wizard.html" import step_indicator %}
 
-{% block title %}Setup · Schritt 2 · secscan{% endblock %}
+{% block title %}Setup · step 2 · secscan{% endblock %}
 
 {% block content %}
 <section class="max-w-2xl mx-auto"
@@ -33,30 +33,30 @@
 
   <div class="card bg-base-200 shadow-sm">
     <div class="card-body">
-      <h1 class="card-title text-2xl">Master-Key &middot; einmalig anzeigen</h1>
+      <h1 class="card-title text-2xl">Master key &middot; shown once</h1>
       <p class="opacity-70">
-        Dieser Schluessel registriert neue Server bei secscan. Er wird jetzt
-        zum ersten und letzten Mal angezeigt.
+        This key registers new servers with secscan. It is shown now for the
+        first and last time.
       </p>
 
       <div class="alert alert-warning mt-4">
         <span>
-          Dieser Schluessel wird <strong>nicht</strong> erneut angezeigt.
-          Notiere ihn jetzt in deinem Password-Manager.
+          This key will <strong>not</strong> be shown again. Store it in your
+          password manager now.
         </span>
       </div>
 
       <div class="mt-4">
-        <label class="label label-text" for="master-key-value">Master-Key</label>
+        <label class="label label-text" for="master-key-value">Master key</label>
         <div class="join w-full">
           <code id="master-key-value"
                 class="join-item flex-1 font-mono text-sm md:text-base bg-base-100 border border-base-300 rounded-l px-3 py-3 break-all select-all">{{ master_key }}</code>
           <button type="button"
                   class="btn join-item"
                   @click="copyKey()"
-                  aria-label="Master-Key in die Zwischenablage kopieren">
-            <span x-show="!copied">Kopieren</span>
-            <span x-show="copied" x-cloak>Kopiert!</span>
+                  aria-label="Copy master key to clipboard">
+            <span x-show="!copied">Copy</span>
+            <span x-show="copied" x-cloak>Copied!</span>
           </button>
         </div>
       </div>
@@ -84,7 +84,7 @@
                   class="btn btn-primary"
                   x-bind:disabled="!confirmed"
                   x-bind:class="{ 'btn-disabled': !confirmed }">
-            Weiter
+            Next
           </button>
         </div>
       </form>

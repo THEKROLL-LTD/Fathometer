@@ -29,7 +29,7 @@
       {% if filter.is_active %}
         <a href="{{ url_for('dashboard.index') }}"
            class="link link-hover text-xs">
-          Filter zuruecksetzen
+          Reset filters
         </a>
       {% endif %}
     </div>
@@ -59,9 +59,8 @@
       </fieldset>
     {% else %}
       <p class="text-xs opacity-60">
-        Keine Tags angelegt — unter
-        <a href="{{ url_for('settings.tags_list') }}" class="link link-hover">Settings · Tags</a>
-        anlegen.
+        No tags created — create them under
+        <a href="{{ url_for('settings.tags_list') }}" class="link link-hover">Settings · Tags</a>.
       </p>
     {% endif %}
 
@@ -85,32 +84,32 @@
            role="radiogroup"
            aria-labelledby="tags-mode-label"
            x-data="{ mode: {{ (filter.tags_mode or 'or') | tojson | forceescape }} }">
-        <span id="tags-mode-label" class="opacity-70">Tag-Modus:</span>
+        <span id="tags-mode-label" class="opacity-70">Tag mode:</span>
         <div class="join">
           <label class="join-item btn btn-xs cursor-pointer"
                  :class="mode === 'or' ? 'btn-primary' : 'btn-ghost'">
             <input type="radio" name="tags_mode" value="or"
                    class="sr-only"
                    x-model="mode" />
-            ODER
+            OR
           </label>
           <label class="join-item btn btn-xs cursor-pointer"
                  :class="mode === 'and' ? 'btn-primary' : 'btn-ghost'">
             <input type="radio" name="tags_mode" value="and"
                    class="sr-only"
                    x-model="mode" />
-            UND
+            AND
           </label>
         </div>
         <span class="opacity-60"
-              x-text="mode === 'and' ? 'alle Tags' : 'mindestens einer'">
+              x-text="mode === 'and' ? 'all tags' : 'at least one'">
           {# Fallback fuer no-JS: serverseitig gerenderter Initialtext. #}
-          {% if filter.tags_mode == 'and' %}alle Tags{% else %}mindestens einer{% endif %}
+          {% if filter.tags_mode == 'and' %}all tags{% else %}at least one{% endif %}
         </span>
       </div>
 
       <label class="flex items-center gap-2" for="filter-severity">
-        <span class="opacity-70">Severity ab:</span>
+        <span class="opacity-70">Severity from:</span>
         <select id="filter-severity"
                 name="severity"
                 class="select select-xs select-bordered">
@@ -126,14 +125,14 @@
         <input type="checkbox" name="kev_only" value="1"
                class="checkbox checkbox-xs checkbox-error"
                {% if filter.kev_only %}checked{% endif %} />
-        <span>nur KEV</span>
+        <span>KEV only</span>
       </label>
 
       <label class="cursor-pointer flex items-center gap-2">
         <input type="checkbox" name="stale_only" value="1"
                class="checkbox checkbox-xs checkbox-warning"
                {% if filter.stale_only %}checked{% endif %} />
-        <span>nur stale</span>
+        <span>stale only</span>
       </label>
 
       <div class="ml-auto flex items-center gap-2">
@@ -142,7 +141,7 @@
             Reset
           </a>
         {% endif %}
-        <button type="submit" class="btn btn-primary btn-sm">Anwenden</button>
+        <button type="submit" class="btn btn-primary btn-sm">Apply</button>
       </div>
     </div>
   </div>

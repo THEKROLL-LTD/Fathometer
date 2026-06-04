@@ -28,7 +28,7 @@
 {% extends "base_app.html" %}
 {% import "_macros.html" as m %}
 
-{% block title %}LLM-Bewertung · {{ server.name }} · secscan{% endblock %}
+{% block title %}LLM assessment · {{ server.name }} · secscan{% endblock %}
 
 {% block head %}
   <script defer src="{{ url_for('static', filename='js/llm_chat.js') }}"></script>
@@ -58,46 +58,46 @@
     <div class="min-w-0">
       <div class="flex items-center gap-2">
         <h1 class="text-2xl font-semibold">
-          LLM-Bewertung fuer
+          LLM assessment for
           <a href="{{ url_for('server_detail.show', server_id=server.id) }}"
              class="link link-hover font-mono">{{ server.name }}</a>
         </h1>
-        {{ m.quick_copy(conv_url, label="Conversation-Link kopieren") }}
+        {{ m.quick_copy(conv_url, label="Copy conversation link") }}
       </div>
       <p class="text-sm opacity-70 mt-1">
-        Modell: <code class="font-mono">{{ conversation.model }}</code>
+        Model: <code class="font-mono">{{ conversation.model }}</code>
         ·
         Status:
         {% if is_active %}
-          <span class="badge badge-success badge-sm">aktiv</span>
+          <span class="badge badge-success badge-sm">active</span>
         {% else %}
           <span class="badge badge-ghost badge-sm">{{ conversation.status.value }}</span>
         {% endif %}
-        · Gestartet
+        · Started
         <time datetime="{{ conversation.started_at.isoformat() }}"
               title="{{ conversation.started_at.strftime('%Y-%m-%d %H:%M %Z') }}">
           {{ conversation.started_at | relative_time }}
         </time>
         {% if token_usage.cap and not token_usage.blocked and not token_usage.warning_threshold %}
-          · <span class="opacity-70">{{ token_usage.used }}/{{ token_usage.cap }} Token heute</span>
+          · <span class="opacity-70">{{ token_usage.used }}/{{ token_usage.cap }} tokens today</span>
         {% endif %}
       </p>
       <p class="text-xs opacity-60 mt-1">
-        Bewertungen sind Schaetzungen, nicht blind vertrauen.
+        Assessments are estimates — don't trust them blindly.
       </p>
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <a href="{{ url_for('server_detail.show', server_id=server.id) }}"
-         class="btn btn-ghost btn-sm">Zurueck zum Server</a>
+         class="btn btn-ghost btn-sm">Back to server</a>
       {% if is_active %}
         <form method="post"
               action="{{ archive_url }}"
               class="inline"
               x-data
-              @submit="if (!confirm('Conversation wirklich archivieren?')) $event.preventDefault()">
+              @submit="if (!confirm('Archive this conversation?')) $event.preventDefault()">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <button type="submit" class="btn btn-ghost btn-sm text-error">
-            Archivieren
+            Archive
           </button>
         </form>
       {% endif %}
@@ -108,8 +108,8 @@
   {% if token_usage.blocked %}
     <div class="alert alert-error" role="alert">
       <span>
-        Tages-Token-Cap erreicht ({{ token_usage.used }}/{{ token_usage.cap }} Token).
-        Neue Anfragen ab
+        Daily token cap reached ({{ token_usage.used }}/{{ token_usage.cap }} tokens).
+        New requests from
         <time datetime="{{ token_usage.reset_at.isoformat() }}">
           {{ token_usage.reset_at.strftime('%Y-%m-%d %H:%M UTC') }}
         </time>.
@@ -118,9 +118,9 @@
   {% elif token_usage.warning_threshold %}
     <div class="alert alert-warning" role="status">
       <span>
-        Warnung: {{ token_usage.used }}/{{ token_usage.cap }} Token verbraucht
-        ({{ token_usage.percent | round(0) }}%). Neue Anfragen noch moeglich
-        bis zum Cap. Reset um
+        Warning: {{ token_usage.used }}/{{ token_usage.cap }} tokens used
+        ({{ token_usage.percent | round(0) }}%). New requests still possible
+        until the cap. Reset at
         <time datetime="{{ token_usage.reset_at.isoformat() }}">
           {{ token_usage.reset_at.strftime('%H:%M UTC') }}
         </time>.
@@ -157,7 +157,7 @@
         </div>
       </div>
       <div class="chat-header text-xs opacity-70 mb-1">
-        Assistent
+        Assistant
         <span class="loading loading-dots loading-xs ml-2"
               x-show="streaming"
               aria-hidden="true"></span>
@@ -175,10 +175,10 @@
           @submit.prevent="submitFollowup()">
       <div class="card-body space-y-2">
         <label for="followup-content" class="label">
-          <span class="label-text">Folge-Frage</span>
+          <span class="label-text">Follow-up question</span>
           {% if token_usage.blocked %}
             <span class="label-text-alt text-error">
-              Cap erreicht — Eingabe gesperrt
+              Cap reached — input locked
             </span>
           {% endif %}
         </label>
@@ -188,19 +188,19 @@
                   rows="3"
                   maxlength="4000"
                   class="textarea textarea-bordered w-full"
-                  placeholder="Was moechtest du genauer wissen?"
+                  placeholder="What would you like to know in more detail?"
                   {% if input_disabled %}disabled{% endif %}></textarea>
         <div class="flex items-center justify-between gap-2">
           <span class="text-xs opacity-60">
-            <span x-text="draft.length"></span>/4000 Zeichen
+            <span x-text="draft.length"></span>/4000 characters
           </span>
           <button type="submit"
                   class="btn btn-primary"
                   :disabled="streaming || draft.trim().length === 0 || {{ 'true' if input_disabled else 'false' }}">
-            <span x-show="!streaming">Senden</span>
+            <span x-show="!streaming">Send</span>
             <span x-show="streaming" class="flex items-center gap-2">
               <span class="loading loading-spinner loading-xs"></span>
-              Streamt…
+              Streaming…
             </span>
           </button>
         </div>

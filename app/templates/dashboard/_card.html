@@ -52,7 +52,7 @@
       <div class="flex flex-col items-end gap-1 shrink-0">
         {% if card.kev_open_count > 0 %}
           <span class="badge badge-error font-semibold"
-                title="{{ card.kev_open_count }} aktive KEV-Findings — bekannte ausgenutzte CVEs.">
+                title="{{ card.kev_open_count }} active KEV findings — known exploited CVEs.">
             KEV {{ card.kev_open_count }}
           </span>
         {% endif %}
@@ -87,7 +87,7 @@
              @click.stop
              class="badge badge-outline badge-sm font-mono hover:badge-primary"
              style="border-color: {{ link.tag.color }}; color: {{ link.tag.color }};"
-             title="Nach Tag filtern: {{ link.tag.name }}">
+             title="Filter by tag: {{ link.tag.name }}">
             {{ link.tag.name }}
           </a>
         {% endfor %}
@@ -131,8 +131,8 @@
        jede Minute aktualisiert und vom SSE-Client beim Scan-Empfang
        neu beschrieben. #}
     <div class="flex flex-wrap items-center gap-2 text-xs opacity-80">
-      <span title="{% if card.server.last_scan_at %}{{ card.server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}{% else %}noch nie{% endif %}">
-        Letzter Scan:
+      <span title="{% if card.server.last_scan_at %}{{ card.server.last_scan_at.strftime('%Y-%m-%d %H:%M %Z') }}{% else %}never{% endif %}">
+        Last scan:
         <span data-last-scan-at="{{ card.server.last_scan_at | iso_or_empty }}">{{ card.server.last_scan_at | relative_time }}</span>
       </span>
       {% if card.is_active %}
@@ -141,19 +141,19 @@
            `data-stale-threshold-h` und der Karten-`data-last-scan-at`. #}
         <span class="badge badge-warning badge-sm{% if not card.is_stale %} hidden{% endif %}"
               data-stale-threshold-h="{{ card.server.expected_scan_interval_h }}"
-              title="Letzter Scan aelter als erwarteter Interval ({{ card.server.expected_scan_interval_h }}h).">
+              title="Last scan older than expected interval ({{ card.server.expected_scan_interval_h }}h).">
           stale
         </span>
       {% endif %}
       {% if card.is_db_stale and card.is_active %}
         <span class="badge badge-warning badge-sm"
-              title="Trivy-DB veraltet (Schwelle: {{ db_stale_threshold_h }}h){% if card.server.trivy_db_updated_at %} — Stand: {{ card.server.trivy_db_updated_at.strftime('%Y-%m-%d') }}{% endif %}.">
-          db veraltet
+              title="Trivy DB outdated (threshold: {{ db_stale_threshold_h }}h){% if card.server.trivy_db_updated_at %} — as of: {{ card.server.trivy_db_updated_at.strftime('%Y-%m-%d') }}{% endif %}.">
+          db outdated
         </span>
       {% endif %}
       {% if card.severity_counts.total > 0 %}
         <span class="ml-auto opacity-70">
-          {{ card.severity_counts.total }} offen
+          {{ card.severity_counts.total }} open
         </span>
       {% endif %}
     </div>

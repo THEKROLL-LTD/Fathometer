@@ -154,7 +154,7 @@ def _check_token_cap() -> tuple[Response, int] | None:
         return _json_error(
             429,
             "token_cap_exceeded",
-            "Tages-Token-Cap erreicht. Reset um 00:00 UTC.",
+            "Daily token cap reached. Reset at 00:00 UTC.",
             reset_at=usage.reset_at.isoformat(),
             used=usage.used,
             cap=usage.cap,
@@ -184,7 +184,7 @@ def start_conversation(server_id: int) -> Any:
         return _json_error(
             400,
             "llm_not_configured",
-            "LLM-Provider ist noch nicht konfiguriert. Siehe /settings/llm.",
+            "LLM provider is not configured yet. See /settings/llm.",
         )
 
     existing = _active_conversation_for(server_id)
@@ -283,18 +283,18 @@ def post_message(conversation_id: int) -> Any:
 
     conv = _load_conversation(conversation_id)
     if conv.status != LlmConversationStatus.ACTIVE:
-        return _json_error(409, "conversation_archived", "Conversation ist archiviert.")
+        return _json_error(409, "conversation_archived", "Conversation is archived.")
 
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
-        return _json_error(400, "invalid_body", "JSON-Objekt erwartet")
+        return _json_error(400, "invalid_body", "JSON object expected")
     content = body.get("content")
     if not isinstance(content, str) or not content.strip():
-        return _json_error(400, "invalid_content", "Feld 'content' erforderlich")
+        return _json_error(400, "invalid_content", "Field 'content' required")
     # Hartes Cap pro User-Turn — 8 KB wie Notes (siehe forms.NOTE_TEXT_MAX_LEN).
     content = content.strip()
     if len(content) > 8 * 1024:
-        return _json_error(400, "content_too_long", "User-Message > 8 KB")
+        return _json_error(400, "content_too_long", "User message > 8 KB")
 
     sess = get_session()
     now = datetime.now(tz=UTC)
