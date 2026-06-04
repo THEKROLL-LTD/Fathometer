@@ -1,4 +1,4 @@
-{# Settings-Shell (Mode 2: HTMX-Detail-Pane-Fragment).
+{# Settings-Shell (Mode 2: HTMX-Detail-Pane-Fragment) — Block AD / ADR-0047.
 
    Wird vom Render-Helper `render_settings(...)` benutzt, wenn der
    Request HTMX ist aber nicht direkt auf `#settings-content` zielt
@@ -12,14 +12,16 @@
      - alle weiteren Template-Variablen werden 1:1 an das include
        weitergereicht (Jinja-Default-Verhalten).
 
-   Stub — der frontend-implementer poliert das Layout. Wichtig fuer
-   Tests: das `#settings-content`-Element existiert mit dieser ID,
-   damit `hx-target="#settings-content"` aus der Settings-Nav greift. #}
+   Layout: horizontale Tab-Leiste oben (`settings/_nav.html`), darunter der
+   `.settings`-Content-Frame. `#settings-content` traegt die `.settings`-
+   Klasse, damit der Frame (Padding + Container-Query-Kontext) ueber den
+   Tab-Swap stehen bleibt und nur sein Inhalt ersetzt wird.
+
+   Wichtig fuer Tests/HTMX: `#settings-content` (Tab-Swap-Target) und
+   `#detail-pane-content` (Detail-Pane-Wrapper) existieren mit diesen IDs. #}
 <div id="detail-pane-content">
-  <div class="settings-shell flex h-full">
-    {% include "settings/_nav.html" %}
-    <div id="settings-content" class="flex-1 overflow-y-auto">
-      {% include content_template %}
-    </div>
+  {% include "settings/_nav.html" %}
+  <div id="settings-content" class="settings">
+    {% include content_template %}
   </div>
 </div>

@@ -1,18 +1,18 @@
-{# Settings-Page (Mode 1: Vollseite, kein HX-Request).
+{# Settings-Page (Mode 1: Vollseite, kein HX-Request) — Block AD / ADR-0047.
 
-   Erbt von `base_app.html` (globale Sidebar + Detail-Pane) und rendert
-   die Settings-Shell als Detail-Pane-Inhalt.
+   Erbt von `base_app.html` (globale Topbar + Fleet-Sidebar + Detail-Pane)
+   und rendert die Settings-Tab-Leiste + den Content-Frame als
+   Detail-Pane-Inhalt.
 
-   Variablen wie in `_shell.html`. #}
+   Variablen wie in `_shell.html`. `#settings-content` traegt die
+   `.settings`-Klasse (siehe `_shell.html`). #}
 {% extends "base_app.html" %}
 
-{% block title %}Settings · secscan{% endblock %}
+{% block title %}Settings · Fathometer{% endblock %}
 
 {% block detail_pane %}
-<div class="settings-shell flex h-full">
-  {% include "settings/_nav.html" %}
-  <div id="settings-content" class="flex-1 overflow-y-auto">
-    {% include content_template %}
-  </div>
+{% include "settings/_nav.html" %}
+<div id="settings-content" class="settings">
+  {% include content_template %}
 </div>
 {% endblock %}

@@ -1,100 +1,99 @@
-{# Settings-Sekundaer-Navigation (ADR-0016 / Block-I-Refinement).
+{# Settings-Tab-Navigation (Block AD / ADR-0047 — loest die vertikale
+   Sekundaer-Nav aus ADR-0016/Block-I ab).
 
    Variablen:
      - `active` (str) — aktiver Tab-Bezeichner aus dem View:
-       `tags`, `llm`, `servers`, `master_key`, `about`.
+       `servers`, `tags`, `groups`, `llm`, `llm_reviewer`, `master_key`, `about`.
 
-   Layout: 224px (`w-56`) Sticky-Nav links innerhalb des Detail-Pane.
-   Aktiver Eintrag: `menu-active bg-primary/10 text-primary font-semibold`
-   (gemaess Mockup §454-491).
+   Layout: horizontale Sticky-Tab-Leiste (`.settings-tabs`) oben in `.main`,
+   die globale Fleet-Sidebar bleibt links. Aktiver Tab:
+   `settings-tabs__item--active` + `aria-selected`.
 
-   Klick auf einen Eintrag: HTMX-Swap nur des Content-Bereichs rechts
+   Klick auf einen Tab: HTMX-Swap nur des Content-Bereichs
    (`hx-target="#settings-content"`, `hx-swap="innerHTML"`,
-   `hx-headers='{"HX-Target": "settings-content"}'`). Nav bleibt stehen.
-   `href`-Fallback fuer No-JS.
-#}
-<nav id="settings-nav"
-     class="settings-nav w-56 shrink-0 border-r border-base-300 bg-base-100 py-4"
-     aria-label="Settings navigation">
-  <div class="px-4 pb-2 text-xs uppercase opacity-50 tracking-wide">Settings</div>
-  <ul class="menu menu-sm w-full px-2">
-    <li>
-      <a href="{{ url_for('settings.tags_list') }}"
-         hx-get="{{ url_for('settings.tags_list') }}"
-         hx-target="#settings-content"
-         hx-swap="innerHTML"
-         hx-push-url="true"
-         hx-headers='{"HX-Target": "settings-content"}'
-         class="{% if active == 'tags' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
-        Tags
-      </a>
-    </li>
-    <li>
-      <a href="{{ url_for('settings.groups_list') }}"
-         hx-get="{{ url_for('settings.groups_list') }}"
-         hx-target="#settings-content"
-         hx-swap="innerHTML"
-         hx-push-url="true"
-         hx-headers='{"HX-Target": "settings-content"}'
-         class="{% if active == 'groups' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
-        Groups
-      </a>
-    </li>
-    <li>
-      <a href="{{ url_for('llm_settings.show') }}"
-         hx-get="{{ url_for('llm_settings.show') }}"
-         hx-target="#settings-content"
-         hx-swap="innerHTML"
-         hx-push-url="true"
-         hx-headers='{"HX-Target": "settings-content"}'
-         class="{% if active == 'llm' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
-        LLM Provider
-      </a>
-    </li>
-    <li>
-      <a href="{{ url_for('settings.llm_reviewer_view') }}"
-         hx-get="{{ url_for('settings.llm_reviewer_view') }}"
-         hx-target="#settings-content"
-         hx-swap="innerHTML"
-         hx-push-url="true"
-         hx-headers='{"HX-Target": "settings-content"}'
-         class="{% if active == 'llm_reviewer' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
-        LLM Reviewer
-      </a>
-    </li>
-    <li>
-      <a href="{{ url_for('servers.list_servers') }}"
-         hx-get="{{ url_for('servers.list_servers') }}"
-         hx-target="#settings-content"
-         hx-swap="innerHTML"
-         hx-push-url="true"
-         hx-headers='{"HX-Target": "settings-content"}'
-         class="{% if active == 'servers' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
-        Server management
-      </a>
-    </li>
-    <li>
-      <a href="{{ url_for('settings.master_key_view') }}"
-         hx-get="{{ url_for('settings.master_key_view') }}"
-         hx-target="#settings-content"
-         hx-swap="innerHTML"
-         hx-push-url="true"
-         hx-headers='{"HX-Target": "settings-content"}'
-         class="flex items-center {% if active == 'master_key' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
-        <span>Master-Key</span>
-        <span class="badge badge-xs badge-warning ml-auto">new</span>
-      </a>
-    </li>
-    <li>
-      <a href="{{ url_for('settings.about_view') }}"
-         hx-get="{{ url_for('settings.about_view') }}"
-         hx-target="#settings-content"
-         hx-swap="innerHTML"
-         hx-push-url="true"
-         hx-headers='{"HX-Target": "settings-content"}'
-         class="{% if active == 'about' %}menu-active bg-primary/10 text-primary font-semibold{% endif %}">
-        About
-      </a>
-    </li>
-  </ul>
+   `hx-headers='{"HX-Target": "settings-content"}'`). Die Tab-Leiste bleibt
+   stehen. `href`-Fallback fuer Right-Click-in-neuem-Tab + No-JS. Der
+   HTMX-Attribut-Satz ist 1:1 aus der alten `_nav.html` uebernommen. #}
+<nav class="settings-tabs"
+     id="settings-nav"
+     role="tablist"
+     aria-label="Settings sections">
+  <a href="{{ url_for('servers.list_servers') }}"
+     hx-get="{{ url_for('servers.list_servers') }}"
+     hx-target="#settings-content"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-headers='{"HX-Target": "settings-content"}'
+     role="tab"
+     aria-selected="{{ 'true' if active == 'servers' else 'false' }}"
+     class="settings-tabs__item{% if active == 'servers' %} settings-tabs__item--active{% endif %}">
+    <span>Servers</span>
+  </a>
+  <a href="{{ url_for('settings.tags_list') }}"
+     hx-get="{{ url_for('settings.tags_list') }}"
+     hx-target="#settings-content"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-headers='{"HX-Target": "settings-content"}'
+     role="tab"
+     aria-selected="{{ 'true' if active == 'tags' else 'false' }}"
+     class="settings-tabs__item{% if active == 'tags' %} settings-tabs__item--active{% endif %}">
+    <span>Tags</span>
+  </a>
+  <a href="{{ url_for('settings.groups_list') }}"
+     hx-get="{{ url_for('settings.groups_list') }}"
+     hx-target="#settings-content"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-headers='{"HX-Target": "settings-content"}'
+     role="tab"
+     aria-selected="{{ 'true' if active == 'groups' else 'false' }}"
+     class="settings-tabs__item{% if active == 'groups' %} settings-tabs__item--active{% endif %}">
+    <span>Groups</span>
+  </a>
+  <a href="{{ url_for('llm_settings.show') }}"
+     hx-get="{{ url_for('llm_settings.show') }}"
+     hx-target="#settings-content"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-headers='{"HX-Target": "settings-content"}'
+     role="tab"
+     aria-selected="{{ 'true' if active == 'llm' else 'false' }}"
+     class="settings-tabs__item{% if active == 'llm' %} settings-tabs__item--active{% endif %}">
+    <span>LLM Provider</span>
+  </a>
+  <a href="{{ url_for('settings.llm_reviewer_view') }}"
+     hx-get="{{ url_for('settings.llm_reviewer_view') }}"
+     hx-target="#settings-content"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-headers='{"HX-Target": "settings-content"}'
+     role="tab"
+     aria-selected="{{ 'true' if active == 'llm_reviewer' else 'false' }}"
+     class="settings-tabs__item{% if active == 'llm_reviewer' %} settings-tabs__item--active{% endif %}">
+    <span>LLM Reviewer</span>
+  </a>
+  <a href="{{ url_for('settings.master_key_view') }}"
+     hx-get="{{ url_for('settings.master_key_view') }}"
+     hx-target="#settings-content"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-headers='{"HX-Target": "settings-content"}'
+     role="tab"
+     aria-selected="{{ 'true' if active == 'master_key' else 'false' }}"
+     class="settings-tabs__item{% if active == 'master_key' %} settings-tabs__item--active{% endif %}">
+    <span>Master-Key</span>
+    <span class="settings-tabs__badge">new</span>
+  </a>
+  <a href="{{ url_for('settings.about_view') }}"
+     hx-get="{{ url_for('settings.about_view') }}"
+     hx-target="#settings-content"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-headers='{"HX-Target": "settings-content"}'
+     role="tab"
+     aria-selected="{{ 'true' if active == 'about' else 'false' }}"
+     class="settings-tabs__item{% if active == 'about' %} settings-tabs__item--active{% endif %}">
+    <span>About</span>
+  </a>
 </nav>

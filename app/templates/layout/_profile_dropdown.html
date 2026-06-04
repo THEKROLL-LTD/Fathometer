@@ -22,13 +22,17 @@
     <div class="profile-menu__name">{{ current_user.username }}</div>
   </div>
 
-  {# Settings — HTMX-Pane-Swap; href bleibt fuer Right-Click + No-JS. #}
+  {# Settings — HTMX-Pane-Swap; href bleibt fuer Right-Click + No-JS.
+     Active-Marker (Block AD / ADR-0047): alle Settings-Routen liegen unter
+     `/settings` — Pfad-basierter Check markiert den Eintrag als aktuelle Seite. #}
+  {% set _on_settings = (request.path or "").startswith("/settings") %}
   <a href="{{ url_for('settings.settings_index') }}"
      hx-get="{{ url_for('settings.settings_index') }}"
      hx-target="#detail-pane"
      hx-push-url="true"
-     class="profile-menu__item"
+     class="profile-menu__item{% if _on_settings %} profile-menu__item--active{% endif %}"
      role="menuitem"
+     {% if _on_settings %}aria-current="page"{% endif %}
      @click="profileOpen = false">
     <svg viewBox="0 0 24 24" width="16" height="16"
          fill="none" stroke="currentColor" stroke-width="1.5"
