@@ -33,8 +33,9 @@
         {% if _band_ackable %}
           <button type="button"
                   class="sd-band-ack"
+                  x-show="!armed"
                   data-test="band-ack-all-{{ section.band }}"
-                  @click.prevent.stop="openModal()">
+                  @click.prevent.stop="arm()">
             <span class="sd-band-ack__check" aria-hidden="true">
               <svg width="9" height="9" viewBox="0 0 12 12" fill="none"
                    stroke="currentColor" stroke-width="1.6">
@@ -43,6 +44,22 @@
             </span>
             Acknowledge all
           </button>
+          <span class="sd-band-ack-confirm"
+                x-show="armed"
+                x-cloak
+                @click.stop
+                data-test="band-ack-confirm-{{ section.band }}">
+            <span class="sd-band-ack-confirm__q">Acknowledge <b>{{ section.total_count }}</b> findings?</span>
+            <button type="button"
+                    class="sd-band-ack-confirm__yes"
+                    data-test="band-ack-confirm-yes-{{ section.band }}"
+                    :disabled="busy"
+                    @click.prevent.stop="confirm()">Confirm</button>
+            <button type="button"
+                    class="sd-band-ack-confirm__no"
+                    data-test="band-ack-confirm-no-{{ section.band }}"
+                    @click.prevent.stop="cancel()">Cancel</button>
+          </span>
         {% endif %}
       </span>
       <span class="sd-band__count"><b>{{ section.total_count }}</b>findings</span>
@@ -58,6 +75,5 @@
       </div>
     </div>
   </details>
-  {% if _band_ackable %}{% include "_partials/bulk_ack_band_modal.html" %}{% endif %}
 </div>
 {%- endif -%}

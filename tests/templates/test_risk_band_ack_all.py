@@ -1,25 +1,31 @@
-"""Pure-Unit-Tests fuer das Per-Band „Acknowledge all"-Hover-Control + Modal
-(`_partials/risk_band_section.html` + neues `_partials/bulk_ack_band_modal.html`).
+"""Pure-Unit-Tests fuer das Per-Band „Acknowledge all"-Inline-Confirm-Control
+(`_partials/risk_band_section.html`).
 
-TICKET-009 Etappe 2 / ADR-0044 §(3).
+TICKET-009-Nachzuegler / ADR-0044-Amendment: das Modal wurde durch einen
+Zwei-Zustands-Toggle im `.sd-band__actions`-Slot ersetzt:
+  - Ruhe-Zustand: Button `sd-band-ack` (`x-show="!armed"`), `arm()` beim Klick.
+  - Armed-Zustand: Confirm-Slot `sd-band-ack-confirm` (`x-show="armed"`) mit
+    Frage „Acknowledge <b>N</b> findings?", Confirm-Button (`confirm()`) und
+    Cancel-Button (`cancel()`).
+KEIN Modal mehr, KEINE Kommentar-Textarea, KEINE Confirm-Checkbox, KEINE
+Alpine-`examples`.
 
-Prueft (Faelle 1-7 der Ticket-Liste):
-  1.  Jedes ackable Band (escalate/act/mitigate/monitor/noise) rendert das
-      Control `data-test="band-ack-all-<band>"`.
-  2.  Band `pending`: KEIN Control, KEIN Modal-Include.
-  3.  Leeres Band (`is_empty=True`): Partial rendert gar nichts (kein
-      verwaistes Modal).
-  4.  Modal-Render: Confirm-Checkbox vorhanden, Kommentar-Feld OHNE
-      `required`-Attribut (ADR-0006), kein server-gerendertes Findings-
-      Listing (Beispiele kommen aus Alpine `x-for`, nicht aus einer
-      Jinja-Schleife).
-  5.  Modal liegt AUSSERHALB des `<details>`-Elements (Struktur-Assert).
-  6.  `@click.prevent.stop` am Control vorhanden.
-  7.  Script-Include `bulk_ack_band.js` in `base_app.html`.
+Prueft:
+  1.  Jedes ackable Band (escalate/act/mitigate/monitor/noise) rendert den
+      Rest-Button `data-test="band-ack-all-<band>"`.
+  2.  Band `pending`: KEIN Rest-Button, KEIN Confirm-Slot, kein
+      `bulkAckBand(`-Scope, kein (totes) Modal.
+  3.  Leeres Band (`is_empty=True`): Partial rendert gar nichts.
+  4.  Inline-Confirm-Slot: `band-ack-confirm-<band>` mit Yes-Button ("Confirm")
+      und No-Button ("Cancel"); die Frage rendert `section.total_count`.
+  5.  Toggle: Rest-Button traegt `x-show="!armed"`, Confirm-Slot `x-show="armed"`.
+  6.  `@click.prevent.stop` an arm()/confirm()/cancel().
+  7.  Negativ: kein `bulk-ack-band-modal`, keine `<textarea>` im Actions-Slot.
+  8.  Script-Include `bulk_ack_band.js` in `base_app.html`.
 
-Render-Strategie identisch zu `test_risk_band_accordion.py`: das Partial
-wird via `render_template_string` aus dem Datei-Quelltext gerendert, mit
-einem `section`-dict + `server`-SimpleNamespace im Kontext.
+Render-Strategie identisch zu `test_risk_band_accordion.py`: das Partial wird
+via `render_template_string` aus dem Datei-Quelltext gerendert, mit einem
+`section`-dict + `server`-SimpleNamespace im Kontext.
 """
 
 from __future__ import annotations
@@ -85,27 +91,30 @@ def _render_section_partial(
 
 
 # ===========================================================================
-# Fall 1 — Control fuer jedes ackable Band vorhanden
+# Fall 1 — Rest-Button fuer jedes ackable Band vorhanden
 # ===========================================================================
 
 
 @pytest.mark.parametrize("band", _ACKABLE_BANDS)
 def test_ack_all_control_present_for_ackable_band(app: Flask, band: str) -> None:
-    """Jedes Band aus escalate/act/mitigate/monitor/noise rendert das
-    `band-ack-all-<band>`-Control."""
+    """Jedes Band aus escalate/act/mitigate/monitor/noise rendert den
+    Rest-Button `band-ack-all-<band>`."""
     html = _render_section_partial(app, section=_make_section(band))
 
     marker = f'data-test="band-ack-all-{band}"'
-    assert marker in html, f"Control '{marker}' fehlt im Render fuer Band '{band}'. HTML: {html!r}"
+    assert marker in html, (
+        f"Rest-Button '{marker}' fehlt im Render fuer Band '{band}'. HTML: {html!r}"
+    )
 
 
 # ===========================================================================
-# Fall 2 — pending hat kein Control und kein Modal
+# Fall 2 — pending hat kein Control, keinen Confirm-Slot, kein Modal/Scope
 # ===========================================================================
 
 
-def test_pending_band_has_no_control_and_no_modal(app: Flask) -> None:
-    """Band `pending`: KEIN ack-all-Control, KEIN Modal-Include."""
+def test_pending_band_has_no_control_and_no_scope(app: Flask) -> None:
+    """Band `pending`: KEIN ack-all-Control, KEIN Confirm-Slot, KEIN
+    Alpine-`bulkAckBand(`-Scope, kein (totes) Modal."""
     html = _render_section_partial(app, section=_make_section("pending"))
 
     # Das Band wird gerendert (es ist nicht leer) — aber ohne ackable-Affordance.
@@ -115,158 +124,202 @@ def test_pending_band_has_no_control_and_no_modal(app: Flask) -> None:
     assert 'data-test="band-ack-all-pending"' not in html, (
         f"pending darf KEIN ack-all-Control haben (ADR-0044 §Verworfen e). HTML: {html!r}"
     )
-    assert 'data-test="bulk-ack-band-modal"' not in html, (
-        f"pending darf KEIN Modal-Include haben. HTML: {html!r}"
+    assert 'data-test="band-ack-confirm-pending"' not in html, (
+        f"pending darf KEINEN Inline-Confirm-Slot haben. HTML: {html!r}"
     )
     # Kein Alpine-Scope auf dem Wrapper.
     assert "bulkAckBand(" not in html, (
         f'pending-Wrapper darf keinen x-data="bulkAckBand(...)"-Scope haben. HTML: {html!r}'
     )
+    # Modal-Aera vorbei — kein totes Modal-Markup.
+    assert "bulk-ack-band-modal" not in html, (
+        f"pending darf KEIN (totes) Modal-Markup haben. HTML: {html!r}"
+    )
 
 
 # ===========================================================================
-# Fall 3 — leeres Band rendert gar nichts (kein verwaistes Modal)
+# Fall 3 — leeres Band rendert gar nichts
 # ===========================================================================
 
 
 @pytest.mark.parametrize("band", ("escalate", "noise"))
 def test_empty_band_renders_nothing(app: Flask, band: str) -> None:
     """`is_empty=True` -> Partial rendert nur Whitespace, kein <details>,
-    kein verwaistes Modal."""
+    kein Control, kein Confirm-Slot."""
     html = _render_section_partial(app, section=_make_section(band, is_empty=True))
 
     assert html.strip() == "", (
         f"Leeres Band ('{band}', is_empty=True) soll nichts rendern. HTML: {html!r}"
     )
-    # Doppelter Schutz: weder details noch Modal noch Control.
+    # Doppelter Schutz: weder details noch Control noch Confirm-Slot.
     assert "<details" not in html, f"Kein <details> bei leerem Band. HTML: {html!r}"
-    assert "bulk-ack-band-modal" not in html, (
-        f"Kein verwaistes Modal bei leerem Band. HTML: {html!r}"
-    )
     assert "band-ack-all-" not in html, f"Kein Control bei leerem Band. HTML: {html!r}"
+    assert "band-ack-confirm-" not in html, f"Kein Confirm-Slot bei leerem Band. HTML: {html!r}"
 
 
 # ===========================================================================
-# Fall 4 — Modal: Confirm-Checkbox, Comment ohne required, kein server-Listing
+# Fall 4 — Inline-Confirm-Slot: Yes/No-Buttons + Count in der Frage
 # ===========================================================================
 
 
-def test_modal_confirm_checkbox_present(app: Flask) -> None:
-    """Modal eines ackablen Bands enthaelt die Confirm-Checkbox."""
-    html = _render_section_partial(app, section=_make_section("act"))
+def test_inline_confirm_slot_has_yes_and_no_buttons(app: Flask) -> None:
+    """Der Confirm-Slot eines ackablen Bands enthaelt den Slot-Hook, einen
+    Confirm-Button ('Confirm') und einen Cancel-Button ('Cancel')."""
+    html = _render_section_partial(app, section=_make_section("escalate"))
 
-    assert 'data-test="bulk-ack-band-modal"' in html, (
-        f"Modal soll fuer ackables Band gerendert sein. HTML: {html!r}"
+    assert 'data-test="band-ack-confirm-escalate"' in html, (
+        f"Confirm-Slot 'band-ack-confirm-escalate' fehlt. HTML: {html!r}"
     )
-    assert 'data-test="bulk-ack-band-confirm-check"' in html, (
-        f"Confirm-Checkbox-Hook fehlt im Modal. HTML: {html!r}"
+    assert 'data-test="band-ack-confirm-yes-escalate"' in html, (
+        f"Confirm-Yes-Button fehlt. HTML: {html!r}"
+    )
+    assert 'data-test="band-ack-confirm-no-escalate"' in html, (
+        f"Confirm-No-Button fehlt. HTML: {html!r}"
     )
 
-
-def test_modal_comment_textarea_has_no_required_attr(app: Flask) -> None:
-    """ADR-0006: das Kommentar-Feld darf KEIN `required` tragen, aber
-    `maxlength="8192"`."""
+    # Button-Texte: 'Confirm' fuer yes, 'Cancel' fuer no.
     import re as _re
 
-    html = _render_section_partial(app, section=_make_section("act"))
-
-    textarea_match = _re.search(r"<textarea\b[^>]*>", html)
-    assert textarea_match is not None, f"Keine <textarea> im Modal gefunden. HTML: {html!r}"
-    textarea_tag = textarea_match.group(0)
-
-    assert "required" not in textarea_tag, (
-        f"Kommentar-Textarea darf KEIN 'required' tragen (ADR-0006). Tag: {textarea_tag!r}"
+    yes_match = _re.search(
+        r'<button[^>]*data-test="band-ack-confirm-yes-escalate"[^>]*>(.*?)</button>',
+        html,
+        _re.DOTALL,
     )
-    assert 'maxlength="8192"' in textarea_tag, (
-        f"Kommentar-Textarea soll maxlength=8192 tragen. Tag: {textarea_tag!r}"
+    assert yes_match is not None, f"Confirm-Yes-Button-Tag nicht gefunden. HTML: {html!r}"
+    assert "Confirm" in yes_match.group(1), (
+        f"Confirm-Yes-Button soll Text 'Confirm' tragen. Inhalt: {yes_match.group(1)!r}"
     )
 
+    no_match = _re.search(
+        r'<button[^>]*data-test="band-ack-confirm-no-escalate"[^>]*>(.*?)</button>',
+        html,
+        _re.DOTALL,
+    )
+    assert no_match is not None, f"Confirm-No-Button-Tag nicht gefunden. HTML: {html!r}"
+    assert "Cancel" in no_match.group(1), (
+        f"Confirm-No-Button soll Text 'Cancel' tragen. Inhalt: {no_match.group(1)!r}"
+    )
 
-def test_modal_examples_come_from_alpine_not_server_listing(app: Flask) -> None:
-    """Die Beispiel-Liste darf NICHT server-gerendert sein: der Examples-
-    Container nutzt Alpine `x-for`/`<template>`, es gibt keine Jinja-
-    Schleife ueber echte Finding-Objekte (kein hartes `<li>` mit echtem
-    Identifier-String)."""
-    section = _make_section("act")
-    html = _render_section_partial(app, section=section)
 
-    # Examples-Container vorhanden.
-    assert 'data-test="bulk-ack-band-examples"' in html, (
-        f"Examples-Container-Hook fehlt im Modal. HTML: {html!r}"
+def test_inline_confirm_question_renders_total_count(app: Flask) -> None:
+    """Die Frage „Acknowledge <b>N</b> findings?" rendert den
+    `section.total_count` (hier 42)."""
+    html = _render_section_partial(app, section=_make_section("act", count=42))
+
+    assert "Acknowledge <b>42</b> findings?" in html, (
+        f"Confirm-Frage soll 'Acknowledge <b>42</b> findings?' mit total_count=42 "
+        f"rendern. HTML: {html!r}"
     )
-    # Beispiele kommen aus Alpine `x-for` — der Container nutzt ein
-    # <template x-for=...>, nicht eine Jinja-`for`-Schleife mit echten Items.
-    assert "x-for=" in html, (
-        f"Examples sollen via Alpine x-for kommen (kein server-Listing). HTML: {html!r}"
-    )
-    # Der Truncation-Hinweis ist ebenfalls Alpine-getrieben (x-text / x-if),
-    # kein server-berechneter Count.
-    assert 'data-test="bulk-ack-band-truncation"' in html, (
-        f"Truncation-Hook fehlt im Modal. HTML: {html!r}"
-    )
-    # Negativ-Probe: keine konkreten CVE-/Finding-Identifier im Markup —
-    # die `section`-Fixture traegt keinerlei Finding-Objekte, also darf auch
-    # nichts derartiges erscheinen. Wir pruefen, dass die Liste keine
-    # gerenderten <li>-Items mit echtem Textinhalt ausserhalb von
-    # x-text-Bindings hat: alle dynamischen Werte haengen an x-text.
-    assert "CVE-" not in html, (
-        f"Modal darf keine server-gerenderten CVE-Identifier enthalten. HTML: {html!r}"
-    )
-    assert 'x-text="ex.identifier_key"' in html, (
-        f"Beispiel-Identifier soll an Alpine `ex.identifier_key` binden "
-        f"(client-side), nicht server-gerendert sein. HTML: {html!r}"
+    # Der Frage-Slot traegt die strukturelle Klasse.
+    assert "sd-band-ack-confirm__q" in html, (
+        f"Frage-Element soll Klasse 'sd-band-ack-confirm__q' tragen. HTML: {html!r}"
     )
 
 
 # ===========================================================================
-# Fall 5 — Modal liegt AUSSERHALB des <details>
+# Fall 5 — Toggle: Rest-Button x-show="!armed", Confirm-Slot x-show="armed"
 # ===========================================================================
 
 
-def test_modal_is_sibling_of_details_not_inside(app: Flask) -> None:
-    """Das Modal muss als Sibling NACH dem schliessenden `</details>` stehen,
-    nicht innerhalb des `<details>...</details>`-Bereichs (sonst versteckt
-    ein collapsed <details> das Modal)."""
-    html = _render_section_partial(app, section=_make_section("act"))
+def test_toggle_x_show_armed_flags(app: Flask) -> None:
+    """Rest-Button ist nur sichtbar wenn NICHT armed, der Confirm-Slot nur
+    wenn armed — der Zwei-Zustands-Toggle haengt an `armed`."""
+    import re as _re
 
-    details_open = html.index("<details")
-    details_close = html.index("</details>")
-    modal_pos = html.index('data-test="bulk-ack-band-modal"')
+    html = _render_section_partial(app, section=_make_section("monitor"))
 
-    assert modal_pos > details_close, (
-        f"Modal (Pos {modal_pos}) muss NACH dem schliessenden </details> "
-        f"(Pos {details_close}) stehen. HTML: {html!r}"
+    # Rest-Button traegt x-show="!armed".
+    rest_match = _re.search(
+        r'<button[^>]*data-test="band-ack-all-monitor"[^>]*>',
+        html,
+        _re.DOTALL,
     )
-    # Doppelter Schutz: das Modal liegt nicht im Substring zwischen
-    # <details ...> und </details>.
-    details_block = html[details_open:details_close]
-    assert "bulk-ack-band-modal" not in details_block, (
-        f"Modal darf nicht INNERHALB des <details>-Blocks liegen. "
-        f"<details>-Block: {details_block!r}"
+    assert rest_match is not None, f"Rest-Button-Tag nicht gefunden. HTML: {html!r}"
+    assert 'x-show="!armed"' in rest_match.group(0), (
+        f'Rest-Button soll x-show="!armed" tragen. Tag: {rest_match.group(0)!r}'
     )
 
+    # Confirm-Slot traegt x-show="armed".
+    confirm_match = _re.search(
+        r'<span[^>]*data-test="band-ack-confirm-monitor"[^>]*>',
+        html,
+        _re.DOTALL,
+    )
+    assert confirm_match is not None, f"Confirm-Slot-Tag nicht gefunden. HTML: {html!r}"
+    assert 'x-show="armed"' in confirm_match.group(0), (
+        f'Confirm-Slot soll x-show="armed" tragen. Tag: {confirm_match.group(0)!r}'
+    )
+
 
 # ===========================================================================
-# Fall 6 — @click.prevent.stop am Control
+# Fall 6 — @click.prevent.stop an arm()/confirm()/cancel()
 # ===========================================================================
 
 
-def test_control_has_click_prevent_stop(app: Flask) -> None:
-    """Das Control traegt `@click.prevent.stop="openModal()"` (bzw. die
-    aequivalente `x-on:click.prevent.stop`-Form) — sonst toggelt der Klick
-    das <details>."""
+def test_arm_button_has_click_prevent_stop(app: Flask) -> None:
+    """Der Rest-Button traegt `@click.prevent.stop="arm()"` (bzw. die
+    aequivalente `x-on:`-Form) — sonst toggelt der Klick das <details>."""
     html = _render_section_partial(app, section=_make_section("noise"))
 
-    has_at_form = '@click.prevent.stop="openModal()"' in html
-    has_xon_form = 'x-on:click.prevent.stop="openModal()"' in html
+    has_at_form = '@click.prevent.stop="arm()"' in html
+    has_xon_form = 'x-on:click.prevent.stop="arm()"' in html
     assert has_at_form or has_xon_form, (
-        f"Control soll @click.prevent.stop (oder x-on:click.prevent.stop) "
-        f"mit openModal() tragen. HTML: {html!r}"
+        f"Rest-Button soll @click.prevent.stop (oder x-on:-Form) mit arm() tragen. HTML: {html!r}"
+    )
+
+
+def test_confirm_button_has_click_prevent_stop(app: Flask) -> None:
+    """Der Confirm-Button traegt `@click.prevent.stop="confirm()"`."""
+    html = _render_section_partial(app, section=_make_section("noise"))
+
+    has_at_form = '@click.prevent.stop="confirm()"' in html
+    has_xon_form = 'x-on:click.prevent.stop="confirm()"' in html
+    assert has_at_form or has_xon_form, (
+        f"Confirm-Button soll @click.prevent.stop (oder x-on:-Form) mit confirm() tragen. "
+        f"HTML: {html!r}"
+    )
+
+
+def test_cancel_button_has_click_prevent_stop(app: Flask) -> None:
+    """Der Cancel-Button traegt `@click.prevent.stop="cancel()"`."""
+    html = _render_section_partial(app, section=_make_section("noise"))
+
+    has_at_form = '@click.prevent.stop="cancel()"' in html
+    has_xon_form = 'x-on:click.prevent.stop="cancel()"' in html
+    assert has_at_form or has_xon_form, (
+        f"Cancel-Button soll @click.prevent.stop (oder x-on:-Form) mit cancel() tragen. "
+        f"HTML: {html!r}"
     )
 
 
 # ===========================================================================
-# Fall 7 — Script-Include in base_app.html
+# Fall 7 — Negativ: kein Modal, keine Textarea im Actions-Slot
+# ===========================================================================
+
+
+def test_no_modal_and_no_textarea_in_actions(app: Flask) -> None:
+    """Die Modal-Aera ist vorbei: weder `bulk-ack-band-modal` noch eine
+    Kommentar-`<textarea>` (ADR-0006-Pflichtkommentar-Falle) duerfen im
+    Actions-Slot eines ackablen Bands gerendert sein."""
+    html = _render_section_partial(app, section=_make_section("act"))
+
+    assert "bulk-ack-band-modal" not in html, (
+        f"Kein (totes) Modal-Markup erwartet (Inline-Confirm ersetzt es). HTML: {html!r}"
+    )
+    assert "<textarea" not in html, (
+        f"Keine Kommentar-<textarea> im Inline-Confirm-Flow erwartet. HTML: {html!r}"
+    )
+    # Auch die alten Modal-Hooks duerfen nicht mehr existieren.
+    assert "bulk-ack-band-confirm-check" not in html, (
+        f"Confirm-Checkbox-Hook ist Modal-Aera und darf nicht mehr existieren. HTML: {html!r}"
+    )
+    assert "bulk-ack-band-examples" not in html, (
+        f"Examples-Hook ist Modal-Aera und darf nicht mehr existieren. HTML: {html!r}"
+    )
+
+
+# ===========================================================================
+# Fall 8 — Script-Include in base_app.html
 # ===========================================================================
 
 

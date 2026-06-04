@@ -899,6 +899,42 @@
   border: 1px solid currentColor;
 }
 
+/* Armed-Confirm-Zustand — bleibt sichtbar, faehrt schnell ein.
+   Ersetzt das frueher modale Bulk-Ack (ADR-0044-Amendment, TICKET-009). */
+.sd-band-ack-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  animation: sd-flyout-in 200ms var(--ease-materialize);
+}
+.sd-band-ack-confirm__q { color: var(--text-secondary); }
+.sd-band-ack-confirm__q b { color: var(--text-primary); font-weight: 700; }
+.sd-band-ack-confirm__yes,
+.sd-band-ack-confirm__no {
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: color var(--dur-hover) var(--ease-drift),
+              letter-spacing var(--dur-hover) var(--ease-drift);
+}
+.sd-band-ack-confirm__yes { color: var(--accent); }
+.sd-band-ack-confirm__yes:hover { letter-spacing: 0.14em; }
+.sd-band-ack-confirm__no { color: var(--text-tertiary); }
+.sd-band-ack-confirm__no:hover { color: var(--text-primary); }
+.sd-band-ack-confirm__yes:focus-visible,
+.sd-band-ack-confirm__no:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .sd-band__body { animation: sd-flyout-in 260ms var(--ease-materialize); }
 
 /* Pager-Footer der Triage-Band-Seiten: Innenabstand wie die Finding-Rows

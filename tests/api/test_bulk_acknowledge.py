@@ -64,7 +64,6 @@ class _FakeSession:
     Konfigurierbar pro Test:
       - `server_active`:   ob der Guard-SELECT eine Zeile liefert.
       - `count`:           Anzahl fuer den dry_run-COUNT.
-      - `examples`:        Roh-Zeilen (Tuples) fuer die examples-Projektion.
       - `scope_ids`:       IDs, die der Scope-ID-Projektion zurueckgegeben werden.
       - `update_rowcount`: rowcount, das das Apply-UPDATE liefert.
       - `note_ids`:        IDs, die die Note-ID-Reselektion zurueckgibt.
@@ -75,14 +74,12 @@ class _FakeSession:
         *,
         server_active: bool = True,
         count: int = 0,
-        examples: list[tuple[str, str]] | None = None,
         scope_ids: list[int] | None = None,
         update_rowcount: int = 0,
         note_ids: list[int] | None = None,
     ) -> None:
         self.server_active = server_active
         self._count = count
-        self._examples = examples or []
         self._scope_ids = scope_ids or []
         self._update_rowcount = update_rowcount
         self._note_ids = note_ids or []
@@ -130,11 +127,7 @@ class _FakeSession:
         if "from finding_notes" in sql:
             return _ExecResult(rows=list(self._note_ids))
 
-        # 4) examples-Projektion: identifier_key + package_name, order by ident
-        if "identifier_key" in sql and "package_name" in sql:
-            return _ExecResult(rows=list(self._examples))
-
-        # 5) Scope-ID-Projektion: SELECT findings.id ... (Apply-Pfad).
+        # 4) Scope-ID-Projektion: SELECT findings.id ... (Apply-Pfad).
         if "findings.id" in sql:
             return _ExecResult(rows=list(self._scope_ids))
 
@@ -219,19 +212,11 @@ def test_apply_update_statement_shape_has_no_limit() -> None:
 # ===========================================================================
 
 
-def test_dry_run_flavor_c_returns_count_and_examples_no_update(
+def test_dry_run_flavor_c_returns_count_and_scope_no_update(
     nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Test 5: dry_run -> count + examples (<=5), KEIN finding_ids, kein UPDATE."""
-    sess = _FakeSession(
-        server_active=True,
-        count=3,
-        examples=[
-            ("CVE-2024-0001", "openssl"),
-            ("CVE-2024-0002", "libxml2"),
-            ("CVE-2024-0003", "zlib"),
-        ],
-    )
+    """Test 5: dry_run -> count + server_scope, KEIN examples/finding_ids, kein UPDATE."""
+    sess = _FakeSession(server_active=True, count=3)
     _patch_session(monkeypatch, sess)
     client = nodb_app.test_client()
 
@@ -243,10 +228,10 @@ def test_dry_run_flavor_c_returns_count_and_examples_no_update(
     body = resp.get_json()
     assert body["dry_run"] is True
     assert body["count"] == 3
-    assert len(body["examples"]) == 3
-    assert body["examples"][0] == {"identifier_key": "CVE-2024-0001", "package_name": "openssl"}
     assert body["server_scope"] == {"server_id": 1, "risk_band": "noise"}
-    # Flavor-C-dry_run liefert KEIN finding_ids / server_count.
+    # Flavor-C-dry_run liefert KEIN examples / finding_ids / server_count
+    # (ADR-0044-Amendment: Band-UI rendert den Count server-seitig).
+    assert "examples" not in body
     assert "finding_ids" not in body
     assert "server_count" not in body
     # Kein UPDATE, kein Insert, kein Commit im dry_run.
@@ -255,26 +240,9 @@ def test_dry_run_flavor_c_returns_count_and_examples_no_update(
     assert sess.commit_count == 0
 
 
-def test_dry_run_flavor_c_caps_examples_at_five(
-    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """examples ist auf max. 5 begrenzt (Builder traegt LIMIT 5)."""
-    scope = BulkAckServerScope(server_id=1, risk_band="noise")
-    example_stmt = (
-        bulk_mod._build_server_scope_query(scope)
-        .with_only_columns(Finding.identifier_key, Finding.package_name)
-        .order_by(Finding.identifier_key.asc())
-        .limit(bulk_mod._FLAVOR_C_EXAMPLES_LIMIT)
-    )
-    sql = str(example_stmt.compile(dialect=postgresql.dialect())).lower()
-    assert "limit" in sql
-    assert "order by" in sql and "identifier_key" in sql
-    assert bulk_mod._FLAVOR_C_EXAMPLES_LIMIT == 5
-
-
 def test_dry_run_flavor_c_empty_band(nodb_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test 6: Band ohne Findings -> count=0, examples=[]."""
-    sess = _FakeSession(server_active=True, count=0, examples=[])
+    """Test 6: Band ohne Findings -> count=0, kein examples-Key."""
+    sess = _FakeSession(server_active=True, count=0)
     _patch_session(monkeypatch, sess)
     client = nodb_app.test_client()
 
@@ -285,7 +253,7 @@ def test_dry_run_flavor_c_empty_band(nodb_app: Flask, monkeypatch: pytest.Monkey
     assert resp.status_code == 200, resp.get_data(as_text=True)
     body = resp.get_json()
     assert body["count"] == 0
-    assert body["examples"] == []
+    assert "examples" not in body
     assert "finding_ids" not in body
     assert sess.update_statements == []
 

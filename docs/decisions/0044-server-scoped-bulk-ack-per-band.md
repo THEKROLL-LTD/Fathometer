@@ -2,6 +2,8 @@
 
 **Status:** Akzeptiert · **Datum:** 2026-06-04 · **Bezug:** Loest **ADR-0022 §Bulk-Ack-„noise"-Workflow** ab (noise-only-Beschraenkung und ID-Listen-Transport entfallen); loest **ADR-0039 §2** (Fragment-Endpoint `GET /<id>/fragments/noise`) ab — das Noise-Fragment entfaellt ersatzlos. **ADR-0006** (keine Pflicht-Kommentare) gilt unveraendert. **ADR-0037 §(4)** (`POST /findings/bulk/acknowledge` der Bucket-View) ist ein anderer Endpoint und bleibt unberuehrt. Einzel-Acknowledge (`POST /findings/<id>/acknowledge`) bleibt unveraendert.
 
+**Amendment 2026-06-04 (TICKET-009-Nachzügler):** Die UI-Mechanik aus §(2)/§(3) wurde vor dem Merge auf die Design-Vorgabe (`docs/design/ServerDetail.jsx`) angepasst: **kein Modal und keine Kommentar-Eingabe** mehr, stattdessen ein **Inline-Confirm/Cancel** direkt im Band-Header. Die `examples` in der dry_run-Response entfallen ersatzlos. Details in §(2)/§(3) unten (mit Amendment-Markierung).
+
 ## Kontext
 
 Die Server-Detail-Seite (`/servers/<id>`) hat heute genau einen Bulk-Shortcut: „Acknowledge all noise on this server (N)" (Block O, ADR-0022). Der Mechanismus dahinter hat zwei Probleme — eines davon ist ein Bug, das andere eine Funktionsluecke.
@@ -47,28 +49,27 @@ class BulkAckRequest(BaseModel):
 - Server-Existenz-/revoked-/retired-Guard wie bei den Fragment-Endpoints (404).
 - Das Feld `risk_band_filter: Literal["noise"]` (Block O) **entfaellt ersatzlos**. Sein einziger Consumer war `bulk_ack_noise.js`. Der Injection-Schutz aus ADR-0022 (eingeschleuste non-noise-IDs werden gedropped) ist bei Flavor C **per Konstruktion** obsolet: der Client liefert gar keine IDs mehr, die er manipulieren koennte. Der adversarial Fokus verschiebt sich auf den Flavor selbst (siehe §5).
 
-### (2) dry_run liefert Count + Beispiele
+### (2) dry_run liefert Count (Beispiele entfallen — Amendment 2026-06-04)
 
-Der Zwei-Phasen-Ablauf (dry_run → apply) bleibt. Die dry_run-Response fuer Flavor C enthaelt zusaetzlich maximal **5 Beispiel-Findings** fuer die Modal-Preview:
+Der Zwei-Phasen-Ablauf (dry_run → apply) bleibt als generische Endpoint-Faehigkeit erhalten. Die dry_run-Response fuer Flavor C enthaelt `count` und das `server_scope`-Echo:
 
 ```json
 {
   "dry_run": true,
   "count": 2816,
-  "examples": [{"identifier_key": "CVE-...", "package_name": "..."}, ...],
   "server_scope": {"server_id": 42, "risk_band": "noise"}
 }
 ```
 
-`examples` ist deterministisch sortiert (`identifier_key ASC`, LIMIT 5). Das ersetzt die bisherige server-gerenderte 50er-Inline-Liste im Modal — die hat bei tausenden Findings weder Platz noch Informationswert („das sprengt den Modal"). `finding_ids` entfaellt in der Flavor-C-dry_run-Response (bei 100k-Findings-Servern waere das ein MB-Payload ohne Consumer).
+**Amendment 2026-06-04:** Die urspruenglich vorgesehenen `examples` (max. 5 Beispiel-Findings fuer die Modal-Preview) sind **ersatzlos entfallen** — das Band-UI nutzt keinen Modal-Preview mehr (siehe §(3)) und rendert den Count direkt aus dem server-seitig bekannten `total_count` der Band-Sektion (kein dry_run-Roundtrip im UI-Pfad). `finding_ids` war in der Flavor-C-dry_run-Response ohnehin nie enthalten (bei 100k-Findings-Servern ein MB-Payload ohne Consumer).
 
-### (3) UI: Hover-Control pro Band-Sektion statt Toolbar-Link
+### (3) UI: Per-Band Inline-Confirm/Cancel im Summary-Header (Amendment 2026-06-04)
 
 - Der Toolbar-Link „Acknowledge all noise on this host (N)" und der `sd-noise-toolbar`-Slot **entfallen**.
-- Jede Risk-Band-Sektion der Triage-Queue (`_partials/risk_band_section.html`) **ausser `pending`** bekommt im `<summary>`-Header ein Hover-Control: Checkbox + Label „ACKNOWLEDGE ALL". Sichtbar nur bei Hover ueber der Band-Zeile (CSS-Reveal); das Label wechselt von grau (`--text-secondary`) zu cyan (`--accent`) bei Hover genau ueber dem Control.
-- Klick auf das Control oeffnet das Modal und darf das `<details>`-Akkordeon **nicht** togglen (`@click.prevent.stop`).
-- **Ein** generisches Modal-Partial ersetzt `_bulk_ack_noise_modal.html`: Band-Badge + Count (aus dry_run), max. 5 Beispiele + „… and N more", Pflicht-Bestaetigungs-Checkbox (wie bisher), Kommentar **optional** (ADR-0006). Das Modal liegt als Sibling des `<details>` im Sektions-Wrapper — innerhalb eines collapsed `<details>` waere es unsichtbar.
-- Nach Apply: Toast + `window.location.reload()` (bestehendes Pattern aus `bulk_ack_noise.js`). Ein gezielter OOB-Refresh der Band-Counts ist bewusst nicht Teil dieser ADR (siehe Re-Open-Trigger).
+- Jede Risk-Band-Sektion der Triage-Queue (`_partials/risk_band_section.html`) **ausser `pending`** bekommt im `<summary>`-Header ein Hover-Control: ein „Acknowledge all"-Button mit rein **visuellem** SVG-Haekchen (`.sd-band-ack__check`, **keine** echte Checkbox). Sichtbar nur bei Hover ueber der Band-Zeile (CSS-Reveal via `opacity`); grau (`--text-tertiary`) → cyan (`--accent`) bei Hover genau ueber dem Control.
+- Klick auf das Control darf das `<details>`-Akkordeon **nicht** togglen (`@click.prevent.stop`).
+- **Amendment 2026-06-04 — Inline-Confirm statt Modal:** Der Klick oeffnet **kein Modal**, sondern schaltet im selben `.sd-band__actions`-Slot in einen Inline-Confirm-Zustand (`.sd-band-ack-confirm`): „Acknowledge **N** findings?  Confirm  Cancel" (N = `total_count` der Sektion, server-gerendert). „Confirm" fuehrt das Apply aus (Flavor C, `dry_run=false`), „Cancel" kehrt in den Ruhezustand zurueck. Das generische Modal-Partial, die dry_run-Beispiel-Vorschau und die **optionale Kommentar-Eingabe entfallen** — der Per-Band-Bulk-Ack schreibt **keine Notiz** mehr (ADR-0006 bleibt fuer Einzel-Ack und Flavor A/B unberuehrt; der `comment`-Parameter des Endpoints bleibt fuer jene erhalten). Markup-Struktur 1:1 aus `docs/design/ServerDetail.jsx` (`.sd-band-ack` / `.sd-band-ack-confirm`).
+- Nach Apply: Toast + `window.location.reload()`. Ein gezielter OOB-Refresh der Band-Counts ist bewusst nicht Teil dieser ADR (siehe Re-Open-Trigger).
 
 ### (4) Grosse Mengen: Audit-Metadata gecappt, Notes als Bulk-Insert
 

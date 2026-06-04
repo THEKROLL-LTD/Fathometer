@@ -9,8 +9,9 @@ und das Projekt folgt [Semantic Versioning](https://semver.org/).
 ### Server-Detail
 
 - Jedes Risk-Band (ausser `pending`) hat ein "Acknowledge all"-Hover-Control
-  am Band-Header (ADR-0044). Klick oeffnet ein generisches Modal mit Count und
-  max. 5 Beispiel-Findings aus der `dry_run`-Antwort.
+  am Band-Header (ADR-0044). Klick schaltet inline in eine Bestaetigung
+  ("Acknowledge N findings?  Confirm  Cancel") direkt im Band-Header — kein
+  Modal, keine Notiz-Eingabe (Design `docs/design/ServerDetail.jsx`).
 - Bulk-Ack wirkt jetzt auf **ALLE** offenen Findings des Bands auf diesem
   Server — der Server resolved den Scope selbst (`server_scope`-Flavor C, kein
   ID-Transport durch den Client). Das 50er-Limit des Noise-Workflows entfaellt.

@@ -68,8 +68,6 @@ from app.schemas.bulk_request import (
 # Maximale Anzahl IDs in `metadata.finding_ids` (ADR-0044 §(4); Praezedenz
 # llm_worker.py). `metadata.count` traegt immer die volle Zahl.
 _AUDIT_FINDING_IDS_CAP = 50
-# Maximale Anzahl Beispiel-Findings in der Flavor-C-dry_run-Response.
-_FLAVOR_C_EXAMPLES_LIMIT = 5
 
 log = structlog.get_logger(__name__)
 
@@ -397,9 +395,10 @@ def _handle_server_scope(sess: Any, req: BulkAckRequest, scope: BulkAckServerSco
     """Flavor-C-Pfad: server-scoped Per-Band-Bulk-Ack (ADR-0044).
 
     Resolved die Findings server-seitig ueber `(server_id, risk_band,
-    status=OPEN)`. dry_run liefert `count` + max. 5 `examples` + `server_scope`
-    (KEIN `finding_ids`-Array). Apply fuehrt ein direktes UPDATE ueber den
-    WHERE-Scope aus (keine ORM-Hydration) und liefert die betroffene Anzahl
+    status=OPEN)`. dry_run liefert `count` + `server_scope` (KEIN
+    `finding_ids`-Array, KEINE `examples` — das Band-UI rendert den Count
+    server-seitig, ADR-0044-Amendment). Apply fuehrt ein direktes UPDATE ueber
+    den WHERE-Scope aus (keine ORM-Hydration) und liefert die betroffene Anzahl
     aus `result.rowcount`.
     """
     guard = _active_server_guard(sess, scope.server_id)
@@ -410,22 +409,14 @@ def _handle_server_scope(sess: Any, req: BulkAckRequest, scope: BulkAckServerSco
     scope_echo = {"server_id": scope.server_id, "risk_band": scope.risk_band}
 
     # Single Source des WHERE-Scopes (server_id, status=OPEN, risk_band).
-    # Count, Beispiele und der Note-ID-Scope leiten sich davon ab; das Apply-
-    # UPDATE traegt denselben WHERE inline (klare SQL-Shape, kein Subquery).
+    # Count und der Note-ID-Scope leiten sich davon ab; das Apply-UPDATE traegt
+    # denselben WHERE inline (klare SQL-Shape, kein Subquery).
     scope_subq = _build_server_scope_query(scope).with_only_columns(Finding.id).subquery()
 
-    # ---- Phase 2a: dry_run -> echter COUNT + max. 5 Beispiele -------------
+    # ---- Phase 2a: dry_run -> echter COUNT --------------------------------
     if req.dry_run:
         count_stmt = select(func.count()).select_from(scope_subq)
         count = int(sess.execute(count_stmt).scalar_one())
-
-        example_rows = sess.execute(
-            _build_server_scope_query(scope)
-            .with_only_columns(Finding.identifier_key, Finding.package_name)
-            .order_by(Finding.identifier_key.asc())
-            .limit(_FLAVOR_C_EXAMPLES_LIMIT)
-        ).all()
-        examples = [{"identifier_key": ident, "package_name": pkg} for ident, pkg in example_rows]
 
         log.info(
             "bulk_ack.dry_run",
@@ -439,7 +430,6 @@ def _handle_server_scope(sess: Any, req: BulkAckRequest, scope: BulkAckServerSco
             {
                 "dry_run": True,
                 "count": count,
-                "examples": examples,
                 "server_scope": scope_echo,
             }
         )
