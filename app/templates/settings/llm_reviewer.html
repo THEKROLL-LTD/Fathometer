@@ -1,41 +1,39 @@
-{# LLM-Risk-Reviewer-Settings-Tab (Block P, ADR-0023).
+{# LLM-Risk-Reviewer-Settings-Tab (Block AD / ADR-0047 — Restyling auf s-*).
 
    Wird ueber `_settings_shell.render_settings(active="llm_reviewer", ...)`
-   als Content-Markup gerendert. Mode-Wechsel und Backlog-Re-queue brauchen
-   beide eine Master-Key-Bestaetigung (analog `/settings/master-key`).
+   als Content-Markup gerendert (KEIN `extends`), includiert in
+   `#settings-content.settings`. Mode-Wechsel, Concurrency-Wechsel und
+   Backlog-Re-queue brauchen je eine Master-Key-Bestaetigung.
 
    Variablen-Vertrag (aus `app/views/settings.py:llm_reviewer_view`):
      - `current_mode`        : str — 'off' | 'observation' | 'live'.
-     - `current_concurrency` : int — aktueller `llm_worker_job_concurrency`-Wert (1..200).
-     - `mode_form`           : LlmReviewerModeForm.
-     - `requeue_form`        : LlmReviewerRequeueForm.
-     - `concurrency_form`    : LlmReviewerConcurrencyForm.
+     - `active_model`        : str | None.
+     - `current_concurrency` : int (1..200).
+     - `mode_form` / `requeue_form` / `concurrency_form`.
      - `job_counts`       : dict[str,int] — queued/in_progress/done/failed.
-     - `would_call_count` : int — done-Jobs mit `result.would_call=true`.
+     - `would_call_count` : int.
      - `groups_total`     : int.
-     - `top_groups`       : list[ApplicationGroup] — Top-5 by last_used_at.
+     - `top_groups`       : list[ApplicationGroup] — label/group_kind/last_used_at.
      - `cache_total`      : int.
-     - `token_budget`     : dict — `used_today`, `daily_limit`, `resets_at`.
+     - `token_budget`     : dict — used_today/daily_limit/resets_at.
      - `heartbeat_at`     : datetime | None.
-     - `heartbeat_age_s`  : float | None.
      - `heartbeat_healthy`: bool.
+     - `sub_tab`          : str — 'overview' | 'debug_log'.
 
-   Sicherheit: alle Werte sind serverseitig; keine LLM/User-Daten werden
-   ungeprueft gerendert. Strict-Autoescape ueberall.
+   Die drei DaisyUI-Modals sind durch token-gestylte Alpine-Overlays ersetzt
+   (kein DaisyUI). Die Master-Key-/Privacy-/Slider-Eingaben bleiben in der
+   jeweiligen Form. Strict-Autoescape ueberall; keine LLM/User-Daten ungeprueft.
 #}
-<div class="max-w-3xl p-6 space-y-6"
-     x-data="{ modeOpen: false, requeueOpen: false, concurrencyOpen: false, privacyAcked: false }">
-  <header>
-    <h1 class="text-2xl font-semibold">LLM Risk Reviewer</h1>
-    <p class="opacity-70 text-sm mt-1">
-      Asynchronous LLM worker for application grouping and risk assessment
-      (ADR-0023). Changing the mode requires master key confirmation.
-    </p>
-  </header>
+<div x-data="{ modeOpen: false, requeueOpen: false, concurrencyOpen: false, privacyAcked: false }">
+  <p class="settings__eyebrow">Settings</p>
+  <h1 class="settings__title">LLM Risk Reviewer</h1>
+  <p class="settings__lede">
+    Asynchronous LLM worker for application grouping and risk assessment
+    (ADR-0023). Changing the mode requires master key confirmation.
+  </p>
 
-  {# Sub-Tab-Navigation — Overview vs. Debug Log (v0.9.3, ADR-0023 §e).
-     Settings-Top-Nav ist flach, darum dieser inline-Sub-Tab-Switcher. #}
-  <div role="tablist" class="tabs tabs-bordered" data-test="llm-reviewer-subtabs">
+  {# Sub-Tabs — Overview vs. Debug Log. #}
+  <div class="s-subtabs" role="tablist" data-test="llm-reviewer-subtabs">
     <a role="tab"
        href="{{ url_for('settings.llm_reviewer_view') }}"
        hx-get="{{ url_for('settings.llm_reviewer_view') }}"
@@ -43,10 +41,8 @@
        hx-swap="innerHTML"
        hx-push-url="true"
        hx-headers='{"HX-Target": "settings-content"}'
-       class="tab {% if (sub_tab | default('overview')) == 'overview' %}tab-active{% endif %}"
-       data-test="llm-reviewer-subtab-overview">
-      Overview
-    </a>
+       class="s-subtabs__item {% if (sub_tab | default('overview')) == 'overview' %}s-subtabs__item--active{% endif %}"
+       data-test="llm-reviewer-subtab-overview">Overview</a>
     <a role="tab"
        href="{{ url_for('settings.llm_reviewer_debug_log') }}"
        hx-get="{{ url_for('settings.llm_reviewer_debug_log') }}"
@@ -54,444 +50,296 @@
        hx-swap="innerHTML"
        hx-push-url="true"
        hx-headers='{"HX-Target": "settings-content"}'
-       class="tab {% if sub_tab == 'debug_log' %}tab-active{% endif %}"
-       data-test="llm-reviewer-subtab-debug">
-      Debug Log
-    </a>
+       class="s-subtabs__item {% if sub_tab == 'debug_log' %}s-subtabs__item--active{% endif %}"
+       data-test="llm-reviewer-subtab-debug">Debug log</a>
   </div>
 
-  {# Current-Mode-Card. #}
-  <div class="card bg-base-200 shadow-sm" data-test="llm-reviewer-mode-card">
-    <div class="card-body">
-      <div class="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 class="card-title">Mode</h2>
-          <p class="text-sm opacity-70 mt-1">
-            Current mode:
-            <strong class="font-mono ml-1" data-test="llm-current-mode">{{ current_mode }}</strong>
-          </p>
-          <p class="text-xs opacity-70 mt-1">
-            Active model:
-            <code class="font-mono ml-1" data-test="llm-active-model">{{ active_model or "—" }}</code>
-          </p>
-        </div>
-        <button type="button"
-                class="btn btn-warning btn-sm"
-                @click="modeOpen = true; privacyAcked = false"
-                data-test="llm-mode-change-button">
-          Change mode...
-        </button>
-      </div>
+  {# Status strip — Mode + Model + Worker + Change-mode. #}
+  <div class="s-statusbar" data-test="llm-reviewer-mode-card">
+    <div class="s-statusbar__cell">
+      <span class="s-statusbar__label">Mode</span>
+      <span class="s-statusbar__value{% if current_mode == 'live' %} s-statusbar__value--accent{% endif %}"
+            data-test="llm-current-mode">{{ current_mode }}</span>
     </div>
-  </div>
-
-  {# Concurrency-Card (Block U, ADR-0029). MVP-Vereinfachung: nur den
-     persistierten Settings-Wert anzeigen — kein Live-`in_flight`-Counter.
-     Operator schaut fuer Live-Werte in das `llm_worker.status`-Snapshot
-     im Container-Log (Phase F). #}
-  <div class="card bg-base-200 shadow-sm" data-test="llm-reviewer-concurrency-card">
-    <div class="card-body">
-      <div class="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 class="card-title">Worker concurrency</h2>
-          <p class="text-sm opacity-70 mt-1">
-            Parallel LLM jobs in the worker:
-            <strong class="font-mono ml-1" data-test="llm-current-concurrency">{{ current_concurrency }}</strong>
-            <span class="opacity-60 text-xs">(1..200)</span>
-          </p>
-          <p class="text-xs opacity-60 mt-1">
-            Hot reload within 30 s of the change. No pod restart needed.
-            Live values (<code class="font-mono">in_flight</code>, throughput) in the
-            container log via <code class="font-mono">llm_worker.status</code>.
-          </p>
-        </div>
-        <button type="button"
-                class="btn btn-warning btn-sm"
-                @click="concurrencyOpen = true"
-                data-test="llm-concurrency-change-button">
-          Change concurrency...
-        </button>
-      </div>
+    <div class="s-statusbar__cell">
+      <span class="s-statusbar__label">Active model</span>
+      <span class="s-statusbar__value" data-test="llm-active-model">{{ active_model or "—" }}</span>
     </div>
-  </div>
-
-  {# Queue-Stats. #}
-  <div class="card bg-base-200 shadow-sm" data-test="llm-queue-stats-card">
-    <div class="card-body">
-      <h2 class="card-title">Job queue</h2>
-      <dl class="grid grid-cols-4 gap-2 text-sm mt-2">
-        <div class="bg-base-300/40 rounded p-3">
-          <dt class="text-[10px] uppercase tracking-wider opacity-65">queued</dt>
-          <dd class="font-mono text-2xl" data-test="queue-queued">{{ job_counts.queued }}</dd>
-        </div>
-        <div class="bg-base-300/40 rounded p-3">
-          <dt class="text-[10px] uppercase tracking-wider opacity-65">in_progress</dt>
-          <dd class="font-mono text-2xl" data-test="queue-in-progress">{{ job_counts.in_progress }}</dd>
-        </div>
-        <div class="bg-base-300/40 rounded p-3">
-          <dt class="text-[10px] uppercase tracking-wider opacity-65">done (24h)</dt>
-          <dd class="font-mono text-2xl" data-test="queue-done">{{ job_counts.done }}</dd>
-        </div>
-        <div class="bg-base-300/40 rounded p-3">
-          <dt class="text-[10px] uppercase tracking-wider opacity-65">failed (24h)</dt>
-          <dd class="font-mono text-2xl" data-test="queue-failed">{{ job_counts.failed }}</dd>
-        </div>
-      </dl>
-
-      {% if current_mode == 'observation' or would_call_count > 0 %}
-        <div class="alert alert-info text-sm mt-3" role="status"
-             data-test="observation-backlog-info">
-          <span>
-            Observation backlog:
-            <strong class="font-mono">{{ would_call_count }}</strong>
-            {% if would_call_count == 1 %}job{% else %}jobs{% endif %}
-            with <code class="font-mono">would_call=true</code>.
-          </span>
-        </div>
-      {% endif %}
-
-      {% if current_mode == 'live' and would_call_count > 0 %}
-        <div class="mt-3" data-test="llm-requeue-section">
-          <button type="button"
-                  class="btn btn-warning btn-sm"
-                  @click="requeueOpen = true"
-                  data-test="llm-requeue-button">
-            Re-queue observation backlog ({{ would_call_count }} jobs)
-          </button>
-        </div>
-      {% endif %}
-    </div>
-  </div>
-
-  {# Library-Stats. #}
-  <div class="card bg-base-200 shadow-sm" data-test="llm-library-stats-card">
-    <div class="card-body">
-      <h2 class="card-title">Application group library</h2>
-      <p class="text-sm opacity-70">
-        Total:
-        <strong class="font-mono" data-test="groups-total">{{ groups_total }}</strong>
-        {% if groups_total == 1 %}group{% else %}groups{% endif %}.
-      </p>
-      {% if top_groups %}
-        {# Block T (ADR-0028): Risk-Band ist jetzt per-(group, server) und
-           lebt in `application_group_evaluations`. Die Library-Sicht hier
-           zeigt nur fleet-weite Pattern-Identitaet; eine Aggregat-Pille
-           "Bewertung fleet-wide" ist explizit out-of-MVP (siehe ADR-0028
-           §Re-Open-Trigger Variante D). Operator sieht die per-Server-
-           Bewertungen auf der jeweiligen Server-Detail-Seite. #}
-        <div class="overflow-x-auto mt-2">
-          <table class="table table-sm">
-            <thead>
-              <tr>
-                <th class="text-[10px] uppercase tracking-wider opacity-65">Label</th>
-                <th class="text-[10px] uppercase tracking-wider opacity-65">Group kind</th>
-                <th class="text-[10px] uppercase tracking-wider opacity-65">Last used</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for grp in top_groups %}
-                <tr data-test="top-group-row">
-                  <td class="font-mono">{{ grp.label }}</td>
-                  <td class="text-xs opacity-70">
-                    {% if grp.group_kind %}
-                      {{ grp.group_kind }}
-                    {% else %}
-                      <span class="opacity-50">—</span>
-                    {% endif %}
-                  </td>
-                  <td class="text-xs opacity-70">
-                    {% if grp.last_used_at %}
-                      {{ grp.last_used_at | humanize_delta }}
-                    {% else %}
-                      <span class="opacity-50">never</span>
-                    {% endif %}
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      {% else %}
-        <p class="text-xs opacity-50 italic mt-2">No groups in the library yet.</p>
-      {% endif %}
-    </div>
-  </div>
-
-  {# Cache-Stats. #}
-  <div class="card bg-base-200 shadow-sm" data-test="llm-cache-stats-card">
-    <div class="card-body">
-      <h2 class="card-title">Risk cache</h2>
-      <p class="text-sm opacity-70">
-        Entries:
-        <strong class="font-mono" data-test="cache-total">{{ cache_total }}</strong>
-      </p>
-      <p class="text-xs opacity-50">
-        Hit rate (7d): <span class="font-mono">N/A</span>
-        <span class="opacity-60">— audit-based cache hit rate will be added in a later block.</span>
-      </p>
-    </div>
-  </div>
-
-  {# Token-Budget. #}
-  <div class="card bg-base-200 shadow-sm" data-test="llm-token-budget-card">
-    <div class="card-body">
-      <h2 class="card-title">Token budget</h2>
-      <dl class="text-sm space-y-1 mt-2">
-        <div class="flex justify-between">
-          <dt class="opacity-60">used today</dt>
-          <dd class="font-mono" data-test="budget-used">{{ token_budget.used_today }}</dd>
-        </div>
-        <div class="flex justify-between">
-          <dt class="opacity-60">daily limit</dt>
-          <dd class="font-mono" data-test="budget-limit">{{ token_budget.daily_limit }}</dd>
-        </div>
-        <div class="flex justify-between">
-          <dt class="opacity-60">reset</dt>
-          <dd class="font-mono text-xs" data-test="budget-resets-at">
-            {% if token_budget.resets_at %}
-              {{ token_budget.resets_at.strftime('%Y-%m-%d %H:%M UTC') }}
-            {% else %}
-              <span class="opacity-50">—</span>
-            {% endif %}
-          </dd>
-        </div>
-      </dl>
-    </div>
-  </div>
-
-  {# Worker-Liveness. #}
-  <div class="card bg-base-200 shadow-sm" data-test="llm-worker-card">
-    <div class="card-body">
-      <h2 class="card-title">Worker</h2>
-      <div class="flex items-center gap-3 mt-2">
-        {% if heartbeat_healthy %}
-          <span class="badge badge-success badge-sm" data-test="worker-status-healthy">healthy</span>
-        {% else %}
-          <span class="badge badge-warning badge-sm" data-test="worker-status-stale">stale</span>
-        {% endif %}
-        <span class="text-sm opacity-70">
-          last heartbeat:
-          <strong class="font-mono ml-1" data-test="worker-heartbeat">
-            {% if heartbeat_at %}
-              {{ heartbeat_at | humanize_delta }}
-            {% else %}
-              never
-            {% endif %}
-          </strong>
+    <div class="s-statusbar__cell">
+      <span class="s-statusbar__label">Worker</span>
+      <span style="display: flex; align-items: center; gap: 10px;">
+        <span style="width: 7px; height: 7px; border-radius: 50%; background: {% if heartbeat_healthy %}var(--status-operational){% else %}var(--status-degraded){% endif %};{% if heartbeat_healthy %} box-shadow: 0 0 6px rgba(57, 255, 20, 0.45);{% endif %}" aria-hidden="true"></span>
+        <span class="s-statusbar__value" data-test="worker-heartbeat">
+          {% if heartbeat_healthy %}healthy{% else %}stale{% endif %} ·
+          {% if heartbeat_at %}{{ heartbeat_at | humanize_delta }}{% else %}never{% endif %}
         </span>
-      </div>
+      </span>
     </div>
+    <button type="button"
+            class="s-btn"
+            @click="modeOpen = true; privacyAcked = false"
+            data-test="llm-mode-change-button">Change mode…</button>
   </div>
 
-  {# Mode-Wechsel-Modal — Master-Key + Privacy-Notice (bei `live`). #}
-  <dialog class="modal"
-          x-show="modeOpen"
-          x-cloak
-          :class="{'modal-open': modeOpen}"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="llm-mode-modal-title"
-          @keydown.escape.window="modeOpen = false"
-          data-test="llm-mode-modal">
-    <div class="modal-box max-w-xl"
-         x-data="{ newMode: '{{ current_mode }}' }">
-      <h3 id="llm-mode-modal-title" class="text-lg font-semibold">
-        Change LLM mode
-      </h3>
-      <form method="post"
-            action="{{ url_for('settings.llm_reviewer_change_mode') }}"
-            class="space-y-3 mt-3">
-        {{ mode_form.csrf_token }}
+  {# Worker concurrency — read-only display + Change-modal. #}
+  <section class="s-section">
+    <div class="s-section__head">
+      <h2 class="s-section__label">Worker concurrency</h2>
+      <span class="s-section__meta">Hot-reload, no pod restart needed</span>
+    </div>
+    <div class="s-slider-row" data-test="llm-reviewer-concurrency-card">
+      <span class="s-slider-row__value" data-test="llm-current-concurrency">{{ current_concurrency }}</span>
+      <input type="range" min="1" max="200" value="{{ current_concurrency }}" disabled aria-label="Current worker concurrency" />
+      <span class="s-slider-row__range">1 – 200</span>
+      <button type="button"
+              class="s-btn s-btn--primary"
+              @click="concurrencyOpen = true"
+              data-test="llm-concurrency-change-button">Change…</button>
+    </div>
+    <p class="s-section__hint">
+      Parallel LLM jobs in the worker. Hot-reload within 30 s of the change.
+      Live values (<code>in_flight</code>, throughput) in the container log via
+      <code>llm_worker.status</code>.
+    </p>
+  </section>
 
-        <label class="form-control">
-          <span class="label-text text-sm">New mode</span>
-          <select name="new_mode"
-                  class="select select-bordered select-sm"
-                  x-model="newMode"
-                  required
-                  data-test="llm-mode-select">
-            {% for value, label in [('off', 'off'), ('observation', 'observation'), ('live', 'live')] %}
-              <option value="{{ value }}"
-                      {% if value == current_mode %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        </label>
+  {# Job queue. #}
+  <section class="s-section">
+    <div class="s-section__head">
+      <h2 class="s-section__label">Job queue</h2>
+      <span class="s-section__meta">live</span>
+    </div>
+    <div class="s-kpis" data-test="llm-queue-stats-card">
+      <div class="s-kpi">
+        <p class="s-kpi__label">Queued</p>
+        <div class="s-kpi__num{% if job_counts.queued == 0 %} s-kpi__num--zero{% endif %}" data-test="queue-queued">{{ job_counts.queued }}</div>
+      </div>
+      <div class="s-kpi">
+        <p class="s-kpi__label">In progress</p>
+        <div class="s-kpi__num{% if job_counts.in_progress == 0 %} s-kpi__num--zero{% endif %}" data-test="queue-in-progress">{{ job_counts.in_progress }}</div>
+      </div>
+      <div class="s-kpi">
+        <p class="s-kpi__label">Done · 24h</p>
+        <div class="s-kpi__num{% if job_counts.done == 0 %} s-kpi__num--zero{% endif %}" data-test="queue-done">{{ job_counts.done }}</div>
+      </div>
+      <div class="s-kpi">
+        <p class="s-kpi__label">Failed · 24h</p>
+        <div class="s-kpi__num{% if job_counts.failed > 0 %} s-kpi__num--alarm{% else %} s-kpi__num--zero{% endif %}" data-test="queue-failed">{{ job_counts.failed }}</div>
+      </div>
+    </div>
 
-        {# Privacy-Notice nur sichtbar wenn `live` ausgewaehlt — Snapshot-
-           Daten gehen an einen externen Provider; Operator-Verantwortung. #}
-        <div x-show="newMode === 'live'" x-cloak
-             class="alert alert-warning text-sm"
-             role="alert"
-             data-test="llm-privacy-notice">
-          <div>
-            <p class="font-semibold">GDPR notice</p>
-            <p class="text-xs mt-1">
-              In <code>live</code> mode, snapshot data (listeners, services,
-              package names, paths) is sent to the configured LLM provider.
-              Make sure the provider is compatible with your data protection
-              requirements (e.g. EU hosting or a local model).
-            </p>
-            <label class="label cursor-pointer justify-start gap-2 mt-2">
-              <input type="checkbox"
-                     class="checkbox checkbox-sm"
-                     x-model="privacyAcked"
-                     data-test="llm-privacy-checkbox">
-              <span class="label-text text-xs">
-                I have understood the GDPR notice and accept responsibility.
-              </span>
-            </label>
+    {% if current_mode == 'observation' or would_call_count > 0 %}
+      <p class="s-section__hint" data-test="observation-backlog-info">
+        Observation backlog:
+        <b>{{ would_call_count }}</b>
+        {% if would_call_count == 1 %}job{% else %}jobs{% endif %}
+        with <code>would_call=true</code>.
+      </p>
+    {% endif %}
+
+    <div style="margin-top: 18px; display: flex; gap: 12px;">
+      {% if current_mode == 'live' and would_call_count > 0 %}
+        <button type="button"
+                class="s-btn s-btn--sm"
+                @click="requeueOpen = true"
+                data-test="llm-requeue-button">Re-queue backlog ({{ would_call_count }})</button>
+      {% endif %}
+      <a class="s-btn s-btn--sm s-btn--ghost"
+         href="{{ url_for('settings.llm_reviewer_debug_log') }}"
+         hx-get="{{ url_for('settings.llm_reviewer_debug_log') }}"
+         hx-target="#settings-content"
+         hx-swap="innerHTML"
+         hx-push-url="true"
+         hx-headers='{"HX-Target": "settings-content"}'>Open debug log →</a>
+    </div>
+  </section>
+
+  {# Budget & cache. #}
+  <section class="s-section">
+    <div class="s-section__head">
+      <h2 class="s-section__label">Budget &amp; cache</h2>
+    </div>
+    <div class="s-twoup">
+      <div data-test="llm-token-budget-card">
+        <div class="s-kv">
+          <div class="s-kv__k">Used today</div>
+          <div class="s-kv__v" data-test="budget-used">{{ token_budget.used_today }}</div>
+          <div class="s-kv__k">Daily limit</div>
+          <div class="s-kv__v" data-test="budget-limit">{{ token_budget.daily_limit }}</div>
+          <div class="s-kv__k">Reset</div>
+          <div class="s-kv__v" data-test="budget-resets-at">
+            {% if token_budget.resets_at %}{{ token_budget.resets_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}—{% endif %}
           </div>
         </div>
-
-        <label class="form-control">
-          <span class="label-text text-sm">Master-Key</span>
-          <input type="password"
-                 name="master_key"
-                 class="input input-bordered input-sm"
-                 autocomplete="off"
-                 required
-                 minlength="10"
-                 maxlength="128"
-                 data-test="llm-mode-master-key" />
-        </label>
-
-        <div class="modal-action">
-          <button type="button"
-                  class="btn btn-ghost btn-sm"
-                  @click="modeOpen = false">
-            Cancel
-          </button>
-          <button type="submit"
-                  class="btn btn-warning btn-sm"
-                  :disabled="newMode === 'live' && !privacyAcked"
-                  data-test="llm-mode-submit">
-            Set mode
-          </button>
+      </div>
+      <div data-test="llm-cache-stats-card">
+        <div class="s-kv">
+          <div class="s-kv__k">Risk-cache entries</div>
+          <div class="s-kv__v" data-test="cache-total">{{ cache_total }}</div>
+          <div class="s-kv__k">Hit-rate (7d)</div>
+          <div class="s-kv__v" style="color: var(--text-tertiary);">n/a</div>
         </div>
-      </form>
+        <p class="s-section__hint">
+          Audit-based cache hit rate will be added in a later block.
+        </p>
+      </div>
     </div>
-    <div class="modal-backdrop bg-black/40" @click="modeOpen = false"></div>
-  </dialog>
+  </section>
 
-  {# Re-queue-Backlog-Modal — Master-Key. #}
-  <dialog class="modal"
-          x-show="requeueOpen"
-          x-cloak
-          :class="{'modal-open': requeueOpen}"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="llm-requeue-modal-title"
-          @keydown.escape.window="requeueOpen = false"
-          data-test="llm-requeue-modal">
-    <div class="modal-box max-w-lg">
-      <h3 id="llm-requeue-modal-title" class="text-lg font-semibold">
-        Re-queue observation backlog
-      </h3>
-      <p class="text-sm opacity-70 mt-2">
-        Resets all <code>done</code> jobs with
-        <code class="font-mono">result.would_call=true</code> back to
-        <code>queued</code>. The worker processes them — token usage occurs
-        at the next pickup.
-      </p>
-      <form method="post"
-            action="{{ url_for('settings.llm_reviewer_requeue_backlog') }}"
-            class="space-y-3 mt-3">
-        {{ requeue_form.csrf_token }}
-        <label class="form-control">
-          <span class="label-text text-sm">Master-Key</span>
-          <input type="password"
-                 name="master_key"
-                 class="input input-bordered input-sm"
-                 autocomplete="off"
-                 required
-                 minlength="10"
-                 maxlength="128"
-                 data-test="llm-requeue-master-key" />
-        </label>
-        <div class="modal-action">
-          <button type="button"
-                  class="btn btn-ghost btn-sm"
-                  @click="requeueOpen = false">
-            Cancel
-          </button>
-          <button type="submit"
-                  class="btn btn-warning btn-sm"
-                  data-test="llm-requeue-submit">
-            Run re-queue
-          </button>
+  {# Application Group Library. #}
+  <section class="s-section">
+    <div class="s-section__head">
+      <h2 class="s-section__label">Application group library</h2>
+      <span class="s-section__meta" data-test="groups-total">{{ groups_total }} {% if groups_total == 1 %}group{% else %}groups{% endif %}</span>
+    </div>
+    {% if top_groups %}
+      <div class="s-table" data-test="llm-library-stats-card">
+        <div class="s-table__head" style="grid-template-columns: minmax(0, 1.6fr) 180px 140px;">
+          <span>Label</span>
+          <span>Group kind</span>
+          <span class="s-table__cell--right">Last used</span>
         </div>
-      </form>
-    </div>
-    <div class="modal-backdrop bg-black/40" @click="requeueOpen = false"></div>
-  </dialog>
+        {% for grp in top_groups %}
+          <div class="s-table__row" style="grid-template-columns: minmax(0, 1.6fr) 180px 140px;" data-test="top-group-row">
+            <span>{{ grp.label }}</span>
+            <span style="color: var(--text-tertiary);">
+              {% if grp.group_kind %}{{ grp.group_kind }}{% else %}—{% endif %}
+            </span>
+            <span class="s-table__cell--right" style="color: var(--text-tertiary);">
+              {% if grp.last_used_at %}{{ grp.last_used_at | humanize_delta }}{% else %}never{% endif %}
+            </span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="s-empty">No groups in the library yet.</div>
+    {% endif %}
+  </section>
 
-  {# Concurrency-Wechsel-Modal — Slider/Input + Master-Key. #}
-  <dialog class="modal"
-          x-show="concurrencyOpen"
-          x-cloak
-          :class="{'modal-open': concurrencyOpen}"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="llm-concurrency-modal-title"
-          @keydown.escape.window="concurrencyOpen = false"
-          data-test="llm-concurrency-modal">
-    <div class="modal-box max-w-lg"
-         x-data="{ newConcurrency: {{ current_concurrency }} }">
-      <h3 id="llm-concurrency-modal-title" class="text-lg font-semibold">
-        Change worker concurrency
-      </h3>
-      <p class="text-sm opacity-70 mt-2">
-        Number of concurrently running LLM jobs in
-        <code class="font-mono">secscan-llm-worker</code>. Default
-        <strong>1</strong>, maximum <strong>200</strong>. Recommendation:
-        ramp up in steps of 5 or 10 and watch the container log.
-      </p>
-      <form method="post"
-            action="{{ url_for('settings.llm_reviewer_change_concurrency') }}"
-            class="space-y-3 mt-3">
-        {{ concurrency_form.csrf_token if concurrency_form else '' }}
+  {# ── Mode-Wechsel-Modal — Master-Key + Privacy-Notice (bei live). ── #}
+  <div x-show="modeOpen"
+       x-cloak
+       style="position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: var(--backdrop-modal); padding: 24px;"
+       role="dialog" aria-modal="true" aria-labelledby="llm-mode-modal-title"
+       @click.self="modeOpen = false"
+       @keydown.escape.window="modeOpen = false"
+       data-test="llm-mode-modal">
+    <div style="background: var(--surface-elevated); border: var(--border); max-width: 560px; width: 100%; padding: 28px;"
+         x-data="{ newMode: '{{ current_mode }}' }">
+      <h3 id="llm-mode-modal-title" class="s-card__title" style="font-size: 18px;">Change LLM mode</h3>
+      <form method="post" action="{{ url_for('settings.llm_reviewer_change_mode') }}" style="margin-top: 16px;">
+        {{ mode_form.csrf_token }}
+        <div class="s-field">
+          <label class="s-field__label">New mode</label>
+          <select name="new_mode" class="s-select" x-model="newMode" required data-test="llm-mode-select">
+            {% for value, label in [('off', 'off'), ('observation', 'observation'), ('live', 'live')] %}
+              <option value="{{ value }}" {% if value == current_mode %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
 
-        <label class="form-control">
-          <span class="label-text text-sm">
-            New value: <strong class="font-mono ml-1" x-text="newConcurrency"></strong>
+        <div x-show="newMode === 'live'" x-cloak class="s-warning" style="margin-bottom: 24px;" role="alert" data-test="llm-privacy-notice">
+          <svg class="s-warning__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" aria-hidden="true">
+            <path d="M12 9v4" /><path d="M12 17h.01" />
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          </svg>
+          <span>
+            <b>GDPR notice</b><br />
+            In <code>live</code> mode, snapshot data (listeners, services, package
+            names, paths) is sent to the configured LLM provider. Make sure the
+            provider is compatible with your data protection requirements.
+            <label style="display: flex; align-items: center; gap: 8px; margin-top: 10px; cursor: pointer;">
+              <input type="checkbox" x-model="privacyAcked" style="accent-color: var(--accent);" data-test="llm-privacy-checkbox" />
+              <span>I have understood the GDPR notice and accept responsibility.</span>
+            </label>
           </span>
-          <input type="range"
-                 name="concurrency"
-                 class="range range-warning range-sm"
-                 min="1"
-                 max="200"
-                 step="1"
-                 x-model.number="newConcurrency"
-                 required
-                 data-test="llm-concurrency-range" />
-        </label>
+        </div>
 
-        <label class="form-control">
-          <span class="label-text text-sm">Master-Key</span>
-          <input type="password"
-                 name="master_key"
-                 class="input input-bordered input-sm"
-                 autocomplete="off"
-                 required
-                 minlength="10"
-                 maxlength="128"
-                 data-test="llm-concurrency-master-key" />
-        </label>
+        <div class="s-field">
+          <label class="s-field__label">Master-Key</label>
+          <input type="password" name="master_key" class="s-input s-input--mono"
+                 autocomplete="off" required minlength="10" maxlength="128"
+                 data-test="llm-mode-master-key" />
+        </div>
 
-        <div class="modal-action">
-          <button type="button"
-                  class="btn btn-ghost btn-sm"
-                  @click="concurrencyOpen = false">
-            Cancel
-          </button>
-          <button type="submit"
-                  class="btn btn-warning btn-sm"
-                  data-test="llm-concurrency-submit">
-            Set concurrency
-          </button>
+        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+          <button type="button" class="s-btn s-btn--sm" @click="modeOpen = false">Cancel</button>
+          <button type="submit" class="s-btn s-btn--primary s-btn--sm"
+                  :disabled="newMode === 'live' && !privacyAcked"
+                  data-test="llm-mode-submit">Set mode</button>
         </div>
       </form>
     </div>
-    <div class="modal-backdrop bg-black/40" @click="concurrencyOpen = false"></div>
-  </dialog>
+  </div>
+
+  {# ── Re-queue-Backlog-Modal — Master-Key. ── #}
+  <div x-show="requeueOpen"
+       x-cloak
+       style="position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: var(--backdrop-modal); padding: 24px;"
+       role="dialog" aria-modal="true" aria-labelledby="llm-requeue-modal-title"
+       @click.self="requeueOpen = false"
+       @keydown.escape.window="requeueOpen = false"
+       data-test="llm-requeue-modal">
+    <div style="background: var(--surface-elevated); border: var(--border); max-width: 520px; width: 100%; padding: 28px;">
+      <h3 id="llm-requeue-modal-title" class="s-card__title" style="font-size: 18px;">Re-queue observation backlog</h3>
+      <p class="s-section__hint" style="margin-top: 12px;">
+        Resets all <code>done</code> jobs with <code>result.would_call=true</code>
+        back to <code>queued</code>. The worker processes them — token usage
+        occurs at the next pickup.
+      </p>
+      <form method="post" action="{{ url_for('settings.llm_reviewer_requeue_backlog') }}" style="margin-top: 16px;">
+        {{ requeue_form.csrf_token }}
+        <div class="s-field">
+          <label class="s-field__label">Master-Key</label>
+          <input type="password" name="master_key" class="s-input s-input--mono"
+                 autocomplete="off" required minlength="10" maxlength="128"
+                 data-test="llm-requeue-master-key" />
+        </div>
+        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+          <button type="button" class="s-btn s-btn--sm" @click="requeueOpen = false">Cancel</button>
+          <button type="submit" class="s-btn s-btn--primary s-btn--sm" data-test="llm-requeue-submit">Run re-queue</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {# ── Concurrency-Wechsel-Modal — Slider + Master-Key. ── #}
+  <div x-show="concurrencyOpen"
+       x-cloak
+       style="position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: var(--backdrop-modal); padding: 24px;"
+       role="dialog" aria-modal="true" aria-labelledby="llm-concurrency-modal-title"
+       @click.self="concurrencyOpen = false"
+       @keydown.escape.window="concurrencyOpen = false"
+       data-test="llm-concurrency-modal">
+    <div style="background: var(--surface-elevated); border: var(--border); max-width: 520px; width: 100%; padding: 28px;"
+         x-data="{ newConcurrency: {{ current_concurrency }} }">
+      <h3 id="llm-concurrency-modal-title" class="s-card__title" style="font-size: 18px;">Change worker concurrency</h3>
+      <p class="s-section__hint" style="margin-top: 12px;">
+        Number of concurrently running LLM jobs in
+        <code>secscan-llm-worker</code>. Default <b>1</b>, maximum <b>200</b>.
+        Recommendation: ramp up in steps of 5 or 10 and watch the container log.
+      </p>
+      <form method="post" action="{{ url_for('settings.llm_reviewer_change_concurrency') }}" style="margin-top: 16px;">
+        {{ concurrency_form.csrf_token if concurrency_form else '' }}
+        <div class="s-field">
+          <label class="s-field__label">New value: <b x-text="newConcurrency" style="color: var(--text-primary);"></b></label>
+          <div class="s-slider-row">
+            <input type="range" name="concurrency" min="1" max="200" step="1"
+                   x-model.number="newConcurrency" required data-test="llm-concurrency-range" />
+            <span class="s-slider-row__value" x-text="newConcurrency"></span>
+          </div>
+        </div>
+        <div class="s-field">
+          <label class="s-field__label">Master-Key</label>
+          <input type="password" name="master_key" class="s-input s-input--mono"
+                 autocomplete="off" required minlength="10" maxlength="128"
+                 data-test="llm-concurrency-master-key" />
+        </div>
+        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+          <button type="button" class="s-btn s-btn--sm" @click="concurrencyOpen = false">Cancel</button>
+          <button type="submit" class="s-btn s-btn--primary s-btn--sm" data-test="llm-concurrency-submit">Set concurrency</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>

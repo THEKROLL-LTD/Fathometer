@@ -1,165 +1,124 @@
-{# LLM-Risk-Reviewer Sub-Tab "Debug Log" (Block P / v0.9.3, ADR-0023 §e).
+{# LLM-Risk-Reviewer Sub-Tab "Debug Log" (Block AD / ADR-0047 — Restyling auf s-*).
 
-   Read-only Liste der letzten 50 `llm_debug_log`-Eintraege. Klick auf
-   einen Eintrag expandiert Request/Response/Reasoning inline (kein
-   Modal — Operator scrollt + diffed lieber direkt).
+   Read-only Liste der letzten `llm_debug_log`-Eintraege. Klick auf einen
+   Eintrag expandiert Request/Response/Reasoning inline (kein Modal). Wird ueber
+   `render_settings(active="llm_reviewer", ...)` als Content-Markup gerendert
+   (KEIN `extends`), includiert in `#settings-content.settings`.
 
    Variablen-Vertrag (aus `app/views/settings.py::llm_reviewer_debug_log`):
      - `debug_log_entries` : list[LLMDebugLog] — DESC by created_at.
      - `group_labels`      : dict[int, str]   — group_id -> label.
+     - `sub_tab`           : str.
+
+   Bewusst NICHT gebaut (Mockup-Features ohne Backend, siehe TD-017):
+     Filter-/Level-Controls, Pause-/Copy-Buttons, Live-Streaming. Es gibt heute
+     keinen Backend-Filter; die Liste ist serverseitig auf die letzten Eintraege
+     begrenzt.
 
    Sicherheit:
      - `request_body`/`response_body` sind JSONB, gerendert via `|tojson`
-       (autoescape-safe — Jinja escaped `<`, `>`, `'`, `&` korrekt fuer
-       JSON-im-HTML). KEIN `|safe`.
-     - `error`/`model`/`job_type` sind Worker-Server-Side-Strings ohne
-       User-Input — trotzdem standard Autoescape.
+       (autoescape-safe). KEIN `|safe`.
+     - `error`/`model`/`job_type` sind Worker-Server-Side-Strings — Autoescape.
 #}
-<div class="max-w-5xl p-6 space-y-4">
-  <header class="flex items-end justify-between gap-3 flex-wrap">
-    <div>
-      <h1 class="text-2xl font-semibold">LLM Risk Reviewer</h1>
-      <p class="opacity-70 text-sm mt-1">
-        Debug log of the most recent LLM calls (read-only).
-        Eviction runs in the worker — see ADR-0023 §e.
-      </p>
-    </div>
-  </header>
+<p class="settings__eyebrow">Settings</p>
+<h1 class="settings__title">LLM Risk Reviewer</h1>
+<p class="settings__lede">
+  Debug log of the most recent LLM calls (read-only). Eviction runs in the
+  worker — see ADR-0023 §e.
+</p>
 
-  {# Sub-Tab-Navigation — pragmatisches Pattern, da die Settings-Nav
-     selbst nur flache Top-Level-Tabs kennt. #}
-  <div role="tablist" class="tabs tabs-bordered" data-test="llm-reviewer-subtabs">
-    <a role="tab"
-       href="{{ url_for('settings.llm_reviewer_view') }}"
-       hx-get="{{ url_for('settings.llm_reviewer_view') }}"
-       hx-target="#settings-content"
-       hx-swap="innerHTML"
-       hx-push-url="true"
-       hx-headers='{"HX-Target": "settings-content"}'
-       class="tab {% if sub_tab == 'overview' %}tab-active{% endif %}"
-       data-test="llm-reviewer-subtab-overview">
-      Overview
-    </a>
-    <a role="tab"
-       href="{{ url_for('settings.llm_reviewer_debug_log') }}"
-       hx-get="{{ url_for('settings.llm_reviewer_debug_log') }}"
-       hx-target="#settings-content"
-       hx-swap="innerHTML"
-       hx-push-url="true"
-       hx-headers='{"HX-Target": "settings-content"}'
-       class="tab {% if sub_tab == 'debug_log' %}tab-active{% endif %}"
-       data-test="llm-reviewer-subtab-debug">
-      Debug Log
-    </a>
-  </div>
-
-  {# Operator-Awareness: Debug-Log enthaelt Host-Snapshot-Daten (Listener-
-     Adressen, Process-Commands, Kernel-Module, aktive Services). Beim
-     Sharing der Log-Bodies (z.B. Bug-Report, externes Modell-Provider-
-     Support-Ticket) darauf achten. ADR-0023 Update v0.9.3 §e + Security-
-     Auditor-Note. #}
-  <div class="alert alert-warning" role="note" data-test="llm-debug-log-privacy-notice">
-    <span class="text-xs">
-      <strong>Privacy notice:</strong> request and response bodies contain host snapshot data
-      (listener addresses, process commands, kernel modules, active services). Before sharing
-      with third parties (bug reports, provider support), review sensitive fields.
-    </span>
-  </div>
-
-  {% if not debug_log_entries %}
-    <div class="alert alert-info" role="status" data-test="llm-debug-log-empty">
-      <span>No LLM debug log entries yet.</span>
-    </div>
-  {% else %}
-    <div class="overflow-x-auto" data-test="llm-debug-log-table-wrap">
-      <table class="table table-sm" data-test="llm-debug-log-table">
-        <thead>
-          <tr>
-            <th class="text-[10px] uppercase tracking-wider opacity-65">Created</th>
-            <th class="text-[10px] uppercase tracking-wider opacity-65">Job type</th>
-            <th class="text-[10px] uppercase tracking-wider opacity-65">Group</th>
-            <th class="text-[10px] uppercase tracking-wider opacity-65">Model</th>
-            <th class="text-[10px] uppercase tracking-wider opacity-65">Status</th>
-            <th class="text-[10px] uppercase tracking-wider opacity-65 text-right">Duration</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for entry in debug_log_entries %}
-            {%- set model_short = entry.model.rsplit('/', 1)[-1] -%}
-            {%- set group_label = group_labels.get(entry.group_id) if entry.group_id else None -%}
-            {%- set status_badge = {
-                  'success': 'badge-success',
-                  'failed': 'badge-error',
-                  'timeout': 'badge-warning',
-                  'validation_error': 'badge-warning',
-                }.get(entry.status, 'badge-neutral') -%}
-            {%- set reasoning_value = (entry.response_body or {}).get('reasoning_field') if entry.response_body is mapping else none -%}
-            <tr>
-              <td colspan="6" class="p-0">
-                <details class="w-full" data-test="llm-debug-log-row-{{ entry.id }}">
-                  <summary class="cursor-pointer list-none grid grid-cols-[1.5fr_1.2fr_1.4fr_1.6fr_1fr_0.8fr] gap-2 items-center px-3 py-2 hover:bg-base-200/40 border-b border-base-200">
-                    <span class="text-xs font-mono opacity-80"
-                          title="{{ entry.created_at.strftime('%Y-%m-%d %H:%M:%S %Z') }}">
-                      {{ entry.created_at | humanize_delta }}
-                    </span>
-                    <span class="text-xs font-mono">{{ entry.job_type }}</span>
-                    <span class="text-xs font-mono truncate"
-                          title="{{ group_label or '-' }}">
-                      {% if group_label %}{{ group_label }}{% else %}<span class="opacity-50">—</span>{% endif %}
-                    </span>
-                    <span class="text-xs font-mono truncate"
-                          title="{{ entry.model }}">{{ model_short }}</span>
-                    <span>
-                      <span class="badge badge-sm {{ status_badge }} font-mono"
-                            data-test="llm-debug-log-status-{{ entry.id }}">{{ entry.status }}</span>
-                    </span>
-                    <span class="text-xs font-mono opacity-80 text-right">
-                      {{ entry.duration_ms }} ms
-                    </span>
-                  </summary>
-
-                  <div class="px-4 py-3 bg-base-100 border-b border-base-200 space-y-3"
-                       data-test="llm-debug-log-detail-{{ entry.id }}">
-                    {% if entry.error %}
-                      <div class="alert alert-error text-xs" role="alert"
-                           data-test="llm-debug-log-error-{{ entry.id }}">
-                        <pre class="whitespace-pre-wrap break-words font-mono text-xs">{{ entry.error }}</pre>
-                      </div>
-                    {% endif %}
-
-                    <div>
-                      <div class="text-[10px] uppercase tracking-wider opacity-65 mb-1">Request</div>
-                      <pre class="bg-base-200/60 rounded p-3 text-xs overflow-auto max-h-96"
-                           data-test="llm-debug-log-request-{{ entry.id }}">{{ entry.request_body | tojson(indent=2) }}</pre>
-                    </div>
-
-                    {% if reasoning_value %}
-                      <div>
-                        <div class="text-[10px] uppercase tracking-wider opacity-65 mb-1">Reasoning</div>
-                        <pre class="bg-base-200/60 rounded p-3 text-xs overflow-auto max-h-96 whitespace-pre-wrap"
-                             data-test="llm-debug-log-reasoning-{{ entry.id }}">{{ reasoning_value }}</pre>
-                      </div>
-                    {% endif %}
-
-                    <div>
-                      <div class="text-[10px] uppercase tracking-wider opacity-65 mb-1">Response</div>
-                      {% if entry.response_body is none %}
-                        <p class="text-xs opacity-50 italic"
-                           data-test="llm-debug-log-response-empty-{{ entry.id }}">
-                          No response body (the call failed before a response arrived).
-                        </p>
-                      {% else %}
-                        <pre class="bg-base-200/60 rounded p-3 text-xs overflow-auto max-h-96"
-                             data-test="llm-debug-log-response-{{ entry.id }}">{{ entry.response_body | tojson(indent=2) }}</pre>
-                      {% endif %}
-                    </div>
-                  </div>
-                </details>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
+{# Sub-Tabs — Overview vs. Debug Log. #}
+<div class="s-subtabs" role="tablist" data-test="llm-reviewer-subtabs">
+  <a role="tab"
+     href="{{ url_for('settings.llm_reviewer_view') }}"
+     hx-get="{{ url_for('settings.llm_reviewer_view') }}"
+     hx-target="#settings-content"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-headers='{"HX-Target": "settings-content"}'
+     class="s-subtabs__item {% if sub_tab == 'overview' %}s-subtabs__item--active{% endif %}"
+     data-test="llm-reviewer-subtab-overview">Overview</a>
+  <a role="tab"
+     href="{{ url_for('settings.llm_reviewer_debug_log') }}"
+     hx-get="{{ url_for('settings.llm_reviewer_debug_log') }}"
+     hx-target="#settings-content"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-headers='{"HX-Target": "settings-content"}'
+     class="s-subtabs__item {% if sub_tab == 'debug_log' %}s-subtabs__item--active{% endif %}"
+     data-test="llm-reviewer-subtab-debug">Debug log</a>
 </div>
+
+{# Operator-Awareness: Debug-Log enthaelt Host-Snapshot-Daten. #}
+<div class="s-warning" role="note" data-test="llm-debug-log-privacy-notice">
+  <svg class="s-warning__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" aria-hidden="true">
+    <path d="M12 9v4" /><path d="M12 17h.01" />
+    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+  </svg>
+  <span>
+    <b>Privacy notice:</b> request and response bodies contain host snapshot data
+    (listener addresses, process commands, kernel modules, active services).
+    Before sharing with third parties (bug reports, provider support), review
+    sensitive fields.
+  </span>
+</div>
+
+{% if not debug_log_entries %}
+  <div class="s-empty" data-test="llm-debug-log-empty">No LLM debug log entries yet.</div>
+{% else %}
+  <div class="s-log" style="display: block;" data-test="llm-debug-log-table-wrap">
+    <div data-test="llm-debug-log-table">
+      {% for entry in debug_log_entries %}
+        {%- set model_short = entry.model.rsplit('/', 1)[-1] -%}
+        {%- set group_label = group_labels.get(entry.group_id) if entry.group_id else None -%}
+        {%- set status_level = {
+              'success': 'done',
+              'failed': 'error',
+              'timeout': 'warn',
+              'validation_error': 'warn',
+            }.get(entry.status, 'info') -%}
+        {%- set reasoning_value = (entry.response_body or {}).get('reasoning_field') if entry.response_body is mapping else none -%}
+        <details data-test="llm-debug-log-row-{{ entry.id }}" style="border-bottom: var(--hairline);">
+          <summary class="s-log__line" style="cursor: pointer; list-style: none; padding: 8px 0; align-items: baseline;">
+            <span class="s-log__time"
+                  title="{{ entry.created_at.strftime('%Y-%m-%d %H:%M:%S %Z') }}">{{ entry.created_at | humanize_delta }}</span>
+            <span class="s-log__level s-log__level--{{ status_level }}"
+                  data-test="llm-debug-log-status-{{ entry.id }}">{{ entry.status }}</span>
+            <span class="s-log__msg">
+              {{ entry.job_type }}{% if group_label %} · {{ group_label }}{% endif %}
+              <span class="s-log__meta">{{ model_short }} · {{ entry.duration_ms }} ms</span>
+            </span>
+          </summary>
+
+          <div style="padding: 8px 0 16px;" data-test="llm-debug-log-detail-{{ entry.id }}">
+            {% if entry.error %}
+              <div style="margin-bottom: 12px; color: var(--status-restricted);" data-test="llm-debug-log-error-{{ entry.id }}">
+                <pre style="white-space: pre-wrap; word-break: break-word; margin: 0;">{{ entry.error }}</pre>
+              </div>
+            {% endif %}
+
+            <div class="s-field__label" style="margin-bottom: 6px;">Request</div>
+            <pre style="background: var(--surface-raised); padding: 12px; overflow: auto; max-height: 320px; margin: 0 0 12px;"
+                 data-test="llm-debug-log-request-{{ entry.id }}">{{ entry.request_body | tojson(indent=2) }}</pre>
+
+            {% if reasoning_value %}
+              <div class="s-field__label" style="margin-bottom: 6px;">Reasoning</div>
+              <pre style="background: var(--surface-raised); padding: 12px; overflow: auto; max-height: 320px; white-space: pre-wrap; margin: 0 0 12px;"
+                   data-test="llm-debug-log-reasoning-{{ entry.id }}">{{ reasoning_value }}</pre>
+            {% endif %}
+
+            <div class="s-field__label" style="margin-bottom: 6px;">Response</div>
+            {% if entry.response_body is none %}
+              <p class="s-section__hint" style="margin: 0;" data-test="llm-debug-log-response-empty-{{ entry.id }}">
+                No response body (the call failed before a response arrived).
+              </p>
+            {% else %}
+              <pre style="background: var(--surface-raised); padding: 12px; overflow: auto; max-height: 320px; margin: 0;"
+                   data-test="llm-debug-log-response-{{ entry.id }}">{{ entry.response_body | tojson(indent=2) }}</pre>
+            {% endif %}
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}

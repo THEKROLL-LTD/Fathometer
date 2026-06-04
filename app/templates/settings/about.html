@@ -1,7 +1,8 @@
-{# About-Page (ADR-0016).
+{# About-Page (Block AD / ADR-0047 — Restyling auf s-*-Schicht).
 
    Wird ueber `_settings_shell.render_settings(active="about", ...)` als
-   Content-Markup gerendert. Read-only — niemals Geheimnisse anzeigen.
+   Content-Markup gerendert (KEIN `extends`), includiert in
+   `#settings-content.settings`. Read-only — niemals Geheimnisse anzeigen.
 
    Variablen:
      - `about` (dict) — Keys:
@@ -9,47 +10,42 @@
          python_version, flask_version, sqlalchemy_version,
          trivy_db_stale_count, healthz_url.
 #}
-<div class="max-w-2xl p-6 space-y-6">
-  <header>
-    <h1 class="text-2xl font-semibold">About</h1>
-    <p class="opacity-70 text-sm mt-1">
-      Version and build information (read-only).
-    </p>
-  </header>
+<p class="settings__eyebrow">Settings</p>
+<h1 class="settings__title">About</h1>
+<p class="settings__lede">
+  Version and build information. Read-only.
+</p>
 
-  <div class="card bg-base-200 shadow-sm">
-    <div class="card-body">
-      <h2 class="card-title">Versions</h2>
-      <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm mt-2">
-        <dt class="opacity-60">App version</dt>
-        <dd class="font-mono">{{ about.app_version }}</dd>
-
-        <dt class="opacity-60">Build revision</dt>
-        <dd class="font-mono">{{ about.build_revision }}</dd>
-
-        <dt class="opacity-60">DB schema (Alembic)</dt>
-        <dd class="font-mono">{{ about.alembic_revision }}</dd>
-
-        <dt class="opacity-60">Python</dt>
-        <dd class="font-mono">{{ about.python_version }}</dd>
-
-        <dt class="opacity-60">Flask</dt>
-        <dd class="font-mono">{{ about.flask_version }}</dd>
-
-        <dt class="opacity-60">SQLAlchemy</dt>
-        <dd class="font-mono">{{ about.sqlalchemy_version }}</dd>
-
-        <dt class="opacity-60">Trivy DB stale</dt>
-        <dd class="font-mono">{{ about.trivy_db_stale_count }} servers</dd>
-
-        <dt class="opacity-60">Healthcheck</dt>
-        <dd>
-          <a href="{{ about.healthz_url }}"
-             class="link link-primary font-mono"
-             target="_blank"
-             rel="noopener">{{ about.healthz_url }}</a>
-        </dd>
-      </dl>
-    </div>
+<section class="s-section">
+  <div class="s-section__head">
+    <h2 class="s-section__label">Build</h2>
   </div>
-</div>
+  <dl class="s-about-grid">
+    <dt>App version</dt>         <dd>{{ about.app_version }}</dd>
+    <dt>Build revision</dt>      <dd>{{ about.build_revision }}</dd>
+    <dt>DB schema (Alembic)</dt> <dd>{{ about.alembic_revision }}</dd>
+    <dt>Python</dt>              <dd>{{ about.python_version }}</dd>
+    <dt>Flask</dt>               <dd>{{ about.flask_version }}</dd>
+    <dt>SQLAlchemy</dt>          <dd>{{ about.sqlalchemy_version }}</dd>
+  </dl>
+</section>
+
+<section class="s-section">
+  <div class="s-section__head">
+    <h2 class="s-section__label">Runtime</h2>
+  </div>
+  <dl class="s-about-grid">
+    <dt>Trivy DB stale</dt>
+    <dd>
+      {% if about.trivy_db_stale_count and about.trivy_db_stale_count > 0 %}
+        <span class="warn">{{ about.trivy_db_stale_count }} servers</span>
+      {% else %}
+        {{ about.trivy_db_stale_count }} servers
+      {% endif %}
+    </dd>
+    <dt>Healthcheck</dt>
+    <dd><a href="{{ about.healthz_url }}" target="_blank" rel="noopener">{{ about.healthz_url }}</a></dd>
+    <dt>License</dt>
+    <dd>Internal · THEKROLL LTD</dd>
+  </dl>
+</section>

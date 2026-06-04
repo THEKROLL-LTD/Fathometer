@@ -1,236 +1,212 @@
-{# LLM-Provider Content (ADR-0016 / Block-I-Refinement).
+{# LLM-Provider Content (Block AD / ADR-0047 — Restyling auf s-*-Schicht).
 
-   Wird ueber `_settings_shell.render_settings(active="llm", ...)` in einem
-   von drei Modi gerendert. Daher KEIN `extends`. Template liefert nur das
-   Content-Markup. Das JS-Snippet `static/js/llm_settings.js` wird global
-   in `base_app.html` geladen — solange wir Content-Only oder Fragment
-   liefern, ist Alpine bereits initialisiert.
+   Wird ueber `_settings_shell.render_settings(active="llm", ...)` gerendert
+   (KEIN `extends`), includiert in `#settings-content.settings`. Das
+   JS-Snippet `static/js/llm_settings.js` wird global in `base_app.html`
+   geladen; die Alpine-Component `llmProviderForm` bleibt unveraendert
+   gebunden (Methoden applyPreset/onSubmit/confirmSubmit/testConnection,
+   State baseUrl/model/testing/testResult/confirmOpen/activeConvCount).
 
    Variablen (siehe app/views/llm_settings.py::show):
      - `form` (LlmSettingsForm)
      - `has_existing_key` (bool)
      - `presets` (list[dict])
      - `active_conversation_count` (int)
+     - `feed_statuses` (list | None)
+
+   Confirm-Flow unveraendert (Provider/Model-Wechsel archiviert aktive
+   Bewertungen): die frueher genutzte DaisyUI-Modal-Mechanik ist durch ein
+   token-gestyltes Alpine-Overlay (x-show) ersetzt — kein DaisyUI. Das Modal
+   liegt INNERHALB der Form, damit `confirmSubmit()`'s `this.$el.submit()`
+   weiterhin die Form trifft.
+
+   Sicherheit:
+     - `| forceescape` neben `tojson` bleibt Pflicht (sonst koennte ein `"`
+       das x-data-Attribut vorzeitig schliessen).
+     - Kein `|safe`. Alle Werte unter Jinja-Autoescape.
 #}
-<div class="max-w-3xl p-6 space-y-6">
-  <header>
-    <h1 class="text-2xl font-semibold">LLM Provider</h1>
-    <p class="text-sm opacity-70 mt-1">
-      Configuration for the "Request assessment" feature on the server
-      detail page. Switching provider or model archives all active
-      assessments.
-    </p>
-  </header>
+<p class="settings__eyebrow">Settings</p>
+<h1 class="settings__title">LLM Provider</h1>
+<p class="settings__lede">
+  Configuration for the "Request assessment" feature on the server detail
+  page. Switching provider or model archives all active assessments.
+</p>
 
-  <div class="card bg-base-200 shadow-sm">
-    <div class="card-body">
-      {# `| forceescape` neben `tojson` ist Pflicht: ohne wuerden enthaltene
-         `"` das `x-data`-Attribut vorzeitig schliessen, der Alpine-Ausdruck
-         koennte nicht parsen (siehe _macros.html · `quick_copy`). #}
-      <form method="post"
-            action="{{ url_for('llm_settings.update') }}"
-            class="space-y-4"
-            x-data="llmProviderForm({
-              presets: {{ presets | tojson | forceescape }},
-              initialBaseUrl: {{ (form.base_url.data or '') | tojson | forceescape }},
-              initialModel: {{ (form.model.data or '') | tojson | forceescape }},
-              activeConvCount: {{ active_conversation_count | tojson | forceescape }},
-              testConnectionUrl: {{ url_for('llm_settings.test_connection') | tojson | forceescape }}
-            })"
-            @submit="onSubmit($event)">
-        {{ form.csrf_token }}
+<section class="s-section">
+  <div class="s-section__head">
+    <h2 class="s-section__label">Active provider</h2>
+  </div>
 
+  <form method="post"
+        action="{{ url_for('llm_settings.update') }}"
+        x-data="llmProviderForm({
+          presets: {{ presets | tojson | forceescape }},
+          initialBaseUrl: {{ (form.base_url.data or '') | tojson | forceescape }},
+          initialModel: {{ (form.model.data or '') | tojson | forceescape }},
+          activeConvCount: {{ active_conversation_count | tojson | forceescape }},
+          testConnectionUrl: {{ url_for('llm_settings.test_connection') | tojson | forceescape }}
+        })"
+        @submit="onSubmit($event)">
+    {{ form.csrf_token }}
+
+    <div class="s-card">
+      <div class="s-fields-grid">
         {# Preset-Dropdown — befuellt base_url+model. #}
-        <div class="form-control">
-          <label class="label" for="llm-preset">
-            <span class="label-text">Preset</span>
-          </label>
+        <div class="s-field">
+          <label class="s-field__label" for="llm-preset">Preset</label>
           <select id="llm-preset"
-                  class="select select-bordered w-full"
+                  class="s-select"
                   @change="applyPreset($event.target.value)">
             <option value="">— choose manually —</option>
             {% for p in presets %}
               <option value="{{ loop.index0 }}">{{ p.name }}</option>
             {% endfor %}
           </select>
-          <span class="label-text-alt mt-1 opacity-70">
-            Sets base URL and model. You still need to enter the API key.
-          </span>
+          <span class="s-field__hint">Sets base URL and model. You still need to enter the API key.</span>
         </div>
 
-        <div class="form-control">
-          {{ form.provider_name.label(class="label label-text") }}
-          {{ form.provider_name(class="input input-bordered w-full",
-                                placeholder="e.g. deepinfra-prod") }}
+        <div class="s-field">
+          <label class="s-field__label" for="{{ form.provider_name.id }}">Display name</label>
+          {{ form.provider_name(class="s-input", placeholder="e.g. deepinfra-prod") }}
+          <span class="s-field__hint">Shown in the server detail next to each assessment.</span>
           {% for err in form.provider_name.errors %}
-            <p class="text-error text-sm mt-1">{{ err }}</p>
+            <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
           {% endfor %}
         </div>
 
-        <div class="form-control">
-          {{ form.base_url.label(class="label label-text") }}
-          {{ form.base_url(**{
-              "class": "input input-bordered w-full font-mono text-sm",
-              "x-model": "baseUrl"
-          }) }}
-          <span class="label-text-alt mt-1 opacity-70">
-            HTTPS or http://localhost / http://127.0.0.1.
-          </span>
+        <div class="s-field s-field--span">
+          <label class="s-field__label" for="{{ form.base_url.id }}">Base URL</label>
+          {{ form.base_url(**{"class": "s-input s-input--mono", "x-model": "baseUrl"}) }}
+          <span class="s-field__hint">HTTPS or http://localhost / http://127.0.0.1.</span>
           {% for err in form.base_url.errors %}
-            <p class="text-error text-sm mt-1">{{ err }}</p>
+            <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
           {% endfor %}
         </div>
 
-        <div class="form-control">
-          {{ form.model.label(class="label label-text") }}
-          {{ form.model(**{
-              "class": "input input-bordered w-full font-mono text-sm",
-              "x-model": "model"
-          }) }}
+        <div class="s-field">
+          <label class="s-field__label" for="{{ form.model.id }}">Model name</label>
+          {{ form.model(**{"class": "s-input s-input--mono", "x-model": "model"}) }}
           {% for err in form.model.errors %}
-            <p class="text-error text-sm mt-1">{{ err }}</p>
+            <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
           {% endfor %}
         </div>
 
-        <div class="form-control">
-          {{ form.api_key.label(class="label label-text") }}
-          {{ form.api_key(class="input input-bordered w-full",
+        <div class="s-field">
+          <label class="s-field__label" for="{{ form.api_key.id }}">API Key</label>
+          {{ form.api_key(class="s-input s-input--mono",
                           autocomplete="off",
                           placeholder="•••• set — leave empty to keep" if has_existing_key else "API key (cleartext)") }}
           {% if has_existing_key %}
-            <span class="label-text-alt mt-1 opacity-70">
-              Already set. Leave empty to keep the existing key. Enter a new
-              value to replace it.
-            </span>
+            <span class="s-field__hint">Already set. Leave empty to keep the existing key. Enter a new value to replace it.</span>
           {% endif %}
           {% for err in form.api_key.errors %}
-            <p class="text-error text-sm mt-1">{{ err }}</p>
+            <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
           {% endfor %}
         </div>
+      </div>
 
-        <div class="form-control">
-          {{ form.daily_token_cap.label(class="label label-text") }}
-          {{ form.daily_token_cap(class="input input-bordered w-full") }}
-          <span class="label-text-alt mt-1 opacity-70">
-            Cap per day, reset at 00:00 UTC. Warning banner at 80%, hard 429
-            at 100%.
-          </span>
+      <hr class="s-card__divider" />
+
+      <div class="s-fields-grid">
+        <div class="s-field">
+          <label class="s-field__label" for="{{ form.daily_token_cap.id }}">Daily token cap</label>
+          {{ form.daily_token_cap(class="s-input s-input--mono") }}
+          <span class="s-field__hint">Reset at 00:00 UTC. Warning banner at 80%, hard 429 at 100%.</span>
           {% for err in form.daily_token_cap.errors %}
-            <p class="text-error text-sm mt-1">{{ err }}</p>
+            <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
           {% endfor %}
         </div>
+      </div>
 
-        {% if active_conversation_count > 0 %}
-          <div class="alert alert-info text-sm" role="status">
-            <span>
-              {{ active_conversation_count }} active assessment{{ '' if active_conversation_count == 1 else 's' }}
-              will be archived when base URL or model are changed.
-            </span>
-          </div>
-        {% endif %}
-
-        <div class="flex flex-wrap gap-2 justify-end">
-          <button type="button"
-                  class="btn btn-ghost"
-                  @click="testConnection()"
-                  :disabled="testing">
-            <span x-show="!testing">Test connection</span>
-            <span x-show="testing" x-cloak class="flex items-center gap-2">
-              <span class="loading loading-spinner loading-xs"></span>
-              Trying…
-            </span>
-          </button>
-          <button type="submit" class="btn btn-primary">Save</button>
-        </div>
-
-        <p class="text-xs opacity-60">
-          "Test connection" probes the currently **saved** provider — not the
-          form values edited here. Save first, then test.
+      {% if active_conversation_count > 0 %}
+        <p class="s-section__hint" data-test="active-conv-note">
+          {{ active_conversation_count }} active assessment{{ '' if active_conversation_count == 1 else 's' }}
+          will be archived when base URL or model are changed.
         </p>
+      {% endif %}
 
-        <div x-show="testResult"
-             x-cloak
-             class="alert text-sm"
-             :class="testResult && testResult.success ? 'alert-success' : 'alert-error'"
-             role="status">
-          <template x-if="testResult && testResult.success">
-            <span>
-              OK — latency <span x-text="testResult.latency_ms"></span> ms,
-              model <code class="font-mono" x-text="testResult.model"></code>.
-            </span>
-          </template>
-          <template x-if="testResult && !testResult.success">
-            <span>
-              Error:
-              <span x-text="testResult.error || testResult.message || 'unknown'"></span>
-            </span>
-          </template>
-        </div>
+      <div class="s-actions">
+        <span class="s-actions__hint">
+          "Test connection" probes the currently <b style="color: var(--text-secondary); font-weight: 400;">saved</b> provider —
+          not the values edited here. Save first, then test.
+        </span>
+        <div class="s-actions__spacer"></div>
+        <button type="button"
+                class="s-btn"
+                @click="testConnection()"
+                :disabled="testing">
+          <span x-show="!testing">Test connection</span>
+          <span x-show="testing" x-cloak>Trying…</span>
+        </button>
+        <button type="submit" class="s-btn s-btn--primary">Save</button>
+      </div>
 
-        {# Provider-Wechsel-Confirm-Modal. #}
-        <dialog class="modal"
-                x-show="confirmOpen"
-                x-cloak
-                :class="{'modal-open': confirmOpen}"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="provider-switch-title"
-                @keydown.escape.window="confirmOpen = false">
-          <div class="modal-box max-w-lg">
-            <h3 id="provider-switch-title" class="text-lg font-semibold">
-              Confirm provider switch
-            </h3>
-            <p class="py-3 text-sm">
-              You are switching provider/model.
-              <span class="font-semibold" x-text="activeConvCount"></span>
-              active assessment<span x-text="activeConvCount === 1 ? '' : 's'"></span>
-              will be archived. Continue?
-            </p>
-            <div class="modal-action">
-              <button type="button"
-                      class="btn btn-ghost btn-sm"
-                      @click="confirmOpen = false">
-                Cancel
-              </button>
-              <button type="button"
-                      class="btn btn-primary btn-sm"
-                      @click="confirmSubmit()">
-                Archive and save
-              </button>
-            </div>
-          </div>
-          <div class="modal-backdrop bg-black/40" @click="confirmOpen = false"></div>
-        </dialog>
-      </form>
+      <div x-show="testResult" x-cloak style="margin-top: 16px;" role="status">
+        <template x-if="testResult && testResult.success">
+          <p class="s-section__hint" style="color: var(--status-operational); margin-top: 0;">
+            OK — latency <span x-text="testResult.latency_ms"></span> ms,
+            model <code x-text="testResult.model"></code>.
+          </p>
+        </template>
+        <template x-if="testResult && !testResult.success">
+          <p class="s-section__hint" style="color: var(--status-restricted); margin-top: 0;">
+            Error: <span x-text="testResult.error || testResult.message || 'unknown'"></span>
+          </p>
+        </template>
+      </div>
     </div>
-  </div>
-</div>
 
-{# Block Q (ADR-0024) — Feed-Freshness-Anzeige.
-   Zwei Zeilen, rot bei stale (>7 Tage) oder letztem Pull-Failure. #}
+    {# Provider-Wechsel-Confirm — token-gestyltes Alpine-Overlay (kein DaisyUI).
+       Liegt innerhalb der Form, damit confirmSubmit()'s this.$el.submit() greift. #}
+    <div x-show="confirmOpen"
+         x-cloak
+         style="position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: var(--backdrop-modal); padding: 24px;"
+         role="dialog"
+         aria-modal="true"
+         aria-labelledby="provider-switch-title"
+         @click.self="confirmOpen = false"
+         @keydown.escape.window="confirmOpen = false">
+      <div style="background: var(--surface-elevated); border: var(--border); max-width: 520px; width: 100%; padding: 28px;">
+        <h3 id="provider-switch-title" class="s-card__title" style="font-size: 18px;">Confirm provider switch</h3>
+        <p class="s-section__hint" style="margin-top: 12px;">
+          You are switching provider/model.
+          <span x-text="activeConvCount"></span>
+          active assessment<span x-text="activeConvCount === 1 ? '' : 's'"></span>
+          will be archived. Continue?
+        </p>
+        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+          <button type="button" class="s-btn s-btn--sm" @click="confirmOpen = false">Cancel</button>
+          <button type="button" class="s-btn s-btn--primary s-btn--sm" @click="confirmSubmit()">Archive and save</button>
+        </div>
+      </div>
+    </div>
+  </form>
+</section>
+
+{# Block Q (ADR-0024) — Feed-Freshness read-only. #}
 {% if feed_statuses %}
-<div class="mt-6 card bg-base-100 border border-base-300">
-  <div class="card-body p-4 text-xs font-mono">
-    <p class="mb-2 text-base-content/60 uppercase tracking-wide">External Feeds</p>
+<section class="s-section">
+  <div class="s-section__head">
+    <h2 class="s-section__label">External feeds</h2>
+    <span class="s-section__meta">read-only</span>
+  </div>
+  <div class="s-feeds">
     {% for status in feed_statuses %}
       {% set is_failed = status.last_attempt_status == "failed" %}
-      {% set row_color = "text-error" if (status.is_stale or is_failed) else "text-base-content" %}
-      <div class="{{ row_color }}">
-        <span class="font-semibold">
-          {% if status.feed_name == "epss" %}EPSS:{% else %}CISA-KEV:{% endif %}
-        </span>
+      <div class="s-feed">
+        <p class="s-feed__name">{% if status.feed_name == "epss" %}EPSS{% else %}CISA KEV{% endif %}</p>
         {% if status.last_success_at %}
-          last pull {{ status.last_success_at.strftime("%Y-%m-%d %H:%M UTC") }}
-          &middot; {{ "{:,}".format(status.last_success_row_count or 0).replace(",", ".") }} entries
-          {% if status.is_stale %}&middot; stale (&gt;7 days){% endif %}
+          <div class="s-feed__value">{{ "{:,}".format(status.last_success_row_count or 0) }} entries</div>
+          <div class="s-feed__meta"{% if status.is_stale or is_failed %} style="color: var(--status-restricted);"{% endif %}>
+            last pull {{ status.last_success_at.strftime("%Y-%m-%d %H:%M UTC") }}
+            {% if status.is_stale %} · stale (&gt;7 days){% endif %}
+            {% if is_failed and status.last_attempt_at %} · last attempt failed ({{ status.last_attempt_at.strftime("%Y-%m-%d %H:%M UTC") }}){% endif %}
+          </div>
         {% else %}
-          no successful pull yet
-        {% endif %}
-        {% if is_failed and status.last_attempt_at %}
-          &middot; last attempt failed ({{ status.last_attempt_at.strftime("%Y-%m-%d %H:%M UTC") }})
+          <div class="s-feed__value" style="color: var(--text-tertiary);">no successful pull yet</div>
         {% endif %}
       </div>
     {% endfor %}
   </div>
-</div>
+</section>
 {% endif %}

@@ -1,7 +1,7 @@
-{# Master-Key-Rotation (ADR-0016 / schliesst §8-Spec-Luecke).
+{# Master-Key-Rotation (Block AD / ADR-0047 — Restyling auf s-*-Schicht).
 
    Wird ueber `_settings_shell.render_settings(active="master_key", ...)`
-   gerendert. Reines Content-Markup.
+   gerendert (KEIN `extends`), includiert in `#settings-content.settings`.
 
    Variablen:
      - `rotate_form` (MasterKeyRotateForm) — CSRF-Only.
@@ -11,48 +11,85 @@
                                              erfolgreicher Rotation; nur
                                              einmalig anzeigen.
 
+   Flow unveraendert (ADR-0047): Generate → client-seitiger Confirm-Dialog →
+   POST `master_key_rotate` (CSRF) → Reveal-Box mit Klartext-Key + Copy. Die
+   frueher genutzte DaisyUI-Modal-Mechanik ist durch einen nativen
+   confirm()-Dialog ersetzt (analog Server-Retire/Revoke) — kein DaisyUI.
+
    Sicherheits-Hinweis: `new_master_key` ist Server-generiertes Token; wird
    per Jinja-Autoescape gerendert. Niemals `|safe` setzen.
 #}
-<div class="max-w-2xl p-6 space-y-6"
-     x-data="{ confirmOpen: false }">
-  <header>
-    <h1 class="text-2xl font-semibold">Master-Key</h1>
-    <p class="opacity-70 text-sm mt-1">
-      The master key authenticates registration of new servers and the
-      rotation of server keys. It is shown in cleartext only once — note it
-      down securely.
-    </p>
-  </header>
+<p class="settings__eyebrow">Settings</p>
+<h1 class="settings__title">Master-Key</h1>
+<p class="settings__lede">
+  The master key authenticates registration of new servers and the rotation
+  of server keys. It is shown in cleartext only once — note it down securely.
+</p>
 
-  <div class="alert alert-info text-sm" role="status">
-    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 shrink-0"
-         fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-         aria-hidden="true">
-      <path stroke-linecap="round" stroke-linejoin="round"
-            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+<section class="s-section">
+  <div class="s-section__head">
+    <h2 class="s-section__label">Current key</h2>
+  </div>
+  <div class="s-key-status">
+    <div>
+      <div class="s-key-status__row">
+        <span class="label">Status</span>
+        <span class="v" style="display: inline-flex; align-items: center; gap: 10px;">
+          <span style="width: 7px; height: 7px; border-radius: 50%; background: var(--status-operational); box-shadow: 0 0 6px rgba(57, 255, 20, 0.45);" aria-hidden="true"></span>
+          active
+        </span>
+      </div>
+      <div class="s-key-status__row">
+        <span class="label">Last rotation</span>
+        <span class="v">
+          {% if last_rotated_at %}
+            {{ last_rotated_at | relative_time }} · {{ last_rotated_at.strftime('%Y-%m-%d %H:%M UTC') }}
+          {% else %}
+            never
+          {% endif %}
+        </span>
+      </div>
+      <div class="s-key-status__row">
+        <span class="label">Audit event</span>
+        <span class="v"><code>master_key.rotated</code></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="s-section">
+  <div class="s-section__head">
+    <h2 class="s-section__label">Rotate the master-key</h2>
+  </div>
+
+  <div class="s-warning">
+    <svg class="s-warning__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" aria-hidden="true">
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
     </svg>
     <span>
-      On rotation: existing server keys stay valid. New registrations
-      require the new master key from now on.
+      <b>On rotation</b> existing server keys stay valid. New registrations
+      require the new master key from now on. The cleartext key is shown once
+      after generation — store it securely.
     </span>
   </div>
 
-  <div class="bg-base-200 rounded-box p-4 space-y-1">
-    <div class="text-xs opacity-60">Current master key</div>
-    <div class="text-sm">
-      Last rotation:
-      <strong class="font-mono">
-        {% if last_rotated_at %}{{ last_rotated_at | relative_time }}{% else %}never{% endif %}
-      </strong>
-    </div>
-    <div class="text-xs opacity-50">
-      Audit event <code class="font-mono">master_key.rotated</code>.
-    </div>
-  </div>
+  <form method="post"
+        action="{{ url_for('settings.master_key_rotate') }}"
+        x-data
+        @submit="if (!confirm('Rotate master key? Existing server keys stay valid; new registrations require the new key. The new key is shown in cleartext only once — store it securely right away.')) $event.preventDefault();">
+    {{ rotate_form.csrf_token }}
+    <button type="submit"
+            class="s-btn s-btn--primary"
+            data-test="master-key-rotate-submit">
+      Generate new master-key
+    </button>
+  </form>
 
   {% if new_master_key %}
-    <div class="alert alert-success" role="alert"
+    <div class="s-key-reveal"
+         data-test="master-key-reveal"
          x-data="{
            copyKey() {
              const el = document.getElementById('new-master-key');
@@ -67,80 +104,19 @@
              }
            }
          }">
-      <div class="flex-1">
-        <p class="font-semibold">New master key generated.</p>
-        <p class="text-sm mt-1">
-          Note it down now — this key will <strong>not</strong> be shown
-          again.
-        </p>
-        <code id="new-master-key"
-              class="block mt-3 p-3 bg-base-300 text-base-content border border-base-300
-                     rounded font-mono break-all select-all text-sm">{{ new_master_key }}</code>
-        <div class="mt-2 flex items-center gap-2">
-          <button type="button"
-                  class="btn btn-sm btn-ghost"
-                  @click="copyKey()"
-                  aria-label="Copy master key">
-            Copy
-          </button>
-          <span class="text-xs opacity-70">
-            Shown only once — if lost, recoverable only through another
-            rotation.
-          </span>
-        </div>
+      <div class="s-key-reveal__label">New master-key — shown once</div>
+      <div class="s-key-reveal__value" id="new-master-key">{{ new_master_key }}</div>
+      <div class="s-key-reveal__warn">
+        Copy the key now. After leaving this tab it can no longer be retrieved.
+      </div>
+      <div style="margin-top: 14px; display: flex; gap: 10px;">
+        <button type="button"
+                class="s-btn s-btn--sm"
+                @click="copyKey()"
+                aria-label="Copy master key">
+          Copy
+        </button>
       </div>
     </div>
   {% endif %}
-
-  <div class="card bg-base-200 shadow-sm">
-    <div class="card-body">
-      <h2 class="card-title">Generate new master key</h2>
-      <p class="text-sm opacity-70">
-        Existing server keys stay valid. Only new registrations require the
-        new master key.
-      </p>
-      <div class="card-actions mt-3">
-        <button type="button"
-                class="btn btn-warning"
-                @click="confirmOpen = true">
-          Generate new master key
-        </button>
-      </div>
-    </div>
-  </div>
-
-  {# Confirm-Modal. #}
-  <dialog class="modal"
-          x-show="confirmOpen"
-          x-cloak
-          :class="{'modal-open': confirmOpen}"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="master-key-confirm-title"
-          @keydown.escape.window="confirmOpen = false">
-    <div class="modal-box max-w-lg">
-      <h3 id="master-key-confirm-title" class="text-lg font-semibold">
-        Rotate master key?
-      </h3>
-      <p class="py-3 text-sm">
-        Existing server keys stay valid. New registrations require the new
-        master key. The new key is shown in cleartext only once — note it
-        down securely right away. Continue?
-      </p>
-      <form method="post"
-            action="{{ url_for('settings.master_key_rotate') }}"
-            class="modal-action">
-        {{ rotate_form.csrf_token }}
-        <button type="button"
-                class="btn btn-ghost btn-sm"
-                @click="confirmOpen = false">
-          Cancel
-        </button>
-        <button type="submit" class="btn btn-warning btn-sm">
-          Confirm and rotate
-        </button>
-      </form>
-    </div>
-    <div class="modal-backdrop bg-black/40" @click="confirmOpen = false"></div>
-  </dialog>
-</div>
+</section>
