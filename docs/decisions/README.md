@@ -48,6 +48,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0040](0040-group-and-tag-hybrid-lifecycle.md) | Hybrid-Lifecycle für Gruppen und Tags: Inline-Create im Server-Settings, `/settings/{groups,tags}` als Manage-Only (Block Z) — schließt ADR-0034 §Re-Open-Trigger CRUD-UI | Akzeptiert |
 | [0041](0041-finding-detail-inline.md) | Finding-Detail Inline: `?flat=1` + Detail-Modal + flache Tabelle entfernt, erweiterter `<details>`-Body (AI-Reason, Description, Primary-URL, References, Notes), `primary_url` persistiert (Block AA) — löst ADR-0025 §Flat-Switch ab | Akzeptiert |
 | [0042](0042-agent-fire-and-forget-ingest.md) | Agent-Fire-and-Forget: Job-Status-Endpoint + Polling-Loop entfernt, Agent beendet nach 202 — löst ADR-0026 §Status-Endpoint/§Agent-Polling teilweise ab | Akzeptiert |
+| [0043](0043-llm-risk-band-exploitability-model.md) | Risk-Band als LLM-Angreifbarkeits-Urteil (3-Schichten-Exposure × Wirkungs-Klasse W1–W6), Scores als Gewichte, Fix-Verfügbarkeit aus dem Band entkoppelt (`action_type` Backend-abgeleitet) — amendet ADR-0023 §Pass-2 | Akzeptiert |
 | [0044](0044-server-scoped-bulk-ack-per-band.md) | Server-scoped Bulk-Acknowledge pro Risk-Band: `server_scope`-Flavor statt ID-Transport (50er-Limit weg), Per-Band-Hover-Control statt Noise-Link, `pending` server-seitig verboten — löst ADR-0022 §Bulk-Ack-Noise und ADR-0039 §2 `fragments/noise` ab | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
