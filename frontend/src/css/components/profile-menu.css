@@ -118,3 +118,14 @@
 .profile-menu__item--danger:hover {
   background: rgba(255, 68, 68, 0.06);
 }
+
+/* ── Active context — markiert die aktuelle Seite (z. B. Settings) ──
+   Aus dem Settings-Mockup-CSS hierher verschoben (Topbar-Scope, nicht
+   Settings-Scope; Block AD / ADR-0047). Nutzt den DS-Accent-Left-Marker
+   ohne mit der bestehenden Hover-Regel zu kollidieren. */
+.profile-menu__item--active {
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.profile-menu__item--active svg { color: var(--accent); }
