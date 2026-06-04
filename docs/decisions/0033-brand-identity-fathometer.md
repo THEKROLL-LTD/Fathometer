@@ -152,6 +152,8 @@ v{VERSION} · docs · [github-icon] github                       thekroll ltd ·
 
 ### 8. Sprach-Policy
 
+> **Teilweise abgelöst durch [ADR-0045](0045-english-only-ui.md) (2026-06-04):** Die Phase-2-Strategie („Übersetzung nur pro Surface-Redesign, kein eigener Übersetzungs-Block") gilt nicht mehr — die gesamte UI wird in einem dedizierten Block (AB) englisch, abgesichert durch einen maschinellen Sprach-Sweep-Test statt der Soft-Policy. Ziel-Sprache Englisch, Doc-Sprache Deutsch und die Risk-Band-Label-Regel bleiben unverändert gültig.
+
 **Ziel-Sprache UI:** Englisch. Auf lange Sicht ist die gesamte UI englisch (Login, Topbar, Sidebar, Dashboard, Server-Detail, Findings, Settings, Audit, Setup-Wizard, Flash-Messages, Error-Messages).
 
 **Phase-1-Migration:** Block W übersetzt **nur die Surfaces die in Block W angefasst werden**:
@@ -183,7 +185,7 @@ v{VERSION} · docs · [github-icon] github                       thekroll ltd ·
 - **Color-Reduction-Rule** muss bei jedem neuen Element im Code-Review gegen die Doctrine geprüft werden. Implementer-Prompts erinnern explizit daran.
 - **Easing-Doctrine** ist im Token-File hart codiert — Custom-Cubic-Beziers in Templates/CSS-Files lösen Reviewer-Reject aus.
 - **Verbotsliste Border-Radius/Box-Shadow** ist Pflicht-Lint-Check im Phase-1-Review. Implementer-Agent bekommt die Liste explizit in den Prompt.
-- **Sprach-Policy ist Soft-Policy** (keine maschinelle Prüfung) — Reviewer prüft pro PR ob die Surface-Sprache konsistent ist mit dem Redesign-Status. Bei Drift (z.B. deutsche Flash-Message taucht in der neuen englischen Dashboard-Sektion auf): TD-Eintrag oder direkter Fix.
+- **Sprach-Policy ist Soft-Policy** (keine maschinelle Prüfung) — Reviewer prüft pro PR ob die Surface-Sprache konsistent ist mit dem Redesign-Status. Bei Drift (z.B. deutsche Flash-Message taucht in der neuen englischen Dashboard-Sektion auf): TD-Eintrag oder direkter Fix. *Abgelöst durch ADR-0045: maschineller Sprach-Sweep-Test im Default-`pytest`.*
 
 ## Verworfen
 

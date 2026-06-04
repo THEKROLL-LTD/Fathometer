@@ -159,3 +159,5 @@ Wenn ein Agent Scope erweitern will: ablehnen und neue ADR erfordern.
 ## Kommunikations-Sprache
 
 Doc-Sprache und Code-Kommentare auf Deutsch (User-Präferenz). Code selbst (Bezeichner, Strings) auf Englisch wegen Library-/Framework-Konventionen.
+
+**UI-Sprache: ausschließlich Englisch (ADR-0045).** Alle Operator-sichtbaren Strings — Templates, Flash-Messages, Form-Validator-Messages, JS-Strings, Jinja-Filter-Output (Relative-Time), Chat-LLM-System-Prompt — sind englisch. Keine neuen deutschen UI-Strings; der Sprach-Sweep-Test (`tests/test_ui_language.py`) schlägt sonst fehl. Keine i18n-Infrastruktur (kein gettext/babel).

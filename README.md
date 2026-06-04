@@ -4,6 +4,43 @@ Selbst-gehostete Web-App, die Trivy-Filesystem-Scans von Root-Servern einsammelt
 
 **Status: Spec-Phase abgeschlossen, Implementierung steht aus.**
 
+## Worum es geht
+
+secscan beantwortet genau eine Frage pro Finding: **Muss ich etwas tun — und wie dringend?** Kein Zahlenfriedhof aus CVSS, EPSS und KEV-Flags, keine Wand aus „kritisch"-Bannern. Ein einzelner Root-Server wirft schnell hunderte CVEs aus, die meisten als High/Critical eingestuft — und die wenigsten davon sind in *deinem* Setup real angreifbar. Das manuell durchzuarbeiten ist nicht mehr leistbar.
+
+Der Kern ist deshalb ein LLM, das jedes Finding auf **tatsächliche Angreifbarkeit im Kontext** prüft, nicht auf rohe Scores:
+
+1. **Netzwerk-Position** — kommt ein Angreifer überhaupt an den Dienst?
+2. **Code-Pfad** — wird der verwundbare Code in diesem Deployment überhaupt ausgeführt?
+3. **Vorbedingungen** — braucht der Exploit Auth, Config oder Input, den es hier nicht gibt?
+
+CVSS, EPSS und KEV fließen als **Gewichte** ein, sind aber kein Urteil. Ein CVSS-10-CVE in einem nicht erreichbaren Code-Pfad landet bei secscan auf „beobachten" — und die wenigen Findings, die wirklich zählen, stehen oben. Übrig bleibt eine kurze, ehrliche To-do-Liste statt eines Alarm-Dauerfeuers.
+
+secscan ist ein pragmatisches Alltags-Tool für Leute, die ihre eigenen Root-Server betreiben. Es ist **nicht fehlerfrei** und ersetzt kein Enterprise-Vulnerability-Management (das braucht einen anderen Ansatz). Aber es ist besser, als blind jeden Distro-Patch einzuspielen oder Stunden mit hunderten nicht angreifbaren „kritischen" CVEs zu verbrennen.
+
+## Wie secscan einstuft
+
+Jeder Befund wird auf **zwei Achsen** bewertet und in eine von vier Stufen gefasst.
+
+**Achse 1 — ist es auf diesem Host überhaupt angreifbar?** Drei Bedingungen müssen *alle* zutreffen:
+
+1. **Erreichbar** — lauscht der Dienst nach außen (oder ist er über einen anderen erreichbaren Dienst erreichbar)?
+2. **Code-Pfad** — wird der verwundbare Code in deinem Setup tatsächlich ausgeführt (Funktion aktiviert, Branch genutzt)?
+3. **Vorbedingungen** — kann ein Angreifer die Voraussetzungen erfüllen (keine Auth-Hürde, passender Input)?
+
+Fehlt auch nur eine, ist der CVSS-Score egal — es ist hier nicht angreifbar.
+
+**Achse 2 — was wäre der Schaden?** Von Code-Ausführung/System-Übernahme über Datendiebstahl und Manipulation bis hin zu bloßem Dienst-Absturz (DoS).
+
+Daraus die vier Stufen:
+
+- **Eskalieren** — angreifbar *und* schwerer Schaden (Übernahme, Datenverlust). Sofort handeln.
+- **Handeln** — angreifbar, aber begrenzter Schaden; oder schwer, aber nur plausibel erreichbar. Im normalen Zyklus patchen.
+- **Beobachten** — läuft, ist hier aber nicht erreichbar (z.B. Funktion deaktiviert) — trotz hoher Score-Werte.
+- **Rauschen** — die Komponente läuft auf diesem Host gar nicht (liegt z.B. nur als Datei herum).
+
+CVSS, EPSS und KEV fließen als **Gewichte** ein, entscheiden aber nicht allein: ein „kritischer" CVE, der hier nicht erreichbar ist, landet bei *Beobachten*, nicht im Alarm. Reiner Dienst-Absturz (DoS) eskaliert nie automatisch — der Worst-Case ist ein Neustart. Jede Herabstufung wird begründet (welche Bedingung fehlt), damit du sie nachvollziehen kannst.
+
 ## Quick-Start
 
 Voraussetzung: Docker und Docker Compose. Kein Node, kein lokales Python noetig — alles laeuft im Container.

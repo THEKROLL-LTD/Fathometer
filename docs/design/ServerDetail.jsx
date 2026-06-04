@@ -520,9 +520,34 @@ function FindingRow({ f, checked, onToggle }) {
   );
 }
 
-function Band({ band, defaultOpen, selected, toggleSelected }) {
+function Band({ band, defaultOpen, selected, toggleSelected, acked, onAck, onUndo }) {
+  const [armed, setArmed] = useState(false);
   const items = Array.isArray(SD.TRIAGE[band.key]) ? SD.TRIAGE[band.key] : [];
   const count = Array.isArray(SD.TRIAGE[band.key]) ? items.length : SD.TRIAGE[band.key];
+  const isPending = band.key === 'pending';
+
+  // Stop the summary from toggling the <details> when interacting with controls.
+  const swallow = (e) => { e.preventDefault(); e.stopPropagation(); };
+
+  // ── Acknowledged rest-state — band is closed, struck, undoable ──
+  if (acked) {
+    return (
+      <div className="sd-band sd-band--acked">
+        <div className="sd-band__summary">
+          <span className="sd-band__chev" aria-hidden="true">›</span>
+          <span className={`sd-badge sd-badge--${band.key}`}>{band.label}</span>
+          <span className="sd-band__acked-tag">
+            <span className="dot" aria-hidden="true" />
+            {count} acknowledged
+          </span>
+          <button type="button" className="sd-band__undo" onClick={() => onUndo(band.key)}>
+            Undo
+          </button>
+          <span className="sd-band__count sd-band__count--acked"><b>{count}</b>findings</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <details className="sd-band" open={defaultOpen}>
@@ -530,6 +555,40 @@ function Band({ band, defaultOpen, selected, toggleSelected }) {
         <span className="sd-band__chev" aria-hidden="true">›</span>
         <span className={`sd-badge sd-badge--${band.key}`}>{band.label}</span>
         <span aria-hidden="true" />
+        <span className="sd-band__actions">
+          {isPending ? null : armed ? (
+            <span className="sd-band-ack-confirm" onClick={swallow}>
+              <span className="sd-band-ack-confirm__q">Acknowledge <b>{count}</b> findings?</span>
+              <button
+                type="button"
+                className="sd-band-ack-confirm__yes"
+                onClick={(e) => { swallow(e); setArmed(false); onAck(band.key); }}
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                className="sd-band-ack-confirm__no"
+                onClick={(e) => { swallow(e); setArmed(false); }}
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="sd-band-ack"
+              onClick={(e) => { swallow(e); setArmed(true); }}
+            >
+              <span className="sd-band-ack__check" aria-hidden="true">
+                <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6">
+                  <path d="M2.5 6.5 5 9l4.5-5.5" strokeLinecap="square" />
+                </svg>
+              </span>
+              Acknowledge all
+            </button>
+          )}
+        </span>
         <span className="sd-band__count"><b>{count}</b>findings</span>
       </summary>
       {items.length > 0 && (
@@ -558,6 +617,7 @@ function Band({ band, defaultOpen, selected, toggleSelected }) {
 
 function TriageQueue() {
   const [selected, setSelected] = useState(() => new Set());
+  const [ackedBands, setAckedBands] = useState(() => new Set());
   const toggleSelected = useCallback((cve) => {
     setSelected(prev => {
       const next = new Set(prev);
@@ -566,9 +626,15 @@ function TriageQueue() {
     });
   }, []);
 
+  const ackBand = useCallback((key) => {
+    setAckedBands(prev => new Set(prev).add(key));
+  }, []);
+  const undoBand = useCallback((key) => {
+    setAckedBands(prev => { const next = new Set(prev); next.delete(key); return next; });
+  }, []);
+
   // Total open (matches HEADER_STATS.open) — actionable finding count.
   const open = SD.HEADER_STATS.open;
-  const noise = SD.TRIAGE.noise;
 
   return (
     <section className="sd-section">
@@ -582,9 +648,6 @@ function TriageQueue() {
         <button type="button" disabled={selected.size === 0}>
           Auswahl ack {selected.size > 0 ? `(${selected.size})` : ''}
         </button>
-        <button type="button" className="is-prominent">
-          Acknowledge all noise on this host ({noise})
-        </button>
         <button type="button" style={{ marginLeft: 'auto' }}>
           ↓ CSV exportieren
         </button>
@@ -597,6 +660,9 @@ function TriageQueue() {
           defaultOpen={b.key === 'escalate'}
           selected={selected}
           toggleSelected={toggleSelected}
+          acked={ackedBands.has(b.key)}
+          onAck={ackBand}
+          onUndo={undoBand}
         />
       ))}
 
