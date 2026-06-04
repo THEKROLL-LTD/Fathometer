@@ -4,6 +4,36 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — ADR-0046 (Block AC): Persistenter Sidebar-Group-Aufklapp-Zustand
+
+Zielversion **v0.18.0**. Kein Schema, kein neuer Endpoint, keine Migration,
+kein localStorage — Cookie + Server-Render. Drei Phasen (A Server-Read+Render,
+B Client-Write, C Doku).
+
+### Added
+
+- **Aufgeklappte Sidebar-Gruppen bleiben aufgeklappt** über den 60-s-Polling-Swap,
+  Reload und Browser-Sessions hinweg (ADR-0046). Mechanik:
+  - Cookie `sidebar_open_groups` (kommaseparierte Group-IDs, `Max-Age` 1 Jahr,
+    `Path=/`, `SameSite=Lax`, `Secure` über HTTPS analog zur Session-Cookie-Config).
+  - `app/static/js/sidebar.js`: delegierter `toggle`-Listener in der Capture-Phase
+    (das Event bubbelt nicht); schreibt das Cookie bei jedem Toggle komplett neu
+    aus dem DOM-Ist-Zustand (kein inkrementelles Add/Remove) und zieht
+    `aria-expanded` auf dem `<summary>` nach.
+  - `app/views/_sidebar_context.py`: defensiver Cookie-Parser (`set[int]`, nur
+    Ints, Nicht-Parsebares verworfen, 512-Zeichen-/64-ID-Cap, niemals 500) und
+    `sidebar_open_group_ids` im Context **beider** Render-Pfade (Context-Processor
+    + Polling-Endpoint laufen durch `build_sidebar_context()` — single-source).
+  - `app/templates/sidebar/_group_section.html`: `open` + `aria-expanded`
+    conditional aus `sidebar_open_group_ids`; Undefined-Fallback rendert collapsed.
+
+### Unchanged (bewusst)
+
+- Default ohne Cookie bleibt **alles collapsed** (ADR-0034 §Sidebar-Verhalten) —
+  bestehende Sidebar-Tests sind der Regressions-Anker und unverändert grün.
+- Kein Auto-Expand bei aktiver Sidebar-Suche (Out of Scope, Re-Open-Trigger
+  in ADR-0046). Keine geräteübergreifende Persistenz (Cookie ist pro Browser).
+
 ## [Unreleased] — ADR-0045 (Block AB): English-only UI
 
 Zielversion **v0.17.0**. Reiner String-Touch — kein Markup-, Logik-, CSS- oder

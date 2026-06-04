@@ -303,6 +303,10 @@ Fünf prominente Counter: **Total open**, **KEV**, **Critical**, **High**, **Sta
 
 Die Server-Liste ist eine vertikale Liste mit Border-Bottom zwischen Einträgen, keine Cards. Pro Eintrag in einer Zeile: Status-Pill links (Severity-Farbe + Symbol), Server-Name (als Link), Tag-Pills (kompakt), Heartbeat-Bar rechtsbündig. Hover-Zustand mit subtilem `bg-base-200`. Aktiver Server (im Detail-Pane angezeigt) bekommt einen linken Akzent-Border. Vertikaler Abstand pro Zeile ~52px — damit passen ~12 Server in einen typischen Viewport ohne Scroll. Kein Tag-Mode-Toggle in der Sidebar — Tag-Filter sind Multi-Select-Chips, Default ist OR ("mindestens eins"). Wer UND braucht: über Settings-Tag-Verwaltung kombinierte Tags anlegen oder einen Filter-Dropdown öffnen.
 
+### Group-Aufklapp-Zustand persistent (ADR-0046)
+
+Server-Gruppen in der Sidebar sind `<details>`-Sektionen, Default eingeklappt (ADR-0034). Damit ein vom Operator aufgeklappter Zustand den 60-s-Polling-Swap, Reload und Browser-Sessions übersteht, persistiert er in einem langlebigen Cookie `sidebar_open_groups` (kommaseparierte Group-IDs, `Max-Age` 1 Jahr, `Path=/`, `SameSite=Lax`). `sidebar.js` schreibt das Cookie bei jedem Toggle komplett neu aus dem DOM-Ist-Zustand (Capture-Phase, da `toggle` nicht bubbelt); `build_sidebar_context()` liest es und rendert das `open`-Attribut direkt — auf jedem Render-Pfad (Context-Processor **und** Polling-Endpoint) automatisch korrekt, ohne Client-seitiges Re-Apply nach Swaps. Kein Schema, kein Endpoint, kein localStorage (ADR-0046). Ohne Cookie bleibt der ADR-0034-Default (alles collapsed).
+
 ### Typography: Monospace für technische Werte
 
 System-Monospace-Font (CSS `ui-monospace, SFMono-Regular, …`) für: CVE-IDs überall, Paketnamen, Versionen, Server-Hostnames, Kernel-Versionen, File-Paths in Trivy-Targets, Hash-IDs. Body bleibt sans-serif. Schrift-Skala wird auf drei Größen reduziert: 12px (`text-xs`) für Meta-Info, 14px (`text-sm`) für Body, 18px (`text-lg`) für Headings. Keine 24px+ Headings im Sidebar-Layout — wirkt deplaziert.
