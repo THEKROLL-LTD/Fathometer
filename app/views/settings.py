@@ -56,6 +56,7 @@ from app.models import (
     ServerGroup,
     Tag,
 )
+from app.services.feed_status import get_all_feed_statuses
 from app.services.stale_detection import is_db_stale
 from app.settings_service import get_settings_row
 from app.views._settings_shell import render_settings
@@ -1011,6 +1012,9 @@ def about_view() -> Any:
         active="about",
         content_template="settings/about.html",
         about=about,
+        # External-Feeds-Freshness (EPSS / CISA-KEV) — read-only, von der
+        # LLM-Provider-Seite hierher verschoben (Block AD Folge-Fix).
+        feed_statuses=get_all_feed_statuses(sess),
     )
 
 

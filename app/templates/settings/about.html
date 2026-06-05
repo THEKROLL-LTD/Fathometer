@@ -9,6 +9,8 @@
          app_version, build_revision, alembic_revision,
          python_version, flask_version, sqlalchemy_version,
          trivy_db_stale_count, healthz_url.
+     - `feed_statuses` (list | None) — EPSS/CISA-KEV Feed-Freshness, read-only
+       (Block AD Folge-Fix: von der LLM-Provider-Seite hierher verschoben).
 #}
 <p class="settings__eyebrow">Settings</p>
 <h1 class="settings__title">About</h1>
@@ -49,3 +51,32 @@
     <dd>Internal · THEKROLL LTD</dd>
   </dl>
 </section>
+
+{# External-Feeds-Freshness (Block Q / ADR-0024) — read-only. Von der
+   LLM-Provider-Seite hierher verschoben (Block AD Folge-Fix). #}
+{% if feed_statuses %}
+<section class="s-section">
+  <div class="s-section__head">
+    <h2 class="s-section__label">External feeds</h2>
+    <span class="s-section__meta">read-only</span>
+  </div>
+  <div class="s-feeds">
+    {% for status in feed_statuses %}
+      {% set is_failed = status.last_attempt_status == "failed" %}
+      <div class="s-feed">
+        <p class="s-feed__name">{% if status.feed_name == "epss" %}EPSS{% else %}CISA KEV{% endif %}</p>
+        {% if status.last_success_at %}
+          <div class="s-feed__value">{{ "{:,}".format(status.last_success_row_count or 0) }} entries</div>
+          <div class="s-feed__meta"{% if status.is_stale or is_failed %} style="color: var(--status-restricted);"{% endif %}>
+            last pull {{ status.last_success_at.strftime("%Y-%m-%d %H:%M UTC") }}
+            {% if status.is_stale %} · stale (&gt;7 days){% endif %}
+            {% if is_failed and status.last_attempt_at %} · last attempt failed ({{ status.last_attempt_at.strftime("%Y-%m-%d %H:%M UTC") }}){% endif %}
+          </div>
+        {% else %}
+          <div class="s-feed__value" style="color: var(--text-tertiary);">no successful pull yet</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

@@ -15,10 +15,12 @@ Zielversion **v0.19.0**. Reines Restyling — keine Routen-/Schema-/Render-Helpe
 
 - **Settings-Sekundär-Navigation: vertikale 224px-Nav → horizontale Sticky-Tab-
   Leiste** (`.settings-tabs`, ADR-0047). Sieben Tabs in Mockup-Reihenfolge
-  (Servers, Tags, Groups, LLM Provider, LLM Reviewer, Master-Key + Badge „new",
-  About). HTMX-Vertrag 1:1 erhalten (`hx-get`/`hx-target="#settings-content"`/
+  (Servers, Tags, Groups, LLM Provider, LLM Reviewer, Master-Key, About).
+  HTMX-Vertrag 1:1 erhalten (`hx-get`/`hx-target="#settings-content"`/
   `hx-swap="innerHTML"`/`hx-push-url`/`hx-headers` + `href`-Fallback); aktiver
-  Tab via `settings-tabs__item--active` + `aria-selected`.
+  Tab via `settings-tabs__item--active` + `aria-selected`, client-seitig
+  nachgezogen durch `app/static/js/settings_tabs.js` (die Tab-Leiste liegt
+  außerhalb des HTMX-Swap-Targets).
 - **Alle sieben Settings-Subseiten auf die `s-*`-Komponentenschicht** portiert
   (`frontend/src/css/components/settings.css`, 1:1-Port aus `docs/design/settings.css`,
   Token-only). DaisyUI/Tailwind raus aus den Settings-Surfaces:
@@ -40,6 +42,15 @@ Zielversion **v0.19.0**. Reines Restyling — keine Routen-/Schema-/Render-Helpe
 - **Profile-Dropdown** markiert „Settings" als aktiv (`profile-menu__item--active`)
   wenn der Pfad unter `/settings` liegt; der entsprechende CSS-Block wurde aus
   dem Mockup-CSS nach `profile-menu.css` (Topbar-Scope) verschoben.
+
+#### Folge-Fixes (nach erstem Sichttest)
+
+- **External Feeds (EPSS/CISA-KEV)** vom LLM-Provider- auf den **About**-Tab
+  verschoben (read-only; `about_view` reicht jetzt `feed_statuses` durch).
+- **Modals** (Provider-Switch + die drei Reviewer-Modals) per `x-teleport="body"`
+  an `<body>` gehängt → viewport-zentriert statt oben-links (`.settings` ist
+  wegen `container-type:inline-size` sonst Containing-Block für `position:fixed`).
+- **Master-Key-Tab-Badge** („new") aus der Nav entfernt.
 
 ### Removed
 

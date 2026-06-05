@@ -216,7 +216,11 @@
     {% endif %}
   </section>
 
-  {# ── Mode-Wechsel-Modal — Master-Key + Privacy-Notice (bei live). ── #}
+  {# ── Mode-Wechsel-Modal — Master-Key + Privacy-Notice (bei live).
+     x-teleport an <body>: entkommt dem container-type-Containing-Block
+     (`.settings`), sonst oeffnet das fixed-Overlay oben-links statt zentriert.
+     Die Alpine-Scope (modeOpen/privacyAcked) bleibt ueber Teleport erhalten. ── #}
+  <template x-teleport="body">
   <div x-show="modeOpen"
        x-cloak
        style="position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: var(--backdrop-modal); padding: 24px;"
@@ -271,8 +275,10 @@
       </form>
     </div>
   </div>
+  </template>
 
-  {# ── Re-queue-Backlog-Modal — Master-Key. ── #}
+  {# ── Re-queue-Backlog-Modal — Master-Key (x-teleport an <body>). ── #}
+  <template x-teleport="body">
   <div x-show="requeueOpen"
        x-cloak
        style="position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: var(--backdrop-modal); padding: 24px;"
@@ -302,8 +308,10 @@
       </form>
     </div>
   </div>
+  </template>
 
-  {# ── Concurrency-Wechsel-Modal — Slider + Master-Key. ── #}
+  {# ── Concurrency-Wechsel-Modal — Slider + Master-Key (x-teleport an <body>). ── #}
+  <template x-teleport="body">
   <div x-show="concurrencyOpen"
        x-cloak
        style="position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: var(--backdrop-modal); padding: 24px;"
@@ -342,4 +350,5 @@
       </form>
     </div>
   </div>
+  </template>
 </div>

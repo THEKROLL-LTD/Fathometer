@@ -83,7 +83,6 @@
      aria-selected="{{ 'true' if active == 'master_key' else 'false' }}"
      class="settings-tabs__item{% if active == 'master_key' %} settings-tabs__item--active{% endif %}">
     <span>Master-Key</span>
-    <span class="settings-tabs__badge">new</span>
   </a>
   <a href="{{ url_for('settings.about_view') }}"
      hx-get="{{ url_for('settings.about_view') }}"

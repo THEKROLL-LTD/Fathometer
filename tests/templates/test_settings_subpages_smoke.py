@@ -165,7 +165,6 @@ def _ctx_llm_provider() -> dict:
         "has_existing_key": True,
         "presets": [{"name": "OpenAI", "base_url": "https://x", "model": "gpt"}],
         "active_conversation_count": 2,
-        "feed_statuses": None,
     }
 
 
@@ -218,6 +217,14 @@ def _ctx_master_key() -> dict:
 
 
 def _ctx_about() -> dict:
+    feed = SimpleNamespace(
+        feed_name="epss",
+        last_success_at=_NOW,
+        last_success_row_count=335449,
+        is_stale=False,
+        last_attempt_status="success",
+        last_attempt_at=None,
+    )
     return {
         "about": {
             "app_version": "0.19.0",
@@ -228,7 +235,8 @@ def _ctx_about() -> dict:
             "sqlalchemy_version": "2.0",
             "trivy_db_stale_count": 2,
             "healthz_url": "/healthz",
-        }
+        },
+        "feed_statuses": [feed],
     }
 
 
@@ -267,6 +275,19 @@ def test_subpage_has_no_daisyui(app: Flask, template: str, builder: str, indicat
     html = _render(app, template, builder)
     leftovers = _daisy_tokens(html)
     assert not leftovers, f"{template}: DaisyUI-Rest {leftovers}"
+
+
+def test_external_feeds_on_about_not_provider(app: Flask) -> None:
+    """External-Feeds (EPSS/CISA-KEV) liegen jetzt auf About, nicht mehr auf
+    LLM Provider (Block AD Folge-Fix)."""
+    about_html = _render(app, "settings/about.html", "_ctx_about")
+    assert "External feeds" in about_html
+    assert "s-feeds" in about_html
+    assert "EPSS" in about_html
+
+    provider_html = _render(app, "settings/llm_provider.html", "_ctx_llm_provider")
+    assert "External feeds" not in provider_html
+    assert "s-feeds" not in provider_html
 
 
 @pytest.mark.parametrize("template,builder,indicator", _PAGES)

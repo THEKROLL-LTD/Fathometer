@@ -39,7 +39,6 @@ from app.config import Settings
 from app.db import get_session
 from app.forms import LlmSettingsForm
 from app.models import LlmConversation, LlmConversationStatus
-from app.services.feed_status import get_all_feed_statuses
 from app.services.llm_client import (
     ConnectionTestResult,
     LlmClient,
@@ -142,8 +141,6 @@ def show() -> Any:
         .scalars()
         .all()
         .__len__(),
-        # Phase 4 (ADR-0024) — Two-Liner-Anzeige im LLM-Settings-Template.
-        feed_statuses=get_all_feed_statuses(sess),
     )
 
 

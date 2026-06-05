@@ -14,7 +14,7 @@ Das Claude-Design-Mockup (`docs/design/Settings.html` + `settings.css` + `settin
 
 **Reines Restyling auf die `s-*`-Schicht + horizontale Tab-Nav. Keine Routen-, Schema- oder Render-Helper-Änderung.**
 
-1. **Horizontale Tab-Nav.** Die vertikale `_nav.html` (`w-56` `menu`) wird durch `<nav class="settings-tabs" role="tablist">` ersetzt — sieben Tabs in Mockup-Reihenfolge (**Servers, Tags, Groups, LLM Provider, LLM Reviewer, Master-Key (Badge „new"), About**), sticky oben über dem Content. Der **HTMX-Vertrag bleibt byte-für-byte erhalten**: `hx-get` / `hx-target="#settings-content"` / `hx-swap="innerHTML"` / `hx-push-url="true"` / `hx-headers='{"HX-Target": "settings-content"}'` + `href`-Fallback. Aktiver Tab: `settings-tabs__item--active` + `aria-selected`.
+1. **Horizontale Tab-Nav.** Die vertikale `_nav.html` (`w-56` `menu`) wird durch `<nav class="settings-tabs" role="tablist">` ersetzt — sieben Tabs in Mockup-Reihenfolge (**Servers, Tags, Groups, LLM Provider, LLM Reviewer, Master-Key, About**), sticky oben über dem Content. Der **HTMX-Vertrag bleibt byte-für-byte erhalten**: `hx-get` / `hx-target="#settings-content"` / `hx-swap="innerHTML"` / `hx-push-url="true"` / `hx-headers='{"HX-Target": "settings-content"}'` + `href`-Fallback. Aktiver Tab: `settings-tabs__item--active` + `aria-selected`; da die Tab-Leiste außerhalb des Swap-Targets liegt, synchronisiert `settings_tabs.js` den Marker client-seitig.
 
 2. **`s-*`-Komponentenschicht.** `docs/design/settings.css` wird 1:1 nach `frontend/src/css/components/settings.css` portiert (nur Token-Vars, keine neuen Hex-Farben; zwei Port-Eingriffe: kaputter Kommentar Z865 gefixt, `.profile-menu__item--active` nach `profile-menu.css` weil Topbar-Scope). Jede Subseite bekommt den Header-Pattern `settings__eyebrow` (Text „Settings", **ohne** Nummerierung — User-Entscheidung) + `settings__title` + `settings__lede` und die passenden `s-*`-Patterns (`s-table`, `s-pill`, `s-overflow`, `s-card`, `s-fields-grid`, `s-statusbar`, `s-kpis`, `s-twoup`, `s-kv`, `s-slider-row`, `s-subtabs`, `s-log`, `s-key-status`, `s-warning`, `s-key-reveal`, `s-about-grid`, `s-empty`).
 
@@ -42,6 +42,15 @@ Das Claude-Design-Mockup (`docs/design/Settings.html` + `settings.css` + `settin
 - **Vertikale Nav beibehalten, nur restylen:** widerspricht dem Mockup und verschenkt Content-Breite; die horizontale Tab-Nav ist die Design-Vorgabe.
 - **Render-Helper auf zwei Modi reduzieren:** außerhalb des Block-Scopes; die drei Modi (Direkt-URL, Profile-Dropdown-Fragment, Tab-Klick) sind alle in Benutzung.
 - **Mockup-Features ohne Backend mitbauen (Log-Pause/-Copy, Live-Stream, Slider-Inline-Apply):** Scope-Drift; als Tech-Debt vermerkt statt halb implementiert.
+
+## Nachtrag (2026-06-04, Folge-Fixes nach erstem Review)
+
+Vier kleine Anpassungen nach dem ersten Operator-Sichttest, kein Scope-Bruch:
+
+1. **Tab-Active-Sync.** Da `.settings-tabs` außerhalb des HTMX-Swap-Targets liegt, zog der Active-Marker erst beim Full-Reload nach. `app/static/js/settings_tabs.js` synchronisiert ihn jetzt pfad-basiert (`htmx:pushedIntoHistory` + `popstate`).
+2. **Modal-Zentrierung via `x-teleport`.** Das `container-type:inline-size` auf `.settings` macht es zum Containing-Block für `position:fixed` — die Modals öffneten oben-links. Sie werden jetzt per `x-teleport="body"` an `<body>` gehängt und sind dadurch viewport-zentriert; die Alpine-Scope (inkl. `confirmSubmit()`'s `this.$el = Form`) bleibt erhalten.
+3. **External Feeds → About.** Die read-only EPSS/CISA-KEV-Freshness wandert vom LLM-Provider- auf den About-Tab (passt thematisch zu „Runtime"). `about_view` reicht dafür `feed_statuses` durch.
+4. **Master-Key-Badge entfernt.** Der „new"-Badge in der Tab-Nav entfällt (Operator-Wunsch).
 
 ## Re-Open-Trigger
 

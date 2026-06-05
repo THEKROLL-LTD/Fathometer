@@ -12,7 +12,6 @@
      - `has_existing_key` (bool)
      - `presets` (list[dict])
      - `active_conversation_count` (int)
-     - `feed_statuses` (list | None)
 
    Confirm-Flow unveraendert (Provider/Model-Wechsel archiviert aktive
    Bewertungen): die frueher genutzte DaisyUI-Modal-Mechanik ist durch ein
@@ -157,7 +156,11 @@
     </div>
 
     {# Provider-Wechsel-Confirm — token-gestyltes Alpine-Overlay (kein DaisyUI).
-       Liegt innerhalb der Form, damit confirmSubmit()'s this.$el.submit() greift. #}
+       Per x-teleport an <body> gehaengt, damit das fixed-Overlay nicht vom
+       container-type:inline-size auf `.settings` als Containing-Block gefangen
+       wird (sonst landet das Modal oben-links statt viewport-zentriert). Die
+       Alpine-Scope (confirmOpen, confirmSubmit/$el = Form) bleibt erhalten. #}
+    <template x-teleport="body">
     <div x-show="confirmOpen"
          x-cloak
          style="position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: var(--backdrop-modal); padding: 24px;"
@@ -180,33 +183,6 @@
         </div>
       </div>
     </div>
+    </template>
   </form>
 </section>
-
-{# Block Q (ADR-0024) — Feed-Freshness read-only. #}
-{% if feed_statuses %}
-<section class="s-section">
-  <div class="s-section__head">
-    <h2 class="s-section__label">External feeds</h2>
-    <span class="s-section__meta">read-only</span>
-  </div>
-  <div class="s-feeds">
-    {% for status in feed_statuses %}
-      {% set is_failed = status.last_attempt_status == "failed" %}
-      <div class="s-feed">
-        <p class="s-feed__name">{% if status.feed_name == "epss" %}EPSS{% else %}CISA KEV{% endif %}</p>
-        {% if status.last_success_at %}
-          <div class="s-feed__value">{{ "{:,}".format(status.last_success_row_count or 0) }} entries</div>
-          <div class="s-feed__meta"{% if status.is_stale or is_failed %} style="color: var(--status-restricted);"{% endif %}>
-            last pull {{ status.last_success_at.strftime("%Y-%m-%d %H:%M UTC") }}
-            {% if status.is_stale %} · stale (&gt;7 days){% endif %}
-            {% if is_failed and status.last_attempt_at %} · last attempt failed ({{ status.last_attempt_at.strftime("%Y-%m-%d %H:%M UTC") }}){% endif %}
-          </div>
-        {% else %}
-          <div class="s-feed__value" style="color: var(--text-tertiary);">no successful pull yet</div>
-        {% endif %}
-      </div>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}

@@ -70,10 +70,13 @@ def test_htmx_attributes_complete(app: Flask) -> None:
     assert html.count("href=") == 7
 
 
-def test_master_key_badge(app: Flask) -> None:
+def test_master_key_no_badge(app: Flask) -> None:
+    # Der "new"-Badge wurde aus der Nav entfernt (User-Wunsch, Folge-Fix Block AD).
     html = _render_nav(app, "master_key")
-    assert 'class="settings-tabs__badge"' in html
-    assert ">new</span>" in html
+    assert "settings-tabs__badge" not in html
+    assert ">new</span>" not in html
+    # Master-Key-Tab existiert weiterhin.
+    assert "<span>Master-Key</span>" in html
 
 
 def test_no_legacy_nav_markup(app: Flask) -> None:
