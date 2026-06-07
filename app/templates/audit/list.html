@@ -1,4 +1,8 @@
-{# Audit-View `/audit`.
+{# Audit-View `/audit` — Redesign (Style-Adoption docs/design/Audit.jsx).
+
+   Spiegelt das /findings-System: Serif-Header, Activity-Strip, Mono-Filter-
+   Bar mit Chips, Hairline-Tabelle mit expandierbaren Rows, Pager. Cyan ist
+   ausschliesslich das `alert`-Signal (Row-Left-Bar, Pill, Peak-Bar).
 
    Variablen-Vertrag (gesetzt in app/views/audit_view.py):
      - `events`         : list[AuditEvent]
@@ -8,234 +12,296 @@
                                 server_id, server_name, tag)
      - `actions`        : list[str] — KNOWN_ACTIONS
      - `available_tags` : list[Tag]
+     - `activity`       : dict {bars:[{count,height_pct,peak}], total, max}
      - `csv_url`        : str
 
+   UI-Sprache: ausschliesslich Englisch (ADR-0045).
+
    Sicherheit:
-     - `event.event_metadata` ist user-/agent-controlled → nur escaped.
-     - Kommentare und Actor-Namen ebenso.
+     - `event.event_metadata`, Kommentare und Actor-Namen sind user-/agent-
+       controlled → nur autoescaped, niemals `|safe`.
 #}
 {# Block I: dynamisches `extends`. #}
 {% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
 
 {% block title %}Audit log · Fathometer{% endblock %}
 
-{# -------- Action-Kategorisierung fuer Badge-Farben ---------------------- #}
-{% macro action_badge(action) -%}
-  {%- set cls = 'badge-ghost' -%}
-  {%- if action.startswith('auth.failed') or action == 'ratelimit.tripped' -%}
-    {%- set cls = 'badge-error' -%}
-  {%- elif action.startswith('finding.acknowledged') or action.startswith('finding.bulk_acknowledged') or action == 'finding.resolved' -%}
-    {%- set cls = 'badge-success' -%}
-  {%- elif action.startswith('finding.note') or action == 'finding.reopened' -%}
-    {%- set cls = 'badge-warning' -%}
-  {%- elif action.startswith('server.') -%}
-    {%- set cls = 'badge-info' -%}
-  {%- elif action.startswith('tag.') -%}
-    {%- set cls = 'badge-accent' -%}
-  {%- elif action.startswith('key.rotated') -%}
-    {%- set cls = 'badge-warning' -%}
-  {%- elif action.startswith('auth.') -%}
-    {%- set cls = 'badge-info' -%}
-  {%- elif action.startswith('scan.') -%}
-    {%- set cls = 'badge-ghost' -%}
-  {%- elif action.startswith('settings.') -%}
-    {%- set cls = 'badge-accent' -%}
-  {%- elif action.startswith('llm.') -%}
-    {%- set cls = 'badge-info' -%}
-  {%- elif action == 'setup.completed' -%}
-    {%- set cls = 'badge-success' -%}
+{# -------- Action -> Level (Pill-/Row-Farbe). Cyan nur fuer `alert`. ------ #}
+{% macro aud_level(action) -%}
+  {%- if action.startswith('auth.failed') or action == 'ratelimit.tripped' -%}alert
+  {%- elif action == 'finding.reopened' or action.startswith('finding.note')
+        or action.startswith('key.rotated') or action == 'master_key.rotated'
+        or action == 'server.revoked' or action == 'server.retired' -%}notice
   {%- endif -%}
-  <span class="badge badge-sm {{ cls }} font-mono">{{ action }}</span>
 {%- endmacro %}
 
 {% block detail_pane %}
-<div class="p-6">
-<section class="space-y-4">
-  <header class="flex flex-wrap items-end justify-between gap-3">
+{# Chip-Remove-URL: aktueller Query-String minus die uebergebenen Keys (und
+   `page`). Rein server-seitig aus `request.args` gebaut. #}
+{%- macro chip_url(skip) -%}
+{{ url_for('audit.list_events') }}?{% for k in request.args %}{% if k not in skip and k != 'page' %}{% for v in request.args.getlist(k) %}{{ k | urlencode }}={{ v | urlencode }}&{% endfor %}{% endif %}{% endfor %}
+{%- endmacro -%}
+<div id="audit-pane" class="audit">
+
+  {# ---- 1) Header ---- #}
+  <header class="audit__header">
     <div>
-      <h1 class="text-2xl font-semibold">Audit log</h1>
-      <p class="text-sm opacity-70 mt-1">
-        {{ total }} entries · page {{ page }} / {{ pages }}
-      </p>
+      <p class="sd-eyebrow">Ledger</p>
+      <h1 class="audit__title">Audit log</h1>
     </div>
-    <div class="flex items-center gap-2">
-      <a href="{{ csv_url }}"
-         class="btn btn-sm btn-outline"
-         download
-         data-test="audit-csv-export">
-        CSV export
+    <div class="audit__header-right">
+      <span class="audit__counter" data-test="audit-counter">
+        <b>{{ total }}</b> {% if total == 1 %}entry{% else %}entries{% endif %}
+        <span class="sep" aria-hidden="true">·</span>
+        page <b>{{ page }}</b> / {{ pages }}
+      </span>
+      <a href="{{ csv_url }}" class="audit__export" download data-test="audit-csv-export">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+          <path d="M12 3v14" /><path d="M6 11l6 6 6-6" /><path d="M4 21h16" />
+        </svg>
+        <span>CSV export</span>
       </a>
     </div>
   </header>
 
-  {# ---- Filter-Form --------------------------------------------------------
-       HTMX-Submit: gleiche Filter-Logik, aber kein Full-Reload — Sidebar
-       bleibt stehen. `href`-Reset und Pagination unten haben analog `hx-get`. #}
+  {# ---- 2) Activity strip — 48-bucket 24h event histogram. Peak bar is the
+        single cyan signal. ---- #}
+  <div class="audit__activity" role="img"
+       aria-label="{{ activity.total }} events in the last 24 hours"
+       data-test="audit-activity">
+    <div class="audit__activity-head">
+      <span class="audit__activity-label">Activity · last 24h</span>
+      <span class="audit__activity-total"><b>{{ activity.total }}</b> events</span>
+    </div>
+    <div class="audit__bars">
+      {% for bar in activity.bars %}
+        <div class="audit__bar {% if bar.peak %}audit__bar--peak{% endif %}"
+             style="height: {{ bar.height_pct }}%"
+             title="{{ bar.count }} events"></div>
+      {% endfor %}
+    </div>
+    <div class="audit__bars-axis">
+      <span>-24h</span><span>-12h</span><span>now</span>
+    </div>
+  </div>
+
+  {# ---- 3) Filter-bar. HTMX-Submit: gleiche Filter-Logik, kein Full-Reload —
+        Sidebar bleibt stehen. ---- #}
   <form method="get" action="{{ url_for('audit.list_events') }}"
         hx-get="{{ url_for('audit.list_events') }}"
         hx-target="#detail-pane"
         hx-push-url="true"
-        class="card bg-base-200 shadow-sm">
-    <div class="card-body p-4 flex flex-wrap items-end gap-3 text-sm">
-      <label class="form-control">
-        <span class="label-text text-xs opacity-70 pb-1">from</span>
-        <input type="date" name="date_from"
-               value="{{ filter.date_from.isoformat() if filter.date_from else '' }}"
-               class="input input-bordered input-sm">
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-70 pb-1">to</span>
-        <input type="date" name="date_to"
-               value="{{ filter.date_to.isoformat() if filter.date_to else '' }}"
-               class="input input-bordered input-sm">
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-70 pb-1">Actor</span>
-        <input type="text" name="actor"
-               value="{{ filter.actor or '' }}"
-               class="input input-bordered input-sm"
-               placeholder="Username / Server-Name">
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-70 pb-1">Action</span>
-        <select name="action" class="select select-bordered select-sm">
-          <option value="">– all –</option>
-          {% for a in actions %}
-            <option value="{{ a }}" {% if filter.action == a %}selected{% endif %}>{{ a }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-70 pb-1">Server name</span>
-        <input type="text" name="server_name"
-               value="{{ filter.server_name or '' }}"
-               class="input input-bordered input-sm"
-               placeholder="Substring">
-      </label>
-      <label class="form-control">
-        <span class="label-text text-xs opacity-70 pb-1">Tag</span>
-        <select name="tag" class="select select-bordered select-sm">
-          <option value="">– all –</option>
-          {% for t in available_tags %}
-            <option value="{{ t.name }}" {% if filter.tag == t.name %}selected{% endif %}>{{ t.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <div class="flex items-center gap-2">
-        <button type="submit" class="btn btn-sm btn-primary">filter</button>
-        <a href="{{ url_for('audit.list_events') }}"
-           hx-get="{{ url_for('audit.list_events') }}"
-           hx-target="#detail-pane"
-           hx-push-url="true"
-           class="link link-hover text-xs opacity-70">reset</a>
-      </div>
+        class="audit__filter-bar"
+        role="search"
+        data-test="audit-filter-form">
+    <div class="audit__field">
+      <label class="audit__field-label" for="aud-from">from</label>
+      <input id="aud-from" class="ff-input ff-date" type="date" name="date_from"
+             value="{{ filter.date_from.isoformat() if filter.date_from else '' }}">
+    </div>
+    <div class="audit__field">
+      <label class="audit__field-label" for="aud-to">to</label>
+      <input id="aud-to" class="ff-input ff-date" type="date" name="date_to"
+             value="{{ filter.date_to.isoformat() if filter.date_to else '' }}">
+    </div>
+    <div class="audit__field">
+      <label class="audit__field-label" for="aud-actor">Actor</label>
+      <input id="aud-actor" class="ff-input ff-actor" type="text" name="actor"
+             value="{{ filter.actor or '' }}" placeholder="username / server-name"
+             maxlength="128" autocomplete="off">
+    </div>
+    <div class="audit__field">
+      <label class="audit__field-label" for="aud-action">Action</label>
+      <select id="aud-action" class="ff-select" name="action">
+        <option value="">— all —</option>
+        {% for a in actions %}
+          <option value="{{ a }}" {% if filter.action == a %}selected{% endif %}>{{ a }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="audit__field">
+      <label class="audit__field-label" for="aud-server">Server name</label>
+      <input id="aud-server" class="ff-input ff-server" type="text" name="server_name"
+             value="{{ filter.server_name or '' }}" placeholder="substring"
+             maxlength="128" autocomplete="off">
+    </div>
+    <div class="audit__field">
+      <label class="audit__field-label" for="aud-tag">Tag</label>
+      <select id="aud-tag" class="ff-select" name="tag">
+        <option value="">— all —</option>
+        {% for t in available_tags %}
+          <option value="{{ t.name }}" {% if filter.tag == t.name %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="audit__filter-actions">
+      <button type="submit" class="ff-submit" data-test="audit-submit">
+        <span>filter</span><span aria-hidden="true">→</span>
+      </button>
+      <a href="{{ url_for('audit.list_events') }}"
+         hx-get="{{ url_for('audit.list_events') }}"
+         hx-target="#detail-pane"
+         hx-push-url="true"
+         class="ff-reset" data-test="audit-reset">reset</a>
     </div>
   </form>
 
+  {# ---- Active filter chips ---- #}
+  {%- set has_filter = filter.date_from or filter.date_to or filter.actor
+        or filter.action or filter.server_id or filter.server_name or filter.tag -%}
+  {% if has_filter %}
+    <div class="audit__filter-chips" role="region" aria-label="Active filters"
+         data-test="audit-filter-chips">
+      {% if filter.date_from %}
+        <span class="ff-chip"><b>from</b><span>{{ filter.date_from.isoformat() }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['date_from']) }}" aria-label="Remove filter from">×</a></span>
+      {% endif %}
+      {% if filter.date_to %}
+        <span class="ff-chip"><b>to</b><span>{{ filter.date_to.isoformat() }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['date_to']) }}" aria-label="Remove filter to">×</a></span>
+      {% endif %}
+      {% if filter.actor %}
+        <span class="ff-chip"><b>actor</b><span>{{ filter.actor }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['actor']) }}" aria-label="Remove filter actor">×</a></span>
+      {% endif %}
+      {% if filter.action %}
+        <span class="ff-chip"><b>action</b><span>{{ filter.action }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['action']) }}" aria-label="Remove filter action">×</a></span>
+      {% endif %}
+      {% if filter.server_id %}
+        <span class="ff-chip"><b>server</b><span>#{{ filter.server_id }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['server_id']) }}" aria-label="Remove filter server">×</a></span>
+      {% endif %}
+      {% if filter.server_name %}
+        <span class="ff-chip"><b>server</b><span>{{ filter.server_name }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['server_name']) }}" aria-label="Remove filter server name">×</a></span>
+      {% endif %}
+      {% if filter.tag %}
+        <span class="ff-chip"><b>tag</b><span>{{ filter.tag }}</span>
+          <a class="ff-chip__x" href="{{ chip_url(['tag']) }}" aria-label="Remove filter tag">×</a></span>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {# ---- 4) Log table ---- #}
   {% if events %}
-    <div class="overflow-x-auto">
-      <table class="table table-zebra table-sm align-middle" data-test="audit-table">
-        <thead class="text-xs uppercase tracking-wide">
-          <tr>
-            <th class="w-44">Time</th>
-            <th class="w-36">Actor</th>
-            <th class="w-52">Action</th>
-            <th class="w-44">Target</th>
-            <th>Comment / metadata</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for ev in events %}
-            <tr>
-              <td class="text-xs whitespace-nowrap">
+    <div class="audit__log" data-test="audit-table">
+      <div class="audit-head">
+        <span>Time</span>
+        <span>Actor</span>
+        <span>Action</span>
+        <span>Target</span>
+        <span>Comment / Metadata</span>
+        <span aria-hidden="true"></span>
+      </div>
+
+      {% for ev in events %}
+        {%- set lvl = aud_level(ev.action) | trim -%}
+        <details class="audit-row {% if lvl == 'alert' %}audit-row--alert{% endif %}">
+          <summary class="audit-row__summary">
+            <div class="audit-row__time">
+              <div class="audit-row__time-rel">
                 <time datetime="{{ ev.ts.isoformat() }}"
-                      title="{{ ev.ts.strftime('%Y-%m-%d %H:%M:%S %Z') }}">
-                  {{ ev.ts | relative_time }}
-                </time>
-                <div class="opacity-50 text-[0.7rem]">
-                  {{ ev.ts.strftime('%Y-%m-%d %H:%M') }}
-                </div>
-              </td>
-              <td class="text-xs font-mono">{{ ev.actor }}</td>
-              <td>{{ action_badge(ev.action) }}</td>
-              <td class="text-xs">
-                {% if ev.target_type %}
-                  <span class="opacity-60">{{ ev.target_type }}</span>
-                {% endif %}
-                {% if ev.target_id %}
-                  <span class="font-mono">{{ ev.target_id }}</span>
-                {% endif %}
-                {% if not ev.target_type and not ev.target_id %}
-                  <span class="opacity-30">–</span>
-                {% endif %}
-              </td>
-              <td class="text-xs">
-                {% if ev.comment %}
-                  {% set short = ev.comment[:50] %}
-                  <div class="opacity-90"
-                       {% if ev.comment | length > 50 %}title="{{ ev.comment }}"{% endif %}>
-                    {{ short }}{% if ev.comment | length > 50 %}…{% endif %}
+                      title="{{ ev.ts.strftime('%Y-%m-%d %H:%M:%S %Z') }}">{{ ev.ts | relative_time }}</time>
+              </div>
+              <div class="audit-row__time-abs">{{ ev.ts.strftime('%Y-%m-%d %H:%M') }}</div>
+            </div>
+            <div class="audit-row__actor {% if ev.actor_user_id %}audit-row__actor--human{% endif %}"
+                 title="{{ ev.actor }}">{{ ev.actor }}</div>
+            <div class="audit-row__action">
+              <span class="audit-pill {% if lvl == 'alert' %}audit-pill--alert{% elif lvl == 'notice' %}audit-pill--notice{% endif %}"
+                    title="{{ ev.action }}">{{ ev.action }}</span>
+            </div>
+            <div class="audit-row__target" title="{{ ev.target_type }} {{ ev.target_id }}">
+              {% if ev.target_type %}<span class="muted">{{ ev.target_type }}</span> {% endif %}
+              {% if ev.target_id %}<b>{{ ev.target_id }}</b>{% endif %}
+              {% if not ev.target_type and not ev.target_id %}<span class="empty">–</span>{% endif %}
+            </div>
+            <div class="audit-row__meta-cell">
+              {% if ev.comment %}
+                <span class="audit-row__comment" title="{{ ev.comment }}">{{ ev.comment }}</span>
+              {% else %}
+                <span class="audit-row__meta-toggle"><span class="tri" aria-hidden="true">▸</span> metadata</span>
+              {% endif %}
+            </div>
+            <span class="audit-row__chev" aria-hidden="true">›</span>
+          </summary>
+
+          <div class="audit-row__body">
+            {% if ev.event_metadata %}
+              <p class="audit-row__body-eyebrow">Metadata</p>
+              <div class="audit-meta-grid">
+                {% for k, v in ev.event_metadata.items() %}
+                  {%- set accent = (k in ['kev', 'dlq'] and v) or (k == 'band' and v == 'escalate') -%}
+                  <div class="audit-meta-kv">
+                    <span class="audit-meta-kv__k">{{ k }}</span>
+                    <span class="audit-meta-kv__v {% if accent %}audit-meta-kv__v--accent{% endif %}">{{ v }}</span>
                   </div>
-                {% endif %}
-                {% if ev.event_metadata %}
-                  <details class="mt-1">
-                    <summary class="cursor-pointer opacity-60 text-[0.7rem]">
-                      metadata
-                    </summary>
-                    <pre class="text-[0.7rem] whitespace-pre-wrap break-all
-                                bg-base-300/40 rounded p-2 mt-1 max-w-md">{{ ev.event_metadata }}</pre>
-                  </details>
-                {% endif %}
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+                {% endfor %}
+              </div>
+            {% endif %}
+            <div class="audit-row__raw">
+              <span><b>action</b> {{ ev.action }}</span>
+              <span><b>level</b> {{ lvl or 'info' }}</span>
+              <span><b>event_id</b> {{ ev.id }}</span>
+              {% if ev.comment %}<span><b>comment</b> {{ ev.comment }}</span>{% endif %}
+            </div>
+          </div>
+        </details>
+      {% endfor %}
     </div>
 
-    {# Pagination. #}
-    {% if pages > 1 %}
-      {% set parts = [] %}
-      {% if filter.date_from %}{% set _ = parts.append('date_from=' ~ filter.date_from.isoformat()) %}{% endif %}
-      {% if filter.date_to   %}{% set _ = parts.append('date_to='   ~ filter.date_to.isoformat()) %}{% endif %}
-      {% if filter.actor     %}{% set _ = parts.append('actor='     ~ filter.actor) %}{% endif %}
-      {% if filter.action    %}{% set _ = parts.append('action='    ~ filter.action) %}{% endif %}
-      {% if filter.server_id %}{% set _ = parts.append('server_id=' ~ filter.server_id) %}{% endif %}
-      {% if filter.server_name %}{% set _ = parts.append('server_name=' ~ filter.server_name) %}{% endif %}
-      {% if filter.tag       %}{% set _ = parts.append('tag='       ~ filter.tag) %}{% endif %}
-      {% set base_qs = parts | join('&') %}
-
-      {# Pagination — HTMX-Pane-Swap statt Full-Reload. #}
-      {% set prev_url = url_for('audit.list_events') ~ '?' ~ base_qs ~ ('&' if base_qs else '') ~ 'page=' ~ (page - 1) %}
-      {% set next_url = url_for('audit.list_events') ~ '?' ~ base_qs ~ ('&' if base_qs else '') ~ 'page=' ~ (page + 1) %}
-      <div class="join">
+    {# ---- 5) Pager ---- #}
+    {# chip_url([]) liefert die volle URL inkl. aller Filter-Args, endet stets
+       auf `?` (keine Args) oder `&` (mit Args) — also ist `page=` ohne weiteren
+       Separator anhaengbar. #}
+    {%- set base_url = chip_url([]) | trim -%}
+    {%- set sep = '' -%}
+    <div class="audit__footer">
+      <span><b>{{ total }}</b> {% if total == 1 %}entry{% else %}entries{% endif %} · page {{ page }} of {{ pages }}</span>
+      <span class="audit__pager">
         {% if page > 1 %}
-          <a class="join-item btn btn-sm"
-             href="{{ prev_url }}"
-             hx-get="{{ prev_url }}"
-             hx-target="#detail-pane"
-             hx-push-url="true"
-             aria-label="previous page">←</a>
+          <a href="{{ base_url }}{{ sep }}page={{ page - 1 }}"
+             hx-get="{{ base_url }}{{ sep }}page={{ page - 1 }}"
+             hx-target="#detail-pane" hx-push-url="true" aria-label="Previous page">‹</a>
         {% else %}
-          <span class="join-item btn btn-sm btn-disabled">←</span>
+          <span class="is-disabled" aria-disabled="true">‹</span>
         {% endif %}
-        <span class="join-item btn btn-sm btn-disabled">{{ page }} / {{ pages }}</span>
+
+        {%- set ns = namespace(nums=[]) -%}
+        {%- for n in [1, pages, page - 2, page - 1, page, page + 1, page + 2] -%}
+          {%- if n >= 1 and n <= pages and n not in ns.nums -%}{%- set ns.nums = ns.nums + [n] -%}{%- endif -%}
+        {%- endfor -%}
+        {%- set ordered = ns.nums | sort -%}
+        {%- set pns = namespace(prev=0) -%}
+        {%- for n in ordered -%}
+          {%- if n - pns.prev > 1 -%}<span class="gap" aria-hidden="true">…</span>{%- endif -%}
+          {%- if n == page -%}
+            <a href="{{ base_url }}{{ sep }}page={{ n }}"
+               hx-get="{{ base_url }}{{ sep }}page={{ n }}"
+               hx-target="#detail-pane" hx-push-url="true"
+               class="is-current" aria-current="page">{{ n }}</a>
+          {%- else -%}
+            <a href="{{ base_url }}{{ sep }}page={{ n }}"
+               hx-get="{{ base_url }}{{ sep }}page={{ n }}"
+               hx-target="#detail-pane" hx-push-url="true">{{ n }}</a>
+          {%- endif -%}
+          {%- set pns.prev = n -%}
+        {%- endfor -%}
+
         {% if page < pages %}
-          <a class="join-item btn btn-sm"
-             href="{{ next_url }}"
-             hx-get="{{ next_url }}"
-             hx-target="#detail-pane"
-             hx-push-url="true"
-             aria-label="next page">→</a>
+          <a href="{{ base_url }}{{ sep }}page={{ page + 1 }}"
+             hx-get="{{ base_url }}{{ sep }}page={{ page + 1 }}"
+             hx-target="#detail-pane" hx-push-url="true" aria-label="Next page">›</a>
         {% else %}
-          <span class="join-item btn btn-sm btn-disabled">→</span>
+          <span class="is-disabled" aria-disabled="true">›</span>
         {% endif %}
-      </div>
-    {% endif %}
+      </span>
+    </div>
   {% else %}
-    {# Block I: einheitlicher Empty-State mit CTA. #}
     {% include "_empty/no_audit.html" %}
   {% endif %}
-</section>
 </div>
 {% endblock %}

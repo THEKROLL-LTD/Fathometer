@@ -53,6 +53,66 @@ audit_bp = Blueprint("audit", __name__, url_prefix="/audit")
 
 _PER_PAGE = 50
 
+# Aktivitaets-Strip (Audit-Redesign). Histogramm der Event-Anzahl ueber die
+# letzten 24h in `_ACTIVITY_BUCKETS` gleich breiten Zeit-Buckets. Der Peak-
+# Bucket traegt das einzige Cyan-Signal (Design: `audit__bar--peak`).
+_ACTIVITY_BUCKETS = 48
+_ACTIVITY_WINDOW_H = 24
+# Minimale Balken-Hoehe in Prozent fuer nicht-leere Buckets (Design-Floor),
+# damit kleine Buckets sichtbar bleiben.
+_ACTIVITY_MIN_PCT = 6
+
+
+def _compute_activity(
+    timestamps: list[datetime],
+    now: datetime,
+    *,
+    bucket_count: int = _ACTIVITY_BUCKETS,
+    window_h: int = _ACTIVITY_WINDOW_H,
+) -> dict[str, Any]:
+    """Bucketisiert Event-Timestamps in ein 24h-Histogramm (pure, testbar).
+
+    Liefert pro Bucket `count` und `height_pct` (auf den Peak normiert) sowie
+    `peak`-Flag (genau ein Bucket: das erste Maximum mit count > 0). `now` und
+    alle `timestamps` werden als tz-aware UTC erwartet; naive Werte werden als
+    UTC interpretiert.
+
+    Returns dict mit Keys: `bars` (list[dict]), `total` (int), `max` (int).
+    """
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    window = timedelta(hours=window_h)
+    start = now - window
+    span = window / bucket_count
+    counts = [0] * bucket_count
+
+    for ts in timestamps:
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        if ts < start or ts > now:
+            continue
+        idx = int((ts - start) / span)
+        if idx >= bucket_count:
+            idx = bucket_count - 1
+        elif idx < 0:
+            idx = 0
+        counts[idx] += 1
+
+    total = sum(counts)
+    peak_val = max(counts) if counts else 0
+    peak_idx = counts.index(peak_val) if peak_val > 0 else -1
+
+    bars: list[dict[str, Any]] = []
+    for i, c in enumerate(counts):
+        if peak_val > 0 and c > 0:
+            height_pct = max(_ACTIVITY_MIN_PCT, round(c / peak_val * 100))
+        else:
+            height_pct = 0
+        bars.append({"count": c, "height_pct": height_pct, "peak": i == peak_idx})
+
+    return {"bars": bars, "total": total, "max": peak_val}
+
+
 # Bekannte Action-Werte aus §13 — fuer den Filter-Dropdown im Template.
 # Reihenfolge ist absichtlich gruppiert: Findings, Tags, Server, Auth,
 # Sonstiges. Templates iterieren in Reihenfolge.
@@ -237,6 +297,15 @@ def list_events() -> Any:
 
     available_tags = list(sess.execute(select(Tag).order_by(Tag.name)).scalars().all())
 
+    # Aktivitaets-Strip: Event-Timestamps der letzten 24h (ungefiltert — der
+    # Strip zeigt die Gesamtlast, nicht die aktuelle Filter-Auswahl).
+    now = datetime.now(tz=UTC)
+    activity_cutoff = now - timedelta(hours=_ACTIVITY_WINDOW_H)
+    activity_ts = list(
+        sess.execute(select(AuditEvent.ts).where(AuditEvent.ts >= activity_cutoff)).scalars().all()
+    )
+    activity = _compute_activity(activity_ts, now)
+
     qs = _filter_to_query_string(filt)
     csv_url = url_for("audit.export_csv")
     if qs:
@@ -252,6 +321,7 @@ def list_events() -> Any:
         filter=filt,
         actions=KNOWN_ACTIONS,
         available_tags=available_tags,
+        activity=activity,
         csv_url=csv_url,
         # Block I: Sidebar-Layout-Flag.
         hx_partial=is_hx_request(request),
