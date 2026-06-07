@@ -509,11 +509,16 @@ class Finding(Base):
         # diesem Index laufen sie als Index-Only-Scan (~150 Buffer). Die
         # INCLUDE-Spalten decken die Projektion der Aggregate + die
         # Sort-/Filter-Keys der Triage-/Group-Listen ab.
+        # `id` als erste INCLUDE-Spalte (Migration 0019): ohne den `id`-WERT im
+        # Index fallen `count(id)`-Aggregate und der Two-Step-`select(id)`-Pfad
+        # auf Heap-Scans zurueck (B-Tree haelt nur den Heap-TID, nicht den
+        # id-Wert). Mit `id` in INCLUDE werden Q1/Q3/Q4/Q5 Index-Only.
         Index(
             "ix_findings_server_open_triage",
             "server_id",
             "risk_band",
             postgresql_include=[
+                "id",
                 "application_group_id",
                 "first_seen_at",
                 "is_kev",
