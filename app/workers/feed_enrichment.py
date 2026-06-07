@@ -619,7 +619,7 @@ def feed_enrichment_tick(session: Session) -> None:
     with httpx.Client(
         timeout=_HTTP_TIMEOUT_SEC,
         follow_redirects=True,
-        headers={"User-Agent": "secscan-feed-enrichment/1.0"},
+        headers={"User-Agent": "fathometer-feed-enrichment/1.0"},
     ) as client:
         # _log_failure wird bereits innerhalb pull_epss/pull_kev geschrieben;
         # hier nur sicherstellen dass der naechste Feed nicht gekillt wird.

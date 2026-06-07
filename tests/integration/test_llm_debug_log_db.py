@@ -92,7 +92,7 @@ class TestLLMDebugLogRecord:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Request-Body > Cap (gesetzt via Env auf 1024) wird zu Stub-Dict."""
-        monkeypatch.setenv("SECSCAN_LLM_DEBUG_LOG_BODY_SIZE_CAP", "1024")
+        monkeypatch.setenv("FM_LLM_DEBUG_LOG_BODY_SIZE_CAP", "1024")
         try:
             big = {"data": "x" * 10_000}
             entry = record(
@@ -123,7 +123,7 @@ class TestLLMDebugLogRecord:
         db_session: Any,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setenv("SECSCAN_LLM_DEBUG_LOG_BODY_SIZE_CAP", "1024")
+        monkeypatch.setenv("FM_LLM_DEBUG_LOG_BODY_SIZE_CAP", "1024")
         try:
             big = {"data": "y" * 5_000}
             entry = record(
@@ -187,7 +187,7 @@ class TestLLMDebugLogEviction:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Age-Cap auf 14 Tage (Default) — Rows aelter als 14 Tage fliegen raus."""
-        monkeypatch.setenv("SECSCAN_LLM_DEBUG_LOG_MAX_AGE_DAYS", "14")
+        monkeypatch.setenv("FM_LLM_DEBUG_LOG_MAX_AGE_DAYS", "14")
         try:
             # 5 alte (30 Tage) + 5 frische (1 Tag) — Cap 14 Tage.
             old_ids = [_insert_log(db_app, age_days=30) for _ in range(5)]
@@ -216,8 +216,8 @@ class TestLLMDebugLogEviction:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Count-Cap auf 10 — wenn 25 Rows da sind, bleiben nur 10 uebrig."""
-        monkeypatch.setenv("SECSCAN_LLM_DEBUG_LOG_MAX_ROWS", "10")
-        monkeypatch.setenv("SECSCAN_LLM_DEBUG_LOG_MAX_AGE_DAYS", "365")
+        monkeypatch.setenv("FM_LLM_DEBUG_LOG_MAX_ROWS", "10")
+        monkeypatch.setenv("FM_LLM_DEBUG_LOG_MAX_AGE_DAYS", "365")
         try:
             for _ in range(25):
                 _insert_log(db_app, age_days=0)
@@ -238,8 +238,8 @@ class TestLLMDebugLogEviction:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Wenn alles innerhalb der Caps liegt, loescht evict_old() nichts."""
-        monkeypatch.setenv("SECSCAN_LLM_DEBUG_LOG_MAX_ROWS", "100")
-        monkeypatch.setenv("SECSCAN_LLM_DEBUG_LOG_MAX_AGE_DAYS", "30")
+        monkeypatch.setenv("FM_LLM_DEBUG_LOG_MAX_ROWS", "100")
+        monkeypatch.setenv("FM_LLM_DEBUG_LOG_MAX_AGE_DAYS", "30")
         try:
             for _ in range(3):
                 _insert_log(db_app, age_days=1)

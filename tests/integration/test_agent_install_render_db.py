@@ -49,19 +49,19 @@ def test_install_sh_full_wizard_template(db_app: Flask) -> None:
     # Eingebackene Konstanten.
     assert 'RECOMMENDED_TRIVY_VERSION="0.70.0"' in body
     assert 'MIN_TRIVY_VERSION="0.70.0"' in body
-    assert 'CURRENT_AGENT_VERSION="0.4.0"' in body
+    assert 'CURRENT_AGENT_VERSION="0.5.0"' in body
 
-    # SECSCAN_URL ist gesetzt (Fallback auf request.host_url in Tests).
-    assert 'SECSCAN_URL="http' in body
+    # FM_URL ist gesetzt (Fallback auf request.host_url in Tests).
+    assert 'FM_URL="http' in body
 
     # Unattended-Modus ist behandelt.
-    assert "SECSCAN_UNATTENDED" in body
-    assert "SECSCAN_MASTER_KEY" in body
+    assert "FM_UNATTENDED" in body
+    assert "FM_MASTER_KEY" in body
 
     # systemd- UND cron-Fallback sind im Template.
-    assert "secscan-agent.service" in body
-    assert "secscan-agent.timer" in body
-    assert "/etc/cron.d/secscan-agent" in body
+    assert "fathometer-agent.service" in body
+    assert "fathometer-agent.timer" in body
+    assert "/etc/cron.d/fathometer-agent" in body
 
     # Trivy-Setup laedt vom Aqua-Release.
     assert "TRIVY_RELEASE_URL_TEMPLATE=" in body

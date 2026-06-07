@@ -70,7 +70,7 @@ def _hasher_for(time_cost: int, memory_cost: int, parallelism: int) -> PasswordH
 def _settings_from_app() -> Settings:
     from flask import current_app
 
-    return cast("Settings", current_app.config["SECSCAN_SETTINGS"])
+    return cast("Settings", current_app.config["FM_SETTINGS"])
 
 
 def _get_hasher() -> PasswordHasher:

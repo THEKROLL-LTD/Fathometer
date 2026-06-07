@@ -96,16 +96,16 @@ def test_findings_search_route_returns_404(
 
 
 def test_header_logo_links_to_dashboard(logged_in_client: FlaskClient) -> None:
-    """Das Logo (Brand "secscan") linkt auf `/` — gleicher Pfad wie der
+    """Das Logo (Brand "fathometer") linkt auf `/` — gleicher Pfad wie der
     Dashboard-Button."""
     resp = logged_in_client.get("/")
     body = resp.get_data(as_text=True)
     header = _header_section(body)
 
-    # Wir suchen einen `<a href="...">` der "secscan"-Brand enthaelt und
+    # Wir suchen einen `<a href="...">` der "fathometer"-Brand enthaelt und
     # extrahieren das href.
     logo_match = re.search(
-        r'<a\s+href="([^"]+)"[^>]*>\s*(?:<span[^>]*>[^<]*</span>\s*)*<span>secscan</span>',
+        r'<a\s+href="([^"]+)"[^>]*>\s*(?:<span[^>]*>[^<]*</span>\s*)*<span>fathometer</span>',
         header,
         re.DOTALL,
     )

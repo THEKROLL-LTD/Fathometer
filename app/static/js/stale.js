@@ -103,5 +103,5 @@
 
   window.staleTick = staleTick;
   // Export fuer Tests / Konsolen-Debug.
-  window.__secscanRelativeTime = relativeTime;
+  window.__fathometerRelativeTime = relativeTime;
 })();

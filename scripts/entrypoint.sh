@@ -1,5 +1,5 @@
 #!/bin/sh
-# secscan Container-Entrypoint
+# fathometer Container-Entrypoint
 # ----------------------------
 # 1. Wartet auf DB-Erreichbarkeit (max 60 s, exponentielles Backoff).
 # 2. Fuehrt `alembic upgrade head` aus.
@@ -24,9 +24,9 @@ wait_for_db() {
     if python -c "
 import os, sys
 from sqlalchemy import create_engine, text
-url = os.environ.get('SECSCAN_DATABASE_URL', '')
+url = os.environ.get('FM_DATABASE_URL', '')
 if not url:
-    sys.exit('SECSCAN_DATABASE_URL nicht gesetzt')
+    sys.exit('FM_DATABASE_URL nicht gesetzt')
 try:
     engine = create_engine(url, connect_args={'connect_timeout': 3})
     with engine.connect() as conn:
@@ -61,9 +61,9 @@ echo "[entrypoint] starte gunicorn"
 exec gunicorn \
   --bind 0.0.0.0:8000 \
   --worker-class gthread \
-  --workers "${SECSCAN_GUNICORN_WORKERS:-2}" \
-  --threads "${SECSCAN_GUNICORN_THREADS:-8}" \
-  --timeout "${SECSCAN_GUNICORN_TIMEOUT:-120}" \
+  --workers "${FM_GUNICORN_WORKERS:-2}" \
+  --threads "${FM_GUNICORN_THREADS:-8}" \
+  --timeout "${FM_GUNICORN_TIMEOUT:-120}" \
   --worker-tmp-dir /dev/shm \
   --access-logfile - \
   --error-logfile - \

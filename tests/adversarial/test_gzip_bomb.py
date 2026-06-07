@@ -26,7 +26,7 @@ def test_gzip_bomb_decompress_limit_413(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Hochrepetitive Bytes komprimieren winzig, ueberschreiten aber den Bound."""
-    settings: Settings = db_app.config["SECSCAN_SETTINGS"]
+    settings: Settings = db_app.config["FM_SETTINGS"]
     monkeypatch.setattr(settings, "max_decompressed_mb", 1)
 
     _server_id, api_key = register_test_server(db_app, name="bomb-srv")
@@ -60,7 +60,7 @@ def test_gzip_bomb_small_compressed_blows_up(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Klassische gzip-Bomb-Form: winziges gzip -> ueber Bound dekomprimiert."""
-    settings: Settings = db_app.config["SECSCAN_SETTINGS"]
+    settings: Settings = db_app.config["FM_SETTINGS"]
     monkeypatch.setattr(settings, "max_decompressed_mb", 1)
 
     _server_id, api_key = register_test_server(db_app, name="bomb-small")

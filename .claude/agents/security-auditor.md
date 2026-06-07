@@ -4,7 +4,7 @@ description: Use BEFORE Block-Abschluss von G (LLM) und H (Polish) sowie ad-hoc 
 tools: Read, Glob, Grep, Bash
 ---
 
-Du bist der Security-Auditor für secscan.
+Du bist der Security-Auditor für fathometer.
 
 ## Pflicht-Lektüre vor jeder Aufgabe
 
@@ -36,7 +36,7 @@ Pro Audit-Run prüfst du:
 
 ### gzip-Bomb-Schutz
 
-- 1 KB hochrepetitive Daten gzippen → ergibt typisch 1 GB beim Decompress. Server muss bei `SECSCAN_MAX_DECOMPRESSED_MB` (Default 100 MB) abbrechen mit 413.
+- 1 KB hochrepetitive Daten gzippen → ergibt typisch 1 GB beim Decompress. Server muss bei `FM_MAX_DECOMPRESSED_MB` (Default 100 MB) abbrechen mit 413.
 - Test-Snippet: `python -c "import gzip; print(gzip.compress(b'A'*200_000_000)[:5000])" | curl ...`
 
 ### Input-Validierung (über tests/adversarial laufen)
@@ -66,7 +66,7 @@ Pro Audit-Run prüfst du:
 ### Production-Hardening (nur Block H)
 
 - README enthält Reverse-Proxy-Empfehlung mit IP-Allowlist auf `/api/scans`.
-- `SECSCAN_ENCRYPTION_KEY` ist Pflicht beim Start, App refused start ohne (manueller Test).
+- `FM_ENCRYPTION_KEY` ist Pflicht beim Start, App refused start ohne (manueller Test).
 - Container läuft als non-root (Dockerfile prüfen).
 
 ## Workflow

@@ -1,4 +1,4 @@
-"""End-to-End-Smoke fuer `agent/secscan-register.sh` und `agent/secscan-agent.sh`.
+"""End-to-End-Smoke fuer `agent/fathometer-register.sh` und `agent/fathometer-agent.sh`.
 
 Standard: `@pytest.mark.e2e` und skip wenn `RUN_E2E=1` nicht gesetzt ist.
 Die Tests setzen einen ECHTEN HTTP-Server voraus (docker compose up). Im CI
@@ -11,8 +11,8 @@ Manuelle Ausfuehrung:
     # Setup ueber /setup im Browser abschliessen
     # ODER: einen Master-Key direkt in die DB setzen, dann
     export RUN_E2E=1
-    export SECSCAN_URL=http://localhost:8000
-    export SECSCAN_MASTER_KEY=...
+    export FM_URL=http://localhost:8000
+    export FM_MASTER_KEY=...
     .venv/bin/pytest tests/e2e/ -v
 """
 
@@ -36,23 +36,23 @@ pytestmark = pytest.mark.skipif(
 
 
 def _server_url() -> str:
-    return os.environ.get("SECSCAN_URL", "http://localhost:8000")
+    return os.environ.get("FM_URL", "http://localhost:8000")
 
 
 def _master_key() -> str:
-    key = os.environ.get("SECSCAN_MASTER_KEY")
+    key = os.environ.get("FM_MASTER_KEY")
     if not key:
-        pytest.skip("SECSCAN_MASTER_KEY nicht gesetzt — Setup nicht abgeschlossen?")
+        pytest.skip("FM_MASTER_KEY nicht gesetzt — Setup nicht abgeschlossen?")
     return key
 
 
 def test_register_script_returns_server_key(tmp_path: Path) -> None:
-    """`secscan-register.sh` druckt den Server-Key auf stdout."""
+    """`fathometer-register.sh` druckt den Server-Key auf stdout."""
     env = dict(os.environ)
-    env["SECSCAN_MASTER_KEY"] = _master_key()
+    env["FM_MASTER_KEY"] = _master_key()
     result = subprocess.run(
         [
-            str(AGENT_DIR / "secscan-register.sh"),
+            str(AGENT_DIR / "fathometer-register.sh"),
             _server_url(),
             f"e2e-host-{os.getpid()}",
             "24",
@@ -68,17 +68,17 @@ def test_register_script_returns_server_key(tmp_path: Path) -> None:
 
 
 def test_agent_script_pushes_real_fixture(tmp_path: Path) -> None:
-    """`secscan-agent.sh` mit Mock-Trivy laeuft erfolgreich gegen Backend.
+    """`fathometer-agent.sh` mit Mock-Trivy laeuft erfolgreich gegen Backend.
 
     Wir bauen einen Mock-Trivy-Wrapper, der die echte Fixture in `--output`
-    schreibt, und setzen `SECSCAN_TRIVY_PATH` darauf.
+    schreibt, und setzen `FM_TRIVY_PATH` darauf.
     """
     # Schritt 1: registrieren -> Server-Key holen.
     env = dict(os.environ)
-    env["SECSCAN_MASTER_KEY"] = _master_key()
+    env["FM_MASTER_KEY"] = _master_key()
     reg = subprocess.run(
         [
-            str(AGENT_DIR / "secscan-register.sh"),
+            str(AGENT_DIR / "fathometer-register.sh"),
             _server_url(),
             f"e2e-agent-{os.getpid()}",
             "24",
@@ -94,7 +94,7 @@ def test_agent_script_pushes_real_fixture(tmp_path: Path) -> None:
     # Schritt 2: Mock-Trivy-Skript.
     mock_trivy = tmp_path / "mock-trivy.sh"
     fixture_str = str(FIXTURE)
-    # secscan-agent.sh ruft: trivy rootfs <path> --format json ... --output <file>
+    # fathometer-agent.sh ruft: trivy rootfs <path> --format json ... --output <file>
     mock_trivy.write_text(
         "#!/usr/bin/env bash\n"
         "set -e\n"
@@ -111,12 +111,12 @@ def test_agent_script_pushes_real_fixture(tmp_path: Path) -> None:
 
     # Schritt 3: agent laufen lassen.
     env = dict(os.environ)
-    env["SECSCAN_URL"] = _server_url()
-    env["SECSCAN_API_KEY"] = api_key
-    env["SECSCAN_TRIVY_PATH"] = str(mock_trivy)
-    env["SECSCAN_SCAN_PATH"] = str(tmp_path)
+    env["FM_URL"] = _server_url()
+    env["FM_API_KEY"] = api_key
+    env["FM_TRIVY_PATH"] = str(mock_trivy)
+    env["FM_SCAN_PATH"] = str(tmp_path)
     result = subprocess.run(
-        [str(AGENT_DIR / "secscan-agent.sh")],
+        [str(AGENT_DIR / "fathometer-agent.sh")],
         env=env,
         capture_output=True,
         timeout=60,
@@ -170,7 +170,7 @@ def test_gzip_bomb_returns_413_or_401() -> None:
 def test_run_adversarial_script_passes() -> None:
     """Das `run_adversarial.sh` muss erfolgreich (exit 0) durchlaufen."""
     env = dict(os.environ)
-    env["SECSCAN_URL"] = _server_url()
+    env["FM_URL"] = _server_url()
     result = subprocess.run(
         [str(REPO_ROOT / "tests" / "adversarial" / "run_adversarial.sh")],
         env=env,

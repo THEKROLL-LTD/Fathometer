@@ -130,7 +130,7 @@ konnte der Healthcheck nicht durchkommen. SIGTERM.
 die mit dem Worker-Hauptprocess konkurriert. Optionen:
 
 a) **File-basiert**: Worker schreibt alle 10s `mtime` einer Pseudo-Datei
-   (`/tmp/secscan-worker-heartbeat`). Healthcheck checkt File-Age.
+   (`/tmp/fathometer-worker-heartbeat`). Healthcheck checkt File-Age.
    Keine DB-Connection im Hot-Path.
 b) **Read-Replica / Read-Only-Connection** mit kuerzerem
    `statement_timeout`. Komplexer und braucht zweite DB-Connection-
@@ -267,10 +267,10 @@ Pull braucht eigene Engine-Connection-Pool-Konfiguration.
 
 ## TD-008 — Auto-Update ohne End-to-End-Verifikation des Skript-Inhalts
 
-**Was:** ``agent/secscan-agent.sh::auto_update_self`` laedt das neue Skript
+**Was:** ``agent/fathometer-agent.sh::auto_update_self`` laedt das neue Skript
 ueber HTTPS, prueft Shebang + ``AGENT_VERSION="..."`` als Sanity-Marker,
 sendet seit TICKET-001-Review optional einen ``Authorization: Bearer
-$SECSCAN_API_KEY``-Header mit. Aber keine kryptografische Verifikation
+$FM_API_KEY``-Header mit. Aber keine kryptografische Verifikation
 des Skript-Inhalts.
 
 **Warum:** Wenn ein Angreifer den DNS hijacken, eine eigene CA in
@@ -310,7 +310,7 @@ ist, sollte Recovery deterministisch funktionieren.
 
 **Loesung:** ``flock`` um den Auto-Update-Block:
 ```bash
-exec 200>"/var/run/secscan-agent-update.lock"
+exec 200>"/var/run/fathometer-agent-update.lock"
 if ! flock -n 200; then
   log "Auto-Update: another instance is updating, skipping"
   return 0

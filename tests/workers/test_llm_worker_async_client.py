@@ -48,14 +48,14 @@ def _reset_worker_logger_state() -> Iterator[None]:
     """Defensive Logger-State-Reset gegen Test-Pollution.
 
     Vorhergehende Tests (insb. solche die ``configure_logging()`` / einen
-    ``dictConfig``-Lauf triggern) hinterlassen den ``secscan.llm_worker``-
+    ``dictConfig``-Lauf triggern) hinterlassen den ``fathometer.llm_worker``-
     Logger gelegentlich mit ``disabled=True`` oder ``propagate=False``,
     wodurch ``caplog.set_level(...)`` allein nicht ausreicht. Wir setzen
     den Zustand vor jedem Test auf einen bekannten Default und stellen
     nach dem Test den Original-Zustand wieder her, damit andere Tests
     nicht beeinflusst werden.
     """
-    worker_logger = logging.getLogger("secscan.llm_worker")
+    worker_logger = logging.getLogger("fathometer.llm_worker")
     prev_disabled = worker_logger.disabled
     prev_propagate = worker_logger.propagate
     prev_level = worker_logger.level

@@ -1,4 +1,4 @@
-"""Healthcheck-Skript fuer den ``secscan-llm-worker``-Container.
+"""Healthcheck-Skript fuer den ``fathometer-llm-worker``-Container.
 
 Wird vom Compose-Healthcheck-Eintrag und von den k8s-Liveness/Readiness-
 Probes aufgerufen (``python -m app.workers.healthcheck``). Liest die

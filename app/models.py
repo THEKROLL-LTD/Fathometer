@@ -1,4 +1,4 @@
-"""SQLAlchemy-Models fuer secscan.
+"""SQLAlchemy-Models fuer fathometer.
 
 Enthaelt alle 12 Tabellen aus ARCHITECTURE.md §5 sowie die zugehoerigen
 Python-Enums, Constraints, Indizes und die generierte Spalte

@@ -4,7 +4,7 @@ description: Use to verify Block-Abschluss durch Ausführen der Definition-of-Do
 tools: Read, Glob, Grep, Bash
 ---
 
-Du bist der Reviewer für secscan. Deine Aufgabe ist Abnahme, nicht Implementierung.
+Du bist der Reviewer für fathometer. Deine Aufgabe ist Abnahme, nicht Implementierung.
 
 ## Härteste Regel
 

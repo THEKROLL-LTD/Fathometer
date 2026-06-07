@@ -3,16 +3,16 @@
 Block W Phase B.
 
 Prueft:
-- Bei secscan_version="v0.12.0" enthaelt der Output "v0.12.0" und
+- Bei fathometer_version="v0.12.0" enthaelt der Output "v0.12.0" und
   einen Link auf ...releases/tag/v0.12.0.
-- Bei secscan_version="dev" zeigt der Version-Link die Basis-Repo-URL
+- Bei fathometer_version="dev" zeigt der Version-Link die Basis-Repo-URL
   (kein "releases/tag/vdev").
 - GitHub-Icon-Link auf https://github.com/THEKROLL-LTD/fathometer vorhanden.
 - Tagline "thekroll ltd" rechts vorhanden.
 - docs-Link auf README vorhanden.
 
 Render-Pattern:
-  render_template("layout/_footer.html", secscan_version="v0.12.0")
+  render_template("layout/_footer.html", fathometer_version="v0.12.0")
   innerhalb von app.test_request_context("/").
 """
 
@@ -31,7 +31,7 @@ _REPO_BASE_URL = "https://github.com/THEKROLL-LTD/fathometer"
 
 
 def _render_footer(app: Flask, monkeypatch: pytest.MonkeyPatch, version: str) -> str:
-    """Rendert _footer.html mit gegebenem secscan_version."""
+    """Rendert _footer.html mit gegebenem fathometer_version."""
     import app as app_module
 
     monkeypatch.setattr(app_module, "_asset_manifest", _MOCK_MANIFEST)
@@ -39,7 +39,7 @@ def _render_footer(app: Flask, monkeypatch: pytest.MonkeyPatch, version: str) ->
     with app.test_request_context("/"):
         from flask import render_template
 
-        return render_template("layout/_footer.html", secscan_version=version)
+        return render_template("layout/_footer.html", fathometer_version=version)
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ def test_footer_renders_version_string_present(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bei secscan_version='v0.12.0' enthaelt der Footer die Versionsnummer und Releases-URL.
+    """Bei fathometer_version='v0.12.0' enthaelt der Footer die Versionsnummer und Releases-URL.
 
     HINWEIS: Die Template-Implementierung hat einen bekannten Bug:
     das Template baut die URL als 'releases/tag/v' ~ _ver, wobei _ver='v0.12.0' ist.
@@ -71,7 +71,7 @@ def test_footer_renders_dev_fallback_link(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bei secscan_version='dev' zeigt der Link die Basis-Repo-URL, kein releases/tag/vdev."""
+    """Bei fathometer_version='dev' zeigt der Link die Basis-Repo-URL, kein releases/tag/vdev."""
     html = _render_footer(app, monkeypatch, "dev")
 
     # "dev"-Version soll keinen Releases-URL generieren
@@ -138,7 +138,7 @@ def test_footer_release_url_contains_version_without_double_v(
 ) -> None:
     """Releases-URL hat kein doppeltes 'v' (z.B. nicht releases/tag/vv0.12.0).
 
-    secscan_version='v0.12.0' -> URL endet auf '/releases/tag/v0.12.0'
+    fathometer_version='v0.12.0' -> URL endet auf '/releases/tag/v0.12.0'
     (kein '/releases/tag/vv0.12.0').
 
     IMPLEMENTIERUNGS-BUG ERKANNT: _footer.html baut die URL als
@@ -146,15 +146,15 @@ def test_footer_release_url_contains_version_without_double_v(
     Context-Processor), entsteht 'releases/tag/vv0.12.0'.
     Loesungsoptionen:
     a) Template: 'releases/tag/' ~ _ver (ohne hardcoded 'v').
-    b) Context-Processor: secscan_version ohne fuehrendes 'v' liefern,
-       Template rendert 'v{{ secscan_version }}' fuer Display, URL baut
-       'releases/tag/v{{ secscan_version }}'.
+    b) Context-Processor: fathometer_version ohne fuehrendes 'v' liefern,
+       Template rendert 'v{{ fathometer_version }}' fuer Display, URL baut
+       'releases/tag/v{{ fathometer_version }}'.
     """
     html = _render_footer(app, monkeypatch, "v0.12.0")
 
     assert "releases/tag/vv" not in html, (
         "BUG: Releases-URL enthaelt doppeltes 'v' (releases/tag/vv...) — "
-        "Bug im _footer.html: Template haengt 'v' vor secscan_version='v0.12.0' -> 'vv0.12.0'. "
+        "Bug im _footer.html: Template haengt 'v' vor fathometer_version='v0.12.0' -> 'vv0.12.0'. "
         "Fix: Template-Zeile 27: 'releases/tag/' ~ _ver (ohne hartekodietes 'v')."
     )
     assert "releases/tag/v0.12.0" in html, (

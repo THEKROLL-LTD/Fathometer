@@ -132,7 +132,7 @@ def test_dashboard_old_welcome_partial_not_used(db_app: Flask) -> None:
     body = resp.get_data(as_text=True)
 
     # Der spezifische Welcome-Card-Header darf nicht mehr auftauchen.
-    assert "Willkommen bei secscan" not in body, (
+    assert "Willkommen bei fathometer" not in body, (
         "Altes `_pane/welcome.html`-Partial wieder im Pane gelandet — "
         "ADR-0017 verlangt ein einziges Pane-Partial."
     )

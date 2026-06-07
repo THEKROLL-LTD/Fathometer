@@ -158,7 +158,7 @@
                   <div class="s-overflow__item" style="cursor: default; display: block;">
                     <div style="color: var(--text-primary);">Rotate key</div>
                     <div style="color: var(--text-tertiary); font-size: 11px; margin-top: 4px;">
-                      Via <code>secscan-register.sh</code> on the host.
+                      Re-run the installer on the host.
                     </div>
                   </div>
                   <form method="post"
@@ -199,8 +199,8 @@
   {% else %}
     <div class="s-empty" data-test="servers-empty">
       <b>No servers registered yet.</b><br />
-      Register on the target host with <code>agent/secscan-register.sh</code> using
-      the current master key.
+      Run the installer on the target host as root — it asks for the current
+      master key interactively (see “Add a server” below).
     </div>
   {% endif %}
 </section>
@@ -210,14 +210,13 @@
     <h2 class="s-section__label">Add a server</h2>
   </div>
   <p class="s-section__hint" style="margin-top: 0;">
-    Servers register themselves via <code>secscan-register.sh</code> on the host
-    — with the current master key. No UI onboarding needed.
+    Run the installer on the target host as root. It installs Trivy and the
+    agent, registers the host with the master key (asked interactively), and
+    sets up a daily scan timer. No UI onboarding needed.
   </p>
-  <pre class="s-log" style="max-height: none; margin-top: 14px;"><code>SECSCAN_MASTER_KEY="&lt;your-master-key&gt;" \
-  ./secscan-register.sh https://secscan.example.com prod-web-01 24 \
-  | install -m 600 /dev/stdin /etc/secscan/api-key</code></pre>
+  <pre class="s-log" style="max-height: none; margin-top: 14px;"><code>sudo bash &lt;(curl -fsSL {{ external_base_url }}/install.sh)</code></pre>
   <p class="s-section__hint">
-    The server key is shown only once. If lost, rotate it again via
-    <code>secscan-register.sh</code>.
+    The server key never leaves the host. To rotate a host’s key, just re-run
+    the installer on that host.
   </p>
 </section>

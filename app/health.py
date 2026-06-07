@@ -41,7 +41,7 @@ def _db_ping(database_url: str) -> bool:
 @bp.get("/healthz")
 def healthz() -> tuple[Response, int]:
     """Health-Check mit DB-Ping."""
-    database_url: str = current_app.config["SECSCAN_DATABASE_URL"]
+    database_url: str = current_app.config["FM_DATABASE_URL"]
     try:
         _db_ping(database_url)
     except SQLAlchemyError as exc:

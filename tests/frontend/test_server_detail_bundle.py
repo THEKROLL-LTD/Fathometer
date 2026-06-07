@@ -132,7 +132,7 @@ def test_manifest_resolves_app_css_to_hashed_filename(
 
     mock_manifest = {"css/app.css": "css/app.deadbeef.css"}
     monkeypatch.setattr(app_module, "_asset_manifest", mock_manifest)
-    monkeypatch.delenv("SECSCAN_ENV", raising=False)
+    monkeypatch.delenv("FM_ENV", raising=False)
 
     with app.test_request_context("/"):
         result = app_module._asset_url("css/app.css")

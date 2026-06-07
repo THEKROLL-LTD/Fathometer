@@ -10,7 +10,7 @@ Vier Operationen:
 
 TTL und LRU-Schwelle werden aus :func:`app.config.load_settings()` gelesen
 (``llm_cache_ttl_days`` / ``llm_cache_max_rows``). Beide Werte koennen pro
-Deploy ueber ``SECSCAN_LLM_CACHE_*``-Env-Vars ueberschrieben werden.
+Deploy ueber ``FM_LLM_CACHE_*``-Env-Vars ueberschrieben werden.
 """
 
 from __future__ import annotations

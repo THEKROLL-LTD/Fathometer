@@ -10,6 +10,6 @@ test:
 
 # Block N (ADR-0021, Task #18) — Installer-E2E in Docker.
 # Voraussetzung: Docker-Daemon laeuft, ein Backend ist erreichbar unter
-# `SECSCAN_URL` (Default `http://host.docker.internal:8000`).
+# `FM_URL` (Default `http://host.docker.internal:8000`).
 test-installer:
 	bash tests/integration/installer/run.sh

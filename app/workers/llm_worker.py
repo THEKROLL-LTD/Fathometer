@@ -77,7 +77,7 @@ from app.services.pass2_enqueue import Pass2Trigger, enqueue_pass2_for_server
 from app.settings_service import ensure_settings_row
 from app.workers import feed_enrichment
 
-log = logging.getLogger("secscan.llm_worker")
+log = logging.getLogger("fathometer.llm_worker")
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ log = logging.getLogger("secscan.llm_worker")
 
 # Worker-Identitaet bleibt konstant ueber den Prozess-Lifetime; alles
 # settings-abhaengige holen wir lazy ueber Helper damit der Modul-Import
-# nicht an einer fehlenden Env-Var (SECSCAN_ENCRYPTION_KEY) explodiert.
+# nicht an einer fehlenden Env-Var (FM_ENCRYPTION_KEY) explodiert.
 WORKER_ID: str = f"{socket.gethostname()}:{os.getpid()}"
 MAX_ATTEMPTS: int = 3
 HEARTBEAT_INTERVAL_SEC: float = 10.0
@@ -244,7 +244,7 @@ def _compute_pool_sizing(concurrency: int) -> tuple[int, int]:
 
 
 def _get_session_factory() -> sessionmaker[Session]:
-    """Lazy-baut die Worker-Session-Factory aus ``SECSCAN_DATABASE_URL``.
+    """Lazy-baut die Worker-Session-Factory aus ``FM_DATABASE_URL``.
 
     Wir wollen genau eine Engine im Worker-Prozess (Connection-Pool wieder-
     verwenden), bauen sie aber lazy damit Tests die Factory per

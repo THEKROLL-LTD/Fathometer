@@ -1,0 +1,539 @@
+/* Fathometer — /audit page styles. Mirrors the /findings visual system
+   (findings.css) one-for-one: serif header, mono filter-bar, hairline tables,
+   square outline pills, cyan reserved as the single signal. Scoped under
+   .audit so nothing leaks. */
+
+.audit {
+  max-width: 1440px;
+  padding: 56px 72px 96px;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   1) Header strip  (identical chrome to .findings__header)
+   ────────────────────────────────────────────────────────────── */
+.audit__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 48px;
+  align-items: end;
+  padding-bottom: 28px;
+  border-bottom: var(--hairline);
+}
+.audit__title {
+  font-family: var(--font-display);
+  font-size: 64px;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  color: var(--text-primary);
+  margin: 0;
+}
+.audit__header-right {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  padding-bottom: 12px;
+}
+.audit__counter {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.audit__counter b {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.audit__counter .sep { color: var(--border-visible); margin: 0 4px; }
+
+/* CSV export — outlined cyan, mirrors ff-submit / sd-ai-button */
+.audit__export {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  height: 34px;
+  padding: 0 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-hover) var(--ease-drift),
+              letter-spacing var(--dur-hover) var(--ease-drift),
+              gap var(--dur-hover) var(--ease-drift);
+}
+.audit__export:hover { background: rgba(0,229,255,0.08); letter-spacing: 0.18em; gap: 14px; }
+.audit__export:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/* ──────────────────────────────────────────────────────────────
+   2) Activity strip — replaces the empty chart box.
+      A 48-bucket (last 24h) event-volume histogram in the heartbeat
+      vocabulary. Functional: it shows where the load is.
+   ────────────────────────────────────────────────────────────── */
+.audit__activity {
+  margin-top: 28px;
+  border: var(--hairline);
+  padding: 18px 22px 16px;
+  background: var(--surface-raised);
+}
+.audit__activity-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.audit__activity-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.audit__activity-label::before {
+  content: "> ";
+  color: var(--accent);
+}
+.audit__activity-total {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.audit__activity-total b { color: var(--text-primary); font-weight: 700; }
+
+.audit__bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 56px;
+}
+.audit__bar {
+  flex: 1;
+  min-width: 2px;
+  background: var(--border-visible);
+  transition: background var(--dur-hover) var(--ease-drift),
+              filter var(--dur-hover) var(--ease-drift),
+              transform var(--dur-hover) var(--ease-drift);
+  transform-origin: bottom;
+}
+.audit__bar:hover { filter: brightness(1.4); transform: scaleY(1.04); }
+.audit__bar--peak { background: var(--accent); }
+.audit__bars-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-ghost);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   3) Filter-bar  (mirrors .findings__filter-bar exactly)
+   ────────────────────────────────────────────────────────────── */
+.audit__filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 18px;
+  margin-top: 24px;
+  padding-bottom: 18px;
+  border-bottom: var(--hairline);
+}
+.audit__field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.audit__field-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.audit__filter-bar .ff-input,
+.audit__filter-bar .ff-select {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  padding: 8px 12px;
+  outline: none;
+  height: 34px;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color var(--dur-hover) var(--ease-drift),
+              background var(--dur-hover) var(--ease-drift);
+}
+.audit__filter-bar .ff-input::placeholder { color: var(--text-tertiary); }
+.audit__filter-bar .ff-input:hover,
+.audit__filter-bar .ff-select:hover { border-color: var(--border-visible); }
+.audit__filter-bar .ff-input:focus,
+.audit__filter-bar .ff-select:focus { border-color: var(--accent); outline: 1px solid var(--accent); outline-offset: -1px; }
+
+.audit__filter-bar .ff-date { width: 150px; cursor: text; }
+.audit__filter-bar .ff-actor  { width: 200px; }
+.audit__filter-bar .ff-server { width: 170px; }
+
+/* Tame the native date-picker chrome for the dark theme */
+.audit__filter-bar .ff-date::-webkit-calendar-picker-indicator {
+  filter: invert(0.55);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--dur-hover) var(--ease-drift);
+}
+.audit__filter-bar .ff-date:hover::-webkit-calendar-picker-indicator { opacity: 1; }
+.audit__filter-bar .ff-date::-webkit-datetime-edit { color: var(--text-secondary); }
+.audit__filter-bar .ff-date:focus::-webkit-datetime-edit { color: var(--text-primary); }
+
+.audit__filter-bar .ff-select {
+  padding-right: 30px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-tertiary) 50%),
+    linear-gradient(135deg, var(--text-tertiary) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+  min-width: 150px;
+}
+.audit__filter-bar .ff-select option { background: var(--surface-elevated); color: var(--text-primary); }
+
+.audit__filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+}
+.audit__filter-bar .ff-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  height: 34px;
+  padding: 0 16px;
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-drift),
+              letter-spacing var(--dur-hover) var(--ease-drift),
+              gap var(--dur-hover) var(--ease-drift);
+}
+.audit__filter-bar .ff-submit:hover { background: rgba(0,229,255,0.08); letter-spacing: 0.18em; gap: 14px; }
+.audit__filter-bar .ff-submit:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+.audit__filter-bar .ff-reset {
+  background: none;
+  border: 0;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 0 4px;
+  height: 34px;
+  transition: color var(--dur-hover) var(--ease-drift);
+}
+.audit__filter-bar .ff-reset:hover { color: var(--text-primary); }
+.audit__filter-bar .ff-reset:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/* Active filter chips — reuse global .ff-chip from findings.css */
+.audit__filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 0 0;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   4) Log table
+   ────────────────────────────────────────────────────────────── */
+.audit__log { margin-top: 26px; }
+
+/* 5-col layout: time · actor · action · target · comment/metadata(+chev).
+   Sized to fit inside the narrow main column (the 480px sidebar leaves the
+   main area ~850px even on wide screens) — no horizontal overflow. */
+.audit-head,
+.audit-row__summary {
+  display: grid;
+  grid-template-columns: 140px 86px minmax(150px, 1fr) 140px minmax(170px, 1.5fr) 16px;
+  gap: 18px;
+  align-items: center;
+}
+
+.audit-head {
+  padding: 12px 16px 10px;
+  border-top: var(--hairline);
+  border-bottom: var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  background: rgba(255,255,255,0.01);
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+
+.audit-row { border-bottom: var(--hairline); }
+.audit-row[open] { background: var(--surface-raised); }
+.audit-row__summary {
+  list-style: none;
+  padding: 13px 16px;
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-drift);
+}
+.audit-row__summary::-webkit-details-marker { display: none; }
+.audit-row__summary:hover { background: var(--surface-raised); }
+.audit-row[open] .audit-row__summary:hover { background: var(--surface-hover); }
+.audit-row__summary:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* Alert rows carry the single cyan signal as a left-bar */
+.audit-row { position: relative; }
+.audit-row--alert > .audit-row__summary { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Time column — relative over absolute, mono */
+.audit-row__time { min-width: 0; }
+.audit-row__time-rel {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+.audit-row__time-abs {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+  margin-top: 3px;
+}
+
+.audit-row__actor {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.audit-row__actor--human { color: var(--text-primary); }
+
+/* Action pill — square outline tag, mono. Cyan reserved for `alert`. */
+.audit-pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.audit-pill--notice { border-color: var(--border-visible); color: var(--text-primary); }
+.audit-pill--alert  { border-color: var(--accent); color: var(--accent); }
+
+.audit-row__target {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.audit-row__target b { color: var(--text-primary); font-weight: 400; }
+
+/* Comment / metadata cell */
+.audit-row__meta-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.audit-row__comment {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.audit-row__meta-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.audit-row__meta-toggle .tri {
+  display: inline-block;
+  transition: transform var(--dur-hover) var(--ease-drift), color var(--dur-hover) var(--ease-drift);
+}
+.audit-row:hover .audit-row__meta-toggle { color: var(--text-secondary); }
+.audit-row[open] .audit-row__meta-toggle { color: var(--accent); }
+.audit-row[open] .audit-row__meta-toggle .tri { transform: rotate(90deg); }
+
+.audit-row__chev {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-align: center;
+  transition: transform var(--dur-hover) var(--ease-drift), color var(--dur-hover) var(--ease-drift);
+}
+.audit-row[open] .audit-row__chev { transform: rotate(90deg); color: var(--accent); }
+
+/* Expanded metadata body */
+.audit-row__body {
+  padding: 4px 16px 20px 158px;
+  animation: sd-flyout-in 240ms var(--ease-materialize);
+}
+.audit-row__body-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 0 0 12px;
+}
+.audit-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border-subtle);
+  border: var(--hairline);
+  max-width: 760px;
+}
+.audit-meta-kv {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 14px;
+  padding: 9px 14px;
+  background: var(--surface-base);
+}
+.audit-meta-kv__k {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.audit-meta-kv__v {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.audit-meta-kv__v--accent { color: var(--accent); }
+
+.audit-row__raw {
+  margin-top: 14px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.audit-row__raw span { display: inline-flex; gap: 7px; }
+.audit-row__raw b { color: var(--text-secondary); font-weight: 400; }
+
+/* ──────────────────────────────────────────────────────────────
+   5) Pager  (mirrors bucket-card__footer)
+   ────────────────────────────────────────────────────────────── */
+.audit__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 16px 0;
+  margin-top: 8px;
+  border-top: var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.audit__pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.audit__pager button {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 8px;
+  background: none;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-drift), border-color var(--dur-hover) var(--ease-drift);
+}
+.audit__pager button:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-visible); }
+.audit__pager button:disabled { color: var(--text-ghost); cursor: not-allowed; }
+.audit__pager button.is-current { color: var(--accent); border-color: var(--accent); }
+.audit__pager button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.audit__pager .gap { color: var(--text-ghost); padding: 0 2px; }
+
+/* ──────────────────────────────────────────────────────────────
+   6) Narrow-viewport collapse
+   ────────────────────────────────────────────────────────────── */
+@media (max-width: 1280px) {
+  .audit { padding: 40px 32px 80px; }
+  .audit__title { font-size: 48px; }
+  .audit-head,
+  .audit-row__summary {
+    grid-template-columns: 128px 78px minmax(130px, 1fr) 124px minmax(150px, 1.4fr) 16px;
+    gap: 12px;
+  }
+  .audit-row__body { padding-left: 130px; }
+}
+
+@media (max-width: 980px) {
+  .audit__title { font-size: 40px; }
+  .audit-head { display: none; }
+  .audit-row__summary {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "time chev"
+      "action target"
+      "metacell metacell";
+    gap: 10px 16px;
+  }
+  .audit-row__time   { grid-area: time; }
+  .audit-row__actor  { display: none; }
+  .audit-row__action { grid-area: action; }
+  .audit-row__target { grid-area: target; text-align: right; }
+  .audit-row__meta-cell { grid-area: metacell; }
+  .audit-row__chev   { grid-area: chev; }
+  .audit-meta-grid { grid-template-columns: 1fr; }
+  .audit-row__body { padding-left: 16px; }
+}

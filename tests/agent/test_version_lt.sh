@@ -3,9 +3,9 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-export SECSCAN_AGENT_SOURCE_ONLY=1
-# shellcheck source=agent/secscan-agent.sh
-. "$repo_root/agent/secscan-agent.sh"
+export FM_AGENT_SOURCE_ONLY=1
+# shellcheck source=agent/fathometer-agent.sh
+. "$repo_root/agent/fathometer-agent.sh"
 
 assert_true() {
   if ! version_lt "$1" "$2"; then

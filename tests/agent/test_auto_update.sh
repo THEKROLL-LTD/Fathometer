@@ -8,15 +8,15 @@ trap 'rm -rf "$tmpdir"' EXIT
 make_runner() {
   local dir="$1"
   mkdir -p "$dir"
-  cat >"$dir/secscan-agent.sh" <<SH
+  cat >"$dir/fathometer-agent.sh" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
-export SECSCAN_AGENT_SOURCE_ONLY=1
-. "$repo_root/agent/secscan-agent.sh"
+export FM_AGENT_SOURCE_ONLY=1
+. "$repo_root/agent/fathometer-agent.sh"
 auto_update_self "\$@"
 printf 'NO_UPDATE\\n'
 SH
-  chmod +x "$dir/secscan-agent.sh"
+  chmod +x "$dir/fathometer-agent.sh"
   cat >"$dir/lib_host_state.sh" <<'SH'
 #!/usr/bin/env bash
 readonly LIB_HOST_STATE_VERSION="0.3.1"
@@ -83,7 +83,7 @@ case "${AUTO_UPDATE_SCENARIO:-same}" in
       cat >"$out" <<'AGENT'
 #!/usr/bin/env bash
 readonly AGENT_VERSION="0.3.2"
-if [[ "${SECSCAN_AGENT_UPDATED:-0}" = "1" ]]; then
+if [[ "${FM_AGENT_UPDATED:-0}" = "1" ]]; then
   printf 'UPDATED\n'
 else
   printf 'MISSING_GUARD\n'
@@ -102,7 +102,7 @@ SH
   cat >"$tmpdir/bin/mv" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${AUTO_UPDATE_SCENARIO:-}" = "agent_replace_fail" && "${2:-}" == */secscan-agent.sh ]]; then
+if [[ "${AUTO_UPDATE_SCENARIO:-}" = "agent_replace_fail" && "${2:-}" == */fathometer-agent.sh ]]; then
   exit 1
 fi
 real_mv=""
@@ -120,19 +120,19 @@ run_case() {
   local dir="$tmpdir/$scenario"
   make_runner "$dir"
   AUTO_UPDATE_SCENARIO="$scenario" \
-    SECSCAN_URL="https://secscan.example.test" \
+    FM_URL="https://fathometer.example.test" \
     PATH="$tmpdir/bin:$PATH" \
-    bash "$dir/secscan-agent.sh"
+    bash "$dir/fathometer-agent.sh"
 }
 
 make_stubs
 
-out="$(SECSCAN_AGENT_UPDATED=1 run_case happy)"
+out="$(FM_AGENT_UPDATED=1 run_case happy)"
 [[ "$out" = "NO_UPDATE" ]]
 
 dir="$tmpdir/no_url"
 make_runner "$dir"
-out="$(AUTO_UPDATE_SCENARIO=happy PATH="$tmpdir/bin:$PATH" bash "$dir/secscan-agent.sh")"
+out="$(AUTO_UPDATE_SCENARIO=happy PATH="$tmpdir/bin:$PATH" bash "$dir/fathometer-agent.sh")"
 [[ "$out" = "NO_UPDATE" ]]
 
 for scenario in http_error same older download_fail no_shebang wrong_version; do
@@ -142,23 +142,23 @@ done
 
 dir="$tmpdir/happy_direct"
 make_runner "$dir"
-out="$(AUTO_UPDATE_SCENARIO=happy SECSCAN_URL="https://secscan.example.test" PATH="$tmpdir/bin:$PATH" bash "$dir/secscan-agent.sh")"
+out="$(AUTO_UPDATE_SCENARIO=happy FM_URL="https://fathometer.example.test" PATH="$tmpdir/bin:$PATH" bash "$dir/fathometer-agent.sh")"
 [[ "$out" = "UPDATED" ]]
-[[ -f "$dir/secscan-agent.sh.bak" ]]
+[[ -f "$dir/fathometer-agent.sh.bak" ]]
 [[ -f "$dir/lib_host_state.sh.bak" ]]
-grep -q 'AGENT_VERSION="0.3.2"' "$dir/secscan-agent.sh"
+grep -q 'AGENT_VERSION="0.3.2"' "$dir/fathometer-agent.sh"
 
 dir="$tmpdir/helper_fail_direct"
 make_runner "$dir"
-out="$(AUTO_UPDATE_SCENARIO=helper_fail SECSCAN_URL="https://secscan.example.test" PATH="$tmpdir/bin:$PATH" bash "$dir/secscan-agent.sh")"
+out="$(AUTO_UPDATE_SCENARIO=helper_fail FM_URL="https://fathometer.example.test" PATH="$tmpdir/bin:$PATH" bash "$dir/fathometer-agent.sh")"
 [[ "$out" = "UPDATED" ]]
-[[ -f "$dir/secscan-agent.sh.bak" ]]
+[[ -f "$dir/fathometer-agent.sh.bak" ]]
 
 dir="$tmpdir/agent_replace_fail_direct"
 make_runner "$dir"
-out="$(AUTO_UPDATE_SCENARIO=agent_replace_fail SECSCAN_URL="https://secscan.example.test" PATH="$tmpdir/bin:$PATH" bash "$dir/secscan-agent.sh")"
+out="$(AUTO_UPDATE_SCENARIO=agent_replace_fail FM_URL="https://fathometer.example.test" PATH="$tmpdir/bin:$PATH" bash "$dir/fathometer-agent.sh")"
 [[ "$out" = "NO_UPDATE" ]]
-[[ -f "$dir/secscan-agent.sh.bak" ]]
+[[ -f "$dir/fathometer-agent.sh.bak" ]]
 [[ -f "$dir/lib_host_state.sh.bak" ]]
 
 printf 'auto_update tests passed\n'

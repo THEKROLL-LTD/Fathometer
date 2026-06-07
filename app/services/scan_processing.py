@@ -45,7 +45,7 @@ from app.services.pass2_enqueue import enqueue_pass2_for_server
 from app.services.risk_engine import RiskBand, pretriage
 from app.settings_service import get_settings_row
 
-log = logging.getLogger("secscan.scan_processing")
+log = logging.getLogger("fathometer.scan_processing")
 
 # §10: JSON-Parse-Tiefe maximal 32 Ebenen (identisch zu app/api/scans.py).
 _MAX_JSON_DEPTH = 32
@@ -368,7 +368,7 @@ def _get_settings() -> Settings:
         from flask import current_app
 
         if current_app:
-            return cast(Settings, current_app.config["SECSCAN_SETTINGS"])
+            return cast(Settings, current_app.config["FM_SETTINGS"])
     except RuntimeError:
         pass
     return load_settings()

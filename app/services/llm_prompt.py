@@ -126,7 +126,7 @@ def build_system_prompt(server: Server, findings: Sequence[Finding], tags: Seque
     5. Bewertungs-Hinweise (KEV/EPSS/AttackVector priorisieren).
     """
     intro = (
-        "You are a security-analyst assistant for secscan, a triage "
+        "You are a security-analyst assistant for fathometer, a triage "
         "dashboard for Trivy filesystem scans. Answer in English, "
         "concise and concrete. State recommendations clearly, but note "
         "explicitly that they are an estimate, not a guarantee."

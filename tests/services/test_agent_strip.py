@@ -141,7 +141,7 @@ def test_agent_script_uses_correct_jq_filter() -> None:
     Falls jemand das Skript refactored und versehentlich `.Vulnerabilities`
     statt `.Packages` strippt, ist der CI-Lauf rot.
     """
-    agent_sh = Path(__file__).parent.parent.parent / "agent" / "secscan-agent.sh"
+    agent_sh = Path(__file__).parent.parent.parent / "agent" / "fathometer-agent.sh"
     body = agent_sh.read_text()
     assert "del(.Results[].Packages)" in body, (
         "Agent-Skript muss den Packages-Strip-Filter enthalten."

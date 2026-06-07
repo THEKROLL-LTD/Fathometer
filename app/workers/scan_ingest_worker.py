@@ -75,7 +75,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-log = logging.getLogger("secscan.scan_ingest_worker")
+log = logging.getLogger("fathometer.scan_ingest_worker")
 
 # ---------------------------------------------------------------------------
 # Modul-Konstanten

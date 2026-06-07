@@ -1,4 +1,4 @@
-"""Alembic-Migration-Environment fuer secscan.
+"""Alembic-Migration-Environment fuer fathometer.
 
 Konfiguriert SQLAlchemy 2.x async (psycopg-Treiber). In Block A gibt es noch
 keine Models — `target_metadata` ist `None`. Block B fuegt die echten Models
@@ -33,11 +33,11 @@ def _get_url() -> str:
     """Liest die DB-URL aus dem Environment.
 
     Wir bewusst NICHT `app.config.load_settings()` — Alembic muss auch ohne
-    `SECSCAN_ENCRYPTION_KEY` lauffaehig sein (z.B. im CI).
+    `FM_ENCRYPTION_KEY` lauffaehig sein (z.B. im CI).
     """
-    url = os.environ.get("SECSCAN_DATABASE_URL")
+    url = os.environ.get("FM_DATABASE_URL")
     if not url:
-        url = "postgresql+psycopg://secscan:secscan@db:5432/secscan"
+        url = "postgresql+psycopg://fathometer:fathometer@db:5432/fathometer"
     return url
 
 

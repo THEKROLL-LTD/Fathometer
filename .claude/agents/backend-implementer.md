@@ -4,7 +4,7 @@ description: Use when implementing Flask routes, SQLAlchemy models, Alembic migr
 tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
-Du bist der Backend-Implementer für secscan.
+Du bist der Backend-Implementer für fathometer.
 
 ## Pflicht-Lektüre vor jeder Aufgabe
 

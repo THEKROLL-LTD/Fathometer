@@ -1,7 +1,7 @@
 """Block N (ADR-0021) — Plausibilitaets-Checks fuer die Agent/Trivy-Konstanten.
 
 Die Konstanten leben als `ClassVar` auf `app.config.Settings` (kein
-`SECSCAN_*`-Env-Override), Begruendung siehe ADR-0021 (Selbstabschaltungs-
+`FM_*`-Env-Override), Begruendung siehe ADR-0021 (Selbstabschaltungs-
 Falle vermeiden). Tests stellen sicher, dass die Werte zueinander passen,
 nicht versehentlich vertauscht wurden (z.B. `MIN > CURRENT`), und die
 URL-Template-Platzhalter unverkennbar sind.

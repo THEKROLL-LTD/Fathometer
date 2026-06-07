@@ -14,4 +14,4 @@ RUN dnf install -y --setopt=install_weak_deps=False \
     && dnf clean all
 
 WORKDIR /tmp/installer
-CMD ["/bin/bash", "-c", "curl -fsSL ${SECSCAN_URL}/install.sh | bash"]
+CMD ["/bin/bash", "-c", "curl -fsSL ${FM_URL}/install.sh | bash"]

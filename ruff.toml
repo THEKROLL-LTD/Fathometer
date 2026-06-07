@@ -1,4 +1,4 @@
-# Ruff-Konfiguration für secscan
+# Ruff-Konfiguration für fathometer
 # Siehe CLAUDE.md: ruff check . && ruff format --check . muss grün sein.
 
 line-length = 100

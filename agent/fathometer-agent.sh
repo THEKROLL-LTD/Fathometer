@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# secscan-agent.sh
+# fathometer-agent.sh
 # ----------------
 # Collects OS/kernel info, runs `trivy rootfs /` and uploads the result
-# as a wrapper envelope to a secscan backend.
+# as a wrapper envelope to a fathometer backend.
 #
 # Subcommand: `rootfs` (NOT `fs`). Rationale:
 #   - `trivy fs <dir>` is meant for source repos / vendored deps and on a
@@ -35,7 +35,7 @@
 #
 # TICKET-001 — v0.3.1 changes:
 #   - Auto-update check before every scan. The agent downloads a newer
-#     `secscan-agent.sh` from the backend, keeps a `.bak` copy for operator
+#     `fathometer-agent.sh` from the backend, keeps a `.bak` copy for operator
 #     rollback, then re-execs itself once.
 #   - Adds top-level `trivy_db` metadata from `trivy version --format json`.
 #
@@ -43,13 +43,13 @@
 #               (https://aquasecurity.github.io/trivy/)
 #
 # Required env:
-#   SECSCAN_URL       e.g. https://secscan.example.com
-#   SECSCAN_API_KEY   server key produced by ./secscan-register.sh
+#   FM_URL       e.g. https://fathometer.example.com
+#   FM_API_KEY   server key produced by ./fathometer-register.sh
 #
 # Optional env:
-#   SECSCAN_TRIVY_PATH    path to the trivy binary (default: from $PATH)
-#   SECSCAN_SCAN_PATH     what to scan (default: /)
-#   SECSCAN_TIMEOUT_SEC   upload timeout (default: 60)
+#   FM_TRIVY_PATH    path to the trivy binary (default: from $PATH)
+#   FM_SCAN_PATH     what to scan (default: /)
+#   FM_TIMEOUT_SEC   upload timeout (default: 60)
 #
 # Run as root, typically via cron or a systemd timer.
 #
@@ -67,13 +67,13 @@
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.4.0"
+readonly AGENT_VERSION="0.5.0"
 readonly REQUIRED_LIB_HOST_STATE_VERSION="0.3.1"
-readonly TRIVY_BIN="${SECSCAN_TRIVY_PATH:-trivy}"
-readonly SCAN_PATH="${SECSCAN_SCAN_PATH:-/}"
-readonly TIMEOUT_SEC="${SECSCAN_TIMEOUT_SEC:-60}"
+readonly TRIVY_BIN="${FM_TRIVY_PATH:-trivy}"
+readonly SCAN_PATH="${FM_SCAN_PATH:-/}"
+readonly TIMEOUT_SEC="${FM_TIMEOUT_SEC:-60}"
 
-log() { printf '[secscan-agent] %s\n' "$*" >&2; }
+log() { printf '[fathometer-agent] %s\n' "$*" >&2; }
 
 version_lt() {
   local semver_re='^([0-9]+)\.([0-9]+)\.([0-9]+)(-rc\.?([0-9]+))?([.+-][A-Za-z0-9._-]+)?$'
@@ -125,15 +125,15 @@ resolve_self_path() {
 }
 
 auto_update_self() {
-  if [[ "${SECSCAN_AGENT_UPDATED:-0}" = "1" ]]; then
+  if [[ "${FM_AGENT_UPDATED:-0}" = "1" ]]; then
     return 0
   fi
-  if [[ -z "${SECSCAN_URL:-}" ]]; then
+  if [[ -z "${FM_URL:-}" ]]; then
     return 0
   fi
 
   local ver_json server_version
-  ver_json="$(curl -fsS --max-time 5 "${SECSCAN_URL%/}/agent/version" 2>/dev/null || true)"
+  ver_json="$(curl -fsS --max-time 5 "${FM_URL%/}/agent/version" 2>/dev/null || true)"
   if [[ -z "$ver_json" ]]; then
     log "Auto-Update: server unreachable, skipping"
     return 0
@@ -154,7 +154,7 @@ auto_update_self() {
   self_path="$(resolve_self_path)"
   self_dir="$(dirname "$self_path")"
   lib_path="$self_dir/lib_host_state.sh"
-  tmpfile="$(mktemp -t secscan-agent.XXXXXX.sh)"
+  tmpfile="$(mktemp -t fathometer-agent.XXXXXX.sh)"
 
   # Authorization-Header beim Download: das `/agent/files/...`-Endpoint ist
   # heute by-design un-authenticated (Bootstrap-Installer-Konvention), wir
@@ -162,11 +162,11 @@ auto_update_self() {
   # Header und kann ihn fuer Audit/Rate-Limits nutzen; spaetere Endpoint-
   # Hardening (Auth-Pflicht) bricht den Agent nicht.
   local auth_header=()
-  if [[ -n "${SECSCAN_API_KEY:-}" ]]; then
-    auth_header=(-H "Authorization: Bearer ${SECSCAN_API_KEY}")
+  if [[ -n "${FM_API_KEY:-}" ]]; then
+    auth_header=(-H "Authorization: Bearer ${FM_API_KEY}")
   fi
 
-  if ! curl -fsS --max-time 30 "${auth_header[@]+"${auth_header[@]}"}" -o "$tmpfile" "${SECSCAN_URL%/}/agent/files/secscan-agent.sh"; then
+  if ! curl -fsS --max-time 30 "${auth_header[@]+"${auth_header[@]}"}" -o "$tmpfile" "${FM_URL%/}/agent/files/fathometer-agent.sh"; then
     log "Auto-Update: download failed, keeping current version"
     rm -f "$tmpfile"
     return 0
@@ -185,7 +185,7 @@ auto_update_self() {
   local lib_tmp=""
   if [[ -f "$lib_path" ]]; then
     lib_tmp="$(mktemp -t lib_host_state.XXXXXX.sh)"
-    if ! curl -fsS --max-time 30 "${auth_header[@]+"${auth_header[@]}"}" -o "$lib_tmp" "${SECSCAN_URL%/}/agent/files/lib_host_state.sh" 2>/dev/null; then
+    if ! curl -fsS --max-time 30 "${auth_header[@]+"${auth_header[@]}"}" -o "$lib_tmp" "${FM_URL%/}/agent/files/lib_host_state.sh" 2>/dev/null; then
       log "Auto-Update: helper download failed, skipping helper replace"
       rm -f "$lib_tmp"
       lib_tmp=""
@@ -214,7 +214,7 @@ auto_update_self() {
   fi
 
   log "Auto-Update: updated to $server_version, re-exec"
-  export SECSCAN_AGENT_UPDATED=1
+  export FM_AGENT_UPDATED=1
   exec "$self_path" "$@"
 }
 
@@ -223,7 +223,7 @@ require_cmd() {
     || { log "Error: '$1' not found in PATH"; exit 1; }
 }
 
-if [[ "${SECSCAN_AGENT_SOURCE_ONLY:-0}" = "1" ]]; then
+if [[ "${FM_AGENT_SOURCE_ONLY:-0}" = "1" ]]; then
   # shellcheck disable=SC2317
   return 0 2>/dev/null || exit 0
 fi
@@ -233,8 +233,8 @@ require_cmd curl
 require_cmd jq
 require_cmd gzip
 
-: "${SECSCAN_URL:?SECSCAN_URL is not set}"
-: "${SECSCAN_API_KEY:?SECSCAN_API_KEY is not set}"
+: "${FM_URL:?FM_URL is not set}"
+: "${FM_API_KEY:?FM_API_KEY is not set}"
 
 auto_update_self "$@"
 
@@ -318,9 +318,9 @@ fi
 log "Host: ${os_pretty} (kernel ${kernel_version}, ${arch}, trivy ${trivy_version})"
 
 # ----- Trivy scan + Packages[] strip -------------------------------------
-trivy_raw="$(mktemp -t secscan-trivy-raw.XXXXXX.json)"
-trivy_out="$(mktemp -t secscan-trivy.XXXXXX.json)"
-response_body="$(mktemp -t secscan-resp.XXXXXX)"
+trivy_raw="$(mktemp -t fathometer-trivy-raw.XXXXXX.json)"
+trivy_out="$(mktemp -t fathometer-trivy.XXXXXX.json)"
+response_body="$(mktemp -t fathometer-resp.XXXXXX)"
 trap 'rm -f "$trivy_raw" "$trivy_out" "$response_body"' EXIT
 
 log "Starting trivy scan on ${SCAN_PATH} ..."
@@ -409,8 +409,8 @@ http_status="$(printf '%s' "$payload" | gzip -c | curl -sS \
   --max-time "$TIMEOUT_SEC" \
   --post301 --post302 --post303 -L \
   -o "$response_body" -w '%{http_code}' \
-  -X POST "${SECSCAN_URL%/}/api/scans" \
-  -H "Authorization: Bearer ${SECSCAN_API_KEY}" \
+  -X POST "${FM_URL%/}/api/scans" \
+  -H "Authorization: Bearer ${FM_API_KEY}" \
   -H "Content-Type: application/json" \
   -H "Content-Encoding: gzip" \
   --data-binary @- || echo "000")"

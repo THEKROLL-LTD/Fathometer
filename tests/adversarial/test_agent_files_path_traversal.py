@@ -17,11 +17,11 @@ from flask import Flask
     [
         pytest.param("/agent/files/../../etc/passwd", id="dotdot-segment"),
         pytest.param("/agent/files/..%2f..%2fetc%2fpasswd", id="urlencoded-traversal"),
-        pytest.param("/agent/files/%2e%2e/secscan-agent.sh", id="encoded-dotdot"),
+        pytest.param("/agent/files/%2e%2e/fathometer-agent.sh", id="encoded-dotdot"),
         pytest.param("/agent/files//etc/passwd", id="absolute-suffix"),
-        pytest.param("/agent/files/secscan-agent.sh%00.malicious", id="nul-byte-suffix"),
+        pytest.param("/agent/files/fathometer-agent.sh%00.malicious", id="nul-byte-suffix"),
         pytest.param("/agent/files/..\\..\\etc\\passwd", id="backslash-windows"),
-        pytest.param("/agent/files/secscan-agent.sh/../secscan-register.sh", id="chained-dotdot"),
+        pytest.param("/agent/files/fathometer-agent.sh/../fathometer-register.sh", id="chained-dotdot"),
     ],
 )
 def test_agent_files_traversal_returns_404(db_app: Flask, path: str) -> None:
@@ -41,6 +41,6 @@ def test_agent_files_known_file_outside_whitelist_404(db_app: Flask) -> None:
 def test_agent_files_nullbyte_in_name_404(db_app: Flask) -> None:
     """NUL-Byte direkt im Pfad (nicht URL-encoded) wird vom Router gefangen."""
     client = db_app.test_client()
-    resp = client.get("/agent/files/secscan-agent.sh\x00.evil")
+    resp = client.get("/agent/files/fathometer-agent.sh\x00.evil")
     # Werkzeug typischerweise 404 oder 400. Niemals 200.
     assert resp.status_code in (400, 404), resp.status_code

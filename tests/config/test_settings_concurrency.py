@@ -10,8 +10,8 @@ Gespiegelt werden die DB-CheckConstraints in
 - ``llm_worker_job_concurrency`` IN [1, 200]
 - ``llm_debug_log_success_sample_rate`` IN [1, 1000]
 
-Bei jedem Test setzen wir einen Pflicht-``SECSCAN_ENCRYPTION_KEY`` (>=32),
-damit ``Settings()`` ueberhaupt instantiierbar ist. Andere ``SECSCAN_*``-Vars
+Bei jedem Test setzen wir einen Pflicht-``FM_ENCRYPTION_KEY`` (>=32),
+damit ``Settings()`` ueberhaupt instantiierbar ist. Andere ``FM_*``-Vars
 werden pro Test bewusst geleert, damit das Host-Environment keine Defaults
 overrided.
 """
@@ -25,8 +25,8 @@ from app.config import Settings, load_settings
 
 
 @pytest.fixture(autouse=True)
-def _clean_secscan_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Entfernt alle ``SECSCAN_*``-Vars und setzt einen sauberen Encryption-Key.
+def _clean_fathometer_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Entfernt alle ``FM_*``-Vars und setzt einen sauberen Encryption-Key.
 
     Pydantic-Settings liest case-insensitive — wir entfernen darum alle
     Varianten. Der Encryption-Key wird auf eine 32-Zeichen-Konstante
@@ -37,9 +37,9 @@ def _clean_secscan_env(monkeypatch: pytest.MonkeyPatch) -> None:
     import os
 
     for key in list(os.environ.keys()):
-        if key.upper().startswith("SECSCAN_"):
+        if key.upper().startswith("FM_"):
             monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("SECSCAN_ENCRYPTION_KEY", "x" * 32)
+    monkeypatch.setenv("FM_ENCRYPTION_KEY", "x" * 32)
 
 
 # ---------------------------------------------------------------------------
@@ -110,14 +110,14 @@ def test_llm_debug_log_success_sample_rate_rejects_out_of_range(value: int) -> N
 
 
 # ---------------------------------------------------------------------------
-# Env-Var-Override — Prefix SECSCAN_, case-insensitive.
+# Env-Var-Override — Prefix FM_, case-insensitive.
 # ---------------------------------------------------------------------------
 
 
 def test_env_override_llm_worker_job_concurrency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SECSCAN_LLM_WORKER_JOB_CONCURRENCY", "5")
+    monkeypatch.setenv("FM_LLM_WORKER_JOB_CONCURRENCY", "5")
     s = load_settings()
     assert s.llm_worker_job_concurrency == 5
 
@@ -125,14 +125,14 @@ def test_env_override_llm_worker_job_concurrency(
 def test_env_override_llm_debug_log_success_sample_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SECSCAN_LLM_DEBUG_LOG_SUCCESS_SAMPLE_RATE", "25")
+    monkeypatch.setenv("FM_LLM_DEBUG_LOG_SUCCESS_SAMPLE_RATE", "25")
     s = load_settings()
     assert s.llm_debug_log_success_sample_rate == 25
 
 
 def test_env_override_at_upper_bound(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SECSCAN_LLM_WORKER_JOB_CONCURRENCY", "200")
-    monkeypatch.setenv("SECSCAN_LLM_DEBUG_LOG_SUCCESS_SAMPLE_RATE", "1000")
+    monkeypatch.setenv("FM_LLM_WORKER_JOB_CONCURRENCY", "200")
+    monkeypatch.setenv("FM_LLM_DEBUG_LOG_SUCCESS_SAMPLE_RATE", "1000")
     s = load_settings()
     assert s.llm_worker_job_concurrency == 200
     assert s.llm_debug_log_success_sample_rate == 1000
@@ -141,7 +141,7 @@ def test_env_override_at_upper_bound(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_env_override_out_of_range_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """201 ueber die Env-Var muss genauso einen ValidationError werfen wie
     direkt im Konstruktor — sonst koennten Operator-Fehler unbemerkt durch."""
-    monkeypatch.setenv("SECSCAN_LLM_WORKER_JOB_CONCURRENCY", "201")
+    monkeypatch.setenv("FM_LLM_WORKER_JOB_CONCURRENCY", "201")
     with pytest.raises(ValidationError) as exc:
         load_settings()
     assert "llm_worker_job_concurrency" in str(exc.value)
@@ -150,6 +150,6 @@ def test_env_override_out_of_range_raises(monkeypatch: pytest.MonkeyPatch) -> No
 def test_env_override_non_integer_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Tippfehler wie ``"abc"`` muessen frueh durch Pydantic gefangen werden,
     nicht erst beim DB-CheckConstraint."""
-    monkeypatch.setenv("SECSCAN_LLM_WORKER_JOB_CONCURRENCY", "abc")
+    monkeypatch.setenv("FM_LLM_WORKER_JOB_CONCURRENCY", "abc")
     with pytest.raises(ValidationError):
         load_settings()

@@ -41,7 +41,7 @@ log = structlog.get_logger(__name__)
 
 
 def _register_rate_limit() -> str:
-    limits: dict[str, str] = current_app.config["SECSCAN_RATELIMITS"]
+    limits: dict[str, str] = current_app.config["FM_RATELIMITS"]
     return limits["register"]
 
 

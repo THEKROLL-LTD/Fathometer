@@ -51,11 +51,11 @@
 # Requirements: bash >= 4, jq, awk, sed, tr, head, tail.
 #
 
-# Versions-Pakt mit `secscan-agent.sh` (TICKET-001). Wird extern nach dem
+# Versions-Pakt mit `fathometer-agent.sh` (TICKET-001). Wird extern nach dem
 # Sourcen geprueft; bei Mismatch wird ``host_state`` im Envelope omit'et,
 # der Scan laeuft trotzdem durch. Bei semantik-relevanten Aenderungen
 # der Collector-Signaturen mit ``REQUIRED_LIB_HOST_STATE_VERSION`` in
-# ``secscan-agent.sh`` gemeinsam bumpen.
+# ``fathometer-agent.sh`` gemeinsam bumpen.
 # shellcheck disable=SC2034
 readonly LIB_HOST_STATE_VERSION="0.3.1"
 

@@ -33,7 +33,7 @@
 #}
 {% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
 
-{% block title %}{{ server.name }} · secscan{% endblock %}
+{% block title %}{{ server.name }} · Fathometer{% endblock %}
 
 {% block detail_pane %}
 {% set is_active = not server.revoked_at and not server.retired_at %}

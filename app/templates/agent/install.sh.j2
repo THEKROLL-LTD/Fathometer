@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 #
-# secscan-agent bootstrap installer
+# fathometer-agent bootstrap installer
 # Generated at backend render time. Do not edit on the host.
 #
 # Usage (recommended):
-#   curl -fsSL {{ secscan_url }}/install.sh | sudo bash
+#   curl -fsSL {{ fathometer_url }}/install.sh | sudo bash
 #
 # Or, to keep stdin attached to your terminal:
-#   sudo bash <(curl -fsSL {{ secscan_url }}/install.sh)
+#   sudo bash <(curl -fsSL {{ fathometer_url }}/install.sh)
 #
 # Unattended mode (CI/Provisioning):
-#   SECSCAN_UNATTENDED=1 SECSCAN_MASTER_KEY=... SECSCAN_SERVER_NAME=host01 \
-#     sudo -E bash <(curl -fsSL {{ secscan_url }}/install.sh)
+#   FM_UNATTENDED=1 FM_MASTER_KEY=... FM_SERVER_NAME=host01 \
+#     sudo -E bash <(curl -fsSL {{ fathometer_url }}/install.sh)
 #
 
 set -euo pipefail
 
-# SECSCAN_URL bewusst NICHT `readonly` — Phase 6 (probe scan) sourced
-# `/etc/secscan/agent.env` in einer Subshell, die diesselbe Variable per
+# FM_URL bewusst NICHT `readonly` — Phase 6 (probe scan) sourced
+# `/etc/fathometer/agent.env` in einer Subshell, die diesselbe Variable per
 # `set -a; . agent.env` neu zuweist. `readonly` wird in Subshells geerbt
 # und wuerde das Re-Assignment mit 'readonly variable' abbrechen lassen,
 # obwohl die Werte identisch sind. Der Wert wird im Wizard ohnehin nie
 # veraendert — der Defense-Aspekt von `readonly` war hier ueberzogen.
-SECSCAN_URL="{{ secscan_url }}"
+FM_URL="{{ fathometer_url }}"
 readonly RECOMMENDED_TRIVY_VERSION="{{ recommended_trivy_version }}"
 readonly MIN_TRIVY_VERSION="{{ min_trivy_version }}"
 # CURRENT_AGENT_VERSION is rendered for operator inspection (the running
@@ -31,10 +31,10 @@ readonly MIN_TRIVY_VERSION="{{ min_trivy_version }}"
 readonly CURRENT_AGENT_VERSION="{{ current_agent_version }}"
 readonly TRIVY_RELEASE_URL_TEMPLATE="{{ trivy_release_url_template }}"
 
-readonly SECSCAN_PREFIX="/opt/secscan"
-readonly SECSCAN_BIN_DIR="${SECSCAN_PREFIX}/bin"
-readonly SECSCAN_CONF_DIR="/etc/secscan"
-readonly SECSCAN_ENV_FILE="${SECSCAN_CONF_DIR}/agent.env"
+readonly FM_PREFIX="/opt/fathometer"
+readonly FM_BIN_DIR="${FM_PREFIX}/bin"
+readonly FM_CONF_DIR="/etc/fathometer"
+readonly FM_ENV_FILE="${FM_CONF_DIR}/agent.env"
 
 # --- TTY handling --------------------------------------------------------
 # When invoked via `curl | bash`, stdin is the pipe. We read prompts from
@@ -45,11 +45,11 @@ if [[ -t 0 ]]; then
 elif [[ -r /dev/tty ]]; then
   TTY_INPUT=/dev/tty
 else
-  : "${SECSCAN_UNATTENDED:=1}"
+  : "${FM_UNATTENDED:=1}"
   TTY_INPUT=/dev/null
 fi
 readonly TTY_INPUT
-readonly UNATTENDED="${SECSCAN_UNATTENDED:-0}"
+readonly UNATTENDED="${FM_UNATTENDED:-0}"
 
 # --- Output helpers (Box + colors) ---------------------------------------
 # Detect color support; respect NO_COLOR (https://no-color.org/).
@@ -194,19 +194,19 @@ SERVER_ID=""
 detect_system() {
   phase 1 6 "System detection"
 
-  # v0.7.1: Warnen wenn SECSCAN_URL HTTP statt HTTPS ist. Ein Reverse-Proxy
+  # v0.7.1: Warnen wenn FM_URL HTTP statt HTTPS ist. Ein Reverse-Proxy
   # vor dem Backend antwortet typisch mit 301 -> HTTPS auf /api/register,
   # was den Wizard zwar dank --post301/302/303 -L durchbringt, aber den
   # Operator unnoetig im Unklaren laesst. Wenn das Backend hinter TLS
-  # laeuft sollte SECSCAN_PUBLIC_URL=https://... gesetzt sein (siehe
+  # laeuft sollte FM_PUBLIC_URL=https://... gesetzt sein (siehe
   # README "Deploy-Checkliste").
-  case "$SECSCAN_URL" in
+  case "$FM_URL" in
     https://*) : ;;
     http://*)
-      warn "SECSCAN_URL is http://; consider setting SECSCAN_PUBLIC_URL=https://... on the backend"
+      warn "FM_URL is http://; consider setting FM_PUBLIC_URL=https://... on the backend"
       ;;
     *)
-      warn "SECSCAN_URL has no scheme (expected http:// or https://)"
+      warn "FM_URL has no scheme (expected http:// or https://)"
       ;;
   esac
 
@@ -363,7 +363,7 @@ download_pinned_trivy() {
   checksums_url="$(printf '%s' "$url" | sed -E "s#trivy_${version}_Linux-${arch}\\.tar\\.gz#trivy_${version}_checksums.txt#")"
 
   local tmp
-  tmp="$(mktemp -d -t secscan-trivy.XXXXXX)"
+  tmp="$(mktemp -d -t fathometer-trivy.XXXXXX)"
   # Self-clearing RETURN trap: ohne `set -o functrace` feuert ein in einer
   # Funktion gesetzter RETURN-Trap auch beim Return der *aufrufenden* Funktion
   # (setup_trivy) erneut — dort ist `$tmp` nicht mehr in Scope und `set -u`
@@ -401,15 +401,15 @@ download_pinned_trivy() {
   fi
   ok "sha256 verified"
 
-  info "extracting tarball to ${SECSCAN_BIN_DIR}"
-  install -d -m 0755 "$SECSCAN_BIN_DIR"
+  info "extracting tarball to ${FM_BIN_DIR}"
+  install -d -m 0755 "$FM_BIN_DIR"
   if ! tar -xzf "$tarball" -C "$tmp" trivy; then
     fail "failed to extract trivy binary from tarball"
     return 1
   fi
-  install -m 0755 -o root -g root "$tmp/trivy" "${SECSCAN_BIN_DIR}/trivy"
-  ok "trivy ${version} installed to ${SECSCAN_BIN_DIR}/trivy"
-  TRIVY_PATH="${SECSCAN_BIN_DIR}/trivy"
+  install -m 0755 -o root -g root "$tmp/trivy" "${FM_BIN_DIR}/trivy"
+  ok "trivy ${version} installed to ${FM_BIN_DIR}/trivy"
+  TRIVY_PATH="${FM_BIN_DIR}/trivy"
   return 0
 }
 
@@ -430,9 +430,9 @@ setup_trivy() {
     info "no trivy found in PATH"
     local do_install="y"
     if [[ "$UNATTENDED" == "1" ]]; then
-      do_install="${SECSCAN_INSTALL_TRIVY:-yes}"
+      do_install="${FM_INSTALL_TRIVY:-yes}"
     else
-      if ask_yes_no "Install pinned trivy ${RECOMMENDED_TRIVY_VERSION} to ${SECSCAN_BIN_DIR}/trivy?" "y"; then
+      if ask_yes_no "Install pinned trivy ${RECOMMENDED_TRIVY_VERSION} to ${FM_BIN_DIR}/trivy?" "y"; then
         do_install="yes"
       else
         do_install="no"
@@ -458,7 +458,7 @@ setup_trivy() {
   warn "trivy ${existing_version} is older than required ${MIN_TRIVY_VERSION}"
   local install_alongside="y"
   if [[ "$UNATTENDED" == "1" ]]; then
-    install_alongside="${SECSCAN_INSTALL_TRIVY:-yes}"
+    install_alongside="${FM_INSTALL_TRIVY:-yes}"
   else
     if ask_yes_no "Install pinned ${RECOMMENDED_TRIVY_VERSION} alongside?" "y"; then
       install_alongside="yes"
@@ -482,24 +482,24 @@ setup_trivy() {
 # ============================================================================
 write_agent_env() {
   local api_key="$1"
-  install -d -m 0755 "$SECSCAN_CONF_DIR"
+  install -d -m 0755 "$FM_CONF_DIR"
   umask 077
-  cat > "$SECSCAN_ENV_FILE" <<EOF
-# Managed by secscan installer. Do not edit by hand — re-run the installer.
-SECSCAN_URL=${SECSCAN_URL}
-SECSCAN_API_KEY=${api_key}
-SECSCAN_TRIVY_PATH=${TRIVY_PATH}
+  cat > "$FM_ENV_FILE" <<EOF
+# Managed by fathometer installer. Do not edit by hand — re-run the installer.
+FM_URL=${FM_URL}
+FM_API_KEY=${api_key}
+FM_TRIVY_PATH=${TRIVY_PATH}
 EOF
-  chmod 0600 "$SECSCAN_ENV_FILE"
-  chown root:root "$SECSCAN_ENV_FILE"
-  ok "wrote ${SECSCAN_ENV_FILE} (mode 0600)"
+  chmod 0600 "$FM_ENV_FILE"
+  chown root:root "$FM_ENV_FILE"
+  ok "wrote ${FM_ENV_FILE} (mode 0600)"
 }
 
 register_server() {
   phase 4 6 "Server registration"
 
-  if [[ -f "$SECSCAN_ENV_FILE" ]] && grep -q '^SECSCAN_API_KEY=' "$SECSCAN_ENV_FILE"; then
-    info "existing registration found at ${SECSCAN_ENV_FILE}"
+  if [[ -f "$FM_ENV_FILE" ]] && grep -q '^FM_API_KEY=' "$FM_ENV_FILE"; then
+    info "existing registration found at ${FM_ENV_FILE}"
     if [[ "$UNATTENDED" == "1" ]]; then
       ok "skipping re-registration in unattended mode (key already present)"
       return 0
@@ -518,11 +518,11 @@ register_server() {
   local master_key=""
 
   if [[ "$UNATTENDED" == "1" ]]; then
-    server_name="${SECSCAN_SERVER_NAME:-$default_name}"
-    interval_h="${SECSCAN_INTERVAL_HOURS:-24}"
-    master_key="${SECSCAN_MASTER_KEY:-}"
+    server_name="${FM_SERVER_NAME:-$default_name}"
+    interval_h="${FM_INTERVAL_HOURS:-24}"
+    master_key="${FM_MASTER_KEY:-}"
     if [[ -z "$master_key" ]]; then
-      fail "missing env var SECSCAN_MASTER_KEY"
+      fail "missing env var FM_MASTER_KEY"
       exit 2
     fi
   else
@@ -552,7 +552,7 @@ register_server() {
   fi
 
   local response_body
-  response_body="$(mktemp -t secscan-reg.XXXXXX)"
+  response_body="$(mktemp -t fathometer-reg.XXXXXX)"
   local request
   request="$(jq -n \
     --arg master_key "$master_key" \
@@ -563,17 +563,17 @@ register_server() {
   local attempts=0
   while true; do
     attempts=$((attempts + 1))
-    info "POST ${SECSCAN_URL}/api/register"
+    info "POST ${FM_URL}/api/register"
     local http_status
     # v0.7.1: --post301/302/303 -L laesst curl einem 30x-Redirect FOLGEN
     # und den POST-Body neu senden (Default ist 30x -> GET). Notwendig wenn
-    # SECSCAN_URL via HTTP genannt wurde und der Reverse-Proxy auf HTTPS
+    # FM_URL via HTTP genannt wurde und der Reverse-Proxy auf HTTPS
     # umbiegt.
     http_status="$(curl -sS \
       --max-time 30 \
       --post301 --post302 --post303 -L \
       -o "$response_body" -w '%{http_code}' \
-      -X POST "${SECSCAN_URL%/}/api/register" \
+      -X POST "${FM_URL%/}/api/register" \
       -H "Content-Type: application/json" \
       --data-binary "$request" || echo "000")"
 
@@ -623,40 +623,40 @@ register_server() {
 # Phase 5 — Scheduler
 # ============================================================================
 download_agent_script() {
-  install -d -m 0755 "$SECSCAN_BIN_DIR"
+  install -d -m 0755 "$FM_BIN_DIR"
 
-  # secscan-agent.sh + lib_host_state.sh muessen beide im selben Directory
+  # fathometer-agent.sh + lib_host_state.sh muessen beide im selben Directory
   # liegen — der Agent source't die Library per `${_agent_dir}/lib_host_state.sh`.
   # Fehlt die Library, ist `host_state` im Envelope leer und alle Findings
   # landen in `risk_band=unknown` (Block-P-Pipeline silently disabled).
   # Daher seit v0.9.2 beide Files ueber dieselbe Whitelist ausgeliefert.
   local f tmp
-  for f in secscan-agent.sh lib_host_state.sh; do
-    info "downloading ${SECSCAN_URL}/agent/files/${f}"
-    tmp="$(mktemp -t "secscan-${f}.XXXXXX")"
-    if ! curl -fsSL -o "$tmp" "${SECSCAN_URL%/}/agent/files/${f}"; then
+  for f in fathometer-agent.sh lib_host_state.sh; do
+    info "downloading ${FM_URL}/agent/files/${f}"
+    tmp="$(mktemp -t "fathometer-${f}.XXXXXX")"
+    if ! curl -fsSL -o "$tmp" "${FM_URL%/}/agent/files/${f}"; then
       rm -f "$tmp"
       abort "failed to download ${f}"
     fi
-    install -m 0755 -o root -g root "$tmp" "${SECSCAN_BIN_DIR}/${f}"
+    install -m 0755 -o root -g root "$tmp" "${FM_BIN_DIR}/${f}"
     rm -f "$tmp"
-    ok "installed ${SECSCAN_BIN_DIR}/${f}"
+    ok "installed ${FM_BIN_DIR}/${f}"
   done
 }
 
 write_systemd_units() {
-  local svc="/etc/systemd/system/secscan-agent.service"
-  local tmr="/etc/systemd/system/secscan-agent.timer"
+  local svc="/etc/systemd/system/fathometer-agent.service"
+  local tmr="/etc/systemd/system/fathometer-agent.timer"
 
   cat > "$svc" <<EOF
 [Unit]
-Description=secscan agent (trivy rootfs scan + upload)
-Documentation={{ secscan_url }}/
+Description=fathometer agent (trivy rootfs scan + upload)
+Documentation={{ fathometer_url }}/
 
 [Service]
 Type=oneshot
-EnvironmentFile=${SECSCAN_ENV_FILE}
-ExecStart=${SECSCAN_BIN_DIR}/secscan-agent.sh
+EnvironmentFile=${FM_ENV_FILE}
+ExecStart=${FM_BIN_DIR}/fathometer-agent.sh
 Nice=10
 IOSchedulingClass=idle
 EOF
@@ -664,7 +664,7 @@ EOF
 
   cat > "$tmr" <<'EOF'
 [Unit]
-Description=Daily secscan agent run
+Description=Daily fathometer agent run
 
 [Timer]
 OnCalendar=daily
@@ -678,17 +678,17 @@ EOF
 
   info "systemctl daemon-reload"
   systemctl daemon-reload
-  info "systemctl enable --now secscan-agent.timer"
-  systemctl enable --now secscan-agent.timer
-  ok "secscan-agent.timer enabled"
+  info "systemctl enable --now fathometer-agent.timer"
+  systemctl enable --now fathometer-agent.timer
+  ok "fathometer-agent.timer enabled"
 }
 
 write_cron_unit() {
-  local cron_file="/etc/cron.d/secscan-agent"
+  local cron_file="/etc/cron.d/fathometer-agent"
   cat > "$cron_file" <<'EOF'
-# Daily secscan agent run with 2h jitter
+# Daily fathometer agent run with 2h jitter
 SHELL=/bin/bash
-0 3 * * * root sleep $((RANDOM \% 7200)); . /etc/secscan/agent.env; /opt/secscan/bin/secscan-agent.sh
+0 3 * * * root sleep $((RANDOM \% 7200)); . /etc/fathometer/agent.env; /opt/fathometer/bin/fathometer-agent.sh
 EOF
   chmod 0644 "$cron_file"
   ok "wrote ${cron_file}"
@@ -709,7 +709,7 @@ setup_scheduler() {
 # ============================================================================
 probe_scan() {
   phase 6 6 "Probe scan"
-  info "running ${SECSCAN_BIN_DIR}/secscan-agent.sh (this can take 1-5 minutes)"
+  info "running ${FM_BIN_DIR}/fathometer-agent.sh (this can take 1-5 minutes)"
   # Run the agent synchronously, streaming stderr to the operator.
   # `set +e` so we can report a non-zero exit cleanly.
   local rc=0
@@ -717,9 +717,9 @@ probe_scan() {
   (
     set -a
     # shellcheck disable=SC1090
-    . "$SECSCAN_ENV_FILE"
+    . "$FM_ENV_FILE"
     set +a
-    "${SECSCAN_BIN_DIR}/secscan-agent.sh"
+    "${FM_BIN_DIR}/fathometer-agent.sh"
   )
   rc=$?
   set -e
@@ -727,9 +727,9 @@ probe_scan() {
   if [[ "$rc" -eq 0 ]]; then
     ok "probe scan succeeded"
     if [[ -n "$SERVER_ID" ]]; then
-      printf "\n%sDone.%s View server: %s/servers/%s\n" "${C_BOLD}" "${C_RESET}" "${SECSCAN_URL%/}" "$SERVER_ID"
+      printf "\n%sDone.%s View server: %s/servers/%s\n" "${C_BOLD}" "${C_RESET}" "${FM_URL%/}" "$SERVER_ID"
     else
-      printf "\n%sDone.%s View dashboard: %s/\n" "${C_BOLD}" "${C_RESET}" "${SECSCAN_URL%/}"
+      printf "\n%sDone.%s View dashboard: %s/\n" "${C_BOLD}" "${C_RESET}" "${FM_URL%/}"
     fi
   else
     warn "probe scan exited with code ${rc}"
@@ -746,7 +746,7 @@ probe_scan() {
 # ============================================================================
 main() {
   require_root
-  box_header "secscan-agent installer" "Backend: ${SECSCAN_URL}"
+  box_header "fathometer-agent installer" "Backend: ${FM_URL}"
   if [[ "$UNATTENDED" == "1" ]]; then
     info "unattended mode (no prompts will be shown)"
   fi

@@ -17,7 +17,7 @@
 # Exit-Codes: 0 Erfolg, sonst nicht-Null mit Fehler-Log.
 #
 # Anmerkungen:
-#   - macOS: `secscan-agent.sh` ruft `trivy` mit `--scanners vuln` auf, was
+#   - macOS: `fathometer-agent.sh` ruft `trivy` mit `--scanners vuln` auf, was
 #     hier durch ein Mock-Binary ersetzt wird, das die Fixture per `--output`
 #     ausgibt. Falls die Agent-Architektur-Detection (`uname -m` -> `arm64`)
 #     spaeter Probleme macht, faellt der Skript-Pfad auf einen direkten
@@ -39,8 +39,8 @@ readonly E2E_USER="e2e-admin"
 readonly E2E_PASS="e2e-smoke-passwort-2026"
 readonly E2E_SERVER_NAME="e2e-host"
 
-COOKIE_JAR="$(mktemp -t secscan-e2e-cookies.XXXXXX)"
-WORK_DIR="$(mktemp -d -t secscan-e2e.XXXXXX)"
+COOKIE_JAR="$(mktemp -t fathometer-e2e-cookies.XXXXXX)"
+WORK_DIR="$(mktemp -d -t fathometer-e2e.XXXXXX)"
 
 log() { printf '[e2e] %s\n' "$*"; }
 fail() { printf '[e2e] FEHLER: %s\n' "$*" >&2; exit 1; }
@@ -233,12 +233,12 @@ log "step3 ok — setup abgeschlossen"
 log "phase: server registrieren"
 
 API_KEY="$(
-  SECSCAN_MASTER_KEY="$MASTER_KEY" \
-    "${REPO_ROOT}/agent/secscan-register.sh" "$BASE_URL" "$E2E_SERVER_NAME" 24 \
+  FM_MASTER_KEY="$MASTER_KEY" \
+    "${REPO_ROOT}/agent/fathometer-register.sh" "$BASE_URL" "$E2E_SERVER_NAME" 24 \
     2>"${WORK_DIR}/register.log"
 )" || {
   cat "${WORK_DIR}/register.log" >&2
-  fail "secscan-register.sh fehlgeschlagen"
+  fail "fathometer-register.sh fehlgeschlagen"
 }
 
 [[ -n "$API_KEY" ]] || fail "leerer API-Key"
@@ -250,12 +250,12 @@ log "api-key erhalten (${#API_KEY} bytes)"
 # Der Reference-Agent ruft `trivy rootfs <path> --format json --quiet
 # --scanners vuln --output <file>`. Wir basteln ein Mock, das das `--output`-
 # Argument extrahiert und unsere Fixture dorthin kopiert. Damit kann
-# `secscan-agent.sh` unveraendert laufen.
+# `fathometer-agent.sh` unveraendert laufen.
 #
 # Auf macOS liefert `uname -m` typisch `arm64`. Der Agent uebernimmt das
 # 1:1 in die `architecture`-Whitelist des Pydantic-Envelopes. Das Backend
 # akzeptiert nur (x86_64, aarch64, armv7l, i686, ppc64le, s390x) — wir
-# setzen daher fuer den Smoke explizit `SECSCAN_ARCH_OVERRIDE` nicht, sondern
+# setzen daher fuer den Smoke explizit `FM_ARCH_OVERRIDE` nicht, sondern
 # fallen bei Bedarf auf einen Python-Push zurueck (siehe unten).
 # ---------------------------------------------------------------------------
 
@@ -282,7 +282,7 @@ log "phase: agent-push"
 
 # `uname -m` ist auf Apple-Silicon `arm64`, das die Backend-Whitelist nicht
 # enthaelt. Wir bauen daher den Envelope hier direkt mit `aarch64` (das ist
-# semantisch was Linux meldet) und pushen per curl, statt `secscan-agent.sh`
+# semantisch was Linux meldet) und pushen per curl, statt `fathometer-agent.sh`
 # unveraendert laufen zu lassen. Begruendung: das Skript haengt vom System-
 # `arch` ab, und der Smoke soll Plattform-unabhaengig laufen.
 
@@ -334,7 +334,7 @@ echo "$body" | jq -e '.status == "ok"' >/dev/null \
 
 # 7b. DB-Count gegen Erwartung
 db_count="$(docker compose -f "${REPO_ROOT}/docker-compose.yml" exec -T db \
-  psql -U secscan -d secscan -tA -c 'SELECT count(*) FROM findings;' \
+  psql -U fathometer -d fathometer -tA -c 'SELECT count(*) FROM findings;' \
   | tr -d '[:space:]')"
 if [[ "$db_count" != "$EXPECTED_FINDINGS" ]]; then
   fail "findings-count: erwartet ${EXPECTED_FINDINGS}, ist ${db_count}"

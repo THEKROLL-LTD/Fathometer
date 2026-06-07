@@ -25,7 +25,7 @@
 --   (DELETE filtert ueber Namen).
 --
 -- Aufruf (vom Host):
---   docker exec -i secscan-db-1 psql -U secscan -d secscan \
+--   docker exec -i fathometer-db-1 psql -U fathometer -d fathometer \
 --     < scripts/fixtures/server_detail_fixtures.sql
 --
 -- Reset:

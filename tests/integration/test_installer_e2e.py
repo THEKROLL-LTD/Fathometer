@@ -58,7 +58,7 @@ def test_installer_runs_in_container(distro: str, dockerfile: str) -> None:
             "docker",
             "build",
             "-t",
-            f"secscan-installer-test:{distro}",
+            f"fathometer-installer-test:{distro}",
             "-f",
             str(df),
             str(df.parent.parent.parent.parent),  # repo root

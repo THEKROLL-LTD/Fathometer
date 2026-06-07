@@ -2,12 +2,12 @@
 #
 # run_adversarial.sh
 # ------------------
-# Schickt eine Reihe von Bad-Inputs gegen einen lokal laufenden secscan-Server
+# Schickt eine Reihe von Bad-Inputs gegen einen lokal laufenden fathometer-Server
 # und verifiziert, dass jeder mit dem erwarteten Fehler-Status abgewiesen wird.
 #
 # Pflicht-ENV:
-#   SECSCAN_URL        z.B. http://localhost:8000 (Default)
-#   SECSCAN_API_KEY    Server-Key fuer Tests die einen brauchen (optional fuer
+#   FM_URL        z.B. http://localhost:8000 (Default)
+#   FM_API_KEY    Server-Key fuer Tests die einen brauchen (optional fuer
 #                      die meisten Cases — wir wollen nur 401/413/422 sehen).
 #
 # Aufruf (manuell):
@@ -25,8 +25,8 @@
 
 set -uo pipefail
 
-readonly URL="${SECSCAN_URL:-http://localhost:8000}"
-readonly KEY="${SECSCAN_API_KEY:-not-a-real-key}"
+readonly URL="${FM_URL:-http://localhost:8000}"
+readonly KEY="${FM_API_KEY:-not-a-real-key}"
 
 pass=0
 fail=0

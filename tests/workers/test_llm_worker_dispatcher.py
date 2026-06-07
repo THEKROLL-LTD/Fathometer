@@ -46,7 +46,7 @@ def _reset_worker_state() -> Iterator[None]:
 @pytest.fixture(autouse=True)
 def _reset_worker_logger() -> Iterator[None]:
     """Defensive Logger-State-Reset gegen Test-Pollution (siehe Phase-B-Pattern)."""
-    worker_logger = logging.getLogger("secscan.llm_worker")
+    worker_logger = logging.getLogger("fathometer.llm_worker")
     prev_disabled = worker_logger.disabled
     prev_propagate = worker_logger.propagate
     prev_level = worker_logger.level

@@ -1,7 +1,7 @@
 """Konfiguration via pydantic-settings.
 
-Liest alle `SECSCAN_*`-Environment-Variablen ein und validiert sie strikt.
-Fehlende Pflichtwerte (vor allem `SECSCAN_ENCRYPTION_KEY`) fuehren in der
+Liest alle `FM_*`-Environment-Variablen ein und validiert sie strikt.
+Fehlende Pflichtwerte (vor allem `FM_ENCRYPTION_KEY`) fuehren in der
 App-Factory zu einem Start-Refusal — siehe `app/__init__.py`.
 """
 
@@ -16,12 +16,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Zentrale Settings-Klasse.
 
-    Alle Werte koennen ueber Environment-Variablen mit dem Prefix `SECSCAN_`
+    Alle Werte koennen ueber Environment-Variablen mit dem Prefix `FM_`
     gesetzt werden. Defaults entsprechen ARCHITECTURE.md §9.
     """
 
     model_config = SettingsConfigDict(
-        env_prefix="SECSCAN_",
+        env_prefix="FM_",
         env_file=None,  # Container injiziert env direkt; .env wird vom compose geladen.
         case_sensitive=False,
         extra="ignore",
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         description="Flask-Session-Cookie-Geheimnis.",
     )
     database_url: str = Field(
-        default="postgresql+psycopg://secscan:secscan@db:5432/secscan",
+        default="postgresql+psycopg://fathometer:fathometer@db:5432/fathometer",
         description="SQLAlchemy-URL mit async-faehigem psycopg-Treiber.",
     )
 
@@ -48,17 +48,17 @@ class Settings(BaseSettings):
     # Processor `external_base_url` bevorzugt vor `request.host_url`
     # verwendet. Ohne diesen Override sieht Flask hinter einem TLS-
     # terminierenden Reverse-Proxy nur das interne `http://`-Schema —
-    # das wuerde im gerenderten Installer einen falschen `SECSCAN_URL`
+    # das wuerde im gerenderten Installer einen falschen `FM_URL`
     # einbacken und beim ersten `POST /api/register` einen HTTP→HTTPS-
     # 301-Redirect ausloesen (`curl -X POST` verliert dann den POST).
     # Mitigation laeuft zusaetzlich ueber `werkzeug.middleware.proxy_fix.
-    # ProxyFix` (siehe `app/__init__.py`), aber `SECSCAN_PUBLIC_URL` ist
+    # ProxyFix` (siehe `app/__init__.py`), aber `FM_PUBLIC_URL` ist
     # die explizite, deploy-eindeutige Quelle der Wahrheit.
     public_url: str | None = Field(
         default=None,
         description=(
             "Extern sichtbare Backend-URL inkl. Schema, z.B. "
-            "'https://secscan.example.com'. Trailing-Slash wird "
+            "'https://fathometer.example.com'. Trailing-Slash wird "
             "abgeschnitten."
         ),
     )
@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     # heterogenen Reste-Batches muss das Modell pro Batch nur ~3-5 Groups
     # erkennen statt potentiell 10+. Erwartete Trade-offs: ~2x mehr Jobs,
     # aber dafuer deterministischere Job-Dauer und kein 120s-Timeout-Hit.
-    # Operator kann via SECSCAN_LLM_PASS1_FINDINGS_PER_BATCH ueberschreiben.
+    # Operator kann via FM_LLM_PASS1_FINDINGS_PER_BATCH ueberschreiben.
     llm_pass1_findings_per_batch: int = Field(default=50, ge=5, le=2000)
 
     # ----- Block P (ADR-0023) — Worker- und Token-Budget-Settings -----
@@ -140,13 +140,13 @@ class Settings(BaseSettings):
     # compatible — bestehende Deploys behalten das Block-P-Verhalten,
     # bis der Operator manuell in /settings/llm-reviewer hochregelt.
     # Hot-Reload alle 30 s im Worker via ``_get_concurrency_throttled``.
-    # Setzen via SECSCAN_LLM_WORKER_JOB_CONCURRENCY.
+    # Setzen via FM_LLM_WORKER_JOB_CONCURRENCY.
     llm_worker_job_concurrency: int = Field(default=1, ge=1, le=200)
     # Sampling-Rate fuer ``llm_debug_log``-Inserts bei ``status='success'``.
     # Errors (validation_error/timeout/error) werden weiterhin 1:1 persistiert,
     # Successes nur 1:N. Default 1:10 ist Skalierungs-Mitigation fuer N=200
     # (siehe ADR-0029 §Konsequenzen "Debug-Log-Tabelle explodiert").
-    # Setzen via SECSCAN_LLM_DEBUG_LOG_SUCCESS_SAMPLE_RATE.
+    # Setzen via FM_LLM_DEBUG_LOG_SUCCESS_SAMPLE_RATE.
     llm_debug_log_success_sample_rate: int = Field(default=10, ge=1, le=1000)
 
     # ----- Block P (ADR-0023) — LLM-Debug-Log (v0.9.3) -----
@@ -164,12 +164,12 @@ class Settings(BaseSettings):
 
     # ----- Agent- und Trivy-Versionen (Block N / ADR-0021) -----
     # Class-Level-Konstanten — NICHT als BaseSettings-Field deklariert, weil
-    # sie ausdruecklich NICHT per `SECSCAN_*`-Env-Var ueberschrieben werden
+    # sie ausdruecklich NICHT per `FM_*`-Env-Var ueberschrieben werden
     # sollen. Ein User-Setting fuer die Mindest-Version waere eine
     # Selbstabschaltungs-Falle (siehe ADR-0021). Version-Bumps geschehen
     # gemeinsam mit dem Agent-Skript im selben Commit.
     MIN_AGENT_VERSION: ClassVar[str] = "0.1.0"
-    CURRENT_AGENT_VERSION: ClassVar[str] = "0.4.0"
+    CURRENT_AGENT_VERSION: ClassVar[str] = "0.5.0"
     MIN_TRIVY_VERSION: ClassVar[str] = "0.70.0"
     RECOMMENDED_TRIVY_VERSION: ClassVar[str] = "0.70.0"
     TRIVY_RELEASE_URL_TEMPLATE: ClassVar[str] = (
@@ -200,7 +200,7 @@ class Settings(BaseSettings):
             "GitHub-Mirror (cisagov/kev-data) — identisches JSON-Schema, "
             "kein Cloudflare-Bot-Block (cisa.gov direkt blockt Hetzner-/"
             "Cloud-IP-Ranges mit 403). Override fuer Air-Gap / interne "
-            "Proxies via SECSCAN_FEED_KEV_URL."
+            "Proxies via FM_FEED_KEV_URL."
         ),
     )
     feed_pull_interval_hours: int = Field(
@@ -234,7 +234,7 @@ class Settings(BaseSettings):
     )
 
     # ----- Block R (ADR-0026) — Async-Scan-Ingest -----
-    # ENV: SECSCAN_MAX_QUEUED_INGEST_JOBS (Prefix SECSCAN_ + Field-Name).
+    # ENV: FM_MAX_QUEUED_INGEST_JOBS (Prefix FM_ + Field-Name).
     # Das urspruengliche Feature-Flag `SCAN_INGEST_ASYNC` ist seit v0.12.0
     # ersatzlos entfernt — Async ist der einzige Pfad (siehe ADR-0026
     # §Cutover-Abschluss).
@@ -246,7 +246,7 @@ class Settings(BaseSettings):
             "Soft-Cap fuer gleichzeitig queued+in_progress Ingest-Jobs pro Server. "
             "Bei Ueberschreitung 429 Too Many Requests. "
             "DoS-Schutz (ADR-0026 §Bedrohungsmodell). "
-            "Setzen via SECSCAN_MAX_QUEUED_INGEST_JOBS."
+            "Setzen via FM_MAX_QUEUED_INGEST_JOBS."
         ),
     )
     # Block R Phase C (ADR-0026) — Worker-Parameter.
@@ -258,7 +258,7 @@ class Settings(BaseSettings):
         description=(
             "Max. Pickup-Versuche fuer einen Ingest-Job bevor er auf 'failed' "
             "gesetzt wird. Backoff: 30s * 2^(attempts-1). "
-            "Setzen via SECSCAN_SCAN_INGEST_MAX_ATTEMPTS."
+            "Setzen via FM_SCAN_INGEST_MAX_ATTEMPTS."
         ),
     )
     # Stale-Timeout fuer in_progress Ingest-Jobs. Nach Ablauf requeued der
@@ -271,7 +271,7 @@ class Settings(BaseSettings):
             "Stale-Timeout fuer in_progress Ingest-Jobs in Minuten. "
             "Ingest-Jobs sind reine DB-Arbeit ohne LLM-Calls — 5 Minuten "
             "ist ein realistischer Upper-Bound. "
-            "Setzen via SECSCAN_SCAN_INGEST_STALE_TIMEOUT_MIN."
+            "Setzen via FM_SCAN_INGEST_STALE_TIMEOUT_MIN."
         ),
     )
     # Cadence des Retention-Sweeps in Sekunden.
@@ -282,7 +282,7 @@ class Settings(BaseSettings):
         description=(
             "Cadence des Scan-Ingest-Retention-Sweeps in Sekunden (Default 1h). "
             "Loescht payload_gzip bei done-Jobs nach 1h und failed-Zeilen nach 24h. "
-            "Setzen via SECSCAN_SCAN_INGEST_RETENTION_INTERVAL_SEC."
+            "Setzen via FM_SCAN_INGEST_RETENTION_INTERVAL_SEC."
         ),
     )
 
@@ -307,7 +307,7 @@ class Settings(BaseSettings):
 def load_settings() -> Settings:
     """Laedt Settings aus dem Environment.
 
-    Wirft `pydantic.ValidationError`, wenn `SECSCAN_ENCRYPTION_KEY` fehlt oder
+    Wirft `pydantic.ValidationError`, wenn `FM_ENCRYPTION_KEY` fehlt oder
     zu kurz ist. Die App-Factory faengt das ab und beendet mit `SystemExit`.
     """
     return Settings()  # type: ignore[call-arg]

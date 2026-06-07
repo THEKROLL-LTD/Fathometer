@@ -34,21 +34,21 @@ from app.services.llm_debug_log import should_sample_debug_log
 from app.workers import llm_worker
 
 # ---------------------------------------------------------------------------
-# Autouse-Fixture: SECSCAN_*-Env-Cleanup (analog Phase-A-Tests).
+# Autouse-Fixture: FM_*-Env-Cleanup (analog Phase-A-Tests).
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
-def _clean_secscan_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Entfernt alle ``SECSCAN_*``-Vars und setzt einen sauberen Encryption-Key.
+def _clean_fathometer_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Entfernt alle ``FM_*``-Vars und setzt einen sauberen Encryption-Key.
 
     ``load_settings()`` zieht sonst Host-Env-Overrides — wir wollen aber
     die echten Pydantic-Defaults pruefen.
     """
     for key in list(os.environ.keys()):
-        if key.upper().startswith("SECSCAN_"):
+        if key.upper().startswith("FM_"):
             monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("SECSCAN_ENCRYPTION_KEY", "x" * 32)
+    monkeypatch.setenv("FM_ENCRYPTION_KEY", "x" * 32)
 
 
 # ---------------------------------------------------------------------------

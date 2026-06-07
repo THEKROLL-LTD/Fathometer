@@ -15,7 +15,7 @@ Strikte Reihenfolge — niemals vertauschen (ARCHITECTURE.md §9):
 
 Die Verarbeitung (Findings-UPSERT, Host-State, Pre-Triage, Group-Matcher,
 LLM-Job-Queueing, Audit `scan.ingested`) laeuft asynchron im
-`secscan-llm-worker` (`app/workers/scan_ingest_worker.py`). Der Agent beendet
+`fathometer-llm-worker` (`app/workers/scan_ingest_worker.py`). Der Agent beendet
 nach der 202-Annahme und wartet nicht auf das Ergebnis.
 
 Historischer Hinweis: das urspruenglich in ADR-0026 / Block R Phase H als
@@ -27,7 +27,7 @@ unveraendert weiter und wird vom Worker aufgerufen.
 DoS-Schutz:
 - 401 erfolgt VOR jedem Body-Read; ein 10-MB-Body mit ungueltigem Bearer
   schluerft keine CPU am Parser.
-- gzip-Decompress streamend mit hartem 100-MB-Bound (`SECSCAN_MAX_DECOMPRESSED_MB`).
+- gzip-Decompress streamend mit hartem 100-MB-Bound (`FM_MAX_DECOMPRESSED_MB`).
 - JSON-Parse-Tiefe auf 32 begrenzt (§10 "JSON-Parser-Tiefenlimit").
 """
 
@@ -67,12 +67,12 @@ _MAX_JSON_DEPTH = 32
 
 
 def _scans_unauth_rate_limit() -> str:
-    limits: dict[str, str] = current_app.config["SECSCAN_RATELIMITS"]
+    limits: dict[str, str] = current_app.config["FM_RATELIMITS"]
     return limits["scans_unauth"]
 
 
 def _scans_auth_rate_limit() -> str:
-    limits: dict[str, str] = current_app.config["SECSCAN_RATELIMITS"]
+    limits: dict[str, str] = current_app.config["FM_RATELIMITS"]
     return limits["scans_auth"]
 
 
@@ -171,7 +171,7 @@ def _pre_validate_envelope(body: bytes) -> tuple[str | None, str | None]:
 
     Hinweis: ``host.hostname`` ist KEIN Pflichtfeld — die Server-Identitaet
     kommt aus dem Bearer-Token, nicht aus dem Body. Der Referenz-Agent
-    (``agent/secscan-agent.sh``) sendet das Feld nicht, und es darf nicht
+    (``agent/fathometer-agent.sh``) sendet das Feld nicht, und es darf nicht
     zur Pre-Validate-Pflicht gemacht werden (war ein Block-R-Fehler, mit
     v0.12.x korrigiert). Detail-Felder im ``host``-Block werden in der
     Pydantic-Vollvalidierung im Worker geprueft.
@@ -207,7 +207,7 @@ def _handle_async_ingest(
 ) -> Response | tuple[Response, int]:
     """Asynchroner Fast-Path fuer POST /api/scans (Block R Phase B, ADR-0026).
 
-    Laeuft nur wenn `SECSCAN_SCAN_INGEST_ASYNC=true`. Fuehrt Schmal-Validierung,
+    Laeuft nur wenn `FM_SCAN_INGEST_ASYNC=true`. Fuehrt Schmal-Validierung,
     Agent-Version-Gate, Soft-Cap-Check, Job-Insert und Audit-Event durch;
     antwortet mit 202 + job_id binnen <1s.
 
@@ -220,7 +220,7 @@ def _handle_async_ingest(
     """
     from app.services.scan_ingest_queue import QueueFullError, enqueue_or_resolve
 
-    settings = cast(Settings, current_app.config["SECSCAN_SETTINGS"])
+    settings = cast(Settings, current_app.config["FM_SETTINGS"])
 
     # --- 1. Schmal-Validierung ---
     agent_version, pre_err = _pre_validate_envelope(decompressed_body)
@@ -311,12 +311,12 @@ def _handle_async_ingest(
 
 
 def _decompress_limit_bytes() -> int:
-    s = cast(Settings, current_app.config["SECSCAN_SETTINGS"])
+    s = cast(Settings, current_app.config["FM_SETTINGS"])
     return s.max_decompressed_mb * 1024 * 1024
 
 
 def _max_body_bytes() -> int:
-    s = cast(Settings, current_app.config["SECSCAN_SETTINGS"])
+    s = cast(Settings, current_app.config["FM_SETTINGS"])
     return s.max_body_bytes
 
 

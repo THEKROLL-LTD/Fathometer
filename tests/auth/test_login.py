@@ -178,7 +178,7 @@ def test_login_unknown_user_takes_similar_time_as_wrong_password(
 
 
 def test_login_rate_limit_after_5_attempts(seeded_client: FlaskClient) -> None:
-    """`SECSCAN_RATELIMIT_LOGIN=5/minute` -> Versuch 6 muss 429 sein."""
+    """`FM_RATELIMIT_LOGIN=5/minute` -> Versuch 6 muss 429 sein."""
     # Limiter resetten, damit vorherige Tests nichts verbraucht haben.
     with contextlib.suppress(Exception):
         limiter.reset()

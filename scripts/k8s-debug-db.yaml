@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: secscan-db-rw-nodeport
-  namespace: secscan
+  name: fathometer-db-rw-nodeport
+  namespace: fathometer
 spec:
   type: NodePort
   selector:
-    cnpg.io/cluster: secscan-db
+    cnpg.io/cluster: fathometer-db
     cnpg.io/instanceRole: primary
   ports:
     - name: postgres

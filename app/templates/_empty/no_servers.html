@@ -9,9 +9,8 @@
        hx-get="{{ url_for('servers.list_servers') }}"
        hx-target="#detail-pane"
        hx-push-url="true"
-       style="color: var(--accent); text-decoration: none;">Setup</a>
-    and run <code style="font-family: var(--font-mono); color: var(--text-secondary);">secscan-register.sh</code> on the target host:
+       style="color: var(--accent); text-decoration: none;">Setup</a>,
+    then run the installer on the target host as root:
   </p>
-  <pre style="margin: 0; padding: 10px 14px; background: var(--surface-raised); border: var(--border); font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); overflow-x: auto; white-space: pre;">SECSCAN_MASTER_KEY="..." \
-  ./secscan-register.sh https://secscan.example.com prod-web-01 24</pre>
+  <pre style="margin: 0; padding: 10px 14px; background: var(--surface-raised); border: var(--border); font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); overflow-x: auto; white-space: pre;">sudo bash &lt;(curl -fsSL {{ external_base_url }}/install.sh)</pre>
 </li>

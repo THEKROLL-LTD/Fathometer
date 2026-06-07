@@ -12,7 +12,7 @@ Verantwortlichkeiten:
    `http://localhost`/`http://127.0.0.1` (port optional). Andere Schemes/
    Hosts -> `ValueError`.
 2. Decryption des `Setting.llm_api_key_encrypted`-Werts mit Fernet aus
-   `SECSCAN_ENCRYPTION_KEY`. Klartext-Key bleibt strikt im Memory der
+   `FM_ENCRYPTION_KEY`. Klartext-Key bleibt strikt im Memory der
    Funktion — niemals geloggt.
 3. Stream-API (`stream_chat`) als `AsyncIterator[str]` von Token-Deltas
    plus finalem `usage`-Counter.
@@ -108,12 +108,12 @@ def validate_base_url(base_url: str) -> str:
 
 
 def _fernet_from_settings_value(secret_value: str) -> Fernet:
-    """Baut ein Fernet-Objekt aus `SECSCAN_ENCRYPTION_KEY`.
+    """Baut ein Fernet-Objekt aus `FM_ENCRYPTION_KEY`.
 
     Der Settings-Validator erzwingt min. 32 Zeichen. Fernet erwartet aber
     *exakt* 32 URL-safe Base64-Bytes — wir leiten deterministisch ueber
     `urlsafe_b64encode(sha256(raw)[:32])` ab. So ist jede 32+-Eingabe
-    valider Fernet-Key. Begruendung: secscan akzeptiert generierte
+    valider Fernet-Key. Begruendung: fathometer akzeptiert generierte
     Passphrases, nicht zwingend echte Fernet-Keys.
     """
     import base64

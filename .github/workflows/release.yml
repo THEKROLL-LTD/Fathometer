@@ -11,7 +11,7 @@ name: release
 #    semver-Release).
 #
 # Sichtbarkeit des Package muss einmalig in den Repo/Owner-Einstellungen auf
-# "private" gesetzt werden (Settings → Packages → secscan → Change
+# "private" gesetzt werden (Settings → Packages → fathometer → Change
 # visibility). Workflow selbst pusht nur, er verändert die Sichtbarkeit nicht.
 
 on:
@@ -91,7 +91,7 @@ jobs:
             type=ref,event=tag
             type=sha,format=short,enable=${{ github.ref == 'refs/heads/main' }}
           labels: |
-            org.opencontainers.image.title=secscan
+            org.opencontainers.image.title=fathometer
             org.opencontainers.image.description=Self-hosted Trivy filesystem-scan triage
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=

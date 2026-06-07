@@ -4,7 +4,7 @@ DoD-Punkte:
   - Login-required.
   - Version-Strings: `app_version`, `build_revision`, `alembic_revision`,
     `python_version`, `flask_version`, `sqlalchemy_version`.
-  - `build_revision == "dev"` wenn `SECSCAN_BUILD_REVISION` nicht gesetzt.
+  - `build_revision == "dev"` wenn `FM_BUILD_REVISION` nicht gesetzt.
   - `alembic_revision` matched Hex-Pattern `[a-f0-9]+` oder `"unknown"`.
   - Secret-Leak-Gegen-Test: weder Env-Var-Namen noch DB-Spalten-Namen mit
     Geheimnissen erscheinen im Render.
@@ -60,13 +60,13 @@ def test_about_contains_all_required_version_labels(db_app: Flask) -> None:
 
 
 def test_about_build_revision_defaults_to_dev(db_app: Flask) -> None:
-    """Ohne `SECSCAN_BUILD_REVISION`-ENV ist `build_revision == "dev"`.
+    """Ohne `FM_BUILD_REVISION`-ENV ist `build_revision == "dev"`.
 
     Die `_clean_environment`-Fixture (siehe `tests/conftest.py`) stellt
     sicher, dass die Env nicht aus dem Host blutet — wir muessen daher
     nicht eigens via monkeypatch deleten."""
-    if "SECSCAN_BUILD_REVISION" in os.environ:
-        pytest.skip("SECSCAN_BUILD_REVISION ist im Host-Env gesetzt")
+    if "FM_BUILD_REVISION" in os.environ:
+        pytest.skip("FM_BUILD_REVISION ist im Host-Env gesetzt")
     create_admin_user(db_app)
     client = db_app.test_client()
     login(client)
@@ -107,8 +107,8 @@ def test_about_response_does_not_leak_secret_envs(db_app: Flask) -> None:
     body = resp.get_data(as_text=True)
 
     forbidden = [
-        "SECSCAN_ENCRYPTION_KEY",
-        "SECSCAN_SECRET_KEY",
+        "FM_ENCRYPTION_KEY",
+        "FM_SECRET_KEY",
         "master_key_hash",
         "llm_api_key_encrypted",
         "password_hash",
@@ -118,7 +118,7 @@ def test_about_response_does_not_leak_secret_envs(db_app: Flask) -> None:
 
 
 def test_about_response_does_not_leak_actual_secret_values(db_app: Flask) -> None:
-    """Sicherheits-Sentinel: das vorher gesetzte `SECSCAN_SECRET_KEY` aus
+    """Sicherheits-Sentinel: das vorher gesetzte `FM_SECRET_KEY` aus
     `db_app_env`-Fixture (`test-secret-key-not-used-in-prod`) darf nicht
     in der Response auftauchen — egal ob via Env oder DB-Spalte.
 
@@ -129,7 +129,7 @@ def test_about_response_does_not_leak_actual_secret_values(db_app: Flask) -> Non
     login(client)
     resp = client.get("/settings/about")
     body = resp.get_data(as_text=True)
-    # `SECSCAN_SECRET_KEY`-Wert aus der Fixture darf nicht auftauchen.
+    # `FM_SECRET_KEY`-Wert aus der Fixture darf nicht auftauchen.
     assert "test-secret-key-not-used-in-prod" not in body
 
 
@@ -150,18 +150,18 @@ def test_about_renders_app_version_value(db_app: Flask) -> None:
 
 
 def test_about_build_revision_uses_env_when_set(db_app: Flask) -> None:
-    """Wenn `SECSCAN_BUILD_REVISION` gesetzt ist, taucht der Wert im
+    """Wenn `FM_BUILD_REVISION` gesetzt ist, taucht der Wert im
     Build-Revision-Feld auf.
 
-    Der View liest `os.environ.get("SECSCAN_BUILD_REVISION", "dev")` zur
+    Der View liest `os.environ.get("FM_BUILD_REVISION", "dev")` zur
     Request-Zeit (siehe `settings.py::about_view`). Wir setzen
     `os.environ` direkt (statt monkeypatch) und raeumen explizit auf —
     monkeypatch erzeugte in dieser Test-Konfiguration einen
     Connection-Pool-Hang.
     """
     sentinel = "abc1234-canary"
-    prev = os.environ.get("SECSCAN_BUILD_REVISION")
-    os.environ["SECSCAN_BUILD_REVISION"] = sentinel
+    prev = os.environ.get("FM_BUILD_REVISION")
+    os.environ["FM_BUILD_REVISION"] = sentinel
     try:
         create_admin_user(db_app)
         client = db_app.test_client()
@@ -175,6 +175,6 @@ def test_about_build_revision_uses_env_when_set(db_app: Flask) -> None:
         assert value == sentinel, value
     finally:
         if prev is None:
-            os.environ.pop("SECSCAN_BUILD_REVISION", None)
+            os.environ.pop("FM_BUILD_REVISION", None)
         else:
-            os.environ["SECSCAN_BUILD_REVISION"] = prev
+            os.environ["FM_BUILD_REVISION"] = prev

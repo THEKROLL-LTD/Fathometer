@@ -13,7 +13,7 @@ Felder:
 Beim Speichern:
 1. Wenn `base_url` ODER `model` sich aendert -> archiviere alle aktiven
    Conversations, Audit `llm.provider_changed`.
-2. API-Key Fernet-encrypt mit `SECSCAN_ENCRYPTION_KEY`.
+2. API-Key Fernet-encrypt mit `FM_ENCRYPTION_KEY`.
 3. Audit `settings.updated` mit den geaenderten Feldnamen
    (Klartext-Werte werden NIE in `metadata` gelegt).
 
@@ -93,7 +93,7 @@ LLM_PRESETS: list[dict[str, str]] = [
 def _settings_obj() -> Settings:
     from flask import current_app
 
-    return cast(Settings, current_app.config["SECSCAN_SETTINGS"])
+    return cast(Settings, current_app.config["FM_SETTINGS"])
 
 
 def _has_existing_key(setting_row: Any) -> bool:

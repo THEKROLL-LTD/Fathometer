@@ -1,9 +1,9 @@
-"""Flask-App-Factory fuer secscan.
+"""Flask-App-Factory fuer fathometer.
 
 Konfiguriert in dieser Reihenfolge:
 
 1. Settings laden (pydantic-settings) — Start-Refusal wenn
-   `SECSCAN_ENCRYPTION_KEY` fehlt.
+   `FM_ENCRYPTION_KEY` fehlt.
 2. Logging (structlog mit JSON-Output + Redaction-Filter).
 3. Flask-App mit `MAX_CONTENT_LENGTH=64 MB` Default und Jinja-Autoescape.
 4. `flask-limiter` mit in-memory Backend und Default-Limits aus
@@ -42,12 +42,12 @@ if TYPE_CHECKING:
 
 __all__ = ["create_app", "csrf", "limiter"]
 
-# Erlaubtes Zeichenset fuer SECSCAN_VERSION / SECSCAN_BUILD_REVISION.
+# Erlaubtes Zeichenset fuer FM_VERSION / FM_BUILD_REVISION.
 # Regex pre-compiled als Modul-Konstante — wird pro Request nicht neu kompiliert.
 # Ziel: verhindert XSS via Env-Var-Injection in Footer-Links/Text-Nodes
 # (z.B. `"$(rm -rf /)"` wuerde den Link zerbrechen und ist kein gueltiges
 # Semver-Token). Fuer hochentropische Build-Hashes reicht das Whitelist-Muster.
-_SECSCAN_VERSION_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9._-]+$")
+_FM_VERSION_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9._-]+$")
 
 # Global verfuegbarer Limiter — wird in `create_app` initialisiert. Andere
 # Module duerfen ihn via `from app import limiter` importieren und Decorators
@@ -169,7 +169,7 @@ def _load_asset_manifest() -> dict[str, str]:
     """Lies ``app/static/dist/manifest.json`` einmalig (lazy, thread-sicher).
 
     Gibt ein leeres dict zurueck wenn die Datei nicht existiert (Dev-Smoke
-    ohne vorherigen npm-Build). In Production (``SECSCAN_ENV != "dev"``) ist
+    ohne vorherigen npm-Build). In Production (``FM_ENV != "dev"``) ist
     das Fehlen des Manifests ein Indikator fuer einen defekten Build —
     ``_asset_url`` wirft dort einen ``RuntimeError`` (siehe unten).
     """
@@ -206,9 +206,9 @@ def _asset_url(filename: str) -> str:
 
     Verhalten:
     - Key gefunden: gibt ``url_for('static', filename='dist/<mapped>')`` zurueck.
-    - Key nicht gefunden, ``SECSCAN_ENV=dev`` oder Manifest leer (kein Build):
+    - Key nicht gefunden, ``FM_ENV=dev`` oder Manifest leer (kein Build):
       Fallback auf ``url_for('static', filename='dist/<filename>')``.
-    - Key nicht gefunden und Production-Modus (``SECSCAN_ENV != "dev"``):
+    - Key nicht gefunden und Production-Modus (``FM_ENV != "dev"``):
       wirft ``RuntimeError`` — ein fehlendes Mapping signalisiert einen
       defekten Build und soll nicht lautlos in den 404-Fallback laufen.
     """
@@ -221,7 +221,7 @@ def _asset_url(filename: str) -> str:
     if mapped is not None:
         return url_for("static", filename=f"dist/{mapped}")
     # Kein Mapping gefunden.
-    env = os.environ.get("SECSCAN_ENV", "dev")
+    env = os.environ.get("FM_ENV", "dev")
     if env != "dev":
         raise RuntimeError(
             f"asset_url: kein Mapping fuer '{filename}' im Manifest. "
@@ -251,7 +251,7 @@ def create_app() -> Flask:
     """Erzeugt eine konfigurierte Flask-App.
 
     Beendet den Prozess via `SystemExit`, wenn die Settings nicht valide sind
-    (z.B. fehlender `SECSCAN_ENCRYPTION_KEY`).
+    (z.B. fehlender `FM_ENCRYPTION_KEY`).
     """
     # 1. Settings laden — bei Fehlern Start verweigern.
     try:
@@ -259,10 +259,10 @@ def create_app() -> Flask:
     except ValidationError as exc:
         # Bewusst kein structlog hier — Logger ist noch nicht konfiguriert.
         sys.stderr.write(
-            "secscan: Konfigurations-Fehler — Start verweigert.\n"
+            "Fathometer: Konfigurations-Fehler — Start verweigert.\n"
             f"{exc}\n"
             "Pruefe die Pflicht-Environment-Variablen, "
-            "insbesondere SECSCAN_ENCRYPTION_KEY.\n"
+            "insbesondere FM_ENCRYPTION_KEY.\n"
         )
         raise SystemExit(2) from exc
 
@@ -276,9 +276,9 @@ def create_app() -> Flask:
     # zufaellige Keys (40+ distinkte Bytes) loggen nichts.
     if settings.encryption_key_has_low_entropy:
         log.warning(
-            "secscan.weak_encryption_key",
+            "fathometer.weak_encryption_key",
             message=(
-                "SECSCAN_ENCRYPTION_KEY hat weniger als 16 distinkte Byte-Werte. "
+                "FM_ENCRYPTION_KEY hat weniger als 16 distinkte Byte-Werte. "
                 "Empfohlen: 'python -c \"import secrets; "
                 "print(secrets.token_urlsafe(48))\"' oder "
                 "'openssl rand -base64 48'."
@@ -298,7 +298,7 @@ def create_app() -> Flask:
     # terminierenden Reverse-Proxy (nginx/Caddy mit
     # `X-Forwarded-Proto $scheme`) `request.scheme` und damit
     # `request.host_url` korrekt als `https://` aufloest. Ohne ProxyFix
-    # rendert `GET /install.sh` `SECSCAN_URL=http://...`, was beim
+    # rendert `GET /install.sh` `FM_URL=http://...`, was beim
     # ersten `POST /api/register` einen HTTP->HTTPS-301-Redirect
     # ausloest, dem `curl -X POST` nicht folgt. `x_proto=1`/`x_host=1`/
     # `x_for=1` vertraut genau einem Proxy-Hop — die Defaults sind
@@ -309,7 +309,7 @@ def create_app() -> Flask:
         app.wsgi_app, x_proto=1, x_host=1, x_for=1
     )
 
-    # v0.7.1: explizite Public-URL aus `SECSCAN_PUBLIC_URL`. Wenn gesetzt,
+    # v0.7.1: explizite Public-URL aus `FM_PUBLIC_URL`. Wenn gesetzt,
     # ueberschreibt sie `request.host_url`-Fallback im Installer-Render
     # und im `external_base_url`-Context-Processor. Deploy-eindeutige
     # Quelle der Wahrheit — empfohlen fuer alle Production-Setups.
@@ -318,8 +318,8 @@ def create_app() -> Flask:
     app.config.update(
         SECRET_KEY=settings.secret_key.get_secret_value() or "dev-only-insecure",
         MAX_CONTENT_LENGTH=settings.max_body_bytes,  # 64 MB Default — §9.
-        SECSCAN_DATABASE_URL=settings.database_url,
-        SECSCAN_SETTINGS=settings,
+        FM_DATABASE_URL=settings.database_url,
+        FM_SETTINGS=settings,
         AGENT_FILES_DIR=agent_files_dir,
         EXTERNAL_BASE_URL=public_url,  # leer = Fallback auf `request.host_url`.
         SESSION_COOKIE_HTTPONLY=True,
@@ -368,7 +368,7 @@ def create_app() -> Flask:
     limiter.init_app(app)
     # Default-Limits gelten fuer alle Routes; spezifische Endpoints koennen
     # via `@limiter.limit(...)` enger limitieren.
-    app.config["SECSCAN_RATELIMITS"] = {
+    app.config["FM_RATELIMITS"] = {
         "register": settings.ratelimit_register,
         "login": settings.ratelimit_login,
         "scans_unauth": settings.ratelimit_scans_unauth,
@@ -520,16 +520,16 @@ def create_app() -> Flask:
 
     @app.context_processor
     def _inject_version() -> dict[str, str]:
-        """Stellt `secscan_version` und `secscan_build_revision` als Template-Variablen bereit.
+        """Stellt `fathometer_version` und `fathometer_build_revision` als Template-Variablen bereit.
 
-        Liest `SECSCAN_VERSION` bzw. `SECSCAN_BUILD_REVISION` aus der
-        Prozess-Umgebung. Beide Werte werden gegen `_SECSCAN_VERSION_RE`
+        Liest `FM_VERSION` bzw. `FM_BUILD_REVISION` aus der
+        Prozess-Umgebung. Beide Werte werden gegen `_FM_VERSION_RE`
         (`^[A-Za-z0-9._-]+$`, max. 64 Zeichen) validiert, bevor sie ins
         Template gelangen.
 
-        Sicherheitsbegruendung: Der Footer rendert `v{{ secscan_version }}`
+        Sicherheitsbegruendung: Der Footer rendert `v{{ fathometer_version }}`
         sowohl als Text-Node als auch in einem Href-Attribut
-        (`https://github.com/.../releases/tag/v{{ secscan_version }}`).
+        (`https://github.com/.../releases/tag/v{{ fathometer_version }}`).
         Ein boeswilliges Env wie `'"><script>alert(1)</script>` wuerde bei
         unvalidierter Ausgabe den Link zerbrechen oder XSS ermoeglichen.
         Die Regex-Whitelist erlaubt ausschliesslich semantisch valide
@@ -540,13 +540,13 @@ def create_app() -> Flask:
 
         def _validated(env_key: str) -> str:
             raw = os.environ.get(env_key, "").strip()
-            if raw and len(raw) <= _max_len and _SECSCAN_VERSION_RE.match(raw):
+            if raw and len(raw) <= _max_len and _FM_VERSION_RE.match(raw):
                 return raw
             return "dev"
 
         return {
-            "secscan_version": _validated("SECSCAN_VERSION"),
-            "secscan_build_revision": _validated("SECSCAN_BUILD_REVISION"),
+            "fathometer_version": _validated("FM_VERSION"),
+            "fathometer_build_revision": _validated("FM_BUILD_REVISION"),
         }
 
     # Setup-Guard: solange das Setup nicht abgeschlossen ist, leiten wir

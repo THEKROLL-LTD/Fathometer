@@ -405,7 +405,7 @@ def stream(conversation_id: int) -> Response:
 
     from flask import current_app
 
-    app_settings = cast(Settings, current_app.config["SECSCAN_SETTINGS"])
+    app_settings = cast(Settings, current_app.config["FM_SETTINGS"])
     encryption_key = app_settings.encryption_key.get_secret_value()
 
     conv_id = conv.id

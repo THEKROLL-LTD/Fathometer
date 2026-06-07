@@ -59,7 +59,7 @@ def _build_envelope(hostname: str = "e2e-host") -> dict[str, Any]:
 @pytest.fixture
 def async_db_app(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> Flask:
     """db_app mit aktiviertem async-Flag (analog test_scans_async_edge.py)."""
-    settings: Settings = db_app.config["SECSCAN_SETTINGS"]
+    settings: Settings = db_app.config["FM_SETTINGS"]
     monkeypatch.setattr(settings, "scan_ingest_async", True)
     return db_app
 

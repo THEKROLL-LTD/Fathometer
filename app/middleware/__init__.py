@@ -1,4 +1,4 @@
-"""WSGI-Middlewares fuer secscan."""
+"""WSGI-Middlewares fuer fathometer."""
 
 from __future__ import annotations
 

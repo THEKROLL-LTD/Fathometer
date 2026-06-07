@@ -3,7 +3,7 @@
 `create_app()` ist die einzige Stelle, an der Settings geladen, Logging
 konfiguriert und DB-Verbindungen vorbereitet werden. Reiner Import des
 Packages oder der Factory-Funktion darf nicht crashen — selbst wenn
-`SECSCAN_ENCRYPTION_KEY` fehlt.
+`FM_ENCRYPTION_KEY` fehlt.
 """
 
 from __future__ import annotations
@@ -15,14 +15,14 @@ import pytest
 
 
 @pytest.fixture
-def no_secscan_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Entfernt alle `SECSCAN_*`-Variablen und purged das `app`-Modul aus `sys.modules`."""
+def no_fathometer_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Entfernt alle `FM_*`-Variablen und purged das `app`-Modul aus `sys.modules`."""
     for key in (
-        "SECSCAN_ENCRYPTION_KEY",
-        "SECSCAN_SECRET_KEY",
-        "SECSCAN_DATABASE_URL",
-        "SECSCAN_MAX_BODY_MB",
-        "SECSCAN_LOG_LEVEL",
+        "FM_ENCRYPTION_KEY",
+        "FM_SECRET_KEY",
+        "FM_DATABASE_URL",
+        "FM_MAX_BODY_MB",
+        "FM_LOG_LEVEL",
     ):
         monkeypatch.delenv(key, raising=False)
     # Modul-Cache leeren, damit ein frischer Import erzwungen wird.
@@ -31,17 +31,17 @@ def no_secscan_env(monkeypatch: pytest.MonkeyPatch) -> None:
             monkeypatch.delitem(sys.modules, mod, raising=False)
 
 
-def test_import_app_does_not_crash_without_env(no_secscan_env: None) -> None:
+def test_import_app_does_not_crash_without_env(no_fathometer_env: None) -> None:
     """`import app` darf ohne Pflicht-Env-Vars nicht scheitern."""
     import app  # noqa: F401 — import-only smoke test
 
 
-def test_import_create_app_does_not_crash_without_env(no_secscan_env: None) -> None:
+def test_import_create_app_does_not_crash_without_env(no_fathometer_env: None) -> None:
     """Auch der Import der Factory-Funktion darf keine Settings laden."""
     from app import create_app  # noqa: F401 — import-only smoke test
 
 
-def test_create_app_call_fails_without_env(no_secscan_env: None) -> None:
+def test_create_app_call_fails_without_env(no_fathometer_env: None) -> None:
     """Nur `create_app()` darf scheitern — und genau dann auch."""
     from app import create_app
 
@@ -49,7 +49,7 @@ def test_create_app_call_fails_without_env(no_secscan_env: None) -> None:
         create_app()
 
 
-def test_reimporting_app_is_idempotent(no_secscan_env: None) -> None:
+def test_reimporting_app_is_idempotent(no_fathometer_env: None) -> None:
     """Mehrfaches Import-und-Reload darf weder werfen noch globalen State mutieren."""
     import app as app_module
 

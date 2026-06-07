@@ -82,13 +82,13 @@ def test_main_returns_when_shutdown_flag_set(monkeypatch: pytest.MonkeyPatch) ->
     Defensivsicherungen — sobald das Shutdown-Flag *vor* ``main()`` gesetzt
     ist, darf nichts davon aufgerufen werden.
     """
-    monkeypatch.setenv("SECSCAN_ENCRYPTION_KEY", "x" * 32)
-    monkeypatch.setenv("SECSCAN_SECRET_KEY", "test-secret-key-not-used-in-prod")
+    monkeypatch.setenv("FM_ENCRYPTION_KEY", "x" * 32)
+    monkeypatch.setenv("FM_SECRET_KEY", "test-secret-key-not-used-in-prod")
     monkeypatch.setenv(
-        "SECSCAN_DATABASE_URL",
+        "FM_DATABASE_URL",
         "postgresql+psycopg://test:test@127.0.0.1:1/test",
     )
-    monkeypatch.setenv("SECSCAN_LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("FM_LOG_LEVEL", "WARNING")
 
     # DB-Helpers raus aus dem main()-Pfad.
     monkeypatch.setattr(llm_worker, "_read_mode_safe", lambda: "off")

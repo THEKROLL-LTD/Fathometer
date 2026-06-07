@@ -16,7 +16,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
     -w) shift 2 ;;
-    --data-binary) gzip -dc >"$SECSCAN_PAYLOAD_CAPTURE"; shift 2 ;;
+    --data-binary) gzip -dc >"$FM_PAYLOAD_CAPTURE"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -79,13 +79,13 @@ run_agent() {
   local mode="$1"
   local payload="$tmpdir/payload-$mode.json"
   make_stubs "$mode"
-  SECSCAN_AGENT_UPDATED=1 \
-    SECSCAN_URL="https://secscan.example.test" \
-    SECSCAN_API_KEY="test-key" \
-    SECSCAN_SCAN_PATH="/" \
-    SECSCAN_PAYLOAD_CAPTURE="$payload" \
+  FM_AGENT_UPDATED=1 \
+    FM_URL="https://fathometer.example.test" \
+    FM_API_KEY="test-key" \
+    FM_SCAN_PATH="/" \
+    FM_PAYLOAD_CAPTURE="$payload" \
     PATH="$tmpdir/bin:$PATH" \
-    bash "$repo_root/agent/secscan-agent.sh" >/dev/null 2>"$tmpdir/$mode.log"
+    bash "$repo_root/agent/fathometer-agent.sh" >/dev/null 2>"$tmpdir/$mode.log"
   printf '%s\n' "$payload"
 }
 

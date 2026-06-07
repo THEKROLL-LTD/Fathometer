@@ -3,7 +3,7 @@
 Neue Tabelle `scan_ingest_jobs` als asynchrone Ingest-Queue fuer POST
 /api/scans. Ermoeglicht den Fast-Path: HTTP-Handler antwortet <1s mit 202
 + job_id; die eigentliche Verarbeitung (Findings-UPSERT, Pre-Triage,
-Group-Matching, LLM-Queueing) laeuft im secscan-llm-worker als Sub-Tick.
+Group-Matching, LLM-Queueing) laeuft im fathometer-llm-worker als Sub-Tick.
 
 Spalten:
 - id BIGSERIAL PK — Job-ID, wird im 202-Response-Body zurueckgegeben.

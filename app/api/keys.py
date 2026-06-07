@@ -52,7 +52,7 @@ log = structlog.get_logger(__name__)
 def _rotate_rate_limit() -> str:
     from flask import current_app
 
-    limits: dict[str, str] = current_app.config["SECSCAN_RATELIMITS"]
+    limits: dict[str, str] = current_app.config["FM_RATELIMITS"]
     # Wir nutzen das `register`-Bucket, weil Rotation aehnlich selten ist und
     # genauso schuetzenswert.
     return limits["register"]

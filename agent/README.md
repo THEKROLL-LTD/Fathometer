@@ -1,4 +1,4 @@
-# secscan-agent — Referenz-Implementierung
+# fathometer-agent — Referenz-Implementierung
 
 Zwei kleine Bash-Skripte, die das Push-Format aus
 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) (Sektion 6 + 11) abdecken. Sie sind
@@ -24,16 +24,16 @@ solange das Envelope-Schema eingehalten wird.
 
 ## Installation in drei Schritten
 
-**1. Master-Key generieren.** In der secscan Web-UI: Settings → Master-Key
+**1. Master-Key generieren.** In der fathometer Web-UI: Settings → Master-Key
 generieren und einmalig anzeigen lassen. Notieren oder direkt als ENV
 für Schritt 2 verwenden.
 
 **2. Server registrieren.** Auf dem Ziel-Host:
 
 ```bash
-SECSCAN_MASTER_KEY="<dein-master-key>" \
-  ./secscan-register.sh https://secscan.example.com prod-web-01 24 \
-  | install -m 600 /dev/stdin /etc/secscan/api-key
+FM_MASTER_KEY="<dein-master-key>" \
+  ./fathometer-register.sh https://fathometer.example.com prod-web-01 24 \
+  | install -m 600 /dev/stdin /etc/fathometer/api-key
 ```
 
 Das druckt nur den Server-Key auf stdout (alles andere geht nach stderr),
@@ -43,28 +43,28 @@ geht, in der UI rotieren — verlorene Keys sind nicht wiederherstellbar.
 **3. Agent in Cron einhängen.**
 
 ```cron
-# /etc/cron.d/secscan
-0 4 * * * root SECSCAN_URL=https://secscan.example.com SECSCAN_API_KEY="$(cat /etc/secscan/api-key)" /usr/local/bin/secscan-agent.sh >>/var/log/secscan.log 2>&1
+# /etc/cron.d/fathometer
+0 4 * * * root FM_URL=https://fathometer.example.com FM_API_KEY="$(cat /etc/fathometer/api-key)" /usr/local/bin/fathometer-agent.sh >>/var/log/fathometer.log 2>&1
 ```
 
 Oder als systemd-Timer wenn das vorgezogen wird:
 
 ```ini
-# /etc/systemd/system/secscan.service
+# /etc/systemd/system/fathometer.service
 [Unit]
-Description=secscan trivy push
+Description=fathometer trivy push
 After=network-online.target
 
 [Service]
 Type=oneshot
-EnvironmentFile=/etc/secscan/env   # SECSCAN_URL=… SECSCAN_API_KEY=…
-ExecStart=/usr/local/bin/secscan-agent.sh
+EnvironmentFile=/etc/fathometer/env   # FM_URL=… FM_API_KEY=…
+ExecStart=/usr/local/bin/fathometer-agent.sh
 ```
 
 ```ini
-# /etc/systemd/system/secscan.timer
+# /etc/systemd/system/fathometer.timer
 [Unit]
-Description=secscan tägliche Ausführung
+Description=fathometer tägliche Ausführung
 
 [Timer]
 OnCalendar=daily
@@ -75,7 +75,7 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-Aktivieren mit `systemctl enable --now secscan.timer`.
+Aktivieren mit `systemctl enable --now fathometer.timer`.
 
 ## Was wird gesendet?
 
@@ -103,23 +103,23 @@ dem Server an, mit welcher Skript-Version gepusht wurde.
 
 | Variable                | Pflicht | Default       | Bedeutung                              |
 |-------------------------|---------|---------------|----------------------------------------|
-| `SECSCAN_URL`           | ja      | —             | Backend-URL ohne Trailing-Slash        |
-| `SECSCAN_API_KEY`       | ja      | —             | Server-Key aus `secscan-register.sh`   |
-| `SECSCAN_TRIVY_PATH`    | nein    | `trivy`       | Pfad zur Trivy-Binary                  |
-| `SECSCAN_SCAN_PATH`     | nein    | `/`           | Was Trivy scannen soll                 |
-| `SECSCAN_TIMEOUT_SEC`   | nein    | `60`          | curl-Upload-Timeout                    |
-| `SECSCAN_MASTER_KEY`    | nein    | (interaktiv)  | nur für `secscan-register.sh`          |
+| `FM_URL`           | ja      | —             | Backend-URL ohne Trailing-Slash        |
+| `FM_API_KEY`       | ja      | —             | Server-Key aus `fathometer-register.sh`   |
+| `FM_TRIVY_PATH`    | nein    | `trivy`       | Pfad zur Trivy-Binary                  |
+| `FM_SCAN_PATH`     | nein    | `/`           | Was Trivy scannen soll                 |
+| `FM_TIMEOUT_SEC`   | nein    | `60`          | curl-Upload-Timeout                    |
+| `FM_MASTER_KEY`    | nein    | (interaktiv)  | nur für `fathometer-register.sh`          |
 
 ## Exit-Codes
 
-`secscan-agent.sh`:
+`fathometer-agent.sh`:
 
 - `0` — Scan erfolgreich übertragen
 - `1` — fehlende Voraussetzungen (Tools, ENV)
 - `2` — Trivy-Scan fehlgeschlagen
 - `3` — Upload fehlgeschlagen (Netzwerk oder HTTP-Fehler)
 
-`secscan-register.sh`:
+`fathometer-register.sh`:
 
 - `0` — registriert, Server-Key auf stdout
 - `1` — fehlende Voraussetzungen oder ungültige Argumente

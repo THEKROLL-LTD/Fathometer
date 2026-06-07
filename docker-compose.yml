@@ -1,4 +1,4 @@
-# docker-compose-Setup fuer secscan (lokal und Single-Node-Hosting).
+# docker-compose-Setup fuer fathometer (lokal und Single-Node-Hosting).
 # Zwei Services: `app` (Flask + Gunicorn) und `db` (Postgres 17).
 # Production-Empfehlung: Reverse-Proxy davor (nginx/Caddy/Traefik) — siehe
 # ARCHITECTURE.md §9.
@@ -8,15 +8,15 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-secscan}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secscan}
-      POSTGRES_DB: ${POSTGRES_DB:-secscan}
+      POSTGRES_USER: ${POSTGRES_USER:-fathometer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fathometer}
+      POSTGRES_DB: ${POSTGRES_DB:-fathometer}
     volumes:
-      - secscan-db:/var/lib/postgresql/data
+      - fathometer-db:/var/lib/postgresql/data
     healthcheck:
       test:
         - CMD-SHELL
-        - pg_isready -U "${POSTGRES_USER:-secscan}" -d "${POSTGRES_DB:-secscan}"
+        - pg_isready -U "${POSTGRES_USER:-fathometer}" -d "${POSTGRES_DB:-fathometer}"
       interval: 5s
       timeout: 3s
       retries: 10
@@ -31,21 +31,21 @@ services:
       db:
         condition: service_healthy
     environment:
-      SECSCAN_ENCRYPTION_KEY: ${SECSCAN_ENCRYPTION_KEY}
-      SECSCAN_SECRET_KEY: ${SECSCAN_SECRET_KEY}
-      SECSCAN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-secscan}:${POSTGRES_PASSWORD:-secscan}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-secscan}
-      SECSCAN_MAX_BODY_MB: ${SECSCAN_MAX_BODY_MB:-10}
-      SECSCAN_MAX_DECOMPRESSED_MB: ${SECSCAN_MAX_DECOMPRESSED_MB:-100}
-      SECSCAN_RATELIMIT_REGISTER: ${SECSCAN_RATELIMIT_REGISTER:-10/minute}
-      SECSCAN_RATELIMIT_LOGIN: ${SECSCAN_RATELIMIT_LOGIN:-5/minute}
-      SECSCAN_RATELIMIT_SCANS_UNAUTH: ${SECSCAN_RATELIMIT_SCANS_UNAUTH:-20/minute}
-      SECSCAN_RATELIMIT_SCANS_AUTH: ${SECSCAN_RATELIMIT_SCANS_AUTH:-60/hour}
-      SECSCAN_GUNICORN_WORKERS: ${SECSCAN_GUNICORN_WORKERS:-2}
-      SECSCAN_GUNICORN_THREADS: ${SECSCAN_GUNICORN_THREADS:-8}
-      SECSCAN_GUNICORN_TIMEOUT: ${SECSCAN_GUNICORN_TIMEOUT:-120}
-      SECSCAN_LOG_LEVEL: ${SECSCAN_LOG_LEVEL:-INFO}
+      FM_ENCRYPTION_KEY: ${FM_ENCRYPTION_KEY}
+      FM_SECRET_KEY: ${FM_SECRET_KEY}
+      FM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-fathometer}:${POSTGRES_PASSWORD:-fathometer}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-fathometer}
+      FM_MAX_BODY_MB: ${FM_MAX_BODY_MB:-10}
+      FM_MAX_DECOMPRESSED_MB: ${FM_MAX_DECOMPRESSED_MB:-100}
+      FM_RATELIMIT_REGISTER: ${FM_RATELIMIT_REGISTER:-10/minute}
+      FM_RATELIMIT_LOGIN: ${FM_RATELIMIT_LOGIN:-5/minute}
+      FM_RATELIMIT_SCANS_UNAUTH: ${FM_RATELIMIT_SCANS_UNAUTH:-20/minute}
+      FM_RATELIMIT_SCANS_AUTH: ${FM_RATELIMIT_SCANS_AUTH:-60/hour}
+      FM_GUNICORN_WORKERS: ${FM_GUNICORN_WORKERS:-2}
+      FM_GUNICORN_THREADS: ${FM_GUNICORN_THREADS:-8}
+      FM_GUNICORN_TIMEOUT: ${FM_GUNICORN_TIMEOUT:-120}
+      FM_LOG_LEVEL: ${FM_LOG_LEVEL:-INFO}
       # Block R (ADR-0026) — Async-Ingest Per-Server-Soft-Cap.
-      SECSCAN_MAX_QUEUED_INGEST_JOBS: ${SECSCAN_MAX_QUEUED_INGEST_JOBS:-50}
+      FM_MAX_QUEUED_INGEST_JOBS: ${FM_MAX_QUEUED_INGEST_JOBS:-50}
     ports:
       - "8000:8000"
     healthcheck:
@@ -64,7 +64,7 @@ services:
   # Worker-Settings (Mode, Token-Budget, Reset-At) leben auf der
   # Singleton-`settings`-Zeile und werden dort vom Web-Container
   # geaendert — der Worker liest sie im Tick.
-  secscan-llm-worker:
+  fathometer-llm-worker:
     build:
       context: .
       dockerfile: Dockerfile
@@ -82,18 +82,18 @@ services:
         condition: service_healthy
     entrypoint: ["python", "-m", "app.workers.llm_worker"]
     environment:
-      SECSCAN_ENCRYPTION_KEY: ${SECSCAN_ENCRYPTION_KEY}
-      SECSCAN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-secscan}:${POSTGRES_PASSWORD:-secscan}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-secscan}
-      SECSCAN_WORKER_POLL_INTERVAL_SEC: ${SECSCAN_WORKER_POLL_INTERVAL_SEC:-2.0}
-      SECSCAN_WORKER_STALE_TIMEOUT_MIN: ${SECSCAN_WORKER_STALE_TIMEOUT_MIN:-10}
-      SECSCAN_LLM_TOKEN_BUDGET_DAILY: ${SECSCAN_LLM_TOKEN_BUDGET_DAILY:-1000000}
-      SECSCAN_LLM_CACHE_TTL_DAYS: ${SECSCAN_LLM_CACHE_TTL_DAYS:-30}
-      SECSCAN_LLM_CACHE_MAX_ROWS: ${SECSCAN_LLM_CACHE_MAX_ROWS:-100000}
-      SECSCAN_LOG_LEVEL: ${SECSCAN_LOG_LEVEL:-INFO}
+      FM_ENCRYPTION_KEY: ${FM_ENCRYPTION_KEY}
+      FM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-fathometer}:${POSTGRES_PASSWORD:-fathometer}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-fathometer}
+      FM_WORKER_POLL_INTERVAL_SEC: ${FM_WORKER_POLL_INTERVAL_SEC:-2.0}
+      FM_WORKER_STALE_TIMEOUT_MIN: ${FM_WORKER_STALE_TIMEOUT_MIN:-10}
+      FM_LLM_TOKEN_BUDGET_DAILY: ${FM_LLM_TOKEN_BUDGET_DAILY:-1000000}
+      FM_LLM_CACHE_TTL_DAYS: ${FM_LLM_CACHE_TTL_DAYS:-30}
+      FM_LLM_CACHE_MAX_ROWS: ${FM_LLM_CACHE_MAX_ROWS:-100000}
+      FM_LOG_LEVEL: ${FM_LOG_LEVEL:-INFO}
       # Block R (ADR-0026) — Async-Ingest Worker-Sub-Tick-Konstanten.
-      SECSCAN_SCAN_INGEST_MAX_ATTEMPTS: ${SECSCAN_SCAN_INGEST_MAX_ATTEMPTS:-3}
-      SECSCAN_SCAN_INGEST_STALE_TIMEOUT_MIN: ${SECSCAN_SCAN_INGEST_STALE_TIMEOUT_MIN:-5}
-      SECSCAN_SCAN_INGEST_RETENTION_INTERVAL_SEC: ${SECSCAN_SCAN_INGEST_RETENTION_INTERVAL_SEC:-3600}
+      FM_SCAN_INGEST_MAX_ATTEMPTS: ${FM_SCAN_INGEST_MAX_ATTEMPTS:-3}
+      FM_SCAN_INGEST_STALE_TIMEOUT_MIN: ${FM_SCAN_INGEST_STALE_TIMEOUT_MIN:-5}
+      FM_SCAN_INGEST_RETENTION_INTERVAL_SEC: ${FM_SCAN_INGEST_RETENTION_INTERVAL_SEC:-3600}
     healthcheck:
       # timeout: 10s — Cold-Python-Process + DB-Connect liegt unter ARM64-RKE2
       # bei ~6s gemessen (v0.9.4-Befund). 5s waren zu knapp und produzierten
@@ -107,4 +107,4 @@ services:
       start_period: 20s
 
 volumes:
-  secscan-db:
+  fathometer-db:

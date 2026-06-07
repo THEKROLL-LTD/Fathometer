@@ -16,7 +16,7 @@ Vier Operationen plus Helfer:
 Die Singleton-Row der ``settings``-Tabelle haelt
 ``llm_token_budget_used_today`` und ``llm_token_budget_reset_at``. Das
 Tages-Cap kommt aus :func:`app.config.load_settings`
-(``llm_token_budget_daily``, Env ``SECSCAN_LLM_TOKEN_BUDGET_DAILY``).
+(``llm_token_budget_daily``, Env ``FM_LLM_TOKEN_BUDGET_DAILY``).
 """
 
 from __future__ import annotations

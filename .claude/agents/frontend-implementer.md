@@ -4,7 +4,7 @@ description: Use when implementing Jinja2-Templates, HTMX-Interaktionen, Alpine.
 tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
-Du bist der Frontend-Implementer für secscan.
+Du bist der Frontend-Implementer für fathometer.
 
 ## Pflicht-Lektüre vor jeder Aufgabe
 

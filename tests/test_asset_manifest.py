@@ -73,7 +73,7 @@ def test_asset_url_returns_hashed_filename_from_manifest(
 
     mock_manifest = {"css/app.css": "css/app.abc123.css"}
     monkeypatch.setattr(app_module, "_asset_manifest", mock_manifest)
-    monkeypatch.delenv("SECSCAN_ENV", raising=False)
+    monkeypatch.delenv("FM_ENV", raising=False)
 
     with app.test_request_context("/"):
         result = app_module._asset_url("css/app.css")
@@ -100,7 +100,7 @@ def test_asset_url_all_three_manifest_keys(
         "js/app.js": "js/app.ghi789.js",
     }
     monkeypatch.setattr(app_module, "_asset_manifest", mock_manifest)
-    monkeypatch.delenv("SECSCAN_ENV", raising=False)
+    monkeypatch.delenv("FM_ENV", raising=False)
 
     with app.test_request_context("/"):
         css_url = app_module._asset_url("css/app.css")
@@ -121,7 +121,7 @@ def test_asset_url_missing_key_raises_in_production(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_asset_url wirft RuntimeError wenn Key fehlt und SECSCAN_ENV != "dev".
+    """_asset_url wirft RuntimeError wenn Key fehlt und FM_ENV != "dev".
 
     Leeres Manifest simuliert fehlerhaften Build (npm run build nicht
     ausgefuehrt oder Manifest unvollstaendig).
@@ -129,7 +129,7 @@ def test_asset_url_missing_key_raises_in_production(
     import app as app_module
 
     monkeypatch.setattr(app_module, "_asset_manifest", {})
-    monkeypatch.setenv("SECSCAN_ENV", "production")
+    monkeypatch.setenv("FM_ENV", "production")
 
     with (
         app.test_request_context("/"),
@@ -147,15 +147,15 @@ def test_asset_url_missing_key_falls_back_in_dev(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_asset_url faellt in Dev-Mode (SECSCAN_ENV=dev) auf den unverhashten Pfad zurueck.
+    """_asset_url faellt in Dev-Mode (FM_ENV=dev) auf den unverhashten Pfad zurueck.
 
-    Wenn das Manifest leer ist und SECSCAN_ENV=dev gesetzt ist, gibt _asset_url
+    Wenn das Manifest leer ist und FM_ENV=dev gesetzt ist, gibt _asset_url
     url_for("static", filename="dist/css/app.css") zurueck (ohne Hash).
     """
     import app as app_module
 
     monkeypatch.setattr(app_module, "_asset_manifest", {})
-    monkeypatch.setenv("SECSCAN_ENV", "dev")
+    monkeypatch.setenv("FM_ENV", "dev")
 
     with app.test_request_context("/"):
         result = app_module._asset_url("css/app.css")
@@ -169,15 +169,15 @@ def test_asset_url_missing_key_falls_back_when_env_unset(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_asset_url faellt zurueck wenn SECSCAN_ENV nicht gesetzt ist.
+    """_asset_url faellt zurueck wenn FM_ENV nicht gesetzt ist.
 
-    Default in _asset_url ist "dev" (os.environ.get("SECSCAN_ENV", "dev")),
-    daher ist ein fehlender Key ohne SECSCAN_ENV ein Dev-Fallback (kein Fehler).
+    Default in _asset_url ist "dev" (os.environ.get("FM_ENV", "dev")),
+    daher ist ein fehlender Key ohne FM_ENV ein Dev-Fallback (kein Fehler).
     """
     import app as app_module
 
     monkeypatch.setattr(app_module, "_asset_manifest", {})
-    monkeypatch.delenv("SECSCAN_ENV", raising=False)
+    monkeypatch.delenv("FM_ENV", raising=False)
 
     with app.test_request_context("/"):
         result = app_module._asset_url("css/app.css")
@@ -195,7 +195,7 @@ def test_asset_url_dev_fallback_all_three_keys(
     import app as app_module
 
     monkeypatch.setattr(app_module, "_asset_manifest", {})
-    monkeypatch.setenv("SECSCAN_ENV", "dev")
+    monkeypatch.setenv("FM_ENV", "dev")
 
     with app.test_request_context("/"):
         css_url = app_module._asset_url("css/app.css")

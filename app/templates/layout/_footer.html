@@ -11,18 +11,18 @@
    Tagline (rechts): "thekroll ltd · human intent. machine precision."
 
    Version:
-     secscan_version kommt aus _inject_version()-Context-Processor
+     fathometer_version kommt aus _inject_version()-Context-Processor
      (app/__init__.py, parallel vom backend-implementer angelegt).
      Regex-validierter Wert; Default "dev" bei ungueltigem Env-Var.
 
    Sicherheit:
-     - secscan_version ist server-seitig regex-validiert (^[A-Za-z0-9._-]+$).
+     - fathometer_version ist server-seitig regex-validiert (^[A-Za-z0-9._-]+$).
      - Autoescape schuetzt gegen Edge-Cases.
      - Keine Inline-Event-Handler.
 #}
-{% set _ver = secscan_version | default("dev") %}
+{% set _ver = fathometer_version | default("dev") %}
 {# Tag-Convention: GitHub-Tags sind als "v0.12.0" gespeichert (siehe STATE.md).
-   SECSCAN_VERSION kann mit oder ohne fuehrendes "v" gesetzt sein — wir
+   FM_VERSION kann mit oder ohne fuehrendes "v" gesetzt sein — wir
    normalisieren auf "vX.Y.Z" fuer die URL und Anzeige, ohne Doppel-"v". #}
 {% set _ver_tag = _ver if _ver.startswith("v") else ("v" ~ _ver) %}
 {% if _ver == "dev" %}

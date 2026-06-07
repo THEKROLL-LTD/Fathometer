@@ -81,7 +81,7 @@ VARIANTS: list[tuple[str, dict | None]] = [
         {
             "type": "json_schema",
             "json_schema": {
-                "name": "secscan_risk_review",
+                "name": "fathometer_risk_review",
                 "schema": SCHEMA,
                 "strict": False,
             },
@@ -92,7 +92,7 @@ VARIANTS: list[tuple[str, dict | None]] = [
         {
             "type": "json_schema",
             "json_schema": {
-                "name": "secscan_risk_review",
+                "name": "fathometer_risk_review",
                 "schema": SCHEMA,
                 "strict": True,
             },

@@ -12,8 +12,8 @@
 -- `application_groups.risk_band` mehr) oder mittendrin steht.
 --
 -- Anwendung:
---   psql -U secscan -d secscan -f scripts/reset_block_t_clean.sql
---   docker compose exec -T db psql -U secscan -d secscan < scripts/reset_block_t_clean.sql
+--   psql -U fathometer -d fathometer -f scripts/reset_block_t_clean.sql
+--   docker compose exec -T db psql -U fathometer -d fathometer < scripts/reset_block_t_clean.sql
 --
 -- Was BLEIBT:
 --   - users, tags, settings (State-Felder werden resetted, Identity-Felder
@@ -189,14 +189,14 @@ COMMIT;
 -- Nach dem Lauf:
 --   - Operator-Login funktioniert unveraendert (users + settings.* intakt).
 --   - Server-Liste in der UI ist leer; Operator muss Server via
---     `secscan-register` neu anlegen (neuer Server-Key pro Host).
+--     `fathometer-register` neu anlegen (neuer Server-Key pro Host).
 --   - Erster Agent-Scan eines Servers triggert:
 --       1. Findings-UPSERT (frisch, alle als first_seen_at = now()).
 --       2. Pass-1 -> baut application_groups + (bei Block T) Junction-Rows auf.
 --       3. Pass-2 -> fuellt application_group_evaluations bzw. die alten
 --          ApplicationGroup-Eval-Felder, je nach DB-Stand.
 --       4. inherit_group_risk_to_findings setzt Finding-Bands.
---   - Bei aktivem `SECSCAN_SCAN_INGEST_ASYNC=true` laeuft das via
+--   - Bei aktivem `FM_SCAN_INGEST_ASYNC=true` laeuft das via
 --     scan_ingest_jobs; sonst synchron.
 --   - Feed-Pull (EPSS/KEV) wird beim naechsten Worker-Tick getriggert (feed_
 --     pull_log ist leer); die Daten in epss_scores/cisa_kev_catalog waren

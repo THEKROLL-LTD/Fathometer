@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.7
-# Multi-Stage-Build fuer secscan.
+# Multi-Stage-Build fuer fathometer.
 # Builder installiert Dependencies in ein venv, runtime kopiert das venv und
 # laeuft als non-root user.
 
 ARG PYTHON_VERSION=3.13
 # Build-Revision (Git-SHA o.ae.) — wird vom CI per `--build-arg` gesetzt
 # und in der Runtime-Stage als ENV exportiert. About-View liest das
-# via `os.environ.get("SECSCAN_BUILD_REVISION", "dev")`.
-ARG SECSCAN_BUILD_REVISION=dev
+# via `os.environ.get("FM_BUILD_REVISION", "dev")`.
+ARG FM_BUILD_REVISION=dev
 
 # ---------------------------------------------------------------------------
 # Stage 1 — Builder
@@ -50,7 +50,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     mkdir -p app && touch app/__init__.py && \
     pip install --upgrade pip && \
     pip install --no-compile . && \
-    pip uninstall -y secscan
+    pip uninstall -y fathometer
 
 # ---- App-Layer (aendert sich bei jedem Code-Change) -----------------------
 # Echten App-Code kopieren und Package ohne Re-Resolution der Dependencies
@@ -149,8 +149,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ; true
 
 # Non-root user.
-RUN groupadd --system --gid 1001 secscan && \
-    useradd --system --uid 1001 --gid secscan --shell /usr/sbin/nologin secscan
+RUN groupadd --system --gid 1001 fathometer && \
+    useradd --system --uid 1001 --gid fathometer --shell /usr/sbin/nologin fathometer
 
 COPY --from=builder /opt/venv /opt/venv
 
@@ -164,10 +164,10 @@ COPY alembic.ini ./
 # Block N (ADR-0021): `/agent/*.sh` werden ueber `/agent/files/<name>`
 # vom Backend ausgeliefert (`AGENT_FILES_DIR` zeigt auf `/app/agent`).
 COPY agent ./agent
-COPY scripts/entrypoint.sh /usr/local/bin/secscan-entrypoint
+COPY scripts/entrypoint.sh /usr/local/bin/fathometer-entrypoint
 
-RUN chmod +x /usr/local/bin/secscan-entrypoint && \
-    chown -R secscan:secscan /app
+RUN chmod +x /usr/local/bin/fathometer-entrypoint && \
+    chown -R fathometer:fathometer /app
 
 # ---------------------------------------------------------------------------
 # Stage 3 — Flat Runtime
@@ -187,7 +187,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=runtime-builder / /
 
 WORKDIR /app
-USER secscan
+USER fathometer
 
 EXPOSE 8000
 
@@ -217,10 +217,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Build-Revision in die runtime-Stage durchreichen, damit die About-View
 # sie ausliest. Der ARG aus Stage 1 muss in den finalen Stage neu
 # deklariert werden (Docker-Multi-Stage-Verhalten).
-ARG SECSCAN_BUILD_REVISION=dev
-ENV SECSCAN_BUILD_REVISION=${SECSCAN_BUILD_REVISION} \
-    SECSCAN_GUNICORN_WORKERS=2 \
-    SECSCAN_GUNICORN_THREADS=8 \
-    SECSCAN_GUNICORN_TIMEOUT=120
+ARG FM_BUILD_REVISION=dev
+ENV FM_BUILD_REVISION=${FM_BUILD_REVISION} \
+    FM_GUNICORN_WORKERS=2 \
+    FM_GUNICORN_THREADS=8 \
+    FM_GUNICORN_TIMEOUT=120
 
-CMD ["secscan-entrypoint"]
+CMD ["fathometer-entrypoint"]

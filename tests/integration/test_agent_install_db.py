@@ -60,31 +60,31 @@ def test_agent_version_has_cache_header(db_app: Flask) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_agent_files_serves_secscan_agent_sh(db_app: Flask) -> None:
+def test_agent_files_serves_fathometer_agent_sh(db_app: Flask) -> None:
     client = db_app.test_client()
-    resp = client.get("/agent/files/secscan-agent.sh")
+    resp = client.get("/agent/files/fathometer-agent.sh")
     assert resp.status_code == 200
     assert resp.mimetype == "text/x-shellscript"
     body = resp.get_data(as_text=True)
-    assert 'AGENT_VERSION="0.4.0"' in body
+    assert 'AGENT_VERSION="0.5.0"' in body
 
 
-def test_agent_files_serves_secscan_register_sh(db_app: Flask) -> None:
+def test_agent_files_serves_fathometer_register_sh(db_app: Flask) -> None:
     client = db_app.test_client()
-    resp = client.get("/agent/files/secscan-register.sh")
+    resp = client.get("/agent/files/fathometer-register.sh")
     assert resp.status_code == 200
     assert resp.mimetype == "text/x-shellscript"
     body = resp.get_data(as_text=True)
     # Datei-Header oder Skript-Marker; das Register-Skript identifiziert
     # sich im Header.
-    assert "secscan-register.sh" in body or "secscan-register" in body
+    assert "fathometer-register.sh" in body or "fathometer-register" in body
 
 
 def test_agent_files_serves_lib_host_state_sh(db_app: Flask) -> None:
     """v0.9.2: ``lib_host_state.sh`` muss ueber die Whitelist erreichbar sein.
 
     Begruendung: der Bootstrap-Installer laedt diese Library neben
-    ``secscan-agent.sh`` herunter. Fehlt sie auf dem Host, ist ``host_state``
+    ``fathometer-agent.sh`` herunter. Fehlt sie auf dem Host, ist ``host_state``
     im Envelope leer → Pre-Triage liefert ``risk_band=unknown`` → die
     komplette Block-P-LLM-Pipeline wird silently disabled.
     """
@@ -109,8 +109,8 @@ def test_agent_files_unknown_name_404(db_app: Flask) -> None:
     for path in (
         "/agent/files/random.sh",
         "/agent/files/foo",
-        "/agent/files/SECSCAN-AGENT.SH",  # case-sensitive Whitelist
-        "/agent/files/secscan-agent",  # ohne .sh
+        "/agent/files/FATHOMETER-AGENT.SH",  # case-sensitive Whitelist
+        "/agent/files/fathometer-agent",  # ohne .sh
     ):
         resp = client.get(path)
         assert resp.status_code == 404, (path, resp.status_code)
@@ -123,7 +123,7 @@ def test_agent_files_traversal_returns_404(db_app: Flask) -> None:
     for path in (
         "/agent/files/../../etc/passwd",
         "/agent/files/..%2f..%2fetc%2fpasswd",
-        "/agent/files/secscan-agent.sh/../secscan-register.sh",
+        "/agent/files/fathometer-agent.sh/../fathometer-register.sh",
     ):
         resp = client.get(path)
         assert resp.status_code == 404, (path, resp.status_code)
@@ -148,7 +148,7 @@ def test_install_sh_contains_recommended_trivy_version(db_app: Flask) -> None:
     body = client.get("/install.sh").get_data(as_text=True)
     assert 'RECOMMENDED_TRIVY_VERSION="0.70.0"' in body
     assert 'MIN_TRIVY_VERSION="0.70.0"' in body
-    assert 'CURRENT_AGENT_VERSION="0.4.0"' in body
+    assert 'CURRENT_AGENT_VERSION="0.5.0"' in body
 
 
 def test_install_sh_has_resolved_backend_url(db_app: Flask) -> None:
@@ -157,14 +157,14 @@ def test_install_sh_has_resolved_backend_url(db_app: Flask) -> None:
     body = client.get("/install.sh").get_data(as_text=True)
     assert "{{" not in body
     assert "{%" not in body
-    # `SECSCAN_URL` ist auf eine echte URL gerendert (Test-Setup: host_url-
+    # `FM_URL` ist auf eine echte URL gerendert (Test-Setup: host_url-
     # Fallback).
-    assert 'SECSCAN_URL="http' in body
+    assert 'FM_URL="http' in body
 
 
 def test_install_sh_downloads_lib_host_state(db_app: Flask) -> None:
     """v0.9.2: das Installer-Template muss ``lib_host_state.sh`` neben
-    ``secscan-agent.sh`` in dasselbe Bin-Directory legen.
+    ``fathometer-agent.sh`` in dasselbe Bin-Directory legen.
 
     Ohne diesen Download fehlt die Library auf dem Host → Agent sendet
     kein ``host_state`` → Pre-Triage faellt auf ``risk_band=unknown``,
@@ -178,7 +178,7 @@ def test_install_sh_downloads_lib_host_state(db_app: Flask) -> None:
     assert "lib_host_state.sh" in body
     # Beide Files muessen ueber den Loop iteriert werden (sichert die
     # gemeinsame Install-Logik ab).
-    assert "secscan-agent.sh lib_host_state.sh" in body
+    assert "fathometer-agent.sh lib_host_state.sh" in body
 
 
 def test_install_sh_is_public(db_app: Flask) -> None:

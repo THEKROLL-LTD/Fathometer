@@ -1,15 +1,15 @@
 # Block N (ADR-0021, Task #18) — Installer-E2E auf Ubuntu 24.04.
 #
 # Minimaler Container fuer `tests/integration/test_installer_e2e.py`.
-# Nicht fuer Produktiv-Use — pinst keine secscan-Komponenten ein, nur die
+# Nicht fuer Produktiv-Use — pinst keine fathometer-Komponenten ein, nur die
 # OS-Tools, die der Installer braucht (bash, curl, sudo, ca-certificates).
 #
 # Run via `make test-installer` oder direkt:
-#   docker build -t secscan-installer-test:ubuntu-24.04 \
+#   docker build -t fathometer-installer-test:ubuntu-24.04 \
 #     -f tests/integration/installer/Dockerfile.ubuntu-24.04 .
-#   docker run --rm -e SECSCAN_URL=http://host.docker.internal:8000 \
-#     -e SECSCAN_UNATTENDED=1 -e SECSCAN_MASTER_KEY=test \
-#     secscan-installer-test:ubuntu-24.04
+#   docker run --rm -e FM_URL=http://host.docker.internal:8000 \
+#     -e FM_UNATTENDED=1 -e FM_MASTER_KEY=test \
+#     fathometer-installer-test:ubuntu-24.04
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -24,4 +24,4 @@ RUN apt-get update -qq \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp/installer
-CMD ["/bin/bash", "-c", "curl -fsSL ${SECSCAN_URL}/install.sh | bash"]
+CMD ["/bin/bash", "-c", "curl -fsSL ${FM_URL}/install.sh | bash"]

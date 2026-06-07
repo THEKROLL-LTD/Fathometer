@@ -4,8 +4,8 @@ Drei Endpoints ohne Auth (CSRF-frei, login-frei):
 
 - `GET /agent/version` — JSON mit aktuellen Min-/Recommended-Versionen
   fuer Agent und Trivy.
-- `GET /agent/files/<name>` — liefert `secscan-agent.sh` und
-  `secscan-register.sh` als statische Files (Whitelist).
+- `GET /agent/files/<name>` — liefert `fathometer-agent.sh` und
+  `fathometer-register.sh` als statische Files (Whitelist).
 - `GET /install.sh` — rendert das Bootstrap-Installer-Bash-Template mit
   eingebackener Backend-URL und Versions-Konstanten.
 
@@ -34,14 +34,14 @@ agent_install_bp = Blueprint("agent_install", __name__)
 # zusaetzlich gegen Path-Traversal, aber die Whitelist macht den Schutz
 # explizit und auditbar.
 #
-# `lib_host_state.sh` (Block O, ADR-0022) wird vom `secscan-agent.sh` als
+# `lib_host_state.sh` (Block O, ADR-0022) wird vom `fathometer-agent.sh` als
 # Source-Library erwartet. Fehlt sie, kommt `host_state` nicht im Envelope
 # an → Pre-Triage faellt auf `risk_band=unknown` → Block-P-LLM-Pipeline
 # wird silently disabled. Daher zwingend mit ausliefern (v0.9.2).
 _AGENT_FILE_WHITELIST: frozenset[str] = frozenset(
     {
-        "secscan-agent.sh",
-        "secscan-register.sh",
+        "fathometer-agent.sh",
+        "fathometer-register.sh",
         "lib_host_state.sh",
     }
 )
@@ -100,7 +100,7 @@ def install_sh() -> Response:
         external_base_url = request.host_url.rstrip("/")
     rendered = render_template(
         "agent/install.sh.j2",
-        secscan_url=external_base_url,
+        fathometer_url=external_base_url,
         recommended_trivy_version=Settings.RECOMMENDED_TRIVY_VERSION,
         min_trivy_version=Settings.MIN_TRIVY_VERSION,
         trivy_release_url_template=Settings.TRIVY_RELEASE_URL_TEMPLATE,

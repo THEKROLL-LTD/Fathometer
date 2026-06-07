@@ -26,7 +26,7 @@ from app.workers import llm_worker
 @pytest.fixture(autouse=True)
 def _reset_caches_and_logger() -> Iterator[None]:
     llm_worker.invalidate_throttle_caches_for_tests()
-    worker_logger = logging.getLogger("secscan.llm_worker")
+    worker_logger = logging.getLogger("fathometer.llm_worker")
     prev_disabled = worker_logger.disabled
     prev_propagate = worker_logger.propagate
     prev_level = worker_logger.level

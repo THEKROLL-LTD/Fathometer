@@ -745,7 +745,7 @@ def _bind_worker_session_factory(db_app: Flask) -> None:
     """Bindet die Worker-Session-Factory an die Test-DB-Engine.
 
     Der Worker baut sonst lazy eine eigene Engine aus
-    ``SECSCAN_DATABASE_URL`` — funktioniert auch, lässt aber modul-globalen
+    ``FM_DATABASE_URL`` — funktioniert auch, lässt aber modul-globalen
     State zwischen Tests bestehen. Wir verbinden explizit.
     """
     from sqlalchemy.orm import sessionmaker

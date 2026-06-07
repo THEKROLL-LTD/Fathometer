@@ -8,7 +8,7 @@ DB-Strategie:
   `app`, `client`-Fixtures).
 - Tests, die echte ORM-Operationen brauchen, nutzen die `db_*`-Fixtures:
   - `postgres_url` (session-scope): URL aus `TEST_DATABASE_URL` oder
-    Default `postgresql+psycopg://secscan:secscan@localhost:55432/secscan_test`.
+    Default `postgresql+psycopg://fathometer:fathometer@localhost:55432/fathometer_test`.
     Wenn nicht erreichbar -> `pytest.skip(...)`.
   - `migrated_db` (session-scope): laesst `alembic upgrade head` einmal pro
     Suite laufen und droppt am Ende.
@@ -171,7 +171,7 @@ _MOCKED_UNIT_FILES: frozenset[str] = frozenset(
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Auto-Marker pro Test-Pfad."""
     for item in items:
-        rel_path = str(item.fspath).rsplit("secscan/", 1)[-1]
+        rel_path = str(item.fspath).rsplit("fathometer/", 1)[-1]
 
         if any(rel_path.startswith(p) for p in _ACCEPTANCE_PATH_PREFIXES):
             item.add_marker(pytest.mark.acceptance)
@@ -201,15 +201,15 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 @pytest.fixture
 def app_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Setzt die minimal noetigen Env-Vars fuer `create_app()`."""
-    monkeypatch.setenv("SECSCAN_ENCRYPTION_KEY", "x" * 32)
-    monkeypatch.setenv("SECSCAN_SECRET_KEY", "test-secret-key-not-used-in-prod")
+    monkeypatch.setenv("FM_ENCRYPTION_KEY", "x" * 32)
+    monkeypatch.setenv("FM_SECRET_KEY", "test-secret-key-not-used-in-prod")
     monkeypatch.setenv(
-        "SECSCAN_DATABASE_URL",
+        "FM_DATABASE_URL",
         # Bewusst nicht erreichbar — Healthz darf scheitern, andere Tests
         # rufen die DB nicht direkt auf.
         "postgresql+psycopg://test:test@127.0.0.1:1/test",
     )
-    monkeypatch.setenv("SECSCAN_LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("FM_LOG_LEVEL", "WARNING")
     yield
 
 
@@ -246,7 +246,7 @@ def _clean_environment() -> Iterator[None]:
 # Block-B-Fixtures (echte Postgres-DB).
 # ---------------------------------------------------------------------------
 
-DEFAULT_TEST_DB_URL = "postgresql+psycopg://secscan:secscan@localhost:55432/secscan_test"
+DEFAULT_TEST_DB_URL = "postgresql+psycopg://fathometer:fathometer@localhost:55432/fathometer_test"
 
 
 def _is_postgres_reachable(url: str) -> bool:
@@ -267,14 +267,14 @@ def postgres_url() -> str:
 
     Reihenfolge:
     1. `TEST_DATABASE_URL` aus dem Environment.
-    2. Default `postgresql+psycopg://secscan:secscan@localhost:55432/secscan_test`.
+    2. Default `postgresql+psycopg://fathometer:fathometer@localhost:55432/fathometer_test`.
     """
     url = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DB_URL)
     if not _is_postgres_reachable(url):
         pytest.skip(
             f"Postgres unter {url} nicht erreichbar — DB-Tests werden uebersprungen. "
-            "Starte `docker run -d --name secscan-test-db -e POSTGRES_USER=secscan "
-            "-e POSTGRES_PASSWORD=secscan -e POSTGRES_DB=secscan_test -p 55432:5432 "
+            "Starte `docker run -d --name fathometer-test-db -e POSTGRES_USER=fathometer "
+            "-e POSTGRES_PASSWORD=fathometer -e POSTGRES_DB=fathometer_test -p 55432:5432 "
             "postgres:17-alpine` oder setze TEST_DATABASE_URL.",
             allow_module_level=False,
         )
@@ -285,7 +285,7 @@ def postgres_url() -> str:
 def migrated_db(postgres_url: str) -> Iterator[str]:
     """Fuehrt `alembic upgrade head` einmal pro Suite aus und droppt am Ende.
 
-    Wir setzen `SECSCAN_DATABASE_URL` waehrend der Migration auf die Test-DB,
+    Wir setzen `FM_DATABASE_URL` waehrend der Migration auf die Test-DB,
     damit `alembic/env.py` die URL korrekt findet.
     """
     import warnings
@@ -294,8 +294,8 @@ def migrated_db(postgres_url: str) -> Iterator[str]:
 
     from alembic import command
 
-    prev_url = os.environ.get("SECSCAN_DATABASE_URL")
-    os.environ["SECSCAN_DATABASE_URL"] = postgres_url
+    prev_url = os.environ.get("FM_DATABASE_URL")
+    os.environ["FM_DATABASE_URL"] = postgres_url
 
     cfg = Config("alembic.ini")
     # Sicherheitsnetz: auch via cfg-Attribute setzen.
@@ -319,9 +319,9 @@ def migrated_db(postgres_url: str) -> Iterator[str]:
             with contextlib.suppress(Exception):
                 command.downgrade(cfg, "base")
         if prev_url is None:
-            os.environ.pop("SECSCAN_DATABASE_URL", None)
+            os.environ.pop("FM_DATABASE_URL", None)
         else:
-            os.environ["SECSCAN_DATABASE_URL"] = prev_url
+            os.environ["FM_DATABASE_URL"] = prev_url
 
 
 @pytest.fixture
@@ -336,15 +336,15 @@ def db_app_env(
     - Login-Rate-Limit so eng, dass wir den 429-Pfad in ueberschaubaren
       Schritten testen koennen. Standard bleibt `5/minute`.
     """
-    monkeypatch.setenv("SECSCAN_ENCRYPTION_KEY", "x" * 32)
-    monkeypatch.setenv("SECSCAN_SECRET_KEY", "test-secret-key-not-used-in-prod")
-    monkeypatch.setenv("SECSCAN_DATABASE_URL", migrated_db)
-    monkeypatch.setenv("SECSCAN_LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("FM_ENCRYPTION_KEY", "x" * 32)
+    monkeypatch.setenv("FM_SECRET_KEY", "test-secret-key-not-used-in-prod")
+    monkeypatch.setenv("FM_DATABASE_URL", migrated_db)
+    monkeypatch.setenv("FM_LOG_LEVEL", "WARNING")
     # Argon2-Minimum: time_cost>=1, memory_cost>=8 KiB, parallelism>=1.
-    monkeypatch.setenv("SECSCAN_ARGON2_TIME_COST", "1")
-    monkeypatch.setenv("SECSCAN_ARGON2_MEMORY_COST", "8192")
-    monkeypatch.setenv("SECSCAN_ARGON2_PARALLELISM", "1")
-    monkeypatch.setenv("SECSCAN_RATELIMIT_LOGIN", "5/minute")
+    monkeypatch.setenv("FM_ARGON2_TIME_COST", "1")
+    monkeypatch.setenv("FM_ARGON2_MEMORY_COST", "8192")
+    monkeypatch.setenv("FM_ARGON2_PARALLELISM", "1")
+    monkeypatch.setenv("FM_RATELIMIT_LOGIN", "5/minute")
     yield
 
 

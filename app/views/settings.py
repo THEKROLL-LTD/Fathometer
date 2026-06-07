@@ -983,7 +983,7 @@ def about_view() -> Any:
     """Read-only About-Page (Versions-/Build-Info).
 
     Kontext-Dict enthaelt **ausschliesslich** unsensible Werte. Niemals
-    ``SECSCAN_ENCRYPTION_KEY``, ``SECSCAN_SECRET_KEY``, ``master_key_hash``,
+    ``FM_ENCRYPTION_KEY``, ``FM_SECRET_KEY``, ``master_key_hash``,
     ``llm_api_key_encrypted`` oder vergleichbare Geheimnisse — siehe
     Security-Auditor-Checkliste.
     """
@@ -998,8 +998,8 @@ def about_view() -> Any:
     trivy_db_stale_count = sum(1 for srv in servers if is_db_stale(srv))
 
     about: dict[str, Any] = {
-        "app_version": _safe_version("secscan"),
-        "build_revision": os.environ.get("SECSCAN_BUILD_REVISION", "dev"),
+        "app_version": _safe_version("fathometer"),
+        "build_revision": os.environ.get("FM_BUILD_REVISION", "dev"),
         "alembic_revision": alembic_rev or "unknown",
         "python_version": sys.version.split()[0],
         "flask_version": _safe_version("flask"),

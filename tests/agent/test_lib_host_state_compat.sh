@@ -15,7 +15,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
     -w) shift 2 ;;
-    --data-binary) gzip -dc >"$SECSCAN_PAYLOAD_CAPTURE"; shift 2 ;;
+    --data-binary) gzip -dc >"$FM_PAYLOAD_CAPTURE"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -46,19 +46,19 @@ run_case() {
   local name="$2"
   local dir="$tmpdir/$name"
   mkdir -p "$dir"
-  cp "$repo_root/agent/secscan-agent.sh" "$dir/secscan-agent.sh"
-  chmod +x "$dir/secscan-agent.sh"
+  cp "$repo_root/agent/fathometer-agent.sh" "$dir/fathometer-agent.sh"
+  chmod +x "$dir/fathometer-agent.sh"
   if [[ "$lib_body" != "missing" ]]; then
     printf '%s\n' "$lib_body" >"$dir/lib_host_state.sh"
     chmod +x "$dir/lib_host_state.sh"
   fi
   local payload="$tmpdir/$name.json"
-  SECSCAN_AGENT_UPDATED=1 \
-    SECSCAN_URL="https://secscan.example.test" \
-    SECSCAN_API_KEY="test-key" \
-    SECSCAN_PAYLOAD_CAPTURE="$payload" \
+  FM_AGENT_UPDATED=1 \
+    FM_URL="https://fathometer.example.test" \
+    FM_API_KEY="test-key" \
+    FM_PAYLOAD_CAPTURE="$payload" \
     PATH="$tmpdir/bin:$PATH" \
-    bash "$dir/secscan-agent.sh" >/dev/null 2>"$tmpdir/$name.log"
+    bash "$dir/fathometer-agent.sh" >/dev/null 2>"$tmpdir/$name.log"
   printf '%s\n' "$payload"
 }
 

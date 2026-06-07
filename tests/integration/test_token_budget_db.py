@@ -39,7 +39,7 @@ def _open_session(app: Flask) -> object:
 
 
 def test_budget_check_true_when_under_limit(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SECSCAN_LLM_TOKEN_BUDGET_DAILY", "10000")
+    monkeypatch.setenv("FM_LLM_TOKEN_BUDGET_DAILY", "10000")
     sess = _open_session(db_app)
     try:
         with db_app.app_context():
@@ -54,7 +54,7 @@ def test_budget_check_true_when_under_limit(db_app: Flask, monkeypatch: pytest.M
 def test_budget_check_false_at_or_above_limit(
     db_app: Flask, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("SECSCAN_LLM_TOKEN_BUDGET_DAILY", "5000")
+    monkeypatch.setenv("FM_LLM_TOKEN_BUDGET_DAILY", "5000")
     sess = _open_session(db_app)
     try:
         with db_app.app_context():

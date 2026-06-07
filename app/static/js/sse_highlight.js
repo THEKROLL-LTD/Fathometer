@@ -8,7 +8,7 @@
  *     wir es nicht — der Pane-Swap ist schon offensichtlich.
  *
  * Hinweis (ADR-0019): Frueher hat dieses Modul zusaetzlich auf das
- * `secscan:scan-received`-CustomEvent gehoert, das die ehemalige SSE-
+ * `fathometer:scan-received`-CustomEvent gehoert, das die ehemalige SSE-
  * Komponente `dashboardSse` gefeuert hat. Mit Block L gibt es keinen
  * SSE-Channel fuers Dashboard mehr — Updates kommen via HTMX-Polling auf
  * dem Pane- und Sidebar-Container und werden durch den `htmx:afterSwap`/

@@ -47,7 +47,7 @@ unsicheren Daten.
 Plus diese Test-Cases die der `test-writer` programmatisch ergänzt:
 
 - **Gzip-Bomb**: 1 KB hochrepetitiver Bytes komprimiert, decompressed > 100 MB
-  → Server muss bei `SECSCAN_MAX_DECOMPRESSED_MB` mit 413 abbrechen.
+  → Server muss bei `FM_MAX_DECOMPRESSED_MB` mit 413 abbrechen.
 - **Body ohne Auth über 10 MB**: muss mit 401 in <50 ms abgelehnt werden
   (Auth-vor-Body-Parse aus §9).
 - **JSON-Tiefe > 32**: muss mit 422 abgelehnt werden.

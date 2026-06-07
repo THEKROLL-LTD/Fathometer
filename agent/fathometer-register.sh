@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 #
-# secscan-register.sh
+# fathometer-register.sh
 # -------------------
-# Registers this server with the secscan backend and produces a server
-# API key. The master key comes from the SECSCAN_MASTER_KEY env var or
+# Registers this server with the fathometer backend and produces a server
+# API key. The master key comes from the FM_MASTER_KEY env var or
 # is read interactively (silent).
 #
 # Usage:
-#   ./secscan-register.sh <server-url> <server-name> [scan-interval-h]
+#   ./fathometer-register.sh <server-url> <server-name> [scan-interval-h]
 #
 # Examples:
 #   # Interactive:
-#   ./secscan-register.sh https://secscan.example.com prod-web-01 24
+#   ./fathometer-register.sh https://fathometer.example.com prod-web-01 24
 #
 #   # Non-interactive (e.g. in a provisioning script):
-#   SECSCAN_MASTER_KEY="$(cat /root/.secscan-master-key)" \
-#     ./secscan-register.sh https://secscan.example.com prod-web-01 24 \
-#     > /etc/secscan/api-key
-#   chmod 600 /etc/secscan/api-key
+#   FM_MASTER_KEY="$(cat /root/.fathometer-master-key)" \
+#     ./fathometer-register.sh https://fathometer.example.com prod-web-01 24 \
+#     > /etc/fathometer/api-key
+#   chmod 600 /etc/fathometer/api-key
 #
 # Block N (ADR-0021): the preferred way to set up a fresh host is the
 # bootstrap installer one-liner:
 #
-#   curl -fsSL https://secscan.example.com/install.sh | sudo bash
+#   curl -fsSL https://fathometer.example.com/install.sh | sudo bash
 #
 # That wizard runs this script internally after fetching it from the
 # backend. Use this script directly only when you want fine-grained
@@ -42,7 +42,7 @@
 
 set -euo pipefail
 
-log() { printf '[secscan-register] %s\n' "$*" >&2; }
+log() { printf '[fathometer-register] %s\n' "$*" >&2; }
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 \
@@ -55,7 +55,7 @@ if [[ $# -lt 2 || $# -gt 3 ]]; then
   cat >&2 <<EOF
 Usage: $0 <server-url> <server-name> [scan-interval-h]
 
-  server-url        e.g. https://secscan.example.com
+  server-url        e.g. https://fathometer.example.com
   server-name       unique name (a-z, 0-9, ._- and spaces)
   scan-interval-h   expected scan interval in hours (default: 24)
 
@@ -69,19 +69,19 @@ server_url="${1%/}"
 server_name="$2"
 interval_h="${3:-24}"
 
-if [[ -z "${SECSCAN_MASTER_KEY:-}" ]]; then
+if [[ -z "${FM_MASTER_KEY:-}" ]]; then
   # silent read — input does not show up in the shell history
-  read -srp "Master key: " SECSCAN_MASTER_KEY
+  read -srp "Master key: " FM_MASTER_KEY
   echo >&2
 fi
 
-if [[ -z "$SECSCAN_MASTER_KEY" ]]; then
+if [[ -z "$FM_MASTER_KEY" ]]; then
   log "Error: master key is empty"
   exit 1
 fi
 
 request="$(jq -n \
-  --arg master_key "$SECSCAN_MASTER_KEY" \
+  --arg master_key "$FM_MASTER_KEY" \
   --arg name       "$server_name" \
   --argjson interval "$interval_h" \
   '{
@@ -90,7 +90,7 @@ request="$(jq -n \
     expected_scan_interval_h: $interval
   }')"
 
-response_body="$(mktemp -t secscan-reg.XXXXXX)"
+response_body="$(mktemp -t fathometer-reg.XXXXXX)"
 trap 'rm -f "$response_body"' EXIT
 
 http_status="$(curl -sS \

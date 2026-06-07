@@ -3,13 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "secscan"
+name = "fathometer"
 version = "0.1.0"
 description = "Selbst-gehostete Web-App für Trivy-Filesystem-Scans"
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "Proprietary" }
-authors = [{ name = "secscan maintainers" }]
+authors = [{ name = "fathometer maintainers" }]
 
 # Runtime-Dependencies — Stack-Konstanten siehe CLAUDE.md
 dependencies = [

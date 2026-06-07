@@ -355,7 +355,7 @@ def _sanitize_path_prefix(s: str) -> str | None:
     (``AdminLTE-master/``) Form vom LLM — der PASS1-Prompt verlangt zwar
     explizit „absolute path prefixes" mit Leading-Slash, in der Praxis liefert
     Trivy aber bei ``rootfs /``-Scans Pfade RELATIV zur Scan-Root (siehe
-    ``agent/secscan-agent.sh::SCAN_PATH``-Default ``"/"`` plus Trivy-Konvention
+    ``agent/fathometer-agent.sh::SCAN_PATH``-Default ``"/"`` plus Trivy-Konvention
     Pfade ohne Leading-Slash zu reporten).
 
     Bugfix 2026-05-24: persistiere immer in normalisierter relativer Form
@@ -474,7 +474,7 @@ async def chat_completion_json_with_meta(
             response_format={
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "secscan_risk_review",
+                    "name": "fathometer_risk_review",
                     "schema": schema,
                     "strict": False,
                 },

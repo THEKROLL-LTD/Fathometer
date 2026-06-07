@@ -1,4 +1,4 @@
-"""Schema-Tests fuer den `secscan-llm-worker`-Service in `docker-compose.yml`.
+"""Schema-Tests fuer den `fathometer-llm-worker`-Service in `docker-compose.yml`.
 
 Block P (ADR-0023) Phase F definiert einen zweiten Container neben `app`.
 Wir verifizieren, dass der Service deklariert ist und die wichtigsten
@@ -64,13 +64,13 @@ def _service_block(service_name: str) -> str:
 
 def test_worker_service_is_declared() -> None:
     text = _compose_text()
-    assert "  secscan-llm-worker:" in text, (
-        "Service `secscan-llm-worker` fehlt im docker-compose.yml"
+    assert "  fathometer-llm-worker:" in text, (
+        "Service `fathometer-llm-worker` fehlt im docker-compose.yml"
     )
 
 
 def test_worker_entrypoint_points_to_worker_module() -> None:
-    block = _service_block("secscan-llm-worker")
+    block = _service_block("fathometer-llm-worker")
     # Wir akzeptieren beide Listen-Formate (Inline-Liste und Block-Liste).
     inline = '["python", "-m", "app.workers.llm_worker"]'
     has_inline = inline in block
@@ -81,7 +81,7 @@ def test_worker_entrypoint_points_to_worker_module() -> None:
 
 
 def test_worker_depends_on_db_healthy() -> None:
-    block = _service_block("secscan-llm-worker")
+    block = _service_block("fathometer-llm-worker")
     assert "depends_on:" in block, "Worker muss auf `db` warten"
     assert "db:" in block, "depends_on.db fehlt"
     assert "condition: service_healthy" in block, (
@@ -90,7 +90,7 @@ def test_worker_depends_on_db_healthy() -> None:
 
 
 def test_worker_healthcheck_uses_python_module() -> None:
-    block = _service_block("secscan-llm-worker")
+    block = _service_block("fathometer-llm-worker")
     assert "healthcheck:" in block, "Worker-Healthcheck fehlt"
     expected = '["CMD", "python", "-m", "app.workers.healthcheck"]'
     assert expected in block, (
@@ -103,31 +103,31 @@ def test_worker_healthcheck_uses_python_module() -> None:
 
 def test_worker_has_no_inbound_ports() -> None:
     """Worker hat KEINE `ports:`-Direktive (ARCHITECTURE.md §9)."""
-    block = _service_block("secscan-llm-worker")
+    block = _service_block("fathometer-llm-worker")
     assert "ports:" not in block, (
         "Worker darf keine eingehenden Ports exponieren — nur DB- und LLM-Provider-Egress."
     )
 
 
 def test_worker_restart_policy_is_unless_stopped() -> None:
-    block = _service_block("secscan-llm-worker")
+    block = _service_block("fathometer-llm-worker")
     assert "restart: unless-stopped" in block
 
 
 def test_worker_has_required_env_vars() -> None:
-    """Worker braucht `SECSCAN_DATABASE_URL` und `SECSCAN_ENCRYPTION_KEY`."""
-    block = _service_block("secscan-llm-worker")
-    assert "SECSCAN_DATABASE_URL:" in block, (
-        "SECSCAN_DATABASE_URL fehlt — Worker kann sonst keine DB-Engine bauen"
+    """Worker braucht `FM_DATABASE_URL` und `FM_ENCRYPTION_KEY`."""
+    block = _service_block("fathometer-llm-worker")
+    assert "FM_DATABASE_URL:" in block, (
+        "FM_DATABASE_URL fehlt — Worker kann sonst keine DB-Engine bauen"
     )
-    assert "SECSCAN_ENCRYPTION_KEY:" in block, (
-        "SECSCAN_ENCRYPTION_KEY fehlt — load_settings() wuerde am Start ValidationError werfen"
+    assert "FM_ENCRYPTION_KEY:" in block, (
+        "FM_ENCRYPTION_KEY fehlt — load_settings() wuerde am Start ValidationError werfen"
     )
 
 
 def test_worker_uses_same_build_context_as_app() -> None:
     """Worker nutzt das gleiche Image/Build-Setup wie `app`."""
-    block = _service_block("secscan-llm-worker")
+    block = _service_block("fathometer-llm-worker")
     assert "build:" in block, "Worker muss `build:` definieren (gleiches Image wie app)"
     assert "context: ." in block
     assert "dockerfile: Dockerfile" in block

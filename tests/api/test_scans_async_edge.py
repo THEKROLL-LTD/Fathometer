@@ -206,7 +206,7 @@ def test_agent_outdated_returns_400(async_db_app: Flask) -> None:
 
 def test_queue_full_returns_429(async_db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
     """Bei Soft-Cap-Ueberschreitung -> 429 queue_full."""
-    settings: Settings = async_db_app.config["SECSCAN_SETTINGS"]
+    settings: Settings = async_db_app.config["FM_SETTINGS"]
     # Sehr kleinen Cap setzen damit wir ihn leicht fuellen koennen.
     monkeypatch.setattr(settings, "max_queued_ingest_jobs", 2)
 
@@ -373,7 +373,7 @@ def test_decompress_limit_returns_413(
 ) -> None:
     """gzip-Bomb die den Decompress-Limit ueberschreitet -> 413."""
     # Limit auf 1 Byte senken damit wir keinen echten 100-MB-Body brauchen.
-    settings: Settings = async_db_app.config["SECSCAN_SETTINGS"]
+    settings: Settings = async_db_app.config["FM_SETTINGS"]
     monkeypatch.setattr(settings, "max_decompressed_mb", 1)
 
     _server_id, key = register_test_server(async_db_app, "bomb-server")

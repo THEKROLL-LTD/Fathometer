@@ -93,12 +93,12 @@ def _reset_worker_logger_state() -> Iterator[None]:
     """Defensive Logger-State-Reset (Pattern aus Phase B/C-Tests).
 
     ``configure_logging()`` / vorhergehende Tests koennen den
-    ``secscan.llm_worker``-Logger ``disabled=True`` oder
+    ``fathometer.llm_worker``-Logger ``disabled=True`` oder
     ``propagate=False`` setzen — dann waere ``caplog`` blind. Wir bringen
     den Logger in einen bekannten Zustand und stellen das Original danach
     wieder her.
     """
-    worker_logger = logging.getLogger("secscan.llm_worker")
+    worker_logger = logging.getLogger("fathometer.llm_worker")
     prev_disabled = worker_logger.disabled
     prev_propagate = worker_logger.propagate
     prev_level = worker_logger.level
@@ -257,7 +257,7 @@ def test_status_snapshot_resets_counters(
     llm_worker._last_status_at = 0.0  # erzwingt Emit (Cadence-Check faellt durch)
 
     _patch_snapshot_db_reads(monkeypatch, queued=7, tokens_used=100, budget=1000)
-    with caplog.at_level(logging.INFO, logger="secscan.llm_worker"):
+    with caplog.at_level(logging.INFO, logger="fathometer.llm_worker"):
         llm_worker._maybe_emit_status_snapshot(in_flight=3, cap=5)
 
     assert llm_worker._status_counters["done"] == 0
@@ -295,7 +295,7 @@ def test_status_snapshot_cadence_skips_within_30s(
 
     monkeypatch.setattr(llm_worker, "get_session", _spy_get_session)
 
-    with caplog.at_level(logging.INFO, logger="secscan.llm_worker"):
+    with caplog.at_level(logging.INFO, logger="fathometer.llm_worker"):
         llm_worker._maybe_emit_status_snapshot(in_flight=1, cap=5)
 
     # Filter caplog auf den Snapshot-Marker (Trailing-Space damit
@@ -326,7 +326,7 @@ def test_status_snapshot_format_contains_all_fields(
 
     _patch_snapshot_db_reads(monkeypatch, queued=12, tokens_used=250, budget=1000)
 
-    with caplog.at_level(logging.INFO, logger="secscan.llm_worker"):
+    with caplog.at_level(logging.INFO, logger="fathometer.llm_worker"):
         llm_worker._maybe_emit_status_snapshot(in_flight=3, cap=5)
 
     status_records = [r for r in caplog.records if "llm_worker.status " in r.getMessage()]
@@ -407,7 +407,7 @@ def test_status_snapshot_defensive_against_db_failure(
 
     # Caplog auf DEBUG damit sowohl INFO-Snapshot als auch WARNING-Marker
     # eingesammelt werden.
-    with caplog.at_level(logging.DEBUG, logger="secscan.llm_worker"):
+    with caplog.at_level(logging.DEBUG, logger="fathometer.llm_worker"):
         # Darf NICHT crashen.
         llm_worker._maybe_emit_status_snapshot(in_flight=2, cap=5)
 

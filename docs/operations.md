@@ -17,7 +17,7 @@ Der Server braucht HTTPS-Zugriff auf folgende externe Endpunkte:
 
 Wenn der Server keinen Outbound-Zugriff hat:
 
-- **`SECSCAN_FEED_PULL_DISABLED=true`** schaltet die EPSS/KEV-Pulls ab.
+- **`FM_FEED_PULL_DISABLED=true`** schaltet die EPSS/KEV-Pulls ab.
   Findings werden ohne EPSS/KEV ingestet; der Pass-2-LLM-Prompt sagt
   explizit "treat ``epss=n/a`` as unknown — do NOT escalate solely
   because EPSS is missing", funktioniert also auch ohne Feed-Daten.
@@ -26,10 +26,10 @@ Wenn der Server keinen Outbound-Zugriff hat:
 
 ## Agent-Updates
 
-Ab Agent `0.3.1` aktualisiert sich `secscan-agent.sh` vor jedem Scan selbst,
+Ab Agent `0.3.1` aktualisiert sich `fathometer-agent.sh` vor jedem Scan selbst,
 wenn `/agent/version` eine neuere `current_agent_version` meldet. Das Skript
-laedt die neue Version ueber `/agent/files/secscan-agent.sh`, legt
-`secscan-agent.sh.bak` als Operator-Recovery an und re-exec't sich einmalig.
+laedt die neue Version ueber `/agent/files/fathometer-agent.sh`, legt
+`fathometer-agent.sh.bak` als Operator-Recovery an und re-exec't sich einmalig.
 Falls `lib_host_state.sh` vorhanden ist, wird sie best-effort mit aktualisiert;
 Versions-Mismatch fuehrt nur dazu, dass `host_state` ausgelassen wird.
 
@@ -40,8 +40,8 @@ Folgeversionen self-updating. Alte Agents bleiben serverseitig erlaubt
 `trivy_db_*`-Spalten liefern, bis sie aktualisiert sind.
 
 **Recovery via `.bak`-Files:** wenn ein Auto-Update funktional kaputtgeht,
-liegt der vorherige Skript-Stand unter `secscan-agent.sh.bak` bzw.
-`lib_host_state.sh.bak`. Rollback: `mv secscan-agent.sh.bak secscan-agent.sh`.
+liegt der vorherige Skript-Stand unter `fathometer-agent.sh.bak` bzw.
+`lib_host_state.sh.bak`. Rollback: `mv fathometer-agent.sh.bak fathometer-agent.sh`.
 
 **Race-Limitation:** bei sehr kurzen Cron-Intervallen (<5 Min) koennen zwei
 parallel laufende Agent-Instanzen sich beim Auto-Update gegenseitig die
@@ -103,17 +103,17 @@ Delete einer Gruppe setzt `server.group_id = NULL` für alle Member
 ### Tuning
 
 Default-Settings sind fuer Single-Host-Setups dimensioniert; alle
-ueber ``SECSCAN_FEED_*``-Env-Vars ueberschreibbar:
+ueber ``FM_FEED_*``-Env-Vars ueberschreibbar:
 
 | Env-Var | Default | Bedeutung |
 |---|---|---|
-| `SECSCAN_FEED_PULL_DISABLED` | `false` | Master-Switch |
-| `SECSCAN_FEED_EPSS_URL` | empirsec-CSV | EPSS-Quelle |
-| `SECSCAN_FEED_KEV_URL` | CISA-JSON | KEV-Quelle |
-| `SECSCAN_FEED_PULL_INTERVAL_HOURS` | `24` | Pull-Frequenz |
-| `SECSCAN_FEED_JITTER_MAX_MIN` | `30` | Symmetric-Jitter um den Interval |
-| `SECSCAN_FEED_MAX_DECOMPRESSED_MB_EPSS` | `50` | Gzip-Bomb-Cap fuer EPSS |
-| `SECSCAN_FEED_MAX_BYTES_KEV_MB` | `10` | Body-Cap fuer KEV-JSON |
+| `FM_FEED_PULL_DISABLED` | `false` | Master-Switch |
+| `FM_FEED_EPSS_URL` | empirsec-CSV | EPSS-Quelle |
+| `FM_FEED_KEV_URL` | CISA-JSON | KEV-Quelle |
+| `FM_FEED_PULL_INTERVAL_HOURS` | `24` | Pull-Frequenz |
+| `FM_FEED_JITTER_MAX_MIN` | `30` | Symmetric-Jitter um den Interval |
+| `FM_FEED_MAX_DECOMPRESSED_MB_EPSS` | `50` | Gzip-Bomb-Cap fuer EPSS |
+| `FM_FEED_MAX_BYTES_KEV_MB` | `10` | Body-Cap fuer KEV-JSON |
 
 ### Initial-Bootstrap
 
@@ -148,14 +148,14 @@ Nach dem ersten Deploy von Block Q:
 
 `POST /api/scans` antwortet seit v0.11.0 binnen <1s mit 202 + Job-ID.
 Die volle Verarbeitung (Findings-UPSERT, Host-State-Persist, Pre-Triage,
-Group-Matching, LLM-Job-Queueing) laeuft im `secscan-llm-worker`-Container
+Group-Matching, LLM-Job-Queueing) laeuft im `fathometer-llm-worker`-Container
 als Sub-Tick `scan_ingest_tick` (vor LLM-Pickup priorisiert).
 
 ### Async-only seit v0.12.0
 
-Das urspruengliche Feature-Flag `SECSCAN_SCAN_INGEST_ASYNC` (Cutover-Schutz
+Das urspruengliche Feature-Flag `FM_SCAN_INGEST_ASYNC` (Cutover-Schutz
 aus Block R Phase H) ist mit v0.12.0 ersatzlos entfernt — Async ist der
-einzige Pfad. Voraussetzung im Deployment: der `secscan-llm-worker`-Container
+einzige Pfad. Voraussetzung im Deployment: der `fathometer-llm-worker`-Container
 muss laufen, sonst stehen die `scan_ingest_jobs`-Rows fuer immer queued.
 Der Operator-Login + Setup-Wizard bleibt unabhaengig vom Worker erreichbar
 (Web-Container und Worker sind getrennt).
@@ -192,7 +192,7 @@ einem hypothetischen Mid-Statement-Crash) werden binnen <2h auf NULL gesetzt.
 
 | Env-Var | Default | Wirkung |
 |---|---|---|
-| `SECSCAN_MAX_QUEUED_INGEST_JOBS` | `50` | Per-Server-Limit auf `(queued|in_progress)`-Jobs. `429 queue_full` beim Insert wenn ueberschritten. |
+| `FM_MAX_QUEUED_INGEST_JOBS` | `50` | Per-Server-Limit auf `(queued|in_progress)`-Jobs. `429 queue_full` beim Insert wenn ueberschritten. |
 
 Wenn ein Server wiederholt 429s sieht: Stale-Reaper-Lauf abwarten (5min)
 oder manuelle Queue-Bereinigung via SQL oben. Im Steady-State sollte die
@@ -201,7 +201,7 @@ Worker-Backlog hin (siehe Multi-Worker-Re-Open-Trigger in ADR-0026).
 
 ### Worker-Logs
 
-Phasen-Marker im `secscan-llm-worker`-Container:
+Phasen-Marker im `fathometer-llm-worker`-Container:
 - `scan_ingest.job_picked_up` — `{job_id, server_id, attempts}` beim Pickup
 - `scan_ingest.job_done` — `{job_id, scan_id, duration_ms, counts}` bei Erfolg
 - `scan_ingest.job_failed` — `{job_id, error_class, attempts}` bei finalem Fail
@@ -247,10 +247,10 @@ Operator kann pro Server einen Force-Scan triggern statt zu warten:
 
 ```bash
 # Direkt am Agent-Host:
-secscan-agent  # Cron-Script, sofort ausfuehren
+fathometer-agent  # Cron-Script, sofort ausfuehren
 
 # Oder Backend-seitig fuer einen einzelnen Server-Key:
-curl -X POST https://<secscan>/api/scans \
+curl -X POST https://<fathometer>/api/scans \
   -H "Authorization: Bearer <SERVER_KEY>" \
   -H "Content-Encoding: gzip" \
   -H "Content-Type: application/json" \

@@ -28,7 +28,7 @@ from app.models import (
 )
 from app.services.llm_fingerprints import group_findings_fingerprint
 
-log = logging.getLogger("secscan.pass2_enqueue")
+log = logging.getLogger("fathometer.pass2_enqueue")
 
 Pass2Trigger = Literal[
     "scan_ingest",

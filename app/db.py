@@ -18,8 +18,8 @@ from flask import Flask, g
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-_ENGINE_KEY = "_secscan_engine"
-_SESSION_FACTORY_KEY = "_secscan_session_factory"
+_ENGINE_KEY = "_fathometer_engine"
+_SESSION_FACTORY_KEY = "_fathometer_session_factory"
 
 
 def _to_sync_url(url: str) -> str:
@@ -38,7 +38,7 @@ def init_engine(app: Flask) -> None:
 
     Wird in `create_app()` aufgerufen.
     """
-    url = _to_sync_url(app.config["SECSCAN_DATABASE_URL"])
+    url = _to_sync_url(app.config["FM_DATABASE_URL"])
     engine = create_engine(url, pool_pre_ping=True, future=True)
     app.extensions[_ENGINE_KEY] = engine
     app.extensions[_SESSION_FACTORY_KEY] = sessionmaker(

@@ -118,7 +118,7 @@ def _login_rate_limit() -> str:
     """Liest das Login-Rate-Limit aus den App-Settings."""
     from flask import current_app
 
-    limits: dict[str, str] = current_app.config["SECSCAN_RATELIMITS"]
+    limits: dict[str, str] = current_app.config["FM_RATELIMITS"]
     return limits["login"]
 
 

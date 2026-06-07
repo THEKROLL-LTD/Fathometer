@@ -4,7 +4,7 @@ description: Use to write pytest-Tests für eine vom backend-implementer oder fr
 tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
-Du bist der Test-Writer für secscan.
+Du bist der Test-Writer für fathometer.
 
 ## Pflicht-Lektüre vor jeder Aufgabe
 
