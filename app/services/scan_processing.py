@@ -306,24 +306,7 @@ def process_scan_envelope(
             session=session,
         )
 
-    # ---- 7. notify_conversations_for_scan (Best-Effort) ----------------------
-    try:
-        from app.services.llm_update_hook import notify_conversations_for_scan
-
-        notify_conversations_for_scan(
-            session,
-            server.id,
-            new_count=result.findings_inserted,
-            resolved_count=result.findings_resolved,
-            changed_count=0,
-        )
-    except Exception as exc:  # pragma: no cover — Hook darf Ingest nicht killen
-        log.warning(
-            "scan_processing.llm_hook_failed error=%s",
-            type(exc).__name__,
-        )
-
-    # ---- 8. Audit scan.ingested ----------------------------------------------
+    # ---- 7. Audit scan.ingested ----------------------------------------------
     log_event(
         "scan.ingested",
         target_type="server",

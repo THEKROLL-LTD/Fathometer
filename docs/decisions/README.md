@@ -28,10 +28,10 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0020](0020-dashboard-cross-server-findings.md) | Dashboard-Redesign: Cross-Server-Findings-Tabelle, KPI-Sparklines, Entfernung von /findings/search (Block M) | Teilweise abgelöst durch 0025 (Findings-Section wandert auf eigene Seite) |
 | [0021](0021-agent-bootstrap-installer.md) | Agent-Bootstrap-Installer + Trivy-Output-Strip + Ursachen-Felder pro Finding (Block N) | Akzeptiert |
 | [0022](0022-risk-based-prioritization.md) | Risk-basierte Priorisierung: Pre-Triage-Engine, Host-Snapshot, Vendor-Severity, UI-Redesign (Block O) | Akzeptiert (§Audit-Events teilweise abgelöst durch 0027; §UI-Redesign Host-Snapshot-Sektion teilweise abgelöst durch 0038 — Pills + Slide-Down) |
-| [0023](0023-llm-risk-reviewer-and-application-grouping.md) | LLM-Risk-Reviewer mit Application-Grouping (Two-Pass) und asynchroner Job-Queue (Block P) | Akzeptiert (§UI-Konsequenzen amendet durch 0038 — Workflow-Card-Drilldown, Inline-Reason) |
+| [0023](0023-llm-risk-reviewer-and-application-grouping.md) | LLM-Risk-Reviewer mit Application-Grouping (Two-Pass) und asynchroner Job-Queue (Block P) | Akzeptiert (§UI-Konsequenzen amendet durch 0038 — Workflow-Card-Drilldown, Inline-Reason; Block-G-Chat-Konsument entfernt durch 0050 — geteilter `llm_client` bleibt) |
 | [0024](0024-external-epss-kev-enrichment.md) | Externe EPSS-/KEV-Anreicherung | Akzeptiert |
 | [0025](0025-server-detail-and-findings-slim-down.md) | Server-Detail- und Dashboard-Entschlackung, dedizierte Findings-Seite (Block Q) | Teilweise abgelöst durch 0037 (Cross-Server-Findings-Bucket-View) und 0041 (Flat-Switch `?flat=1` entfernt) |
-| [0026](0026-async-scan-ingest.md) | Asynchroner Scan-Ingest mit `scan_ingest_jobs`-Queue (Block R) | Akzeptiert (§Status-Endpoint + §Agent-Polling teilweise abgelöst durch 0042) |
+| [0026](0026-async-scan-ingest.md) | Asynchroner Scan-Ingest mit `scan_ingest_jobs`-Queue (Block R) | Akzeptiert (§Status-Endpoint + §Agent-Polling teilweise abgelöst durch 0042; Chat-Update-Hook im Ingest-Pfad entfernt durch 0050) |
 | [0027](0027-no-per-finding-risk-band-audit.md) | Keine per-Finding-`risk_band`-Audit-Events | Akzeptiert |
 | [0028](0028-application-group-evaluations-junction.md) | Application-Group-Evaluations als Junction-Tabelle (Block T) | Akzeptiert |
 | [0029](0029-parallel-llm-worker-concurrency.md) | Parallele LLM-Job-Verarbeitung im Worker (Single-Worker, In-Process-Concurrency, Block U) | Akzeptiert |
@@ -55,6 +55,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0047](0047-settings-horizontal-tabs-s-layer.md) | Settings-Redesign: vertikale Sekundär-Nav → horizontale Sticky-Tab-Nav (`.settings-tabs`) + durchgängige `s-*`-Komponentenschicht, DaisyUI raus aus den Settings-Surfaces, `settings-manage.css` gelöscht (Block AD) — löst den Sekundär-Nav-Teil von ADR-0016 ab; Render-Helper/Routen/Schema unverändert | Akzeptiert |
 | [0048](0048-rebrand-secscan-to-fathometer.md) | Rebrand secscan → Fathometer (FM_-Env-Prefix, Pfade, Agent-Version) | Akzeptiert |
 | [0049](0049-agent-uninstaller.md) | Agent-Uninstaller: lokales `fathometer-uninstall.sh` (air-gap-first) + `/uninstall.sh`-Alias, entfernt alles vom Installer Mitgebrachte, rein lokal (kein serverseitiges Deregister) — ergänzt ADR-0021 | Akzeptiert |
+| [0050](0050-remove-llm-chat-assessment.md) | Server-weites "Request AI Assessment"-Chat-Feature entfernt (UI/Routes/Prompts/Chat-Services/JS/3 DB-Tabellen, Migration 0017); Provider-Config + Risk-Reviewer bleiben — löst Block G ab | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

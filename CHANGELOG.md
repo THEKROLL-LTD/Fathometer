@@ -4,6 +4,46 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — ADR-0050: "Request AI Assessment"-Chat-Feature entfernt
+
+Das server-weite interaktive LLM-Chat-Assessment (Block G) wird ersatzlos
+entfernt — UI, Routes, Prompts, Chat-Services, JS, DB-Tabellen, Tests. Die
+geteilte LLM-Provider-Config und der asynchrone Risk-Reviewer (Block P) bleiben
+unverändert. Quality-Gates grün: `ruff`/`ruff format`/`mypy app/`, Default-
+`pytest` 2233 passed / 0 failed. **`ARCHITECTURE.md` wird separat (paralleler
+Rewrite) nachgezogen.**
+
+### Removed
+
+- **"Request AI assessment"-Button** auf der Server-Detail-Seite (`servers/detail.html`)
+  + `sd-ai-button`-CSS.
+- **Chat-Blueprint** `app/api/llm_chat.py` (`POST /servers/<id>/chat`,
+  `POST /chat/<id>/messages`, `GET /chat/<id>/stream` (SSE), `GET /chat/<id>`,
+  `POST /chat/<id>/archive`) inkl. Registration in `app/__init__.py`.
+- **Chat-Services:** `llm_prompt.py` (Singular — Chat-System-Prompt),
+  `llm_update_hook.py` (`notify_conversations_for_scan` + Aufruf in
+  `scan_processing.py`), `llm_token_tracker.py` (Chat-80%/100%-Cap-Banner).
+- **Templates/JS:** `app/templates/chat/`, `app/static/js/llm_chat.js`.
+- **DB:** Models `LlmConversation`/`LlmMessage`/`LlmConversationFinding` + Enums
+  `LlmConversationStatus`/`LlmMessageRole`; **Migration `0017_remove_llm_chat`**
+  droppt die drei Tabellen + zwei Postgres-Enums (`downgrade()` rekonstruiert
+  sie leer).
+- **Provider-Switch-Conversation-Archivierung** (`_archive_active_conversations`
+  + Confirm-Modal/Flash) aus `llm_settings.py`/`llm_provider.html`/
+  `llm_settings.js`. Context-Processor `_inject_llm_configured`. Audit-Action
+  `llm.queried` aus `KNOWN_ACTIONS`.
+- **Tests:** `test_llm_chat_db.py`, `test_llm_provider_switch_db.py`,
+  `test_llm_update_hook.py`, `test_llm_token_tracker.py`, `test_llm_prompt.py`,
+  `tests/adversarial/test_prompt_injection.py` (testete den Chat-Prompt).
+
+### Kept (geteilt mit Risk-Reviewer)
+
+- `llm_client.py`, `llm_budget.py`, der gesamte Risk-Reviewer (Block P), die
+  Provider-Config auf `settings` (`llm_base_url`/`llm_model`/
+  `llm_api_key_encrypted`/`llm_daily_token_cap`/`llm_provider_name`), der
+  `/settings/llm`-Provider-Tab und das Audit-Event `llm.provider_changed`
+  (ohne `archived_conversations`-Metadata).
+
 ## [Unreleased] — ADR-0047 (Block AD): Settings-Redesign (horizontale Tab-Nav + `s-*`-Schicht)
 
 Zielversion **v0.19.0**. Reines Restyling — keine Routen-/Schema-/Render-Helper-

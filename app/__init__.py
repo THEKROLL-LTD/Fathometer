@@ -391,7 +391,6 @@ def create_app() -> Flask:
     # 7. Blueprints.
     app.register_blueprint(health_bp)
 
-    from app.api.llm_chat import llm_chat_bp
     from app.views._sidebar_context import sidebar_partials_bp
     from app.views.agent_install import agent_install_bp
     from app.views.audit_view import audit_bp
@@ -417,7 +416,6 @@ def create_app() -> Flask:
     app.register_blueprint(audit_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(dashboard_partials_bp)
-    app.register_blueprint(llm_chat_bp)
     app.register_blueprint(sidebar_partials_bp)
     app.register_blueprint(agent_install_bp)
 
@@ -428,26 +426,6 @@ def create_app() -> Flask:
 
     register_api_routes()
     app.register_blueprint(api_bp)
-
-    @app.context_processor
-    def _inject_llm_configured() -> dict[str, bool]:
-        """`llm_configured` fuer Templates (Server-Detail-Button).
-
-        True wenn `Setting.llm_base_url` UND `Setting.llm_model` gesetzt
-        sind. Falls die DB nicht erreichbar oder die Settings-Row noch
-        nicht existiert: False (fail-safe).
-        """
-        try:
-            from app.db import get_session
-            from app.settings_service import get_settings_row
-
-            sess = get_session()
-            row = get_settings_row(sess)
-            return {
-                "llm_configured": bool(row.llm_base_url and row.llm_model),
-            }
-        except Exception:  # pragma: no cover — DB/Setup-Edge-Case
-            return {"llm_configured": False}
 
     @app.context_processor
     def _inject_agent_version_helpers() -> dict[str, Any]:

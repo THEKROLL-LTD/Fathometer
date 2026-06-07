@@ -164,7 +164,6 @@ def _ctx_llm_provider() -> dict:
         "form": LlmSettingsForm(),
         "has_existing_key": True,
         "presets": [{"name": "OpenAI", "base_url": "https://x", "model": "gpt"}],
-        "active_conversation_count": 2,
     }
 
 

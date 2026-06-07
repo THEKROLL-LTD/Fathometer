@@ -421,7 +421,6 @@ def test_detail_initial_render_wires_fragment_urls(
             ("escalate", "act", "mitigate", "pending", "monitor", "noise"), 0
         ),
         "default_open_band": None,
-        "llm_configured": False,
     }
     with app.test_request_context("/servers/1"):
         html = render_template("servers/detail.html", **ctx)

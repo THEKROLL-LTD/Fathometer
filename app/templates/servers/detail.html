@@ -28,7 +28,7 @@
      - total_findings_count (quick_counts["total_all"])
      - action_required, listeners, services, processes
      - noise_findings, noise_total, action_sections
-     - llm_configured, hx_partial
+     - hx_partial
      - is_agent_outdated, is_trivy_outdated, is_trivy_db_outdated (Jinja-Globals)
 #}
 {% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
@@ -136,62 +136,6 @@
     </div>
 
     <div class="sd-header__right">
-      {# KI-Bewertung-Button. Alpine x-data bleibt als separates Scope-Object
-         auf dem umgebenden div (eigene async start()-Logik, kein Konflikt
-         mit dem aeusseren trendRange/open-Scope). #}
-      {% if llm_configured and is_active %}
-        <div x-data="{
-              busy: false,
-              async start() {
-                if (this.busy) return;
-                this.busy = true;
-                try {
-                  const meta = document.querySelector('meta[name=&quot;csrf-token&quot;]');
-                  const csrf = meta ? meta.getAttribute('content') : '';
-                  const res = await fetch({{ url_for('llm_chat.start_conversation', server_id=server.id) | tojson | forceescape }}, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                      'X-CSRFToken': csrf,
-                      'Accept': 'application/json'
-                    }
-                  });
-                  const data = await res.json();
-                  if (!res.ok) {
-                    const msg = (data && (data.message || data.error)) || ('Error ' + res.status);
-                    this.$dispatch('toast', {msg: msg, kind: 'error'});
-                    this.busy = false;
-                    return;
-                  }
-                  window.location.href = '/chat/' + data.conversation_id;
-                } catch (e) {
-                  this.$dispatch('toast', {msg: 'Network error', kind: 'error'});
-                  this.busy = false;
-                }
-              }
-             }">
-          <button type="button"
-                  class="sd-ai-button"
-                  @click="start()"
-                  :disabled="busy"
-                  title="Request LLM assessment (or jump to the active conversation)">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" aria-hidden="true">
-              <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
-            </svg>
-            <span x-show="!busy">Request AI assessment</span>
-            <span x-show="busy">starting&#x2026;</span>
-          </button>
-        </div>
-      {% elif is_active %}
-        <a href="{{ url_for('llm_settings.show') }}"
-           class="sd-ai-button"
-           title="LLM provider is not configured yet.">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" aria-hidden="true">
-            <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
-          </svg>
-          <span>AI assessment (provider missing)</span>
-        </a>
-      {% endif %}
       <a class="sd-icon-button"
          href="{{ url_for('server_settings.show', server_id=server.id) }}"
          hx-get="{{ url_for('server_settings.show', server_id=server.id) }}"

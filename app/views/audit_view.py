@@ -82,7 +82,6 @@ KNOWN_ACTIONS: list[str] = [
     "key.rotated.master",
     "key.rotated.server",
     "master_key.rotated",
-    "llm.queried",
     "settings.updated",
     "scan.ingested",
     "auth.login",

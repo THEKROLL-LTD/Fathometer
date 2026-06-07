@@ -1,6 +1,6 @@
 /**
- * LLM-Provider-Settings — Alpine-Helper fuer Preset-Application,
- * Test-Verbindung und das Provider-Wechsel-Confirm-Modal.
+ * LLM-Provider-Settings — Alpine-Helper fuer Preset-Application und
+ * Test-Verbindung.
  *
  * Wird von `settings/llm_provider.html` via `x-data="llmProviderForm(...)"`
  * konsumiert. Reine UX-Logik — der Server (`app/views/llm_settings.py`)
@@ -25,21 +25,15 @@
     presets,
     initialBaseUrl,
     initialModel,
-    activeConvCount,
     testConnectionUrl,
   }) {
     return {
       presets: presets || [],
       baseUrl: initialBaseUrl || "",
       model: initialModel || "",
-      initialBaseUrl: initialBaseUrl || "",
-      initialModel: initialModel || "",
-      activeConvCount: activeConvCount || 0,
       testConnectionUrl: testConnectionUrl,
       testing: false,
       testResult: null,
-      confirmOpen: false,
-      _confirmed: false,
 
       applyPreset(idxStr) {
         if (idxStr === "") return;
@@ -47,31 +41,6 @@
         if (!p) return;
         this.baseUrl = p.base_url;
         this.model = p.model;
-      },
-
-      isProviderChanged() {
-        return (
-          (this.baseUrl || "").trim() !==
-            (this.initialBaseUrl || "").trim() ||
-          (this.model || "").trim() !== (this.initialModel || "").trim()
-        );
-      },
-
-      onSubmit(ev) {
-        if (this._confirmed) return;
-        if (this.activeConvCount > 0 && this.isProviderChanged()) {
-          ev.preventDefault();
-          this.confirmOpen = true;
-        }
-      },
-
-      confirmSubmit() {
-        this._confirmed = true;
-        this.confirmOpen = false;
-        // Naechster Frame: das Form-Element submitten.
-        this.$nextTick(() => {
-          this.$el.submit();
-        });
       },
 
       async testConnection() {

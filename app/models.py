@@ -92,29 +92,12 @@ class AttackVector(enum.StrEnum):
     UNKNOWN = "unknown"
 
 
-class LlmConversationStatus(enum.StrEnum):
-    """Lebenszyklus einer LLM-Conversation."""
-
-    ACTIVE = "active"
-    ARCHIVED = "archived"
-
-
-class LlmMessageRole(enum.StrEnum):
-    """Chat-Rolle einer LLM-Message."""
-
-    SYSTEM = "system"
-    USER = "user"
-    ASSISTANT = "assistant"
-
-
 # Postgres-Enum-Typnamen — exakt so in der Migration erzeugt.
 SEVERITY_ENUM_NAME = "severity"
 FINDING_TYPE_ENUM_NAME = "finding_type"
 FINDING_CLASS_ENUM_NAME = "finding_class"
 FINDING_STATUS_ENUM_NAME = "finding_status"
 ATTACK_VECTOR_ENUM_NAME = "attack_vector"
-LLM_CONVERSATION_STATUS_ENUM_NAME = "llm_conversation_status"
-LLM_MESSAGE_ROLE_ENUM_NAME = "llm_message_role"
 
 
 def _pg_enum(enum_cls: type[enum.Enum], name: str) -> Any:
@@ -545,85 +528,6 @@ class FindingNote(Base):
     finding: Mapped[Finding] = relationship("Finding", back_populates="notes")
     author_user: Mapped[User | None] = relationship(
         "User", back_populates="notes", foreign_keys=[author_user_id]
-    )
-
-
-# ---------------------------------------------------------------------------
-# LLM-Tabellen — Schema komplett vorhanden, UI/Logik kommt in Block G.
-# ---------------------------------------------------------------------------
-
-
-class LlmConversation(Base):
-    __tablename__ = "llm_conversations"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    server_id: Mapped[int] = mapped_column(
-        ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
-    )
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    last_message_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    model: Mapped[str] = mapped_column(String(128), nullable=False)
-    status: Mapped[LlmConversationStatus] = mapped_column(
-        _pg_enum(LlmConversationStatus, LLM_CONVERSATION_STATUS_ENUM_NAME),
-        nullable=False,
-        default=LlmConversationStatus.ACTIVE,
-    )
-    findings_snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-    messages: Mapped[list[LlmMessage]] = relationship(
-        "LlmMessage", back_populates="conversation", cascade="all, delete-orphan"
-    )
-    finding_links: Mapped[list[LlmConversationFinding]] = relationship(
-        "LlmConversationFinding",
-        back_populates="conversation",
-        cascade="all, delete-orphan",
-    )
-
-
-class LlmMessage(Base):
-    __tablename__ = "llm_messages"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    conversation_id: Mapped[int] = mapped_column(
-        ForeignKey("llm_conversations.id", ondelete="CASCADE"), nullable=False
-    )
-    role: Mapped[LlmMessageRole] = mapped_column(
-        _pg_enum(LlmMessageRole, LLM_MESSAGE_ROLE_ENUM_NAME), nullable=False
-    )
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    prompt_tokens: Mapped[int | None] = mapped_column(Integer)
-    completion_tokens: Mapped[int | None] = mapped_column(Integer)
-
-    conversation: Mapped[LlmConversation] = relationship(
-        "LlmConversation", back_populates="messages"
-    )
-
-
-class LlmConversationFinding(Base):
-    __tablename__ = "llm_conversation_findings"
-
-    conversation_id: Mapped[int] = mapped_column(
-        ForeignKey("llm_conversations.id", ondelete="CASCADE"), primary_key=True
-    )
-    finding_id: Mapped[int] = mapped_column(
-        ForeignKey("findings.id", ondelete="CASCADE"), primary_key=True
-    )
-    severity_at_send: Mapped[Severity] = mapped_column(
-        _pg_enum(Severity, SEVERITY_ENUM_NAME), nullable=False
-    )
-    cvss_v3_score_at_send: Mapped[float | None] = mapped_column(Float)
-    epss_score_at_send: Mapped[float | None] = mapped_column(Float)
-    is_kev_at_send: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-
-    conversation: Mapped[LlmConversation] = relationship(
-        "LlmConversation", back_populates="finding_links"
     )
 
 
@@ -1322,8 +1226,6 @@ __all__ = [
     "FINDING_CLASS_ENUM_NAME",
     "FINDING_STATUS_ENUM_NAME",
     "FINDING_TYPE_ENUM_NAME",
-    "LLM_CONVERSATION_STATUS_ENUM_NAME",
-    "LLM_MESSAGE_ROLE_ENUM_NAME",
     "SEVERITY_ENUM_NAME",
     "ApplicationGroup",
     "ApplicationGroupEvaluation",
@@ -1341,11 +1243,6 @@ __all__ = [
     "LLMDebugLog",
     "LLMJob",
     "LLMRiskCache",
-    "LlmConversation",
-    "LlmConversationFinding",
-    "LlmConversationStatus",
-    "LlmMessage",
-    "LlmMessageRole",
     "Scan",
     "ScanIngestJob",
     "Server",

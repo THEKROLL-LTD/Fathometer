@@ -131,7 +131,7 @@
   box-shadow: 0 0 6px var(--accent-glow);
 }
 
-/* Submit (mirrors auth__submit / sd-ai-button — outlined cyan) */
+/* Submit (mirrors auth__submit — outlined cyan) */
 .findings__filter-bar .ff-submit {
   display: inline-flex;
   align-items: center;

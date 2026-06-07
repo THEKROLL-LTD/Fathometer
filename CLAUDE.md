@@ -17,7 +17,7 @@ Subagent-Aufrufe nennen die zu lesenden Sektions-Nummern explizit (nicht "lies d
 
 - **Python 3.13**, **Flask**, **SQLAlchemy 2.x**, **Alembic**, **Pydantic v2**.
 - **PostgreSQL 17** in eigenem Container (nicht all-in-one).
-- **Jinja2** + **HTMX** + **Alpine.js** + **Tailwind CSS** mit **DaisyUI**. **Kein Node-Build im MVP** (siehe ADR-001).
+- **Jinja2** + **HTMX** + **Alpine.js** + **Plain CSS** mit eigenem Design-Token-Set (kein Tailwind, kein DaisyUI — entfernt mit ADR-0032). **Frontend-Build via esbuild + lightningcss** in einer Build-only Docker-Stage; Production-Image hat keine Node-Runtime (siehe ADR-0032, löst ADR-0001 ab).
 - **`openai`-Python-SDK** für LLM (OpenAI-kompatibles Protokoll, Default-Provider DeepInfra mit `deepseek-ai/DeepSeek-V3`).
 - **`structlog`** für Logging mit Redaction-Filter.
 - **`flask-limiter`** für Rate-Limits.

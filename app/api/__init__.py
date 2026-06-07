@@ -4,7 +4,7 @@ Sammelt die JSON-Endpoints. Browser-facing Endpoints leben in `app/views/`.
 
 CSRF-Schutz ist NICHT global fuer das Blueprint ausgeschaltet. Einzelne
 Agent-Endpoints, die mit Bearer-Token/Master-Key authentifizieren
-(`scans.py`, `register.py`, `keys.py`, `llm_chat.stream_events`), sind
+(`scans.py`, `register.py`, `keys.py`), sind
 explizit per `@csrf.exempt` ausgenommen. Browser-facing API-Endpoints
 (z. B. `bulk.py:bulk_acknowledge` aus dem Dashboard) bleiben CSRF-
 geschuetzt und erwarten den Token per `X-CSRFToken`-Header (HTMX).

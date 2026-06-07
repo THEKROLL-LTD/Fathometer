@@ -1,7 +1,7 @@
 """LLM-Settings-View `/settings/llm` und `/settings/llm/test-connection`.
 
 ARCHITECTURE.md §7 (Settings-Provider-Block mit Preset-Dropdown) und §12
-(Provider-Wechsel-Hook: alle aktiven Conversations archivieren).
+(Provider-Config — geteilt vom LLM-Risk-Reviewer).
 
 Felder:
 - `provider_name` — freier Anzeigename, Pattern wie Tag-Namen.
@@ -11,8 +11,7 @@ Felder:
 - `daily_token_cap` — Integer >= 1.
 
 Beim Speichern:
-1. Wenn `base_url` ODER `model` sich aendert -> archiviere alle aktiven
-   Conversations, Audit `llm.provider_changed`.
+1. Wenn `base_url` ODER `model` sich aendert -> Audit `llm.provider_changed`.
 2. API-Key Fernet-encrypt mit `FM_ENCRYPTION_KEY`.
 3. Audit `settings.updated` mit den geaenderten Feldnamen
    (Klartext-Werte werden NIE in `metadata` gelegt).
@@ -31,14 +30,12 @@ from typing import Any, cast
 import structlog
 from flask import Blueprint, flash, jsonify, redirect, url_for
 from flask_login import login_required
-from sqlalchemy import select
 
 from app import limiter
 from app.audit import log_event
 from app.config import Settings
 from app.db import get_session
 from app.forms import LlmSettingsForm
-from app.models import LlmConversation, LlmConversationStatus
 from app.services.llm_client import (
     ConnectionTestResult,
     LlmClient,
@@ -58,34 +55,11 @@ LLM_PRESETS: list[dict[str, str]] = [
         # v0.9.3 (ADR-0023 §"Update v0.9.3"): Default-Modell-Wechsel auf
         # ``openai/gpt-oss-120b`` — semantisch staerkstes Modell in der
         # Block-P-Test-Suite, Apache 2.0 self-hostable, Provider-flexibel.
+        # Einziges Preset: nur DeepInfra ist verprobt; weitere Provider
+        # bleiben per manueller Base-URL/Model-Eingabe moeglich.
         "name": "DeepInfra",
         "base_url": "https://api.deepinfra.com/v1/openai",
         "model": "openai/gpt-oss-120b",
-    },
-    {
-        "name": "OpenAI",
-        "base_url": "https://api.openai.com/v1",
-        "model": "gpt-4o-mini",
-    },
-    {
-        "name": "Together AI",
-        "base_url": "https://api.together.xyz/v1",
-        "model": "deepseek-ai/DeepSeek-V3",
-    },
-    {
-        "name": "Groq",
-        "base_url": "https://api.groq.com/openai/v1",
-        "model": "llama-3.1-70b-versatile",
-    },
-    {
-        "name": "Mistral",
-        "base_url": "https://api.mistral.ai/v1",
-        "model": "mistral-large-latest",
-    },
-    {
-        "name": "Ollama (lokal)",
-        "base_url": "http://localhost:11434/v1",
-        "model": "llama3.1",
     },
 ]
 
@@ -100,22 +74,6 @@ def _has_existing_key(setting_row: Any) -> bool:
     return (
         setting_row.llm_api_key_encrypted is not None and len(setting_row.llm_api_key_encrypted) > 0
     )
-
-
-def _archive_active_conversations(session: Any) -> list[int]:
-    """Archiviere alle aktiven Conversations und liefere ihre IDs zurueck."""
-    rows = list(
-        session.execute(
-            select(LlmConversation).where(LlmConversation.status == LlmConversationStatus.ACTIVE)
-        )
-        .scalars()
-        .all()
-    )
-    archived_ids: list[int] = []
-    for conv in rows:
-        conv.status = LlmConversationStatus.ARCHIVED
-        archived_ids.append(conv.id)
-    return archived_ids
 
 
 @llm_settings_bp.get("/")
@@ -135,12 +93,6 @@ def show() -> Any:
         form=form,
         has_existing_key=_has_existing_key(setting_row),
         presets=LLM_PRESETS,
-        active_conversation_count=sess.execute(
-            select(LlmConversation).where(LlmConversation.status == LlmConversationStatus.ACTIVE)
-        )
-        .scalars()
-        .all()
-        .__len__(),
     )
 
 
@@ -162,7 +114,6 @@ def update() -> Any:
                 form=form,
                 has_existing_key=_has_existing_key(setting_row),
                 presets=LLM_PRESETS,
-                active_conversation_count=0,
             ),
             400,
         )
@@ -178,9 +129,7 @@ def update() -> Any:
         setting_row.llm_model or None
     ) != new_model
 
-    archived_ids: list[int] = []
     if provider_changed:
-        archived_ids = _archive_active_conversations(sess)
         log_event(
             "llm.provider_changed",
             target_type="settings",
@@ -190,7 +139,6 @@ def update() -> Any:
                 "new_base_url": new_base_url,
                 "old_model": setting_row.llm_model,
                 "new_model": new_model,
-                "archived_conversations": archived_ids,
             },
             session=sess,
         )
@@ -213,17 +161,11 @@ def update() -> Any:
         metadata={
             "fields": changed_fields,
             "provider_changed": provider_changed,
-            "archived_conversations": archived_ids,
         },
         session=sess,
     )
     sess.commit()
     flash("LLM settings saved.", "success")
-    if provider_changed and archived_ids:
-        flash(
-            f"{len(archived_ids)} active evaluations archived due to provider/model change.",
-            "info",
-        )
     return redirect(url_for("llm_settings.show"))
 
 

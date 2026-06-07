@@ -4,20 +4,13 @@
    (KEIN `extends`), includiert in `#settings-content.settings`. Das
    JS-Snippet `static/js/llm_settings.js` wird global in `base_app.html`
    geladen; die Alpine-Component `llmProviderForm` bleibt unveraendert
-   gebunden (Methoden applyPreset/onSubmit/confirmSubmit/testConnection,
-   State baseUrl/model/testing/testResult/confirmOpen/activeConvCount).
+   gebunden (Methoden applyPreset/testConnection, State
+   baseUrl/model/testing/testResult).
 
    Variablen (siehe app/views/llm_settings.py::show):
      - `form` (LlmSettingsForm)
      - `has_existing_key` (bool)
      - `presets` (list[dict])
-     - `active_conversation_count` (int)
-
-   Confirm-Flow unveraendert (Provider/Model-Wechsel archiviert aktive
-   Bewertungen): die frueher genutzte DaisyUI-Modal-Mechanik ist durch ein
-   token-gestyltes Alpine-Overlay (x-show) ersetzt — kein DaisyUI. Das Modal
-   liegt INNERHALB der Form, damit `confirmSubmit()`'s `this.$el.submit()`
-   weiterhin die Form trifft.
 
    Sicherheit:
      - `| forceescape` neben `tojson` bleibt Pflicht (sonst koennte ein `"`
@@ -27,8 +20,8 @@
 <p class="settings__eyebrow">Settings</p>
 <h1 class="settings__title">LLM Provider</h1>
 <p class="settings__lede">
-  Configuration for the "Request assessment" feature on the server detail
-  page. Switching provider or model archives all active assessments.
+  Provider configuration for the LLM risk reviewer (base URL, model, API key
+  and daily token cap).
 </p>
 
 <section class="s-section">
@@ -42,10 +35,8 @@
           presets: {{ presets | tojson | forceescape }},
           initialBaseUrl: {{ (form.base_url.data or '') | tojson | forceescape }},
           initialModel: {{ (form.model.data or '') | tojson | forceescape }},
-          activeConvCount: {{ active_conversation_count | tojson | forceescape }},
           testConnectionUrl: {{ url_for('llm_settings.test_connection') | tojson | forceescape }}
-        })"
-        @submit="onSubmit($event)">
+        })">
     {{ form.csrf_token }}
 
     <div class="s-card">
@@ -67,7 +58,7 @@
         <div class="s-field">
           <label class="s-field__label" for="{{ form.provider_name.id }}">Display name</label>
           {{ form.provider_name(class="s-input", placeholder="e.g. deepinfra-prod") }}
-          <span class="s-field__hint">Shown in the server detail next to each assessment.</span>
+          <span class="s-field__hint">Free-form label for this provider configuration.</span>
           {% for err in form.provider_name.errors %}
             <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
           {% endfor %}
@@ -110,19 +101,12 @@
         <div class="s-field">
           <label class="s-field__label" for="{{ form.daily_token_cap.id }}">Daily token cap</label>
           {{ form.daily_token_cap(class="s-input s-input--mono") }}
-          <span class="s-field__hint">Reset at 00:00 UTC. Warning banner at 80%, hard 429 at 100%.</span>
+          <span class="s-field__hint">Caps the risk reviewer's daily token spend. Reset at 00:00 UTC.</span>
           {% for err in form.daily_token_cap.errors %}
             <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
           {% endfor %}
         </div>
       </div>
-
-      {% if active_conversation_count > 0 %}
-        <p class="s-section__hint" data-test="active-conv-note">
-          {{ active_conversation_count }} active assessment{{ '' if active_conversation_count == 1 else 's' }}
-          will be archived when base URL or model are changed.
-        </p>
-      {% endif %}
 
       <div class="s-actions">
         <span class="s-actions__hint">
@@ -154,35 +138,5 @@
         </template>
       </div>
     </div>
-
-    {# Provider-Wechsel-Confirm — token-gestyltes Alpine-Overlay (kein DaisyUI).
-       Per x-teleport an <body> gehaengt, damit das fixed-Overlay nicht vom
-       container-type:inline-size auf `.settings` als Containing-Block gefangen
-       wird (sonst landet das Modal oben-links statt viewport-zentriert). Die
-       Alpine-Scope (confirmOpen, confirmSubmit/$el = Form) bleibt erhalten. #}
-    <template x-teleport="body">
-    <div x-show="confirmOpen"
-         x-cloak
-         style="position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: var(--backdrop-modal); padding: 24px;"
-         role="dialog"
-         aria-modal="true"
-         aria-labelledby="provider-switch-title"
-         @click.self="confirmOpen = false"
-         @keydown.escape.window="confirmOpen = false">
-      <div style="background: var(--surface-elevated); border: var(--border); max-width: 520px; width: 100%; padding: 28px;">
-        <h3 id="provider-switch-title" class="s-card__title" style="font-size: 18px;">Confirm provider switch</h3>
-        <p class="s-section__hint" style="margin-top: 12px;">
-          You are switching provider/model.
-          <span x-text="activeConvCount"></span>
-          active assessment<span x-text="activeConvCount === 1 ? '' : 's'"></span>
-          will be archived. Continue?
-        </p>
-        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
-          <button type="button" class="s-btn s-btn--sm" @click="confirmOpen = false">Cancel</button>
-          <button type="button" class="s-btn s-btn--primary s-btn--sm" @click="confirmSubmit()">Archive and save</button>
-        </div>
-      </div>
-    </div>
-    </template>
   </form>
 </section>

@@ -96,9 +96,7 @@ _ACCEPTANCE_PATH_PREFIXES: tuple[str, ...] = (
     "tests/integration/test_heartbeat_aggregation_db",
     "tests/integration/test_keys_rotate_db",
     "tests/integration/test_llm_cache_db",
-    "tests/integration/test_llm_chat_db",
     "tests/integration/test_llm_debug_log_db",
-    "tests/integration/test_llm_provider_switch_db",
     "tests/integration/test_llm_settings_view_db",
     "tests/integration/test_llm_worker_db",
     "tests/integration/test_master_key_rotation_db",
@@ -380,7 +378,6 @@ def _truncate_all(engine: Any) -> None:
                 "scan_ingest_jobs, "
                 "feed_pull_log, epss_scores, cisa_kev_catalog, "
                 "llm_risk_cache, llm_jobs, application_groups, "
-                "llm_conversation_findings, llm_messages, llm_conversations, "
                 "finding_notes, findings, server_tags, tags, scans, servers, "
                 "audit_events, settings, users "
                 "RESTART IDENTITY CASCADE"
