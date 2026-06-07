@@ -242,6 +242,7 @@ _SETUP_EXEMPT_PREFIXES: tuple[str, ...] = (
     # Auth und ohne Setup-Gate erreichbar. Inhalt ist kein Geheimnis, der
     # Operator soll das Skript vor dem Pipen in `bash` inspizieren koennen.
     "/install.sh",
+    "/uninstall.sh",
     "/agent/version",
     "/agent/files/",
 )

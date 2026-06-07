@@ -114,6 +114,27 @@ Supported: Debian/Ubuntu, RHEL family (AlmaLinux, Rocky, Fedora, Amazon, Oracle)
 SUSE — on `x86_64` and `aarch64`. Alpine/OpenRC and container hosts are
 deliberately unsupported.
 
+## Remove a server
+
+To uninstall the agent from a host, run the uninstaller it dropped at install
+time (works air-gapped, no backend needed):
+
+```bash
+sudo /opt/fathometer/bin/fathometer-uninstall.sh
+```
+
+Or, symmetric to the installer, over the network:
+
+```bash
+sudo bash <(curl -fsSL https://fathometer.example.com/uninstall.sh)
+```
+
+It removes `/opt/fathometer`, `/etc/fathometer` (config + API key), the systemd
+timer/service (or cron entry), and the Trivy cache. Pass `--keep-cache` to keep
+the Trivy DB, or `-y` / `FM_UNATTENDED=1` to skip the confirmation prompt. This
+is local-only — the host stays listed in the dashboard until you delete it
+there.
+
 ## More
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the spec: deployment detail, reverse-proxy

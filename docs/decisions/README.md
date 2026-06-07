@@ -53,6 +53,8 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0045](0045-english-only-ui.md) | English-only UI: gesamte UI englisch in einem dedizierten Block (AB), Sprach-Sweep-Test statt Soft-Policy, keine i18n-Infrastruktur — löst ADR-0033 §8 Phase-2-Strategie ab; Doc-Sprache bleibt deutsch | Akzeptiert |
 | [0046](0046-sidebar-group-state-cookie.md) | Sidebar-Group-Aufklapp-Zustand persistent via Cookie `sidebar_open_groups` + Server-Render des `open`-Attributs (Block AC) — Default collapsed aus ADR-0034 bleibt Fallback ohne Cookie | Akzeptiert |
 | [0047](0047-settings-horizontal-tabs-s-layer.md) | Settings-Redesign: vertikale Sekundär-Nav → horizontale Sticky-Tab-Nav (`.settings-tabs`) + durchgängige `s-*`-Komponentenschicht, DaisyUI raus aus den Settings-Surfaces, `settings-manage.css` gelöscht (Block AD) — löst den Sekundär-Nav-Teil von ADR-0016 ab; Render-Helper/Routen/Schema unverändert | Akzeptiert |
+| [0048](0048-rebrand-secscan-to-fathometer.md) | Rebrand secscan → Fathometer (FM_-Env-Prefix, Pfade, Agent-Version) | Akzeptiert |
+| [0049](0049-agent-uninstaller.md) | Agent-Uninstaller: lokales `fathometer-uninstall.sh` (air-gap-first) + `/uninstall.sh`-Alias, entfernt alles vom Installer Mitgebrachte, rein lokal (kein serverseitiges Deregister) — ergänzt ADR-0021 | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

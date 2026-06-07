@@ -219,4 +219,10 @@
     The server key never leaves the host. To rotate a host’s key, just re-run
     the installer on that host.
   </p>
+  <p class="s-section__hint" style="margin-bottom: 0;">
+    To remove the agent from a host, run
+    <code>sudo /opt/fathometer/bin/fathometer-uninstall.sh</code> on it (or
+    <code>sudo bash &lt;(curl -fsSL {{ external_base_url }}/uninstall.sh)</code>).
+    This is local-only — delete the host below to drop it from the dashboard.
+  </p>
 </section>

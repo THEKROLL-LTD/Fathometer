@@ -125,6 +125,25 @@ dem Server an, mit welcher Skript-Version gepusht wurde.
 - `1` — fehlende Voraussetzungen oder ungültige Argumente
 - `2` — HTTP-Fehler oder ungültige Server-Antwort
 
+## Deinstallation
+
+Der Bootstrap-Installer legt `fathometer-uninstall.sh` unter
+`/opt/fathometer/bin/` mit ab (ADR-0049). Entfernen des Agents auf einem Host:
+
+```bash
+sudo /opt/fathometer/bin/fathometer-uninstall.sh
+```
+
+Funktioniert air-gapped (kein Backend-Zugriff nötig). Symmetrisch zum Install
+geht auch der `curl`-Pipe-Weg `sudo bash <(curl -fsSL https://fathometer.example.com/uninstall.sh)`.
+
+Entfernt wird: `/opt/fathometer` (Agent + Trivy), `/etc/fathometer` (Config +
+API-Key), der systemd-Timer/-Service bzw. der Cron-Eintrag, und der
+Trivy-DB-Cache. Flags: `--keep-cache` behält den Trivy-Cache, `-y` /
+`FM_UNATTENDED=1` überspringt die Rückfrage. Rein lokal — der Server-Record im
+Backend bleibt bestehen (in der UI löschen, falls der Host nicht mehr gelistet
+sein soll).
+
 ## Was der Agent NICHT macht
 
 Keine Auto-Updates, kein Datei-Versand außer dem Scan-Envelope, kein

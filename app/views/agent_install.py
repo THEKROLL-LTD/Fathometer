@@ -43,6 +43,7 @@ _AGENT_FILE_WHITELIST: frozenset[str] = frozenset(
         "fathometer-agent.sh",
         "fathometer-register.sh",
         "lib_host_state.sh",
+        "fathometer-uninstall.sh",
     }
 )
 
@@ -76,6 +77,35 @@ def agent_file(name: str) -> Response:
     response = send_from_directory(
         agent_dir,
         name,
+        mimetype="text/x-shellscript",
+        max_age=300,
+    )
+    return response
+
+
+@agent_install_bp.route("/uninstall.sh", methods=["GET"])
+def uninstall_sh() -> Response:
+    """Liefert den Uninstaller als `text/x-shellscript`.
+
+    Convenience-Alias fuer den symmetrischen `curl`-Pipe-Pfad
+    (`sudo bash <(curl -fsSL .../uninstall.sh)`). Serviert byte-identisch
+    dasselbe statische File wie `/agent/files/fathometer-uninstall.sh` —
+    das Skript enthaelt keine backend-spezifischen Konstanten (alle Pfade
+    und Unit-Namen sind fix), daher kein Jinja-Render und damit keine
+    Template-Drift. Single Source of Truth: `agent/fathometer-uninstall.sh`.
+
+    Der Installer legt das Skript zusaetzlich lokal unter
+    `/opt/fathometer/bin/fathometer-uninstall.sh` ab — dieser Endpoint ist
+    nur der Fallback fuer Hosts ohne lokale Kopie (Alt-Installs) und der
+    discoverable Einzeiler neben dem Install-Befehl. Air-gapped Hosts
+    nutzen die lokale Kopie.
+    """
+    agent_dir: str = current_app.config["AGENT_FILES_DIR"]
+    from flask import send_from_directory
+
+    response = send_from_directory(
+        agent_dir,
+        "fathometer-uninstall.sh",
         mimetype="text/x-shellscript",
         max_age=300,
     )

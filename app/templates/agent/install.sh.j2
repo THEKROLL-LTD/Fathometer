@@ -630,8 +630,12 @@ download_agent_script() {
   # Fehlt die Library, ist `host_state` im Envelope leer und alle Findings
   # landen in `risk_band=unknown` (Block-P-Pipeline silently disabled).
   # Daher seit v0.9.2 beide Files ueber dieselbe Whitelist ausgeliefert.
+  #
+  # fathometer-uninstall.sh wird mit-abgelegt (ADR-0049), damit der Operator
+  # den Agent auch air-gapped wieder entfernen kann
+  # (`sudo /opt/fathometer/bin/fathometer-uninstall.sh`) — ohne Backend-Zugriff.
   local f tmp
-  for f in fathometer-agent.sh lib_host_state.sh; do
+  for f in fathometer-agent.sh lib_host_state.sh fathometer-uninstall.sh; do
     info "downloading ${FM_URL}/agent/files/${f}"
     tmp="$(mktemp -t "fathometer-${f}.XXXXXX")"
     if ! curl -fsSL -o "$tmp" "${FM_URL%/}/agent/files/${f}"; then
@@ -731,6 +735,7 @@ probe_scan() {
     else
       printf "\n%sDone.%s View dashboard: %s/\n" "${C_BOLD}" "${C_RESET}" "${FM_URL%/}"
     fi
+    dim "To remove the agent later: sudo ${FM_BIN_DIR}/fathometer-uninstall.sh"
   else
     warn "probe scan exited with code ${rc}"
     if [[ "$HAS_SYSTEMD" -eq 1 ]]; then
