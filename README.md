@@ -93,6 +93,19 @@ That yields four tiers:
 Every downgrade states which condition is missing, so you can check the call.
 Pure DoS never auto-escalates — worst case is a restart.
 
+## What the LLM costs
+
+Surprisingly little. Fathometer judges each finding once and caches the verdict,
+so you only pay the LLM for *new* findings — not for every scan. With an
+open-weights model like **`gpt-oss-120b`** on a commodity inference provider,
+assessing thousands of findings lands in the **single-digit cent** range, and a
+typical day of categorising and scoring the handful of *new* findings costs
+**around one cent**.
+
+You bring your own OpenAI-compatible endpoint and key, so you stay in control of
+the provider and the spend. Any model that speaks the OpenAI protocol works;
+`gpt-oss-120b` is a good price/quality default.
+
 ## Install Fathometer
 
 Fathometer keeps the moving parts small. There are three ways to run it.
