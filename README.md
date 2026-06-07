@@ -1,37 +1,73 @@
-# Fathometer — CVE Intelligence
+<h1 align="center">Fathometer — CVE Intelligence</h1>
 
-Self-hosted CVE intelligence for the **root servers you run yourself**. Agents
-run Trivy on each host, Fathometer judges every finding in context with an LLM,
-and surfaces only the ones that actually need you. Think uptime-kuma, but for
-CVEs on running servers. Full spec in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+<p align="center">
+  Self-hosted CVE intelligence for the <strong>root servers you run yourself</strong>.<br>
+  Agents run Trivy on each host, Fathometer judges every finding in context with an
+  LLM, and surfaces only the ones that actually need you.<br>
+  Think uptime-kuma, but for CVEs on running servers.
+</p>
 
-## What it is
+<p align="center">
+  <a href="ARCHITECTURE.md">Full spec</a> •
+  <a href="#install-fathometer">Install</a> •
+  <a href="#features">Features</a>
+</p>
+
+<p align="center">
+  <img src="docs/images/dashboard.png" width="820" alt="Fathometer dashboard — fleet overview with triage queue and CVSS severity distribution" />
+</p>
+
+## Features
+
+- **LLM context assessment** — every finding is judged on whether it's *actually
+  exploitable on that host*, not on raw CVSS. CVSS, EPSS and KEV feed in as
+  weights, never as the verdict.
+- **Two-tier triage** — only **Act** and **Escalate** reach you; *Watch* and
+  *Noise* stay out of the way. No alarm firehose, no hundreds of "critical" CVEs
+  to wade through by hand.
+- **Explained downgrades** — every "not exploitable here" verdict states which
+  condition is missing, so you can check the call.
+- **Agent push model** — lightweight agents run Trivy on each host and push
+  results; Fathometer never needs credentials to your servers and works
+  air-gapped.
+- **uptime-kuma-style overview** — a calm fleet view with per-host heartbeat
+  history, not a metrics dashboard.
+- **One-command onboarding** — register or remove a host with a single root
+  command (daily systemd timer, cron fallback).
+- **Self-hosted & single-user** — your scan data never leaves your
+  infrastructure. Built for the operator who runs the boxes — no email / Discord
+  / webhook noise by design.
+
+### Three pages, that's it
+
+Fathometer's entire UI is deliberately three surfaces — no sprawling menus, no
+dashboards-of-dashboards:
+
+1. **Dashboard** — fleet overview: what needs action now, the triage queue, and
+   CVSS severity across all hosts.
+2. **Server detail** — the per-host triage workspace: every finding for one
+   host, with the reasoning behind each verdict.
+3. **Findings** — the cross-host explorer: search and filter a single CVE or
+   package across your whole fleet.
+
+## Motivation
 
 There are plenty of tools for container images, Kubernetes clusters and CI
 pipelines. Keeping the handful of **plain root servers** you own quietly under
 control — so you can sleep — is the gap Fathometer fills.
 
-The workflow is deliberately small. Once the agents are running, Fathometer:
+A single root server easily spits out hundreds of CVEs, almost none exploitable
+in *your* setup. Wading through that by hand burns hours and trains you to ignore
+the alarms. Fathometer exists to cut that list down to the few findings that
+actually matter on your hosts.
 
-1. **Collects** the Trivy filesystem scan from each host.
-2. **Assesses** every finding with an LLM — not on raw scores, but on whether
-   it's *actually exploitable on that host*.
-3. **Flags** only what needs you, in two tiers:
-   - **Act** — don't forget to patch this in your normal cycle.
-   - **Escalate** — you have a problem right now, move fast.
-
-Everything else (watch, noise) stays out of your way. No alarm firehose, no
-hundreds of "critical" CVEs to wade through by hand.
-
-Fathometer is a pragmatic everyday tool, **not infallible**, and does not
-replace enterprise vulnerability management — but it beats blindly applying
-every distro patch or burning hours on unexploitable findings.
+It's a pragmatic everyday tool, **not infallible**, and does not replace
+enterprise vulnerability management — but it beats blindly applying every distro
+patch or burning hours on unexploitable findings.
 
 ## How it scores
 
-A single root server easily spits out hundreds of CVEs, most flagged High or
-Critical, and almost none exploitable in *your* setup. Fathometer rates every
-finding on two axes and places it in one of four tiers.
+Fathometer rates every finding on two axes and places it in one of four tiers.
 
 **Axis 1 — is it exploitable on this host?** All three must hold:
 
@@ -61,7 +97,10 @@ Pure DoS never auto-escalates — worst case is a restart.
 
 Fathometer keeps the moving parts small. There are three ways to run it.
 
-### 1. docker-compose (recommended today)
+<details open>
+<summary><strong>1. docker-compose</strong> — recommended today</summary>
+
+<br>
 
 The supported path right now. Brings up the app, a PostgreSQL 17 database, and
 the LLM worker. Put a reverse proxy (Caddy, nginx or Traefik) in front for TLS —
@@ -82,17 +121,29 @@ curl -fsS http://localhost:8000/healthz        # expects {"status":"ok"}
 Reverse-proxy config, TLS, the `/api/scans` IP allowlist and Postgres backups are
 covered in [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.
 
-### 2. Kubernetes (for the brave)
+</details>
+
+<details>
+<summary><strong>2. Kubernetes</strong> — for the brave</summary>
+
+<br>
 
 Run the app and Postgres as you would any Flask + DB workload and let your
 ingress controller terminate TLS. Unlikely to be most people's choice, but
 nothing in Fathometer stands in the way.
 
-### 3. Omnibus single container — *roadmap*
+</details>
+
+<details>
+<summary><strong>3. Omnibus single container</strong> — <em>roadmap</em></summary>
+
+<br>
 
 A single self-contained image (app + database in one container, uptime-kuma
 style, à la GitLab Omnibus) for the simplest possible setup. **Not available
 yet** — planned, not shipped. Use docker-compose until then.
+
+</details>
 
 ## Add a server
 
@@ -148,4 +199,10 @@ Fathometer is licensed under the Apache License, Version 2.0. See
 Third-party dependency licenses — including the LGPL-3.0 notice for psycopg —
 are listed in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
 
-Copyright 2026 THEKROLL LTD.
+Copyright 2026 [THEKROLL LTD](https://thekroll.ltd).
+
+---
+
+<p align="center">
+  <sub><a href="https://thekroll.ltd">THEKROLL LTD</a> · human intent. machine precision.</sub>
+</p>
