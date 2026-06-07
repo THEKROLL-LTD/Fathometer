@@ -573,6 +573,13 @@ Kurzschluss).
 
 ## TD-013 — Materialized `daily_risk_state`-Tabelle
 
+**Status (2026-06-07): UMGESETZT.** Realisiert als „Vergangenheit einfrieren,
+heute live" (siehe [ADR-0035 Addendum 2026-06-07](decisions/0035-daily-risk-state-heartbeat-mapping.md)):
+Tabelle `daily_risk_state` (Migration 0020), Worker-Sub-Tick
+`_run_daily_risk_state_finalize` (Anti-Join-UPSERT, zugleich Backfill),
+Read-Path `heartbeat_aggregation.heartbeats_for_servers` liest frozen + Today-
+Live. Die untenstehende Original-Analyse bleibt als Kontext erhalten.
+
 **Was:** Heute aggregiert `app/services/heartbeat_aggregation.py` die Tages-
 Aggregate fuer die Sidebar-Heartbeat-Bar **live** bei jedem Polling-Tick
 (eine schmale Projektion-Query auf `findings` + Python-Loop ueber 30 Tage

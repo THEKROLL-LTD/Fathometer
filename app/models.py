@@ -35,6 +35,7 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    PrimaryKeyConstraint,
     String,
     Text,
     UniqueConstraint,
@@ -286,6 +287,53 @@ class Scan(Base):
     architecture: Mapped[str | None] = mapped_column(String(16))
 
     server: Mapped[Server] = relationship("Server", back_populates="scans")
+
+
+# ---------------------------------------------------------------------------
+# daily_risk_state — materialisierter Tages-Heartbeat-Snapshot pro Server.
+# ADR-0035-Addendum (2026-06-07) "Vergangenheit einfrieren, heute live" +
+# TD-013. Vergangene Tage sind unveraenderlich (Worker-Anti-Join-UPSERT);
+# der heutige Tag wird live aggregiert und NICHT hier persistiert.
+# ---------------------------------------------------------------------------
+
+
+class DailyRiskState(Base):
+    """Eingefrorener Tages-Risk-Snapshot eines Servers (frozen-Cell).
+
+    Pro `(server_id, day)` haelt diese Tabelle das Aggregat der am Tagesende
+    praesenten Findings — gemaess der Tagesende-Range in
+    `heartbeat_aggregation._aggregate_one_server`:
+
+        first_seen_at <= eod(day)
+        AND (resolved_at IS NULL OR resolved_at > eod(day))
+
+    Felder bewusst als lockere Strings (kein nativer PG-Enum) gehalten — die
+    Tabelle ist ein Visual-Snapshot, keine Audit-Quelle. `max_severity` und
+    `dominant_risk_band` sind die Enum-WERTE als String (z. B. `"critical"`,
+    `"escalate"`). Nur vollstaendig abgelaufene Tage (<= gestern) werden
+    eingefroren; der heutige Tag wird im Read-Path live aggregiert.
+    """
+
+    __tablename__ = "daily_risk_state"
+
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), nullable=False
+    )
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    dominant_risk_band: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    max_severity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    kev_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    had_scan: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("server_id", "day"),
+        Index("ix_daily_risk_state_day", "day"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1263,6 +1311,7 @@ __all__ = [
     "AuditEvent",
     "Base",
     "CisaKevCatalog",
+    "DailyRiskState",
     "EpssScore",
     "FeedPullLog",
     "Finding",

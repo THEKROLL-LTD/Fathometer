@@ -331,21 +331,26 @@ def test_aggregate_finding_row_resolved_drops_out() -> None:
 
 
 def test_heartbeats_for_servers_narrow_projection_via_mock() -> None:
-    """heartbeats_for_servers nutzt schmale Projektion — kein select(Finding) mehr.
+    """live_heartbeats_for_servers nutzt schmale Projektion — kein select(Finding) mehr.
 
     Prueft: die zusammengestellte SELECT-Anweisung enthaelt Finding-Spalten
     (schmale Projektion), nicht das vollstaendige ORM-Objekt.
+
+    Hinweis: Seit dem ADR-0035-Addendum liest der Render-Pfad
+    (`heartbeats_for_servers`) die materialisierte `daily_risk_state`-Tabelle.
+    Diese Internals-Shape-Pruefung gilt der erhaltenen Live-Variante
+    (`live_heartbeats_for_servers`), die die alte 2-Query-Form behaelt.
     """
     from unittest.mock import MagicMock
 
-    from app.services.heartbeat_aggregation import heartbeats_for_servers
+    from app.services.heartbeat_aggregation import live_heartbeats_for_servers
 
     # Mock-Session die leere Results liefert (keine Rows) ->
-    # heartbeats_for_servers baut leere DailyStatus-Listen.
+    # live_heartbeats_for_servers baut leere DailyStatus-Listen.
     session = MagicMock()
     session.execute.return_value.all.return_value = []
 
-    result = heartbeats_for_servers(session, server_ids=[1, 2], days=3, now=FIXED_NOW)
+    result = live_heartbeats_for_servers(session, server_ids=[1, 2], days=3, now=FIXED_NOW)
 
     # Rueckgabe muss fuer beide Server vorhanden sein (Garantie der Funktion)
     assert set(result.keys()) == {1, 2}

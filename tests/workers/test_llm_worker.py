@@ -20,6 +20,7 @@ Validation-Error-Meta usw.) liegen in
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -174,3 +175,138 @@ async def test_aclose_reviewer_client_swallows_aclose_error() -> None:
 
     # Soll NICHT werfen
     await llm_worker._aclose_reviewer_client(_ReviewerWithFailingClient())
+
+
+# ---------------------------------------------------------------------------
+# ADR-0035-Addendum (TD-013): daily_risk_state-Finalize-Sub-Tick
+# ---------------------------------------------------------------------------
+
+
+def test_daily_risk_state_finalize_swallows_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_run_daily_risk_state_finalize`` darf bei DB-/Service-Fehler NICHT
+    crashen — ein Sub-Tick-Fehler kippt sonst den ganzen Worker-Loop.
+
+    Wir patchen ``finalize_pending_days`` so dass es wirft, und ``get_session``
+    auf eine triviale (DB-freie) Session. Der Helper muss ``log.exception``
+    rufen und ohne weitergeworfene Exception zurueckkehren.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_session() -> Any:
+        yield MagicMock()
+
+    monkeypatch.setattr(llm_worker, "get_session", _fake_session)
+
+    def _boom(_session: Any) -> int:
+        raise RuntimeError("db hickup during finalize")
+
+    # finalize_pending_days wird via lokalem Import gezogen — wir patchen das
+    # Symbol im Quellmodul.
+    monkeypatch.setattr(
+        "app.services.daily_risk_state.finalize_pending_days",
+        _boom,
+    )
+
+    logged: dict[str, bool] = {"exception": False}
+    monkeypatch.setattr(
+        llm_worker.log,
+        "exception",
+        lambda *a, **k: logged.__setitem__("exception", True),
+    )
+
+    # Darf NICHT werfen.
+    llm_worker._run_daily_risk_state_finalize()
+    assert logged["exception"] is True
+
+
+def test_daily_risk_state_finalize_commits_and_logs_inserts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bei erfolgreichem Finalize wird committed und (bei >0 Rows) geloggt."""
+    from contextlib import contextmanager
+
+    session = MagicMock()
+
+    @contextmanager
+    def _fake_session() -> Any:
+        yield session
+
+    monkeypatch.setattr(llm_worker, "get_session", _fake_session)
+    monkeypatch.setattr(
+        "app.services.daily_risk_state.finalize_pending_days",
+        lambda _s: 7,
+    )
+    info_msgs: list[Any] = []
+    monkeypatch.setattr(llm_worker.log, "info", lambda *a, **k: info_msgs.append(a))
+
+    llm_worker._run_daily_risk_state_finalize()
+
+    session.commit.assert_called_once()
+    # inserted=7 -> genau eine info-Line.
+    assert any("daily_risk_state_finalized" in str(a[0]) for a in info_msgs), info_msgs
+
+
+def test_daily_risk_state_cadence_gating(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Modul-Global-Gating: innerhalb des Check-Intervalls wird nicht erneut
+    finalisiert.
+
+    Wir treiben ``_run_subticks`` mehrfach mit eingefrorener
+    ``time.monotonic`` und gemockten Sub-Tick-Helfern (kein DB-Zugriff). Der
+    erste Lauf (``_last_daily_risk_state_at == 0`` nach Reset) MUSS
+    finalisieren; der zweite Lauf *kurz danach* (monotonic unveraendert) darf
+    NICHT erneut finalisieren.
+    """
+    from contextlib import contextmanager
+
+    # Alle anderen Sub-Tick-Helfer und Pickup auf No-Op patchen, damit
+    # _run_subticks keinen DB-Zugriff macht.
+    monkeypatch.setattr(llm_worker, "_run_stale_reaper", lambda: None)
+    monkeypatch.setattr(llm_worker, "_run_debug_log_eviction", lambda: None)
+    monkeypatch.setattr(llm_worker, "_run_feed_enrichment_check", lambda: None)
+    monkeypatch.setattr(llm_worker, "_run_scan_ingest_retention_sweep_safe", lambda: None)
+    monkeypatch.setattr(llm_worker, "_run_pass2_backstop_sweep_safe", lambda: None)
+    monkeypatch.setattr(llm_worker, "_pick_next_scan_ingest_job_id", lambda _s: None)
+    monkeypatch.setattr(llm_worker, "_process_scan_ingest_job_safe", lambda _i: None)
+
+    @contextmanager
+    def _fake_session() -> Any:
+        yield MagicMock()
+
+    monkeypatch.setattr(llm_worker, "get_session", _fake_session)
+
+    finalize_calls = {"n": 0}
+    monkeypatch.setattr(
+        llm_worker,
+        "_run_daily_risk_state_finalize",
+        lambda: finalize_calls.__setitem__("n", finalize_calls["n"] + 1),
+    )
+
+    # Zeit einfrieren — ein fixer monotonic-Wert > 0, damit das Reset auf 0.0
+    # den ersten Lauf als faellig markiert (now - 0 > Intervall).
+    fixed_t = 10_000.0
+    monkeypatch.setattr(llm_worker.time, "monotonic", lambda: fixed_t)
+
+    try:
+        llm_worker.reset_shutdown_for_tests()  # _last_daily_risk_state_at = 0.0
+        llm_worker._run_subticks()
+        # Erster Lauf: faellig (fixed_t - 0 > Intervall).
+        assert finalize_calls["n"] == 1
+
+        # Zweiter Lauf, monotonic UNVERAENDERT -> innerhalb Intervall -> kein
+        # erneuter Finalize.
+        llm_worker._run_subticks()
+        assert finalize_calls["n"] == 1
+
+        # Dritter Lauf, monotonic weit nach Intervall -> wieder faellig.
+        monkeypatch.setattr(
+            llm_worker.time,
+            "monotonic",
+            lambda: fixed_t + llm_worker.DAILY_RISK_STATE_CHECK_INTERVAL_SEC + 1.0,
+        )
+        llm_worker._run_subticks()
+        assert finalize_calls["n"] == 2
+    finally:
+        llm_worker.reset_shutdown_for_tests()

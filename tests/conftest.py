@@ -78,6 +78,7 @@ _ACCEPTANCE_PATH_PREFIXES: tuple[str, ...] = (
     "tests/integration/test_bulk_acknowledge_db",
     "tests/integration/test_csv_export_cross_db",
     "tests/integration/test_csv_export_db",
+    "tests/integration/test_daily_risk_state_db",
     "tests/integration/test_dashboard_db",
     "tests/integration/test_dashboard_group_filter_db",
     "tests/integration/test_dashboard_pane_consistency_db",

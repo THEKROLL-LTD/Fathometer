@@ -165,6 +165,12 @@ SCAN_INGEST_RETENTION_SWEEP_INTERVAL_SEC: float = 3600.0
 # aus irgendeinem Grund nicht gefeuert hat (Worker-Crash, DB-Hickup).
 PASS2_BACKSTOP_SWEEP_INTERVAL_SEC: float = 300.0
 
+# ADR-0035-Addendum (TD-013): Check alle 5 min ob `daily_risk_state`-Paare
+# fehlen. Geschrieben wird nur wenn welche fehlen — der Anti-Join in
+# `finalize_pending_days` ist das Gate (idempotent, bei vollstaendiger
+# Tabelle ein billiger No-Op-Insert ueber 0 Rows).
+DAILY_RISK_STATE_CHECK_INTERVAL_SEC: float = 300.0
+
 # Modul-State (graceful Shutdown + Cadence-Tracking).
 _shutdown: bool = False
 # v0.9.5: ``_last_heartbeat_at`` ist Legacy — Heartbeat lebt jetzt im
@@ -179,6 +185,8 @@ _last_feed_pull_check_at: float = 0.0
 _last_retention_sweep_at: float = 0.0
 # TICKET-007: Letzter Lauf des Pass-2-Backstop-Sweeps.
 _last_pass2_backstop_sweep_at: float = 0.0
+# ADR-0035-Addendum (TD-013): Letzter Lauf des daily_risk_state-Finalize-Checks.
+_last_daily_risk_state_at: float = 0.0
 
 # v0.9.6: Mode-/Budget-Caching + Idle-Backoff. Reduziert die Idle-SQL-Last
 # (vorher ~120 Queries/Minute bei leerer Queue) drastisch.
@@ -326,6 +334,7 @@ def reset_shutdown_for_tests() -> None:
     """Test-Hook — setzt das Shutdown-Flag zurueck (zwischen Tests)."""
     global _shutdown, _last_heartbeat_at, _last_reaper_at, _last_debug_log_eviction_at
     global _last_feed_pull_check_at, _last_retention_sweep_at, _last_pass2_backstop_sweep_at
+    global _last_daily_risk_state_at
     _shutdown = False
     _last_heartbeat_at = 0.0
     _last_reaper_at = 0.0
@@ -333,6 +342,7 @@ def reset_shutdown_for_tests() -> None:
     _last_feed_pull_check_at = 0.0
     _last_retention_sweep_at = 0.0
     _last_pass2_backstop_sweep_at = 0.0
+    _last_daily_risk_state_at = 0.0
     # v0.9.5: Stop-Event clearen damit Test-Re-Runs den Heartbeat-Thread
     # nicht im Stop-State festhalten.
     _heartbeat_thread_stop.clear()
@@ -796,6 +806,7 @@ def _run_subticks() -> None:
     """
     global _last_reaper_at, _last_debug_log_eviction_at, _last_feed_pull_check_at
     global _last_retention_sweep_at, _last_pass2_backstop_sweep_at
+    global _last_daily_risk_state_at
     now_mono = time.monotonic()
 
     # Stale-Reaper alle 60s (beide Tabellen: llm_jobs + scan_ingest_jobs).
@@ -836,6 +847,12 @@ def _run_subticks() -> None:
     if now_mono - _last_pass2_backstop_sweep_at > PASS2_BACKSTOP_SWEEP_INTERVAL_SEC:
         _run_pass2_backstop_sweep_safe()
         _last_pass2_backstop_sweep_at = now_mono
+
+    # ADR-0035-Addendum (TD-013): daily_risk_state-Finalize-Check alle 5 min.
+    # Friert fehlende (server, day)-Paare ein; bei vollstaendiger Tabelle No-Op.
+    if now_mono - _last_daily_risk_state_at > DAILY_RISK_STATE_CHECK_INTERVAL_SEC:
+        _run_daily_risk_state_finalize()
+        _last_daily_risk_state_at = now_mono
 
 
 # ---------------------------------------------------------------------------
@@ -2031,6 +2048,30 @@ def _run_feed_enrichment_check() -> None:
             feed_enrichment.feed_enrichment_tick(session)
     except Exception:  # pragma: no cover — DB-/Tick-Failure
         log.exception("llm_worker.feed_enrichment_check_failed")
+
+
+def _run_daily_risk_state_finalize() -> None:
+    """Sub-Tick: friert fehlende `daily_risk_state`-Tages-Cells ein.
+
+    ADR-0035-Addendum (TD-013) "Vergangenheit einfrieren, heute live".
+    Delegiert an :func:`daily_risk_state.finalize_pending_days` (Anti-Join-
+    UPSERT ueber `[today-30, gestern]`). Idempotent — bei vollstaendiger
+    Tabelle ein No-Op-Insert ueber 0 Rows.
+
+    `get_session` committet nicht automatisch — wir committen den Insert
+    explizit. Defensiv try/except: ein DB-Hickup darf den Worker-Loop nicht
+    killen.
+    """
+    from app.services.daily_risk_state import finalize_pending_days
+
+    try:
+        with get_session() as session:
+            inserted = finalize_pending_days(session)
+            session.commit()
+        if inserted:
+            log.info("llm_worker.daily_risk_state_finalized inserted=%d", inserted)
+    except Exception:  # pragma: no cover — DB-/Tick-Failure
+        log.exception("llm_worker.daily_risk_state_finalize_failed")
 
 
 # ---------------------------------------------------------------------------

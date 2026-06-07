@@ -56,7 +56,7 @@ from typing import NamedTuple, Protocol, runtime_checkable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Finding, FindingStatus, Scan, Severity
+from app.models import DailyRiskState, Finding, FindingStatus, Scan, Severity
 
 # RiskBand ist in der DB als String(16) gespeichert (kein nativer PG-Enum).
 # Wir definieren hier einen lokalen Typ-Alias fuer die statische Analyse.
@@ -288,13 +288,21 @@ def heartbeat_for_server(
     return _aggregate_one_server(findings_list, scan_days, _day_range(end_day, days))
 
 
-def heartbeats_for_servers(
+def live_heartbeats_for_servers(
     session: Session,
     server_ids: list[int],
     days: int = 30,
     now: datetime | None = None,
 ) -> dict[int, list[DailyStatus]]:
-    """Batch-Variante fuer die Sidebar — eine Query je fuer Findings/Scans.
+    """Live-Aggregation der Heartbeat-Daten (Oracle fuer den Paritaets-Test).
+
+    Das ist die urspruengliche `heartbeats_for_servers`-Logik (Phase 1,
+    ADR-0035): laedt alle relevanten Findings/Scans pro Server und rollt sie
+    Tag-fuer-Tag ueber `_aggregate_one_server`. Seit dem ADR-0035-Addendum
+    (2026-06-07) liest der Render-Pfad (`heartbeats_for_servers`) stattdessen
+    die materialisierte `daily_risk_state`-Tabelle; diese Funktion bleibt als
+    Referenz-Implementierung erhalten — der Paritaets-Test stellt sicher, dass
+    die SQL-Tagesende-Range exakt dieser Python-Logik entspricht.
 
     Garantiert: jeder uebergebene `server_id` taucht im Result-Dict auf,
     auch wenn der Server keine Findings/Scans hat (Liste enthaelt dann
@@ -361,6 +369,104 @@ def heartbeats_for_servers(
     return out
 
 
+def heartbeats_for_servers(
+    session: Session,
+    server_ids: list[int],
+    days: int = 30,
+    now: datetime | None = None,
+) -> dict[int, list[DailyStatus]]:
+    """Batch-Variante fuer die Sidebar — liest die materialisierte Tabelle.
+
+    ADR-0035-Addendum (2026-06-07) "Vergangenheit einfrieren, heute live":
+
+    - Vergangene `days-1` Tage `[today-(days-1), today-1]` kommen STRIKT aus
+      `daily_risk_state` (eingefrorene Cells). Kein Live-Fallback — fehlende
+      Cells (Worker noch nie gelaufen) rendern als `unknown`/grau bis zum
+      naechsten Finalize-Tick.
+    - Die heutige Cell kommt aus dem billigen Live-Aggregat
+      (`today_live_aggregate`).
+
+    Garantiert: jeder uebergebene `server_id` taucht im Result-Dict auf, und
+    jede Liste enthaelt exakt `days` Cells (aelteste zuerst). Signatur und
+    Rueckgabe-Typ sind unveraendert gegenueber der Phase-1-Live-Variante.
+    """
+    if not server_ids:
+        return {}
+
+    # Lokaler Import vermeidet einen Import-Zyklus (daily_risk_state importiert
+    # aus diesem Modul).
+    from app.services.daily_risk_state import today_live_aggregate
+
+    current = _resolve_now(now)
+    end_day = current.date()
+    today = end_day
+    day_list = _day_range(end_day, days)
+    # Vergangene Tage: alle ausser heute.
+    past_start = day_list[0]
+    past_end = today - timedelta(days=1)
+
+    # Eingefrorene Cells aus der Tabelle ([past_start, gestern]).
+    frozen_by_server: dict[int, dict[date, DailyStatus]] = defaultdict(dict)
+    if past_end >= past_start:
+        frozen_stmt = select(
+            DailyRiskState.server_id,
+            DailyRiskState.day,
+            DailyRiskState.dominant_risk_band,
+            DailyRiskState.max_severity,
+            DailyRiskState.kev_count,
+            DailyRiskState.had_scan,
+        ).where(
+            DailyRiskState.server_id.in_(server_ids),
+            DailyRiskState.day >= past_start,
+            DailyRiskState.day <= past_end,
+        )
+        for row in session.execute(frozen_stmt).all():
+            frozen_by_server[row.server_id][row.day] = DailyStatus(
+                day=row.day,
+                max_severity=(Severity(row.max_severity) if row.max_severity is not None else None),
+                kev_count=row.kev_count,
+                had_scan=row.had_scan,
+                dominant_risk_band=row.dominant_risk_band,
+            )
+
+    # Heutige Cell live aggregieren.
+    today_cells = today_live_aggregate(session, server_ids, now=current)
+
+    out: dict[int, list[DailyStatus]] = {}
+    for sid in server_ids:
+        frozen = frozen_by_server.get(sid, {})
+        cells: list[DailyStatus] = []
+        for d in day_list:
+            if d == today:
+                cells.append(
+                    today_cells.get(
+                        sid,
+                        DailyStatus(
+                            day=today,
+                            max_severity=None,
+                            kev_count=0,
+                            had_scan=False,
+                            dominant_risk_band=None,
+                        ),
+                    )
+                )
+            else:
+                cells.append(
+                    frozen.get(
+                        d,
+                        DailyStatus(
+                            day=d,
+                            max_severity=None,
+                            kev_count=0,
+                            had_scan=False,
+                            dominant_risk_band=None,
+                        ),
+                    )
+                )
+        out[sid] = cells
+    return out
+
+
 # Status-Filter wird im Service explizit nicht angewendet — die Vorhanden-
 # Logik basiert auf `resolved_at`. Damit `FindingStatus` als Import
 # weiterhin sauber verfuegbar ist (z.B. fuer Tests), exportieren wir es.
@@ -370,6 +476,7 @@ __all__ = [
     "DailyStatus",
     "heartbeat_for_server",
     "heartbeats_for_servers",
+    "live_heartbeats_for_servers",
 ]
 
 # TICKET-004 Slice 3: pure Aggregations-Funktion `_aggregate_one_server` und

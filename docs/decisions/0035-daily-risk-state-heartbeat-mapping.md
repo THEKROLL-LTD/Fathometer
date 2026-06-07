@@ -189,8 +189,8 @@ def sidebar_batch():
 
 ## Verworfen
 
-- **Materialized-Tabelle `daily_risk_state`** in Block W: zu viel Migration-/Sync-Aufwand für aktuelle Flotten-Größe. Als [TD-013](../techdebt.md#td-013--materialized-daily_risk_state-tabelle) für späteren Skalierungs-Bedarf dokumentiert.
-- **SQL-only Aggregation mit `generate_series` + COUNT FILTER**: zu unleserlich, Test-Story aufwendiger als Python-Loop, kein klarer Performance-Gewinn bei aktueller Größenordnung.
+- **Materialized-Tabelle `daily_risk_state`** in Block W: zu viel Migration-/Sync-Aufwand für aktuelle Flotten-Größe. Als [TD-013](../techdebt.md#td-013--materialized-daily_risk_state-tabelle) für späteren Skalierungs-Bedarf dokumentiert. **→ Aufgehoben durch das Addendum 2026-06-07 (unten): Strategie 2 wird umgesetzt.**
+- **SQL-only Aggregation mit `generate_series` + COUNT FILTER**: zu unleserlich, Test-Story aufwendiger als Python-Loop, kein klarer Performance-Gewinn bei aktueller Größenordnung. **→ bleibt verworfen für den Render-Pfad; im Worker-Batch (Addendum) ist das Lesbarkeits-/Test-Argument hinfällig.**
 - **Per-Server-Polling-Endpoint** (`GET /servers/<id>/heartbeat`): würde N parallele HTTP-Requests pro Sidebar-Refresh feuern (50+ Requests pro Polling-Tick). Server-/Browser-Last unakzeptabel. Batch-Endpoint löst das.
 - **Dashboard-Polling 10 s beibehalten:** im Re-Design mit Scan-Animationen verstärkt sich der Animation-Restart-Effekt — siehe ADR-0036. Konsolidierung auf 60 s plus `hx-preserve`-Pattern.
 - **Heartbeat 50 Ticks beibehalten:** User-Entscheidung (2026-05-23) für 30 — weniger Daten, mehr horizontal Platz, näher am Design-Mock.
@@ -201,3 +201,28 @@ def sidebar_batch():
 - Wenn Server-Detail-Heatmap (Phase 2) auf `dominant_risk_band` umgestellt wird: `max_severity` aus `DailyStatus` entfernen, Aggregations-Service vereinfachen.
 - Wenn Operator-Feedback negativ zur 30-Tage-Heartbeat ist (z.B. „ich brauche 50 Tage Kontext für Compliance-Audits"): konfigurierbar machen (`settings.sidebar_heartbeat_days`), oder Cadence-Switch im UI.
 - Wenn KEV-Information im Sidebar-Heartbeat vermisst wird: dedizierter KEV-Indicator-Spalte (z.B. `kev`-Spalte neben `escalate`/`act`) — separate ADR.
+
+## Addendum 2026-06-07 — Strategie 2 (`daily_risk_state`) wird umgesetzt
+
+**Status:** Akzeptiert · Ergänzt und revidiert die Phase-1-Entscheidung oben (Strategie 1 „Live-Aggregation").
+
+**Auslöser:** EXPLAIN gegen die echte DB (`scripts/perf/explain_server_detail.sql`) zeigte bei einem Server mit 25.9k offenen / 33.6k Findings, dass die Live-Heartbeat-Aggregation (`heartbeats_for_servers`) im Batch ~71k Rows / ~349 MB Buffer zieht und O(N×F×30) in Python rollt. Das in Phase 1 dokumentierte Skalierungs-Limit (siehe [TD-013](../techdebt.md#td-013--materialized-daily_risk_state-tabelle)) ist damit als Operator-Symptom erreicht — die Phase-1-Begründung „bei aktueller Flotten-Größe unkritisch" gilt nicht mehr.
+
+**Revision der Phase-1-Verwerfung:** Strategie 2 wird umgesetzt, jedoch in einer einfacheren Form als ursprünglich skizziert — **„Vergangenheit einfrieren, heute live"** statt rollierender Voll-Neuberechnung:
+
+- **Vergangene Tage sind unveränderlich.** Ein Worker-Sub-Tick finalisiert per Anti-Join-`INSERT … ON CONFLICT DO NOTHING` alle noch fehlenden `(server, day)`-Paare im Fenster `[today-30, gestern]` (catch-up-sicher bei Worker-Downtime, idempotent, deckt neue Server ab und ist zugleich der Backfill). Möglich, weil `first_seen_at` beim Re-Ingest stabil bleibt und `had_scan` aus append-only `scans` kommt.
+- **Der heutige Tag wird live aggregiert** — als billiges Bestands-Aggregat über die aktuell offenen Findings (nutzt `ix_findings_server_open_triage`), kein 30-Tage-Loop.
+- **Read-Path liest strikt die Tabelle** (29 frozen Cells) + 1 Live-Today-Cell pro Server; **kein** Live-Fallback. Fehlende Vergangenheits-Cells (Worker noch nie gelaufen) rendern als `unknown`/grau bis zum nächsten Tick; der Deploy-Backfill (= erster Finalisierungs-Lauf) verhindert das im Normalfall.
+
+**Bewusste Approximation:** Eingefrorene Tage spiegeln spätere **rückwirkende** Änderungen nicht wider (Re-Open eines alt-resolved Findings, späte Pass-2-`risk_band`-Zuordnung, nachträgliche Severity-Revision). Für einen 30-Tage-**Visual**-Heartbeat (4 Zustände) akzeptiert. **Der Heartbeat ist keine Audit-Quelle.** Die Pass-2-Lag-Kante wird gemildert, indem ein Tag erst nach vollständigem Ablauf (frühestens am Folgetag) finalisiert wird.
+
+**Konsistenz-Pflicht:** Die SQL-Tagesende-Range (`first_seen_at <= eod(D) AND (resolved_at IS NULL OR resolved_at > eod(D))`) muss exakt der Python-Logik in `heartbeat_aggregation.py::_aggregate_one_server` entsprechen — abgesichert durch einen **Paritäts-Test** (Live-Aggregation als Oracle), bevor der Read-Path umgestellt wird.
+
+**Komponenten:**
+
+- Tabelle `daily_risk_state (server_id, day, dominant_risk_band, max_severity, kev_count, had_scan, updated_at)`, PK `(server_id, day)`, Index auf `day` (Migration 0020).
+- `app/services/daily_risk_state.py`: `finalize_pending_days(session)` (Anti-Join-UPSERT) + `today_live_aggregate(session, server_ids)`.
+- `heartbeat_aggregation.py::heartbeats_for_servers` liest Tabelle + merged die Today-Cell; die bisherige Live-Aggregation bleibt als Funktion (Oracle für den Paritäts-Test).
+- Worker-Sub-Tick `_run_daily_risk_state_finalize()` in `llm_worker.py::_run_subticks` mit eigener Cadence-Konstante (~5 min Check; Schreiben nur wenn Paare fehlen).
+
+Strategie 3 (SQL-only im Render-Pfad) bleibt verworfen; die SQL-Aggregation läuft hier **im Worker-Batch**, nicht pro Render.
