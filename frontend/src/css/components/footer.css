@@ -1,39 +1,60 @@
-/* Fathometer — Footer-Komponente (Phase B).
-   BEM: .footer, .footer__sep, .footer__link, .footer__link--icon.
-   Quelle: docs/design/styles.css §Footer. */
+/* Fathometer — Footer-Komponente.
+   Brand-Layout nach thekroll.ltd Footer-Endline:
+     3-Spalten-Grid — Copyright (links) · Tagline (mitte) · Chip-Links (rechts).
+   BEM: .footer__copyright, .footer__tagline, .footer__links,
+        .footer__chip, .footer__chip-tag, .footer__chip--icon.
+   Das Grid-/Höhen-Setup von `.footer` selbst liegt in app.css (Shell-Layout). */
 
-/* ── Trennzeichen ──────────────────────────────────────────── */
+/* ── Copyright (links, gedimmt) ────────────────────────────── */
 
-.footer__sep {
-  color: var(--border-visible);
+.footer__copyright {
+  justify-self: start;
+  color: var(--text-tertiary); /* #666 */
 }
 
-/* ── Links ─────────────────────────────────────────────────── */
+/* ── Tagline (mitte, uppercase) ────────────────────────────── */
 
-.footer a {
-  color: var(--text-tertiary);
-  text-decoration: none;
-  transition: color var(--dur-hover) var(--ease-drift);
+.footer__tagline {
+  justify-self: center;
+  color: var(--color-text-muted); /* #8A8A8A */
 }
 
-.footer a:hover {
-  color: var(--accent);
+/* ── Chip-Link-Gruppe (rechts) ─────────────────────────────── */
+
+.footer__links {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-/* ── Icon-Link (mit SVG + Label nebeneinander) ─────────────── */
+/* ── Chip-Link (Brand: cyan "//"-Tag + uppercase Label) ────── */
 
-.footer__link--icon {
+.footer__chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  line-height: 1;
+  transition:
+    color var(--dur-hover) var(--ease-drift),
+    border-color var(--dur-hover) var(--ease-drift),
+    letter-spacing var(--dur-hover) var(--ease-drift);
 }
 
-.footer__link--icon svg {
+.footer__chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  letter-spacing: 0.23em;
+}
+
+.footer__chip-tag {
+  color: var(--accent);
+}
+
+.footer__chip--icon svg {
   flex: 0 0 auto;
-}
-
-/* ── Tagline (rechtsbündig via margin-left: auto) ──────────── */
-
-.footer__tagline {
-  margin-left: auto;
 }

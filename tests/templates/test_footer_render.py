@@ -7,8 +7,9 @@ Prueft:
   einen Link auf ...releases/tag/v0.12.0.
 - Bei fathometer_version="dev" zeigt der Version-Link die Basis-Repo-URL
   (kein "releases/tag/vdev").
-- GitHub-Icon-Link auf https://github.com/THEKROLL-LTD/fathometer vorhanden.
-- Tagline "thekroll ltd" rechts vorhanden.
+- GitHub-Icon-Chip auf https://github.com/THEKROLL-LTD/fathometer vorhanden.
+- Brand-Tagline "Human intent. Machine precision." (mitte) vorhanden.
+- Brand-Copyright "© 2026 THEKROLL LTD." (links) vorhanden.
 - docs-Link auf README vorhanden.
 
 Render-Pattern:
@@ -92,9 +93,9 @@ def test_footer_renders_github_icon_link(
     html = _render_footer(app, monkeypatch, "v0.12.0")
 
     assert _REPO_BASE_URL in html, f"GitHub-Link '{_REPO_BASE_URL}' fehlt im Footer-Render"
-    # Icon-Link hat class="footer__link--icon"
-    assert "footer__link--icon" in html, (
-        "GitHub-Icon-Link-Klasse 'footer__link--icon' fehlt im Footer-Render"
+    # Icon-Chip hat class="footer__chip--icon" (Brand-Endline-Layout)
+    assert "footer__chip--icon" in html, (
+        "GitHub-Icon-Chip-Klasse 'footer__chip--icon' fehlt im Footer-Render"
     )
 
 
@@ -113,13 +114,23 @@ def test_footer_renders_tagline(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Footer-Tagline 'thekroll ltd · human intent. machine precision.' ist vorhanden."""
+    """Brand-Tagline 'Human intent. Machine precision.' (mitte) ist vorhanden."""
     html = _render_footer(app, monkeypatch, "v0.12.0")
 
-    assert "thekroll ltd" in html, "Tagline 'thekroll ltd' fehlt im Footer-Render"
-    assert "human intent. machine precision." in html, (
-        "Tagline 'human intent. machine precision.' fehlt im Footer-Render"
+    assert "Human intent. Machine precision." in html, (
+        "Tagline 'Human intent. Machine precision.' fehlt im Footer-Render"
     )
+
+
+def test_footer_renders_copyright(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Brand-Copyright '© 2026 THEKROLL LTD.' (links) ist vorhanden."""
+    html = _render_footer(app, monkeypatch, "v0.12.0")
+
+    assert "THEKROLL LTD." in html, "Copyright 'THEKROLL LTD.' fehlt im Footer-Render"
+    assert "2026" in html, "Copyright-Jahr '2026' fehlt im Footer-Render"
 
 
 def test_footer_renders_github_text(

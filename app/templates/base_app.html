@@ -51,6 +51,10 @@
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>{% block title %}Fathometer · CVE Intelligence{% endblock %}</title>
 
+  {# Favicon — SVG (Brand-Logo, dark-only). Alle Ziel-Browser unterstuetzen
+     image/svg+xml; statisch ausgeliefert, kein Build-Hashing noetig. #}
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" />
+
   {# Alpine-Initial-Hide muss vor Stylesheets greifen. #}
   <style>[x-cloak] { display: none !important; }</style>
 
