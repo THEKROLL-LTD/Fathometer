@@ -500,6 +500,28 @@ class Finding(Base):
         # Block P (ADR-0023): Drill-down-Index fuer Application-Group-Filter
         # auf der Server-Detail-View und Dashboard-Filter-Bar.
         Index("ix_findings_application_group", "application_group_id"),
+        # Perf (Migration 0018): konsolidierter Partial-Covering-Index fuer die
+        # Server-Detail-Aggregate. EXPLAIN-Befund (2026-06-07, sid mit 25.9k
+        # offenen Findings): _risk_band_header_counts / _load_server_band_
+        # aggregates / _load_application_groups (Count) / _tendency_quick und
+        # die triage-COUNT-Query lasen je ~15k Buffer (~118 MB) als Heap-Scan
+        # ueber alle offenen Rows, obwohl sie nur 1-2 Spalten zaehlen. Mit
+        # diesem Index laufen sie als Index-Only-Scan (~150 Buffer). Die
+        # INCLUDE-Spalten decken die Projektion der Aggregate + die
+        # Sort-/Filter-Keys der Triage-/Group-Listen ab.
+        Index(
+            "ix_findings_server_open_triage",
+            "server_id",
+            "risk_band",
+            postgresql_include=[
+                "application_group_id",
+                "first_seen_at",
+                "is_kev",
+                "severity",
+                "epss_score",
+            ],
+            postgresql_where="status = 'open'",
+        ),
     )
 
 

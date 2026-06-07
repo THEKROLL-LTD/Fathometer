@@ -40,11 +40,23 @@ def _patch(monkeypatch: pytest.MonkeyPatch, rows: list[Any], total: int) -> dict
         "app.views.server_detail._load_server_with_tags", lambda _sid: _make_server(1)
     )
     sess = MagicMock()
+    # Two-Step-Hydration (Perf-Refactor 2026-06-07): der Endpoint feuert
+    # COUNT (`.scalar()`) -> schlanke ID-Query (`.scalars()` #1, liefert IDs)
+    # -> volle ORM-Hydration (`.scalars()` #2, liefert die <=10 Findings).
+    ids = [r.id for r in rows]
+    state = {"scalars_calls": 0}
 
     def _execute(_stmt: Any) -> Any:
         result = MagicMock()
         result.scalar.return_value = total
-        result.scalars.return_value.all.return_value = list(rows)
+
+        def _scalars() -> Any:
+            state["scalars_calls"] += 1
+            sc = MagicMock()
+            sc.all.return_value = list(ids) if state["scalars_calls"] == 1 else list(rows)
+            return sc
+
+        result.scalars.side_effect = _scalars
         return result
 
     sess.execute.side_effect = _execute

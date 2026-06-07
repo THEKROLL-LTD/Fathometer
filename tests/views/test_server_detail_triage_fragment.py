@@ -111,24 +111,33 @@ def _patch_session_returning(
 ) -> tuple[MagicMock, list[Any]]:
     """Patcht get_session fuer den Triage-Endpoint.
 
-    Der Endpoint feuert zwei Queries: einen COUNT (`.scalar()`) fuer die
-    Pagination-Metadaten und die projizierte Findings-Query (`.all()`).
-    `.scalar()` liefert `total` (Default: `len(rows)`), `.all()` liefert
-    `rows`. Beide Statement-Ausdruecke werden in `captured` gespeichert —
-    die Findings-Query ist `captured[-1]`, der COUNT `captured[0]`.
+    Two-Step-Hydration (Perf-Refactor 2026-06-07): der Endpoint feuert DREI
+    Queries (bei nicht-leerem Ergebnis):
+      [0] COUNT (`.scalar()` -> `total`) fuer die Pagination-Metadaten,
+      [1] schlanke ID-Query (`.scalars()` #1 -> IDs) fuer Sort+LIMIT,
+      [-1] volle ORM-Hydration (`.scalars()` #2 -> `rows`) der <=10 IDs.
+    Bei leerem Ergebnis entfaellt [-1] (page_ids leer -> keine Hydration),
+    dann ist `captured` 2 Eintraege lang. Alle Statement-Ausdruecke landen
+    in `captured`.
     """
     sess = MagicMock()
     captured: list[Any] = []
     _total = total if total is not None else len(rows)
+    ids = [r.id for r in rows]
+    state = {"scalars_calls": 0}
 
     def _execute(stmt: Any) -> Any:
         captured.append(stmt)
         result = MagicMock()
-        result.all.return_value = list(rows)
-        # Block AA (ADR-0041): Findings-Query laeuft jetzt ueber
-        # `.scalars().all()` (volle ORM-Hydration statt Spalten-Projektion).
-        result.scalars.return_value.all.return_value = list(rows)
         result.scalar.return_value = _total
+
+        def _scalars() -> Any:
+            state["scalars_calls"] += 1
+            sc = MagicMock()
+            sc.all.return_value = list(ids) if state["scalars_calls"] == 1 else list(rows)
+            return sc
+
+        result.scalars.side_effect = _scalars
         return result
 
     sess.execute.side_effect = _execute
@@ -331,19 +340,27 @@ def test_triage_band_fragment_empty_band(app: Flask, monkeypatch: pytest.MonkeyP
 def test_triage_band_fragment_orm_hydration_columns(
     app: Flask, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Block AA (ADR-0041): die Findings-Query ist ein volles `select(Finding)`
+    """Block AA (ADR-0041): die Hydration-Query ist ein volles `select(Finding)`
     — die Inline-Body-Felder description/references/primary_url sind als
-    Spalten Teil der Selektion (keine 13-Spalten-Projektion mehr)."""
+    Spalten Teil der Selektion.
+
+    Perf-Refactor 2026-06-07 (Two-Step): Step 1 projiziert NUR `id` (schlanker
+    Index-Only-Scan ueber ix_findings_server_open_triage), Step 2 hydratisiert
+    die <=10 sichtbaren IDs voll. Wir verifizieren beide Vertraege."""
     _stub_load_server(monkeypatch, _make_server(1))
-    _sess, captured = _patch_session_returning(monkeypatch, [])
+    rows = [_make_row(fid=1)]
+    _sess, captured = _patch_session_returning(monkeypatch, rows)
     _call_inner(app, "/servers/1/triage/escalate?page=1", 1, "escalate")
-    # Zwei Statements: [0] COUNT-Query, [-1] ORM-Findings-Query.
-    assert len(captured) == 2, (
-        f"Erwartet 2 SQL-Statements (COUNT + Findings), captured: {len(captured)}"
+    # Drei Statements: [0] COUNT, [1] schlanke ID-Query, [-1] ORM-Hydration.
+    assert len(captured) == 3, (
+        f"Erwartet 3 SQL-Statements (COUNT + ID-Query + Hydration), captured: {len(captured)}"
     )
-    stmt = captured[-1]
-    col_names = {c.name for c in stmt.selected_columns}
-    # Volle ORM-Hydration: die fuer den Inline-Body noetigen Spalten sind dabei.
+    # Step 1 darf NUR `id` projizieren — sonst materialisiert der Sort wieder
+    # fette Rows (das ist genau der Bug, den dieser Refactor behebt).
+    id_cols = {c.name for c in captured[1].selected_columns}
+    assert id_cols == {"id"}, f"Step-1-Query soll nur `id` projizieren, hat: {sorted(id_cols)}"
+    # Step 2: volle ORM-Hydration mit den Inline-Body-Spalten.
+    col_names = {c.name for c in captured[-1].selected_columns}
     for needed in ("id", "description", "references", "primary_url", "risk_band_reason"):
         assert needed in col_names, (
             f"ORM-Hydration unvollstaendig — {needed!r} fehlt in {sorted(col_names)}"
@@ -353,9 +370,12 @@ def test_triage_band_fragment_orm_hydration_columns(
 def test_triage_band_fragment_eager_loads_notes(
     app: Flask, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """selectinload(Finding.notes) ist als Loader-Option gesetzt (kein N+1)."""
+    """selectinload(Finding.notes) ist als Loader-Option der Hydration-Query
+    gesetzt (kein N+1). Bei nicht-leerem Ergebnis ist die Hydration-Query
+    `captured[-1]` (Step 2 des Two-Step-Refactors)."""
     _stub_load_server(monkeypatch, _make_server(1))
-    _sess, captured = _patch_session_returning(monkeypatch, [])
+    rows = [_make_row(fid=1)]
+    _sess, captured = _patch_session_returning(monkeypatch, rows)
     _call_inner(app, "/servers/1/triage/escalate?page=1", 1, "escalate")
     stmt = captured[-1]
     # Loader-Optionen tragen das Ziel-Attribut im `path`-Repr.

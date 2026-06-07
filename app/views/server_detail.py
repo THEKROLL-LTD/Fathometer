@@ -1045,11 +1045,17 @@ def triage_band_fragment(server_id: int, band: str) -> str:
         `Seite N von M · X Findings`). Ein COUNT-Query liefert den Total
         fuer `total_pages` und den Footer-Zaehler.
       - Sort: `is_kev DESC, severity ASC (CRITICAL=0), epss_score DESC NULLS LAST`.
-      - Block AA (ADR-0041): volle ORM-`Finding`-Hydration mit
-        `selectinload(Finding.notes)` — der Inline-Body greift auf
-        `description`/`references`/`primary_url`/`notes` zu. Die ADR-0039-
-        Spalten-Projektion entfaellt (Paginations-Groesse 10 macht den
-        Performance-Vorteil vernachlaessigbar).
+      - Block AA (ADR-0041): die <=10 sichtbaren Rows werden voll als ORM-
+        `Finding` hydratisiert (`selectinload(Finding.notes)`) — der Inline-
+        Body greift auf `description`/`references`/`primary_url`/`notes` zu.
+      - Perf-Refactor 2026-06-07 (Two-Step): die ADR-0041-Annahme
+        „Paginations-Groesse 10 macht den Performance-Vorteil
+        vernachlaessigbar" hat sich per EXPLAIN (Server mit 14k offenen
+        Findings im Band) als falsch erwiesen — `select(Finding) … LIMIT 10`
+        materialisierte fuer den Sort *alle* Kandidaten-Rows fett aus dem
+        Heap. Daher zweistufig: schlanke `select(Finding.id)`-Query
+        (Index-Only ueber `ix_findings_server_open_triage`) fuer Sort+LIMIT,
+        dann volle Hydration nur der Seiten-IDs. Output ist identisch.
     """
     if band not in _RISK_BAND_SECTION_ORDER:
         abort(400)
@@ -1078,9 +1084,20 @@ def triage_band_fragment(server_id: int, band: str) -> str:
     if page > total_pages:
         page = total_pages
 
-    stmt = (
-        select(Finding)
-        .options(selectinload(Finding.notes))
+    # Two-Step-Hydration (Perf, EXPLAIN 2026-06-07): die fruehere
+    # `select(Finding) … LIMIT 10`-Variante materialisierte fuer den Sort
+    # *alle* Kandidaten-Rows des Bands fett aus dem Heap (Q2: 14.027 Rows
+    # à ~1.6 KB / ~70 MB Buffer), nur um 10 zu rendern — die LIMIT greift
+    # erst nach dem Sort. Stattdessen:
+    #   Step 1: schlanke ID-Query nur ueber die Sort-Keys. Laeuft als
+    #           Index-Only-Scan ueber `ix_findings_server_open_triage`
+    #           (INCLUDE is_kev/severity/epss_score) -> top-N-Sort auf
+    #           schmalen Index-Tupeln, kein Heap-Fetch der Nicht-Sichtbaren.
+    #   Step 2: volle ORM-Hydration (+ selectinload notes) nur fuer die <=10
+    #           sichtbaren IDs. Die `IN`-Query liefert keine Ordnung, daher
+    #           re-sortieren wir in Python nach der Step-1-Reihenfolge.
+    id_stmt = (
+        select(Finding.id)
         .where(*base_where)
         .order_by(
             Finding.is_kev.desc(),
@@ -1090,7 +1107,19 @@ def triage_band_fragment(server_id: int, band: str) -> str:
         .limit(_TRIAGE_PAGE_SIZE)
         .offset((page - 1) * _TRIAGE_PAGE_SIZE)
     )
-    findings = list(sess.execute(stmt).scalars().all())
+    page_ids = list(sess.execute(id_stmt).scalars().all())
+    if page_ids:
+        by_id = {
+            f.id: f
+            for f in sess.execute(
+                select(Finding).options(selectinload(Finding.notes)).where(Finding.id.in_(page_ids))
+            )
+            .scalars()
+            .all()
+        }
+        findings = [by_id[i] for i in page_ids if i in by_id]
+    else:
+        findings = []
     return render_template(
         "servers/_partials/triage_findings_page.html",
         findings=findings,
