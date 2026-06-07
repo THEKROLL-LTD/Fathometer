@@ -170,7 +170,12 @@ _MOCKED_UNIT_FILES: frozenset[str] = frozenset(
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Auto-Marker pro Test-Pfad."""
     for item in items:
-        rel_path = str(item.fspath).rsplit("fathometer/", 1)[-1]
+        # Pfad relativ zum pytest-rootdir — robust gegen das Arbeitsverzeichnis.
+        # Frueher: `rsplit("fathometer/", 1)[-1]` — brach nach dem Rebrand
+        # secscan->Fathometer, weil das Verzeichnis weiter `secscan` heisst und
+        # der Split nie matchte. Folge: acceptance/db_integration-Marker wurden
+        # NIE gesetzt, Heavy-Tests nur per Fixture-Skip ausgeschlossen.
+        rel_path = os.path.relpath(str(item.fspath), str(config.rootpath))
 
         if any(rel_path.startswith(p) for p in _ACCEPTANCE_PATH_PREFIXES):
             item.add_marker(pytest.mark.acceptance)
