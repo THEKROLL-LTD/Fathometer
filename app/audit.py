@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Audit-Log-Helper.
 
 Zentrale Funktion `log_event(...)` schreibt einen `audit_events`-Eintrag in

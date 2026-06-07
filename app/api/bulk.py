@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """`POST /api/findings/bulk-acknowledge` — zwei-Phasen-Bulk-Acknowledge.
 
 ARCHITECTURE.md §6 (Endpoint), §13 (Audit-Action `finding.bulk_acknowledged`).

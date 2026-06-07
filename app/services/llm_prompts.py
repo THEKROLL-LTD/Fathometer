@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Block-P-LLM-Risk-Reviewer-Prompts (ADR-0023, v0.9.3-Iteration).
 
 Die beiden System-Prompts werden wortgetreu aus den Evidenz-Files unter

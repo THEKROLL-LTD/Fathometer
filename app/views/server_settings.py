@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Server-Settings-Sub-View `GET /servers/<id>/settings` und zugehoerige POSTs.
 
 Block X (ADR-0038, Phase B): Tag-Editor und neue Group-/Scan-Interval-Editoren

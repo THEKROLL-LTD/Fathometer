@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Streaming-Gzip-Decompress-Middleware fuer `POST /api/scans`.
 
 Architektur-Bezug:

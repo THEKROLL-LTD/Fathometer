@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Healthcheck-Skript fuer den ``fathometer-llm-worker``-Container.
 
 Wird vom Compose-Healthcheck-Eintrag und von den k8s-Liveness/Readiness-

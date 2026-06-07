@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Block N (ADR-0021) — Agent-Bootstrap-Installer-Routes.
 
 Drei Endpoints ohne Auth (CSRF-frei, login-frei):

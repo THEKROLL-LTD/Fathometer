@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Dashboard-KPI-Service — Phase D Grundstein + Phase E Erweiterung.
 
 Kapselt die Aggregations-Queries fuer die Context-Keys:

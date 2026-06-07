@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Daily-Severity-Snapshots fuer den Server-Detail-Trend (Block K, ADR-0018).
 
 ARCHITECTURE.md §7a (Detail-Pane) und §15 (Triage-Sortierung). ADR-0018

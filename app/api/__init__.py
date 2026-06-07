@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """API-Blueprint (`/api/...`).
 
 Sammelt die JSON-Endpoints. Browser-facing Endpoints leben in `app/views/`.

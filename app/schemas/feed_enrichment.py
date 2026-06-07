@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Pydantic-Schemas fuer die External-EPSS/KEV-Feeds (ADR-0024).
 
 Strikte Validierung auf Eingaben aus dem FIRST.org-EPSS-CSV und dem

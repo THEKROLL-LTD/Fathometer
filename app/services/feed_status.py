@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Read-Side-Service fuer den Feed-Status (Block Q Phase 4, ADR-0024).
 
 Liefert pro Feed (``epss``, ``cisa_kev``) den letzten erfolgreichen Pull

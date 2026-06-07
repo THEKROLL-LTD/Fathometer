@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Service-Extraktion fuer Scan-Verarbeitung (ADR-0026, Block R Phase C).
 
 Kapselt die vollstaendige Verarbeitungssequenz die vorher inline in

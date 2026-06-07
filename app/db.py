@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Synchrone SQLAlchemy-Engine und Session-Factory fuer die Web-Schicht.
 
 Flask laeuft im MVP synchron (Gunicorn-Sync-Worker). Async-SQLAlchemy nutzen

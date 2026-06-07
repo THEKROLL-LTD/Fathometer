@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Login- und Logout-Endpunkte."""
 
 from __future__ import annotations

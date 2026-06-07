@@ -94,7 +94,7 @@ jobs:
             org.opencontainers.image.title=fathometer
             org.opencontainers.image.description=Self-hosted Trivy filesystem-scan triage
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.licenses=
+            org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Build and push image

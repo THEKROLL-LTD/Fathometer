@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Structlog-Konfiguration mit Redaction-Filter.
 
 Sensible Felder, deren Name die Muster `password|key|token|hash` enthaelt

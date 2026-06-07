@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Security-Helfer (Stub fuer Block A).
 
 In Block B/C werden hier Key-Hashing und Verify-Funktionen ergaenzt.

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Stale-Detection-Helper fuer Dashboard und Server-Detail.
 
 ARCHITECTURE.md §14:

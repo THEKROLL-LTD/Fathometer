@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Pydantic-Schema fuer den Findings-View-Filter auf `/servers/<id>`.
 
 ARCHITECTURE.md §7: alle Filter im URL-Query-String fuer teilbare Links.

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Tendenz-Berechnung fuer den Server-Detail-Header (Block K, ADR-0018;
 ADR-0038 reduziert das Fenster auf 30 Tage).
 

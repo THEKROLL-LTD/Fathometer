@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Token-Budget-Service fuer Block P (ADR-0023) — Tages-Cap mit 00:00-UTC-Reset.
 
 Vier Operationen plus Helfer:

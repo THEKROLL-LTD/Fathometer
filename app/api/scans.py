@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """`POST /api/scans` — Async-Scan-Ingest mit Auth-vor-Body-Parse.
 
 Strikte Reihenfolge — niemals vertauschen (ARCHITECTURE.md §9):

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Pro-Server ESCALATE/ACT-Count-Aggregation fuer den Sidebar-Polling-Endpoint.
 
 Liefert fuer jeden Server-ID die Anzahl OPEN-Findings in den Risk-Bands

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Dashboard-View `/` — Risk-KPI-Uebersicht mit Server-Filter-Counter.
 
 ARCHITECTURE.md §7 + §14 + §15.

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Gemeinsame Helper fuer API-Endpoints.
 
 - `json_error` baut konsistente Fehler-Antworten.

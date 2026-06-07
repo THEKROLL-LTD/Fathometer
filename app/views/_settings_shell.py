@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """3-Modi-Render-Helper fuer die Settings-View (ADR-0016 / Block-I-Addendum).
 
 Die Settings-View ist intern zweigeteilt (Sekundaer-Nav links + Content

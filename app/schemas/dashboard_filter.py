@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Pydantic-Schema fuer den Dashboard-Filter-Query-String.
 
 ARCHITECTURE.md §7 fordert: alle Filter (Tags, Severity-Schwelle-Override,

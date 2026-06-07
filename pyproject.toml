@@ -8,8 +8,8 @@ version = "0.1.0"
 description = "Selbst-gehostete Web-App für Trivy-Filesystem-Scans"
 readme = "README.md"
 requires-python = ">=3.13"
-license = { text = "Proprietary" }
-authors = [{ name = "fathometer maintainers" }]
+license = { text = "Apache-2.0" }
+authors = [{ name = "THEKROLL LTD" }]
 
 # Runtime-Dependencies — Stack-Konstanten siehe CLAUDE.md
 dependencies = [

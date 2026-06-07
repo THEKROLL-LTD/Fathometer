@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """LLM-Output-Sanitization mit nh3.
 
 ARCHITECTURE.md §10 (`nh3.clean(...)` MUSS auf LLM-Output laufen) und

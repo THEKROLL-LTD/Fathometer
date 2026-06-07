@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """SQLAlchemy-Models fuer fathometer.
 
 Enthaelt alle 12 Tabellen aus ARCHITECTURE.md §5 sowie die zugehoerigen

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """LLM-Settings-View `/settings/llm` und `/settings/llm/test-connection`.
 
 ARCHITECTURE.md §7 (Settings-Provider-Block mit Preset-Dropdown) und §12

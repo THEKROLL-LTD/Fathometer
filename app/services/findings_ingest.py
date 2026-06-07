@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Findings-Ingest: Pydantic-Envelope -> normalisierte DB-Zeilen.
 
 Aufgaben (siehe ARCHITECTURE.md §5 und §6):

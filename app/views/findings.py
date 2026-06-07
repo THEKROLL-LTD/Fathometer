@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Findings-Routen (Block E + ADR-0037 Bucket-View).
 
 ARCHITECTURE.md §6 (Endpoints) und §13 (Audit-Actions).

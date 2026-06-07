@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Server-Detail-View `/servers/<id>` — Triage-Hauptansicht (Block E).
 
 ADR-0025 / Block Q: die frueheren View-Modi `gruppiert` und `diff` sind

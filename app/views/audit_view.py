@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Audit-View `GET /audit` und CSV-Export `/audit/export.csv`.
 
 ARCHITECTURE.md §13 (Audit-Log) und §7 (UI-View). Filter:

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """CSV-Export-Service mit Streaming und Formula-Injection-Mitigation.
 
 ARCHITECTURE.md §7 (CSV-Export aus Audit- und Findings-Listen). Streaming

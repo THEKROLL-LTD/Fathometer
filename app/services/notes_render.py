@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Markdown-/Plain-Text-Render fuer Notizen mit nh3-Sanitization.
 
 ARCHITECTURE.md §10 (XSS-Praevention) und Block-Plan: `nh3.clean(` MUSS

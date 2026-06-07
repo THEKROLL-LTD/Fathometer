@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Bucket-Query-Service fuer die Cross-Server Bucket-View auf `/findings`.
 
 ADR-0037: `/findings` rendert eine Cross-Server Bucket-View nach

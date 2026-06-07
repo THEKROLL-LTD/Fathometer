@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """CVSS-Vendor-Resolver (Block O Phase B, ADR-0022 §CVSS-Vendor-Resolver).
 
 Bestimmt pro Finding die anzuzeigende Severity aus der zur Host-Distro

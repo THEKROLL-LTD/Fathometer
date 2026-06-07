@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Semver-Vergleichs-Helper fuer Agent-/Trivy-Versions-Indikatoren.
 
 ADR-0021 (Block N) fuehrt UI-Pills fuer veraltete Agents, veraltete Trivy-

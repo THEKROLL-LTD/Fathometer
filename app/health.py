@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Health- und Readiness-Endpoints.
 
 `/healthz` macht einen DB-Ping (SELECT 1) und antwortet mit 503 falls die DB

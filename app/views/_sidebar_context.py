@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Sidebar-Context-Builder fuer Block-I-View-Routes (Phase C, ADR-0030).
 
 Variablen-Vertrag — initialer Page-Render (Context-Processor-Pfad):

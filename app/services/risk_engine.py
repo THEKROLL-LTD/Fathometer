@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Risk-Engine — Pre-Triage und gemeinsame Konstanten (Block O, ADR-0022).
 
 Phase A lieferte Konstanten und Enums; Phase B faegt die deterministische

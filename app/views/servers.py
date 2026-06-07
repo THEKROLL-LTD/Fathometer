@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Browser-View `/settings/servers` — Server-Liste mit Revoke/Retire.
 
 Funktionen:

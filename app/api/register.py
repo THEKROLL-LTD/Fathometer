@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """`POST /api/register` — Server-Registrierung per Master-Key.
 
 Strikter Flow:

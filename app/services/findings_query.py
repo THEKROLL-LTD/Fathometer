@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Findings-Query-Service fuer die Triage-Hauptansicht (Block E).
 
 ARCHITECTURE.md §5 (Findings-Schema), §7 (List-View auf `/servers/<id>`),

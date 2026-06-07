@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Heartbeat-Aggregation fuer die Sidebar-Server-Liste (Block I).
 
 ARCHITECTURE.md §7a (UI v2 Sidebar) und Block-I-Aufgabe 3.

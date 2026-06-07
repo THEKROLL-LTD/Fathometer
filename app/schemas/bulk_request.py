@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Pydantic-Schemas fuer `POST /api/findings/bulk-acknowledge`.
 
 ARCHITECTURE.md §6 und Block F-Plan: drei Flavors.

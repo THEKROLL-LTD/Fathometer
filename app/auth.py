@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Authentifizierung und Key-Hashing.
 
 Drei verschiedene Geheimnis-Typen mit unterschiedlichen Hash-Strategien:

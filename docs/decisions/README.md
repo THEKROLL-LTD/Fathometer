@@ -56,6 +56,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0048](0048-rebrand-secscan-to-fathometer.md) | Rebrand secscan → Fathometer (FM_-Env-Prefix, Pfade, Agent-Version) | Akzeptiert |
 | [0049](0049-agent-uninstaller.md) | Agent-Uninstaller: lokales `fathometer-uninstall.sh` (air-gap-first) + `/uninstall.sh`-Alias, entfernt alles vom Installer Mitgebrachte, rein lokal (kein serverseitiges Deregister) — ergänzt ADR-0021 | Akzeptiert |
 | [0050](0050-remove-llm-chat-assessment.md) | Server-weites "Request AI Assessment"-Chat-Feature entfernt (UI/Routes/Prompts/Chat-Services/JS/3 DB-Tabellen, Migration 0017); Provider-Config + Risk-Reviewer bleiben — löst Block G ab | Akzeptiert |
+| [0051](0051-apache-2-0-license.md) | Lizenzierung unter Apache License 2.0 (LICENSE/NOTICE, pyproject, SPDX-Header in app/, README); Rechteinhaber THEKROLL LTD — löst `Proprietary` ab | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

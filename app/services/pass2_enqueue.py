@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Single-Source-of-Truth fuer das Enqueue von Pass-2-Risk-Evaluation-Jobs.
 
 TICKET-007: der Pass-2-Trigger lief frueher genau einmal pro Scan-Upload im

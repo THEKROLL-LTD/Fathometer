@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Flask-App-Factory fuer fathometer.
 
 Konfiguriert in dieser Reihenfolge:

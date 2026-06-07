@@ -140,3 +140,12 @@ there.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the spec: deployment detail, reverse-proxy
   and TLS, security model, data model, scoring internals.
 - `docs/decisions/` — architecture decision records (ADRs).
+
+## License
+
+Fathometer is licensed under the Apache License, Version 2.0. See
+[`LICENSE`](LICENSE) for the full text and [`NOTICE`](NOTICE) for attribution.
+Third-party dependency licenses — including the LGPL-3.0 notice for psycopg —
+are listed in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+
+Copyright 2026 THEKROLL LTD.

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Service rund um die Singleton-`settings`-Zeile.
 
 Die Tabelle haelt genau eine Zeile (Check-Constraint `id = 1`). Beim ersten

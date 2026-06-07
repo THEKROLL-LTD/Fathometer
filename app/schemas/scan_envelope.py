@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Pydantic-Envelope und Trivy-Sub-Schema fuer `POST /api/scans`.
 
 Strikte Validierung nach ARCHITECTURE.md §10 (Regex-Whitelists, Laengen- und

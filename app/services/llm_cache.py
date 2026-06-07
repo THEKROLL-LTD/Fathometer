@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """LLM-Risk-Cache-Helper fuer Block P (ADR-0023) — Pass-2-Cache.
 
 Vier Operationen:

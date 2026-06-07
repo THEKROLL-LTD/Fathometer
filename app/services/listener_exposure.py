@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Listener-Exposure-Klassifizierung (Block X, ADR-0038 §(3)).
 
 Bestimmt fuer eine bind-Adresse, ob ein Listener nur loopback-erreichbar ist

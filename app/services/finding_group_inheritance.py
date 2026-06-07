@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Vererbung von Per-(group, server)-Eval-Bands auf Findings.
 
 Pass-2 bewertet Risk pro ``(ApplicationGroup, Server)`` — die Junction-Tabelle

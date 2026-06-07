@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Pattern-Matcher fuer Block P (ADR-0023) — deterministische Zuordnung.
 
 Implementiert die Match-Logik aus ADR-0023 §"Pattern-Match-Logik":

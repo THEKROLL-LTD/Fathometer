@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Ingest-Queue-Service fuer asynchronen Scan-Ingest (ADR-0026, Block R Phase B).
 
 Kapselt den UPSERT-Eintrag in `scan_ingest_jobs` mit Idempotency via

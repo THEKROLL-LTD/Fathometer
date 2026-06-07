@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Konfiguration via pydantic-settings.
 
 Liest alle `FM_*`-Environment-Variablen ein und validiert sie strikt.

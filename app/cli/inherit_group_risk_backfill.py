@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Initial-Backfill fuer Group-Risk-Vererbung.
 
 Aufruf:

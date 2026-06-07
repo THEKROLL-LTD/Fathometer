@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """LLM-Client-Wrapper um das `openai`-Python-SDK.
 
 Siehe ARCHITECTURE.md §12 (Provider-Abstraktion) und §10 (Whitelist auf

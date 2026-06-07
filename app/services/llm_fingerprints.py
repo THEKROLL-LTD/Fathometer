@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Fingerprint-Helper fuer Block P (ADR-0023) — Two-Level-Cache.
 
 Drei Eingangs-Fingerprints plus ein abgeleiteter Cache-Key:

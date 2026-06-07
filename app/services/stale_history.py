@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Daily-Stale-Server-Counts fuer die Dashboard-Sparkline (ADR-0020).
 
 ARCHITECTURE.md §14 definiert Server-Stale als

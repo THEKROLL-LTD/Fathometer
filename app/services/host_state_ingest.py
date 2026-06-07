@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Host-Snapshot-Persistenz (Block O Phase C Task #7, ADR-0022).
 
 Persistiert den vom Agent gelieferten `envelope.host_state`-Block in die vier

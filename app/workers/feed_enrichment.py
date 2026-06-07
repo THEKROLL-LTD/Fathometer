@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """External-EPSS/KEV-Feed-Pull-Worker (ADR-0024, Block Q Phase 1).
 
 Wird vom ``llm_worker``-Sub-Tick ``_run_feed_enrichment_check`` aufgerufen.

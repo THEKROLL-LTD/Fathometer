@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Sysline-Context-Service (Block W Phase F, ADR-0036).
 
 Baut den Status-Dict fuer die ``sysline``-Sektion des Dashboards:

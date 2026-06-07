@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Scan-Ingest-Worker-Sub-Tick fuer Block R (ADR-0026, Phase C).
 
 Dieser Sub-Tick wird in `llm_worker._tick()` VOR dem LLM-Pickup aufgerufen.

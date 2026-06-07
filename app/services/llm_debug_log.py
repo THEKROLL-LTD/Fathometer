@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Operator-Debugging-Log fuer LLM-Calls (Block P, v0.9.3, ADR-0023 §"(e)").
 
 Drei Operationen:

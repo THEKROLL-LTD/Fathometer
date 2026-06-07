@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Dashboard-Partials-Blueprint (Block W Phase F, ADR-0036).
 
 Stellt den OOB-Polling-Endpoint ``GET /_partials/dashboard/kpis`` bereit.

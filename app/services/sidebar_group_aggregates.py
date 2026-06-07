@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Group-Aggregat-Counts fuer Sidebar-Section-Header (Block W, ADR-0034).
 
 Liefert pro `group_id` (inkl. NULL = ungrouped) die Summen:

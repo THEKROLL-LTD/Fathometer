@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Backfill bestehender Findings mit EPSS/KEV-Daten (Block Q Phase 3, ADR-0024).
 
 Bei jedem erfolgreichen Feed-Pull werden ALLE bestehenden Findings in

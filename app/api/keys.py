@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """`POST /api/keys/rotate` — Master- oder Server-Key rotieren.
 
 Body:

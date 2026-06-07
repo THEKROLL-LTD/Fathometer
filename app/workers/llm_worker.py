@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """LLM-Risk-Reviewer-Worker fuer Block P (ADR-0023).
 
 Standalone-Python-Prozess (kein Flask-App-Context) der in einem

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Pydantic-Schema fuer `POST /_partials/sidebar/batch` (ADR-0035, Block W).
 
 Validiert den Request-Body des Viewport-Lazy-Batch-Endpoints. Der Client

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 THEKROLL LTD
+
 """Settings-Browser-Views unter `/settings`.
 
 Enthaelt:
