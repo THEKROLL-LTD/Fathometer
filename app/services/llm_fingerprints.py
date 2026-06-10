@@ -15,8 +15,10 @@ Drei Eingangs-Fingerprints plus ein abgeleiteter Cache-Key:
 
 * :func:`cve_data_fingerprint` — SHA256[:16] ueber
   ``(identifier_key, severity, severity_by_provider_normalized, epss_score,
-  is_kev, vendor_status)``. Aendert sich wenn EPSS/KEV/Vendor-Status-Daten
-  fuer enthaltene Findings driften.
+  is_kev, vendor_status, title, attack_vector)``. Aendert sich wenn
+  EPSS/KEV/Vendor-Status-Daten fuer enthaltene Findings driften —
+  title/attack_vector sind seit TICKET-011 Teil des Pass-2-Prompts und
+  muessen daher mit-invalidieren (z.B. Title-Update durch CVE-Enrichment).
 
 * :func:`server_context_fingerprint` — SHA256[:16] ueber kanonisch-
   serialisierte Host-Felder. PIDs, args, snapshot_at und das User-Feld
@@ -24,8 +26,10 @@ Drei Eingangs-Fingerprints plus ein abgeleiteter Cache-Key:
   §"Two-Level-Caching").
 
 * :func:`make_cache_key` — voller SHA256-hex (64 chars) ueber die vier
-  Inputs (group_id + die drei 16-char-Fingerprints), passt 1:1 in die
-  PK-Spalte ``llm_risk_cache.cache_key``.
+  Inputs (group_id + die drei 16-char-Fingerprints) plus den
+  Versions-Salt :data:`app.services.llm_prompts.PASS2_PROMPT_VERSION`
+  (TICKET-011: materielle Prompt-Semantik-Aenderungen invalidieren den
+  Cache einmalig), passt 1:1 in die PK-Spalte ``llm_risk_cache.cache_key``.
 
 Die Snapshot-Daten fuer den Server-Context werden hier aus den vier
 Block-O-Snapshot-Tabellen geladen (``server_listeners``, ``server_processes``,
@@ -51,6 +55,7 @@ from app.models import (
     ServerProcess,
     ServerService,
 )
+from app.services.llm_prompts import PASS2_PROMPT_VERSION
 
 
 def group_findings_fingerprint(findings: list[Finding]) -> str:
@@ -83,6 +88,8 @@ def cve_data_fingerprint(findings: list[Finding]) -> str:
     * ``round(epss_score, 4) if epss_score is not None else None``
     * ``is_kev``
     * ``vendor_status``
+    * ``title`` (TICKET-011: Teil der Pass-2-Prompt-Zeile)
+    * ``attack_vector.value`` (TICKET-011: dito)
     """
     tuples = sorted(
         (
@@ -92,6 +99,8 @@ def cve_data_fingerprint(findings: list[Finding]) -> str:
             round(f.epss_score, 4) if f.epss_score is not None else None,
             f.is_kev,
             f.vendor_status,
+            f.title or "",
+            f.attack_vector.value,
         )
         for f in findings
     )
@@ -197,13 +206,20 @@ def make_cache_key(
     cve_data_fp: str,
     server_context_fp: str,
 ) -> str:
-    """Voller SHA256-hex (64 chars) ueber die vier Inputs.
+    """Voller SHA256-hex (64 chars) ueber die vier Inputs plus Versions-Salt.
 
     Format des serialisierten Payloads: pipe-getrennte Strings, damit der
     Key in Debug-Logs visuell trennbar bleibt (der Hash selbst ist
     deterministisch unabhaengig vom Payload-Format).
+
+    Der Versions-Salt (:data:`PASS2_PROMPT_VERSION`, TICKET-011) sorgt
+    dafuer, dass eine materielle Aenderung der Prompt-Semantik den Cache
+    einmalig invalidiert — sonst blieben Bestands-Reasons aus alter
+    Semantik bis zur naechsten OPEN-Set-Aenderung stehen.
     """
-    payload = f"{group_id}|{group_findings_fp}|{cve_data_fp}|{server_context_fp}"
+    payload = (
+        f"{group_id}|{group_findings_fp}|{cve_data_fp}|{server_context_fp}|v{PASS2_PROMPT_VERSION}"
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

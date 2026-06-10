@@ -504,6 +504,116 @@ def test_pass2_prompt_truncates_long_paths() -> None:
     assert "path=opt/foo/" + ("a" * (128 - len("opt/foo/"))) in prompt
 
 
+# ---------------------------------------------------------------------------
+# TICKET-011: deterministische Worst-Selektion + title/av + Aggregat-Zeile
+# ---------------------------------------------------------------------------
+
+
+def test_pass2_prompt_always_contains_kev_finding() -> None:
+    """Bug-A-Regression (Befund CVE-2026-31431): ein KEV-Finding muss
+    UNABHAENGIG von seiner Position in der Input-Liste im Prompt stehen —
+    das fruehere ``fs[:32]``-Cap hat es bei grossen Groups zufaellig
+    weggeschnitten."""
+    server = _make_server()
+    findings = [
+        _make_finding(i, package_name="linux", target_path=f"/usr/lib/modules/{i}")
+        for i in range(1, 101)
+    ]
+    f_kev = _make_finding(999, cve="CVE-2026-31431", package_name="linux")
+    f_kev.is_kev = True
+    findings.append(f_kev)  # bewusst am Listen-Ende (Position > 32)
+    grp = _make_group("linux", [f.id for f in findings])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, findings)])
+    assert "CVE-2026-31431" in prompt
+    assert "kev=yes" in prompt
+
+
+def test_pass2_prompt_renders_av_and_title() -> None:
+    """TICKET-011 Entscheidung 2: Finding-Zeile traegt ``av=`` und
+    ``title="..."``; Title ist Fremdtext und wird auf eine Zeile
+    gezwungen (Newlines raus, Double-Quotes zu Single-Quotes)."""
+    server = _make_server()
+    f1 = _make_finding(1, package_name="linux")
+    f1.attack_vector = AttackVector.NETWORK
+    f1.title = 'kernel: netfilter "nft_tables"\nuse-after-free'
+    grp = _make_group("linux", [1])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f1])])
+    assert " av=network" in prompt
+    assert "title=\"kernel: netfilter 'nft_tables' use-after-free\"" in prompt
+
+
+def test_pass2_prompt_renders_av_and_title_n_a_when_missing() -> None:
+    server = _make_server()
+    f1 = _make_finding(1)  # attack_vector=UNKNOWN, title=None
+    grp = _make_group("openssl", [1])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f1])])
+    assert " av=n/a" in prompt
+    assert " title=n/a" in prompt
+
+
+def test_pass2_prompt_truncates_long_titles() -> None:
+    server = _make_server()
+    f1 = _make_finding(1)
+    f1.title = "T" * 300
+    grp = _make_group("openssl", [1])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f1])])
+    assert "T" * 300 not in prompt
+    assert ' title="' + "T" * 97 + '..."' in prompt
+
+
+def test_pass2_prompt_renders_aggregate_line_for_rest() -> None:
+    """Nicht gezeigte Findings werden als Aggregat-Zeile summiert
+    (Count pro Severity, max EPSS, Fix-Verteilung, KEV-Count)."""
+    server = _make_server()
+    findings = [_make_finding(i) for i in range(1, 41)]  # 40x HIGH, gleiche Group
+    grp = _make_group("openssl", [f.id for f in findings])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, findings)])
+    assert "... (8 more: 8 high, max_epss=n/a, 0 fixable, 0 kev)" in prompt
+    assert "weitere" not in prompt  # alter deutscher Aggregat-String ist weg
+
+
+def test_pass2_prompt_no_aggregate_line_for_small_group() -> None:
+    server = _make_server()
+    findings = [_make_finding(i) for i in range(1, 4)]
+    grp = _make_group("openssl", [f.id for f in findings])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, findings)])
+    assert " more: " not in prompt
+
+
+def test_pass2_validation_rejects_worst_id_not_shown_in_prompt() -> None:
+    """Bug-C-Regression: ``worst_finding_id`` aus der Group, aber NICHT in
+    der Selektion (= nicht im Prompt gezeigt) → Reject. Reason und
+    Worst-Finding duerfen nicht auseinanderfallen."""
+    # 33 gleichfoermige Findings: die Triage-Order (first_seen ASC bei
+    # sonst identischen Signalen) selektiert 1..32, ID 33 bleibt im Rest.
+    findings = [_make_finding(i) for i in range(1, 34)]
+    grp = _make_group("openssl", [f.id for f in findings])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    payload = {
+        "evaluations": [
+            {
+                "group_label": "openssl",
+                "risk_band": "act",
+                "action_type": "patch",
+                "worst_finding_id": 33,
+                "reason": "x",
+            }
+        ]
+    }
+    with pytest.raises(LLMInvalidResponseError, match="Mitglied"):
+        reviewer._validate_pass2_response(payload, [(grp, findings)])
+    # Gegenprobe: gezeigte ID wird akzeptiert.
+    payload["evaluations"][0]["worst_finding_id"] = 5
+    result = reviewer._validate_pass2_response(payload, [(grp, findings)])
+    assert result.evaluations[0].worst_finding_id == 5
+
+
 @pytest.mark.asyncio
 async def test_invalid_json_response_raises() -> None:
     """Wenn die LLM-Response gar kein JSON ist, kommt InvalidResponse."""

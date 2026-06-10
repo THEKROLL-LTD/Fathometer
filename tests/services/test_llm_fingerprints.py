@@ -11,6 +11,7 @@ Verifiziert:
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 
 from app.models import (
@@ -34,6 +35,7 @@ from app.services.llm_fingerprints import (
     make_cache_key,
     server_context_fingerprint,
 )
+from app.services.llm_prompts import PASS2_PROMPT_VERSION
 
 
 def _make_finding(
@@ -308,3 +310,43 @@ def test_make_cache_key_deterministic_and_input_sensitive() -> None:
     # FP-change → andere Key.
     k4 = make_cache_key(1, "aa" * 8, "bb" * 8, "dd" * 8)
     assert k1 != k4
+
+
+# ---------------------------------------------------------------------------
+# TICKET-011: Versions-Salt + title/attack_vector im CVE-Fingerprint
+# ---------------------------------------------------------------------------
+
+
+def test_make_cache_key_carries_prompt_version_salt() -> None:
+    """Der Key MUSS den Versions-Salt enthalten — eine materielle Prompt-
+    Semantik-Aenderung (PASS2_PROMPT_VERSION-Bump) invalidiert den Cache
+    einmalig (TICKET-011)."""
+    unsalted = hashlib.sha256(f"1|{'aa' * 8}|{'bb' * 8}|{'cc' * 8}".encode()).hexdigest()
+    salted = hashlib.sha256(
+        f"1|{'aa' * 8}|{'bb' * 8}|{'cc' * 8}|v{PASS2_PROMPT_VERSION}".encode()
+    ).hexdigest()
+    key = make_cache_key(1, "aa" * 8, "bb" * 8, "cc" * 8)
+    assert key == salted
+    assert key != unsalted
+
+
+def test_prompt_version_is_at_least_two() -> None:
+    # Version 1 war die Prompt-Semantik vor TICKET-011 (ohne Salt).
+    assert PASS2_PROMPT_VERSION >= 2
+
+
+def test_cve_data_fingerprint_changes_on_title_change() -> None:
+    """Title steht seit TICKET-011 in der Pass-2-Prompt-Zeile und muss den
+    CVE-Fingerprint mit-invalidieren (z.B. Title-Update durch Enrichment)."""
+    f1 = _make_finding()
+    f1.title = "old title"
+    f2 = _make_finding()
+    f2.title = "new title"
+    assert cve_data_fingerprint([f1]) != cve_data_fingerprint([f2])
+
+
+def test_cve_data_fingerprint_changes_on_attack_vector_change() -> None:
+    f1 = _make_finding()
+    f2 = _make_finding()
+    f2.attack_vector = AttackVector.NETWORK
+    assert cve_data_fingerprint([f1]) != cve_data_fingerprint([f2])

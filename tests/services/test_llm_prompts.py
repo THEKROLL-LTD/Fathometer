@@ -10,7 +10,11 @@ Die Marker-Quelle ist ``docs/blocks/P-evidence/prompt-pass1-final.md`` und
 
 from __future__ import annotations
 
-from app.services.llm_prompts import PASS1_SYSTEM_PROMPT, PASS2_SYSTEM_PROMPT
+from app.services.llm_prompts import (
+    PASS1_SYSTEM_PROMPT,
+    PASS2_PROMPT_VERSION,
+    PASS2_SYSTEM_PROMPT,
+)
 
 
 class TestPass1PromptMarkers:
@@ -72,3 +76,25 @@ class TestPass2PromptMarkers:
         assert "ECOSYSTEM-ONLY" in PASS2_SYSTEM_PROMPT
         assert "path=" in PASS2_SYSTEM_PROMPT
         assert "path=n/a" in PASS2_SYSTEM_PROMPT
+
+    def test_no_cve_description_reference_remains(self) -> None:
+        # TICKET-011 (Bug B): der Input enthaelt KEINE CVE-Descriptions —
+        # der Prompt darf kein Description-Reasoning mehr verlangen,
+        # sonst halluziniert das Modell aus Trainingswissen zur CVE-ID.
+        assert "CVE description" not in PASS2_SYSTEM_PROMPT
+
+    def test_title_and_attack_vector_input_markers_present(self) -> None:
+        # TICKET-011 (Entscheidung 2): title + av= sind Teil der
+        # Finding-Zeile und in der Input-Beschreibung dokumentiert.
+        assert "finding title" in PASS2_SYSTEM_PROMPT
+        assert "av=" in PASS2_SYSTEM_PROMPT
+
+    def test_aggregate_line_marker_present(self) -> None:
+        # TICKET-011: nicht gezeigte Findings werden als Aggregat-Zeile
+        # beschrieben; KEV/CRITICAL sind nie aggregiert.
+        assert "aggregate line" in PASS2_SYSTEM_PROMPT
+        assert "never aggregated" in PASS2_SYSTEM_PROMPT
+
+    def test_prompt_version_constant_present(self) -> None:
+        assert isinstance(PASS2_PROMPT_VERSION, int)
+        assert PASS2_PROMPT_VERSION >= 2

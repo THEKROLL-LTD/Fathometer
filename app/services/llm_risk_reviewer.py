@@ -23,8 +23,10 @@ Beide Passes validieren das LLM-Output strikt gegen Halluzinationen:
   Wildcard-only.
 * Pass-2: ``group_label`` muss im Input gewesen sein, ``risk_band`` muss
   in der finalen Whitelist liegen (``pending``/``unknown`` SIND VERBOTEN
-  — das sind reine Pre-Triage-Werte), ``worst_finding_id`` muss Group-
-  Mitglied sein, ``reason`` <= 256 chars und NUL-frei.
+  — das sind reine Pre-Triage-Werte), ``worst_finding_id`` muss eines
+  der im Prompt GEZEIGTEN Findings sein (TICKET-011: deterministische
+  Worst-Selektion via :mod:`app.services.pass2_input_selection` statt
+  zufaelligem ``fs[:32]``-Cap), ``reason`` <= 256 chars und NUL-frei.
 
 Der LLM-Call selbst geht ueber einen duennen Helper :func:`chat_completion_json`,
 der auf dem Block-G-:class:`app.services.llm_client.LlmClient` aufsetzt
@@ -43,8 +45,9 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import load_settings
-from app.models import ApplicationGroup, Finding, Server
+from app.models import ApplicationGroup, AttackVector, Finding, Server
 from app.services.llm_prompts import PASS1_SYSTEM_PROMPT, PASS2_SYSTEM_PROMPT
+from app.services.pass2_input_selection import SelectionResult, select_pass2_findings
 
 if TYPE_CHECKING:
     from app.services.llm_client import LlmClient
@@ -67,6 +70,26 @@ LABEL_PATTERN: re.Pattern[str] = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 # Reason-Hardlimit pro ADR-0023 §"Backend-Validierung".
 MAX_REASON_LEN: int = 256
+
+# TICKET-011: Laengen-Cap fuer den Finding-Title in der Pass-2-Prompt-Zeile.
+MAX_PROMPT_TITLE_LEN: int = 100
+
+
+def _sanitize_prompt_title(raw: str) -> str:
+    """Finding-Title fuer die Pass-2-Prompt-Zeile haerten (TICKET-011).
+
+    Der Title ist Fremdtext (Trivy/CVE-Feed) und wird auf genau eine
+    Zeile gezwungen: Steuerzeichen/Newlines raus, Whitespace kollabiert,
+    Double-Quotes zu Single-Quotes (der Title steht im Prompt in
+    ``title="..."``), Cap bei :data:`MAX_PROMPT_TITLE_LEN` Zeichen.
+    """
+    cleaned = "".join(ch if ch.isprintable() else " " for ch in raw)
+    cleaned = " ".join(cleaned.split())
+    cleaned = cleaned.replace('"', "'")
+    if len(cleaned) > MAX_PROMPT_TITLE_LEN:
+        cleaned = cleaned[: MAX_PROMPT_TITLE_LEN - 3].rstrip() + "..."
+    return cleaned
+
 
 # Final-LLM-Bands (Whitelist; pending/unknown bewusst NICHT zugelassen).
 # Backward-Compat: ``mitigate`` bleibt akzeptiert (Iteration-5-Output, historische
@@ -825,7 +848,11 @@ class LLMRiskReviewer:
         Returns ``(validated_result, meta)`` — siehe :meth:`pass1_detect_groups`
         fuer die Meta-Felder.
         """
-        user_prompt = self._render_pass2_prompt(server, groups_with_findings)
+        # TICKET-011: deterministische Worst-Selektion EINMAL berechnen und
+        # an Render UND Validierung durchreichen — worst_finding_id wird
+        # gegen die gezeigten IDs geprueft, nicht gegen die volle Group.
+        selections = self._select_for_groups(groups_with_findings)
+        user_prompt = self._render_pass2_prompt(server, groups_with_findings, selections)
         cfg = load_settings()
         # v0.9.x: try/except um chat_completion_json_with_meta — analog Pass-1.
         try:
@@ -852,17 +879,29 @@ class LLMRiskReviewer:
         # llm_debug_log schreibt (vorher: leeres Debug-Log-Body, Operator
         # blind).
         try:
-            validated = self._validate_pass2_response(response, list(groups_with_findings))
+            validated = self._validate_pass2_response(
+                response, list(groups_with_findings), selections
+            )
         except LLMInvalidResponseError as exc:
             exc.meta = meta
             raise
         return validated, meta
 
+    @staticmethod
+    def _select_for_groups(
+        groups_with_findings: Sequence[tuple[ApplicationGroup, list[Finding]]],
+    ) -> dict[str, SelectionResult]:
+        """Pass-2-Input-Selektion pro Group (TICKET-011)."""
+        return {grp.label: select_pass2_findings(fs) for grp, fs in groups_with_findings}
+
     def _render_pass2_prompt(
         self,
         server: Server,
         groups_with_findings: Sequence[tuple[ApplicationGroup, list[Finding]]],
+        selections: dict[str, SelectionResult] | None = None,
     ) -> str:
+        if selections is None:
+            selections = self._select_for_groups(groups_with_findings)
         lines: list[str] = []
         lines.append("host_context:")
         lines.append(
@@ -901,14 +940,17 @@ class LLMRiskReviewer:
             if grp.explanation:
                 lines.append(f"    explanation: {grp.explanation[:256]}")
             lines.append(f"    findings_in_group ({len(fs)} total):")
-            # Kompakte Zusammenfassung — max 32 Findings, Rest summiert.
+            # Kompakte Zusammenfassung — deterministische Worst-Selektion
+            # (TICKET-011, `pass2_input_selection`) statt des frueheren
+            # zufaelligen ``fs[:32]``-Caps; der Rest wird aggregiert.
             # Per-Finding-Felder: cvss, epss, kev, fix sind explizit gelistet
             # damit das LLM bewerten kann (siehe PASS2_SYSTEM_PROMPT
             # "Severity / Exploit signal / Patch availability"-Sektion).
             # NULL-Werte werden als ``n/a`` bzw. ``none`` gerendert; der
             # System-Prompt sagt das Modell, "n/a" nicht als Eskalations-
             # Signal zu werten.
-            for f in fs[:32]:
+            sel = selections[grp.label]
+            for f in sel.selected:
                 vendor_map = f.severity_by_provider or {}
                 vendor_str = ",".join(f"{k}={v}" for k, v in sorted(vendor_map.items()))[:80]
                 cvss_str = (
@@ -925,23 +967,43 @@ class LLMRiskReviewer:
                 # dass Pfad-Reasoning nicht moeglich ist.
                 path_raw = (f.target_path or "").strip()
                 path_str = f" path={path_raw[:128]}" if path_raw else " path=n/a"
+                # TICKET-011 (User-Entscheidung 2): title (destillierte
+                # Description) + av (CVSS-Attack-Vector) statt voller
+                # CVE-Description. Title ist Fremdtext und bleibt via
+                # `_sanitize_prompt_title` auf eine Zeile begrenzt.
+                av_str = (
+                    f" av={f.attack_vector.value}"
+                    if f.attack_vector is not None and f.attack_vector != AttackVector.UNKNOWN
+                    else " av=n/a"
+                )
+                title_str = (
+                    f' title="{_sanitize_prompt_title(f.title)}"' if f.title else " title=n/a"
+                )
                 lines.append(
                     f"      {f.id} {f.identifier_key} {f.package_name} "
-                    f"sev={f.severity.value}{cvss_str}{epss_str}{fix_str}{kev_str}"
+                    f"sev={f.severity.value}{cvss_str}{epss_str}{fix_str}{kev_str}{av_str}"
                     f"{path_str} "
-                    f"{vendor_str}"
+                    f"{vendor_str}{title_str}"
                 )
-            if len(fs) > 32:
-                lines.append(f"      ... ({len(fs) - 32} weitere)")
+            if sel.rest_count:
+                agg_parts = [f"{count} {sev}" for sev, count in sel.rest_severity_counts]
+                agg_parts.append(
+                    f"max_epss={sel.rest_max_epss:.2f}"
+                    if sel.rest_max_epss is not None
+                    else "max_epss=n/a"
+                )
+                agg_parts.append(f"{sel.rest_fixable_count} fixable")
+                agg_parts.append(f"{sel.rest_kev_count} kev")
+                lines.append(f"      ... ({sel.rest_count} more: {', '.join(agg_parts)})")
             lines.append("")
 
         lines.append(
-            "Liefere pro Group: group_label (exakt wie oben), risk_band aus "
-            "{escalate, act, monitor, noise}, action_type aus "
-            "{patch, mitigate, watch, none}, worst_finding_id (MUSS in der "
-            "Group enthalten sein), reason <= 256 chars. Die (risk_band, "
-            "action_type)-Kombination MUSS aus der Whitelist im System-Prompt "
-            "kommen."
+            "Return per group: group_label (exactly as above), risk_band "
+            "from {escalate, act, monitor, noise}, action_type from "
+            "{patch, mitigate, watch, none}, worst_finding_id (MUST be one "
+            "of the finding ids listed above for that group), reason <= 256 "
+            "chars. The (risk_band, action_type) combination MUST come from "
+            "the whitelist in the system prompt."
         )
         return "\n".join(lines)
 
@@ -949,9 +1011,16 @@ class LLMRiskReviewer:
         self,
         response: dict[str, Any],
         groups_with_findings: list[tuple[ApplicationGroup, list[Finding]]],
+        selections: dict[str, SelectionResult] | None = None,
     ) -> Pass2Result:
-        input_labels: dict[str, set[int]] = {
-            grp.label: {int(f.id) for f in fs} for grp, fs in groups_with_findings
+        if selections is None:
+            selections = self._select_for_groups(groups_with_findings)
+        # TICKET-011 (Bug C): worst_finding_id wird gegen die GEZEIGTEN
+        # IDs (Selektion) validiert, nicht gegen die volle Group — das
+        # LLM hat nur die selektierten Findings gesehen; Reason und
+        # Worst-Finding duerfen nicht auseinanderfallen.
+        input_labels: dict[str, frozenset[int]] = {
+            grp.label: selections[grp.label].selected_ids for grp, _fs in groups_with_findings
         }
 
         evals_raw = response.get("evaluations")
@@ -1024,7 +1093,7 @@ class LLMRiskReviewer:
                 if worst_raw not in input_labels[label]:
                     raise LLMInvalidResponseError(
                         f"Pass2: Group {label!r} worst_finding_id={worst_raw} "
-                        f"ist nicht Mitglied der Group"
+                        f"ist nicht Mitglied der im Prompt gezeigten Findings"
                     )
                 worst_id = worst_raw
             else:

@@ -23,6 +23,14 @@ aktualisieren, dann die Konstanten hier syncen.
 
 from __future__ import annotations
 
+#: Versions-Salt fuer den Pass-2-Cache-Key (TICKET-011): bei materieller
+#: Aenderung der Prompt-Semantik hochzaehlen. Effekt: einmaliger
+#: Voll-Re-Eval pro (group, server) beim naechsten Enqueue
+#: (fingerprint-gated), danach wieder normale Cache-Hits. Ohne Salt
+#: blieben Bestands-Reasons aus alter Prompt-Semantik bis zur naechsten
+#: OPEN-Set-Aenderung im Cache stehen.
+PASS2_PROMPT_VERSION = 2
+
 PASS1_SYSTEM_PROMPT: str = """\
 You group Linux-host vulnerability findings by owner-application.
 
@@ -170,7 +178,14 @@ You receive:
    - findings: a compact list of CVEs in this group with severity,
      CVSS v3, EPSS (probability of exploitation in next 30 days),
      KEV flag (CISA known-exploited list), has_fix indicator,
-     vendor severities.
+     attack vector (av=, from CVSS v3), install path, a short
+     finding title (distilled CVE summary; for kernel CVEs it names
+     the affected subsystem), vendor severities.
+   - if the group holds more findings than fit the prompt, a
+     trailing aggregate line summarizes the rest (count per
+     severity, max EPSS, fixable count, KEV count). The shown
+     findings are the worst-ranked ones of the group; KEV and
+     CRITICAL findings are always shown, never aggregated.
 
 EXPOSURE ASSESSMENT is YOUR judgment as security analyst, based on
 two inputs:
@@ -202,8 +217,8 @@ two inputs:
                     inside other processes but no direct network
                     attack vector.
 
-2. Attack-chain reasoning based on the CVE description and the
-   host context. Even LOOPBACK-ONLY or NO-LISTENER findings may
+2. Attack-chain reasoning based on the finding title, the attack
+   vector, and the host context. Even LOOPBACK-ONLY or NO-LISTENER findings may
    be reachable indirectly via other PUBLIC-EXPOSED components
    on the same host. Two correction paths you may apply:
 
@@ -252,9 +267,9 @@ two inputs:
                     when no per-package path is available), OR
                     ``path=n/a``. You CANNOT do path-based exposure
                     reasoning for this finding. Lean entirely on
-                    listener/process/service evidence and the CVE
-                    description. Do NOT escalate solely because the
-                    path is missing.
+                    listener/process/service evidence and the
+                    finding title. Do NOT escalate solely because
+                    the path is missing.
 
    The path signal does not override listener evidence — a
    PROJECT-LOCAL bundle bound to ``127.0.0.1`` is still LOOPBACK-ONLY.
@@ -284,7 +299,7 @@ SIGNALS. There are NO fixed single-signal triggers. Weigh together:
   - Patch availability: has_fix yes/no.
   - Plausibility that the CVE's specific code path is actually
     reached on this host given the listener, process, and service
-    evidence and the CVE description.
+    evidence and the finding title.
 
 escalate — Combination warrants IMMEDIATE operator action. Typical
            shapes (not a checklist; you must weigh):
@@ -293,7 +308,7 @@ escalate — Combination warrants IMMEDIATE operator action. Typical
            - CRITICAL AND PUBLIC-EXPOSED AND plausible code path
              AND (no fix OR very-high EPSS).
            - HIGH AND PUBLIC-EXPOSED AND no fix AND (EPSS >= 0.5
-             OR clearly weaponizable per CVE description).
+             OR clearly weaponizable per finding title).
            A bare PUBLIC-EXPOSED listener with HIGH/CRITICAL CVEs
            is NOT automatically escalate. A single KEV finding in
            a component that is provably not reachable is NOT
@@ -409,8 +424,8 @@ For each group, return:
   - risk_band (one of: escalate, act, monitor, noise)
   - action_type (one of: patch, mitigate, watch, none — must be
     a valid combination with risk_band per the table above)
-  - worst_finding_id (integer, must be one of the finding_ids in
-    that group)
+  - worst_finding_id (integer, must be one of the finding ids
+    shown for that group — never an id from the aggregate rest)
   - reason (string, max 256 chars, plain text, no NUL)
 
 Return only valid JSON matching the schema below. No prose, no
@@ -431,4 +446,4 @@ Response schema:
 """
 
 
-__all__ = ["PASS1_SYSTEM_PROMPT", "PASS2_SYSTEM_PROMPT"]
+__all__ = ["PASS1_SYSTEM_PROMPT", "PASS2_PROMPT_VERSION", "PASS2_SYSTEM_PROMPT"]
