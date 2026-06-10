@@ -21,7 +21,9 @@ from flask import Flask
         pytest.param("/agent/files//etc/passwd", id="absolute-suffix"),
         pytest.param("/agent/files/fathometer-agent.sh%00.malicious", id="nul-byte-suffix"),
         pytest.param("/agent/files/..\\..\\etc\\passwd", id="backslash-windows"),
-        pytest.param("/agent/files/fathometer-agent.sh/../fathometer-register.sh", id="chained-dotdot"),
+        pytest.param(
+            "/agent/files/fathometer-agent.sh/../fathometer-register.sh", id="chained-dotdot"
+        ),
     ],
 )
 def test_agent_files_traversal_returns_404(db_app: Flask, path: str) -> None:

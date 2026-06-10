@@ -3,11 +3,19 @@
    Nur Border-bottom-Hairline + Padding via .sd-app-group.
 
    Render-Vertrag:
-     - `group`         : ApplicationGroup (id, label, explanation, group_kind)
-     - `evaluation`    : ApplicationGroupEvaluation | None
-     - `count`         : int
-     - `worst_finding` : Finding | None
-     - `server`        : Server
+     - `group`               : ApplicationGroup (id, label, explanation, group_kind)
+     - `evaluation`          : ApplicationGroupEvaluation | None
+     - `count`               : int
+     - `worst_finding`       : Finding | None — LIVE-Worst aus den OFFENEN
+                               Findings (TICKET-010 / ADR-0052, Bug C). Der
+                               Eval-Snapshot (`evaluation.worst_finding_id`)
+                               ist KEINE Render-Bedingung und KEINE
+                               Datenquelle mehr.
+     - `worst_finding_drift` : bool — Eval-Snapshot zeigt auf ein anderes
+                               (oder geschlossenes) Finding als das Live-Worst
+                               -> Hint "re-evaluation pending" (ADR-0052
+                               Entscheidung 2).
+     - `server`              : Server
 
    Sicherheit: group.label, group.explanation und risk_band_reason sind
    LLM-Output — kein |safe, Jinja-Autoescape greift.
@@ -33,14 +41,20 @@
     </div>
   </div>
 
-  {% if evaluation and evaluation.risk_band_reason %}
+  {% if evaluation and (evaluation.risk_band_reason or worst_finding_drift) %}
     <div class="sd-app-group__reason" data-test="group-risk-reason">
       <p class="sd-ai-eyebrow">AI assessment</p>
-      <p class="sd-ai-text">{{ evaluation.risk_band_reason }}</p>
+      <p class="sd-ai-text">
+        {%- if evaluation.risk_band_reason %}{{ evaluation.risk_band_reason }}{% endif %}
+        {%- if worst_finding_drift %} <span class="sd-app-group__reason-hint"
+              data-test="group-drift-hint">re-evaluation pending</span>{% endif -%}
+      </p>
     </div>
   {% endif %}
 
-  {% if evaluation and evaluation.worst_finding_id and worst_finding %}
+  {# Live-Worst (TICKET-010 / ADR-0052): rendert sobald ein offenes Finding
+     existiert — auch ohne Evaluation bzw. bei worst_finding_id=None. #}
+  {% if worst_finding %}
     <div class="sd-app-group__worst" data-test="group-worst-finding">
       <p class="sd-eyebrow">Worst Finding</p>
       <div class="sd-app-group__worst-row">

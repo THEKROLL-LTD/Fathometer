@@ -5,6 +5,8 @@
 **Block:** T (Implementation, siehe `docs/blocks/T-eval-junction.md`)
 **Vorgänger:** ADR-0023 (LLM-Risk-Reviewer + Pass-2-Logik), TICKET-002 (Findings erben Risk-Band von ApplicationGroup), ADR-0022 (host_state als Eval-Input). **Tangiert** ADR-0026 (Async-Ingest, komplementär) und ADR-0025 (Server-Detail-Slim-Down — Group-Card-Render).
 
+> **Hinweis TICKET-010 (ADR-0052, 2026-06-10):** Die Junction-Row bleibt ein Eval-Snapshot, ihre UI-Verwendung ist aber eingeschränkt: Operator-Sichten lesen `worst_finding_id` nicht mehr für die Anzeige (Server-Detail ermittelt das Worst-Finding live aus offenen Findings, §15-Triage-Order); die Row liefert nur noch Band/Reason/Action-Type. `group_findings_fingerprint` wird beidseitig (Enqueue + Worker) ausschließlich über das OPEN-Set berechnet.
+
 ## Kontext
 
 `application_groups` modelliert heute zwei semantisch unterschiedliche Konzepte auf einer einzigen Zeile pro Group:

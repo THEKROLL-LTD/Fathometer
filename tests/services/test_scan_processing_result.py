@@ -21,6 +21,7 @@ class TestScanProcessingResultValid:
             findings_inserted=80,
             findings_updated=15,
             findings_resolved=5,
+            findings_reopened=2,
             class_os_pkgs=60,
             class_lang_pkgs=30,
             class_other=10,
@@ -30,6 +31,7 @@ class TestScanProcessingResultValid:
         assert r.findings_inserted == 80
         assert r.findings_updated == 15
         assert r.findings_resolved == 5
+        assert r.findings_reopened == 2
         assert r.class_os_pkgs == 60
         assert r.class_lang_pkgs == 30
         assert r.class_other == 10
@@ -42,6 +44,7 @@ class TestScanProcessingResultValid:
             findings_inserted=0,
             findings_updated=0,
             findings_resolved=0,
+            findings_reopened=0,
             class_os_pkgs=0,
             class_lang_pkgs=0,
             class_other=0,
@@ -56,6 +59,7 @@ class TestScanProcessingResultValid:
             findings_inserted=0,
             findings_updated=0,
             findings_resolved=0,
+            findings_reopened=0,
             class_os_pkgs=0,
             class_lang_pkgs=0,
             class_other=0,
@@ -75,6 +79,7 @@ class TestScanProcessingResultNegativeCounts:
             ("findings_inserted", -1),
             ("findings_updated", -1),
             ("findings_resolved", -1),
+            ("findings_reopened", -1),
             ("class_os_pkgs", -1),
             ("class_lang_pkgs", -1),
             ("class_other", -1),
@@ -88,6 +93,7 @@ class TestScanProcessingResultNegativeCounts:
             "findings_inserted": 0,
             "findings_updated": 0,
             "findings_resolved": 0,
+            "findings_reopened": 0,
             "class_os_pkgs": 0,
             "class_lang_pkgs": 0,
             "class_other": 0,
@@ -112,6 +118,7 @@ class TestScanProcessingResultMissingFields:
                 findings_inserted=0,
                 findings_updated=0,
                 findings_resolved=0,
+                findings_reopened=0,
                 class_os_pkgs=0,
                 class_lang_pkgs=0,
                 class_other=0,
@@ -127,4 +134,5 @@ class TestScanProcessingResultMissingFields:
                 findings_inserted=0,
                 findings_updated=0,
                 findings_resolved=0,
+                findings_reopened=0,
             )

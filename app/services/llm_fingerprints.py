@@ -6,8 +6,12 @@
 Drei Eingangs-Fingerprints plus ein abgeleiteter Cache-Key:
 
 * :func:`group_findings_fingerprint` — SHA256[:16] ueber sortierte
-  ``(identifier_key, package_purl)``-Tuple. Aendert sich genau wenn neue
-  CVEs in die Group kommen oder resolved werden.
+  ``(identifier_key, package_purl)``-Tuple. Input ist das **OPEN-Set**
+  der Group auf dem Server (TICKET-010/ADR-0052): Enqueue
+  (``pass2_enqueue``) und Worker (``llm_worker._do_pass2``) MUESSEN
+  dieselbe Domaene fingerprinten, sonst konvergiert der Fingerprint-Gate
+  nie. Aendert sich genau wenn Findings der Group offen werden oder
+  aufhoeren offen zu sein (neu, resolved, acknowledged, reopened).
 
 * :func:`cve_data_fingerprint` — SHA256[:16] ueber
   ``(identifier_key, severity, severity_by_provider_normalized, epss_score,
@@ -53,6 +57,14 @@ def group_findings_fingerprint(findings: list[Finding]) -> str:
     """SHA256[:16] ueber sortierte ``(identifier_key, package_purl or "")``-Tuple.
 
     Kanonische Sortierung garantiert Sortier-Unabhaengigkeit beim Caller.
+
+    Erwarteter Input ist das **OPEN-Set** der Group auf dem Server
+    (``status == FindingStatus.OPEN``) — siehe TICKET-010/ADR-0052.
+    Enqueue (``pass2_enqueue.enqueue_pass2_for_server``) und Worker
+    (``llm_worker._do_pass2``) MUESSEN ueber dieselbe Domaene
+    fingerprinten; andernfalls matchen gespeicherter Eval-Fingerprint
+    und Enqueue-Fingerprint nie und jede Group mit non-open Findings
+    wird bei jedem Ingest erneut enqueued.
     """
     tuples = sorted((f.identifier_key, f.package_purl or "") for f in findings)
     payload = json.dumps(tuples, separators=(",", ":"))

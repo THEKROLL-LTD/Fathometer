@@ -47,6 +47,7 @@ def _make_finding(
     is_kev: bool = False,
     vendor_status: str | None = "affected",
     severity_by_provider: dict[str, str] | None = None,
+    status: FindingStatus = FindingStatus.OPEN,
 ) -> Finding:
     now = datetime.now(tz=UTC)
     return Finding(
@@ -59,7 +60,7 @@ def _make_finding(
         installed_version="1.0",
         severity=severity,
         attack_vector=AttackVector.UNKNOWN,
-        status=FindingStatus.OPEN,
+        status=status,
         epss_score=epss,
         is_kev=is_kev,
         first_seen_at=now,
@@ -133,6 +134,56 @@ def test_group_findings_fingerprint_changes_when_cve_added() -> None:
     b = _make_finding(fid=2, identifier_key="CVE-B")
     c = _make_finding(fid=3, identifier_key="CVE-C")
     assert group_findings_fingerprint([a, b]) != group_findings_fingerprint([a, b, c])
+
+
+# ---------------------------------------------------------------------------
+# TICKET-010 Etappe 2 (Bug B): Input-Domaene ist das OPEN-Set
+# ---------------------------------------------------------------------------
+
+
+def _mixed_status_group() -> list[Finding]:
+    """Group mit gemischten Status: 2x open, 1x resolved, 1x acknowledged."""
+    return [
+        _make_finding(fid=1, identifier_key="CVE-A", purl="pkg:deb/a@1"),
+        _make_finding(fid=2, identifier_key="CVE-B", purl="pkg:deb/b@2"),
+        _make_finding(
+            fid=3, identifier_key="CVE-C", purl="pkg:deb/c@3", status=FindingStatus.RESOLVED
+        ),
+        _make_finding(
+            fid=4, identifier_key="CVE-D", purl="pkg:deb/d@4", status=FindingStatus.ACKNOWLEDGED
+        ),
+    ]
+
+
+def test_group_findings_fingerprint_ignores_status_attribute() -> None:
+    """Der Status fliesst NICHT in den Hash ein — die OPEN-Domaene muss
+    deshalb zwingend beim Laden gefiltert werden (Bug-B-Wurzel: wer das
+    ALL-Set laedt, bekommt einen anderen Fingerprint als das OPEN-Set,
+    nicht etwa denselben mit anderem Status-Feld)."""
+    f_open = _make_finding(fid=1, identifier_key="CVE-A", purl="pkg:deb/a@1")
+    f_resolved = _make_finding(
+        fid=1, identifier_key="CVE-A", purl="pkg:deb/a@1", status=FindingStatus.RESOLVED
+    )
+    assert group_findings_fingerprint([f_open]) == group_findings_fingerprint([f_resolved])
+
+
+def test_group_findings_fingerprint_open_subset_differs_from_all_set() -> None:
+    """Bug-B-Kern: ALL-Set-Fingerprint (alter Worker-Load) != OPEN-Set-
+    Fingerprint (Enqueue) sobald die Group non-open Findings enthaelt —
+    genau der Mismatch der die Dauer-Re-Enqueue-Schleife ausgeloest hat."""
+    mixed = _mixed_status_group()
+    open_subset = [f for f in mixed if f.status == FindingStatus.OPEN]
+    assert group_findings_fingerprint(mixed) != group_findings_fingerprint(open_subset)
+
+
+def test_group_findings_fingerprint_open_subset_equal_across_callers() -> None:
+    """Bug-B-Regression: Enqueue und Worker filtern beide auf OPEN — ueber
+    dieselbe gemischte Group kommt (auch bei anderer Lade-Reihenfolge)
+    identischer Fingerprint heraus."""
+    mixed = _mixed_status_group()
+    enqueue_view = [f for f in mixed if f.status == FindingStatus.OPEN]
+    worker_view = [f for f in reversed(mixed) if f.status == FindingStatus.OPEN]
+    assert group_findings_fingerprint(enqueue_view) == group_findings_fingerprint(worker_view)
 
 
 # ---------------------------------------------------------------------------

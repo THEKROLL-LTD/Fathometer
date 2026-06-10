@@ -61,6 +61,7 @@ from app.models import (
 )
 from app.schemas.findings_view_filter import FindingsViewFilter
 from app.services.findings_query import (
+    _severity_rank_expr,
     count_findings,
 )
 from app.services.heartbeat_aggregation import heartbeats_for_servers
@@ -220,15 +221,26 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
          worst_finding_id, action_type, risk_band_computed_at. Fehlende
          Rows bedeuten "Nicht bewertet" — Group-Card rendert die
          entsprechende Pille (siehe ADR-0028 §UI-bei-Eval-Lücke).
-      4. Worst-Finding-Batch (Projektion): id, identifier_key, package_name,
-         title.
+      4. Live-Worst-Finding-Batch (TICKET-010 / ADR-0052, Bug C): EIN
+         `DISTINCT ON (application_group_id)`-Query ueber die OPEN-Findings
+         aller `group_ids`, Order pro Group nach §15-Triage (`is_kev DESC,
+         epss DESC NULLS LAST, cvss DESC NULLS LAST, severity_rank DESC,
+         first_seen_at ASC`). Projektion: application_group_id, id,
+         identifier_key, package_name, title. `evaluation.worst_finding_id`
+         (Snapshot) wird fuer die Anzeige NICHT mehr verwendet — die
+         Workflow-/Group-Cards zeigen den Jetzt-Zustand.
 
     Sortierung der Groups: DESC nach `RISK_BAND_SORT_RANK` — escalate first,
     Groups ohne Junction-Row als `pending`-Rank-40 einsortiert (UI-Pille
     "Nicht bewertet").
 
     Rueckgabe-Format: list[dict] mit Keys `group`, `count`, `evaluation`,
-    `worst_finding`. Die Werte sind Row-Objekte oder `None`.
+    `worst_finding`, `worst_finding_drift`. Die Werte sind Row-Objekte oder
+    `None`; `worst_finding_drift` ist `True` wenn der Eval-Snapshot auf ein
+    anderes (oder nicht mehr offenes) Finding zeigt als das Live-Worst —
+    UI rendert dann den Hint "re-evaluation pending" (ADR-0052 Entscheidung
+    2). Kein Fingerprint-Recompute im Request-Pfad; der ID-Vergleich ist
+    gratis.
     """
     # (1) Count-Aggregat: liefert sowohl die Group-IDs (mindestens 1 OPEN-
     # Finding auf diesem Server) als auch den Counter-Wert pro Group fuer
@@ -279,36 +291,61 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     for row in sess.execute(eval_stmt).all():
         evaluations_by_id[int(row.group_id)] = row
 
-    # (4) Worst-Finding-Batch (Projektion): id, identifier_key, package_name,
-    # title. Filter auf Server, damit ein veralteter Cross-Server-Verweis
-    # nicht stillschweigend angezeigt wird.
-    wf_ids = [
-        ev.worst_finding_id for ev in evaluations_by_id.values() if ev.worst_finding_id is not None
-    ]
-    worst_by_id: dict[int, Any] = {}
-    if wf_ids:
-        worst_stmt = select(
+    # (4) Live-Worst-Finding-Batch (TICKET-010 / ADR-0052, Bug C): pro Group
+    # das Top-Finding nach §15-Triage-Order — ausschliesslich OPEN-Findings,
+    # damit die Cards den Jetzt-Zustand zeigen statt des Eval-Snapshots.
+    # `DISTINCT ON` verlangt dass die ORDER BY mit der Distinct-Spalte
+    # beginnt; danach folgt die Triage-Order (Single-Source fuer den
+    # Severity-Rank: `findings_query._severity_rank_expr`).
+    worst_stmt = (
+        select(
+            Finding.application_group_id,
             Finding.id,
             Finding.identifier_key,
             Finding.package_name,
             Finding.title,
-        ).where(Finding.id.in_(wf_ids), Finding.server_id == server_id)
-        for row in sess.execute(worst_stmt).all():
-            worst_by_id[int(row.id)] = row
+        )
+        .where(
+            Finding.server_id == server_id,
+            Finding.status == FindingStatus.OPEN,
+            Finding.application_group_id.in_(group_ids),
+        )
+        .distinct(Finding.application_group_id)
+        .order_by(
+            Finding.application_group_id,
+            Finding.is_kev.desc(),
+            nulls_last(Finding.epss_score.desc()),
+            nulls_last(Finding.cvss_v3_score.desc()),
+            _severity_rank_expr().desc(),
+            Finding.first_seen_at.asc(),
+        )
+    )
+    worst_by_group: dict[int, Any] = {}
+    for row in sess.execute(worst_stmt).all():
+        worst_by_group[int(row.application_group_id)] = row
 
     result: list[dict[str, Any]] = []
     for grp in groups:
         ev = evaluations_by_id.get(int(grp.id))
+        worst = worst_by_group.get(int(grp.id))
+        # Drift-Kennzeichnung (ADR-0052 Entscheidung 2): der Eval-Snapshot
+        # zeigt auf ein anderes Finding als das Live-Worst — entweder weil
+        # sich das OPEN-Set geaendert hat oder weil das Snapshot-Finding
+        # inzwischen geschlossen ist (dann fehlt es im Live-Query und der
+        # ID-Vergleich schlaegt automatisch an). UI rendert dazu den Hint
+        # "re-evaluation pending".
+        drift = bool(
+            ev is not None
+            and ev.worst_finding_id is not None
+            and (worst is None or int(ev.worst_finding_id) != int(worst.id))
+        )
         result.append(
             {
                 "group": grp,
                 "evaluation": ev,
                 "count": counts_by_id.get(int(grp.id), 0),
-                "worst_finding": (
-                    worst_by_id.get(int(ev.worst_finding_id))
-                    if ev is not None and ev.worst_finding_id is not None
-                    else None
-                ),
+                "worst_finding": worst,
+                "worst_finding_drift": drift,
             }
         )
 

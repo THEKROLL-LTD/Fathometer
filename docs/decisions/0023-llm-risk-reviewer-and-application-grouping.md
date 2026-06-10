@@ -4,6 +4,8 @@
 
 > **Hinweis Block T (ADR-0028, 2026-05-22):** `ApplicationGroup` traegt seit Block T keine Eval-Spalten mehr. Pass-2 schreibt per UPSERT in `application_group_evaluations` mit Composite-PK `(group_id, server_id)`; `inherit_group_risk_to_findings` joint auf die Junction mit Composite-Match. Last-write-wins-Bug zwischen Servern ist behoben. Cache-Layer (`llm_risk_cache`) bleibt unveraendert — der Cache-Key war schon korrekt per-(group, server-context) geschnitten.
 
+> **Hinweis TICKET-010 (ADR-0052, 2026-06-10):** Eval-Input-Semantik präzisiert — Pass-2 lädt, bewertet und fingerprintet ausschließlich **OPEN**-Findings der Group (identische WHERE-Klausel wie `pass2_enqueue`). Vorher lud `_do_pass2` ALLE Findings inkl. resolved/acknowledged: der Worker-Fingerprint matchte dadurch nie den Enqueue-Fingerprint (Dauer-Re-Enqueue bei jedem Ingest) und geschlossene Findings waren als `worst_finding_id` wählbar.
+
 ## Kontext
 
 Block O liefert deterministische Pre-Triage und persistiert `pending`-Findings für die der menschliche/maschinelle Profi noch ein Urteil über Server-Exposure abgeben muss. Während Block O in Arbeit war, sind drei Realität-Punkte aufgetaucht, die die ursprüngliche Block-P-Skizze aus ADR-0022 §Re-Open-Trigger zu naiv machen:

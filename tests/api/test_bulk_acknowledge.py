@@ -524,3 +524,264 @@ def test_regression_flavor_b_dry_run(nodb_app: Flask, monkeypatch: pytest.Monkey
     assert body["server_count"] == 2
     assert sorted(body["finding_ids"]) == [11, 12]
     assert sess.commit_count == 0
+
+
+# ===========================================================================
+# TICKET-010 Etappe 4 — Triage-Aktion triggert Pass-2-Re-Eval
+# ===========================================================================
+#
+# Vertrag: nach erfolgreichem Status-Write ruft der Endpoint
+# `enqueue_pass2_for_server(sess, server_id, trigger="triage_action")` —
+# genau einmal pro betroffenem Server, VOR `sess.commit()`. Bei dry_run,
+# rowcount=0, leerem Treffer-Set oder Validation-Fehler: KEIN Aufruf.
+# Patch-Ziel ist der Import-Ort `app.api.bulk.enqueue_pass2_for_server`.
+
+
+class _FindingStub:
+    """Finding-Stub fuer die Flavor-A/B-Apply-Pfade."""
+
+    def __init__(
+        self,
+        fid: int,
+        server_id: int,
+        status: FindingStatus = FindingStatus.OPEN,
+    ) -> None:
+        self.id = fid
+        self.server_id = server_id
+        self.status = status
+        self.risk_band = "act"
+
+
+class _FindingsSelectSession(_FakeSession):
+    """Spy-Session deren Findings-SELECT konfigurierte Stubs liefert."""
+
+    def __init__(self, findings: list[_FindingStub], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._findings = findings
+
+    def execute(self, stmt: Any, params: Any = None) -> _ExecResult:
+        sql = self._sql(stmt)
+        # COUNT-Statements (Flavor-C-dry_run) enthalten "from findings" im
+        # Subquery — die gehoeren weiter der Basis-Klassifizierung.
+        if sql.startswith("select") and "from findings" in sql and "count(" not in sql:
+            self.executed.append(stmt)
+            return _ExecResult(rows=list(self._findings))
+        return super().execute(stmt, params)
+
+
+def _patch_enqueue(
+    monkeypatch: pytest.MonkeyPatch, call_log: list[str]
+) -> list[tuple[Any, int, str]]:
+    """Patcht `app.api.bulk.enqueue_pass2_for_server` mit einem Spy."""
+    calls: list[tuple[Any, int, str]] = []
+
+    def spy(sess: Any, server_id: int, *, trigger: str) -> int:
+        calls.append((sess, server_id, trigger))
+        call_log.append(f"enqueue:{server_id}")
+        return 1
+
+    monkeypatch.setattr(bulk_mod, "enqueue_pass2_for_server", spy)
+    return calls
+
+
+def _track_commit(sess: _FakeSession, call_log: list[str]) -> None:
+    """Haengt einen `commit`-Eintrag in die geteilte Sequenz-Liste."""
+    orig_commit = sess.commit
+
+    def commit() -> None:
+        call_log.append("commit")
+        orig_commit()
+
+    sess.commit = commit  # type: ignore[method-assign]
+
+
+def _assert_enqueue_before_commit(call_log: list[str]) -> None:
+    assert "commit" in call_log, f"Kein commit im call_log: {call_log}"
+    commit_idx = call_log.index("commit")
+    enqueue_idxs = [i for i, entry in enumerate(call_log) if entry.startswith("enqueue:")]
+    assert enqueue_idxs, f"Kein Enqueue im call_log: {call_log}"
+    assert all(i < commit_idx for i in enqueue_idxs), (
+        f"Enqueue muss vor commit() derselben Session laufen: {call_log}"
+    )
+
+
+def test_apply_flavor_c_enqueues_pass2_once_before_commit(
+    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Flavor C Apply mit rowcount>0 -> genau ein Enqueue, vor commit."""
+    call_log: list[str] = []
+    sess = _FakeSession(server_active=True, update_rowcount=12, scope_ids=[10, 11])
+    _track_commit(sess, call_log)
+    _patch_session(monkeypatch, sess)
+    calls = _patch_enqueue(monkeypatch, call_log)
+    client = nodb_app.test_client()
+
+    resp = client.post(
+        "/api/findings/bulk-acknowledge",
+        json={"server_scope": {"server_id": 4, "risk_band": "act"}, "dry_run": False},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert len(calls) == 1, f"Genau ein Enqueue erwartet, got {calls}"
+    spy_sess, server_id, trigger = calls[0]
+    assert spy_sess is sess, "Enqueue muss mit DERSELBEN Session laufen die committet wird"
+    assert server_id == 4
+    assert trigger == "triage_action"
+    _assert_enqueue_before_commit(call_log)
+
+
+def test_apply_flavor_c_rowcount_zero_does_not_enqueue(
+    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Flavor C Apply mit rowcount=0 (Band leer/schon ACK) -> kein Enqueue."""
+    call_log: list[str] = []
+    sess = _FakeSession(server_active=True, update_rowcount=0, scope_ids=[])
+    _patch_session(monkeypatch, sess)
+    calls = _patch_enqueue(monkeypatch, call_log)
+    client = nodb_app.test_client()
+
+    resp = client.post(
+        "/api/findings/bulk-acknowledge",
+        json={"server_scope": {"server_id": 4, "risk_band": "noise"}, "dry_run": False},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert calls == [], f"rowcount=0 darf NICHT enqueuen: {calls}"
+    assert sess.commit_count == 1, "Commit (Audit-Event) laeuft trotzdem"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"server_scope": {"server_id": 4, "risk_band": "act"}, "dry_run": True},
+        {"finding_ids": [1, 2], "dry_run": True},
+        {"match": {"cve_id": "CVE-2024-12345"}, "dry_run": True},
+    ],
+    ids=["flavor_c", "flavor_a", "flavor_b"],
+)
+def test_dry_run_does_not_enqueue(
+    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch, body: dict[str, Any]
+) -> None:
+    """dry_run=true -> kein Status-Write, kein Enqueue (alle Flavors)."""
+    call_log: list[str] = []
+    sess = _FindingsSelectSession(
+        [_FindingStub(1, 7), _FindingStub(2, 8)],
+        server_active=True,
+        count=2,
+    )
+    _patch_session(monkeypatch, sess)
+    calls = _patch_enqueue(monkeypatch, call_log)
+    client = nodb_app.test_client()
+
+    resp = client.post("/api/findings/bulk-acknowledge", json=body)
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert calls == [], f"dry_run darf NICHT enqueuen: {calls}"
+    assert sess.commit_count == 0
+
+
+def test_flavor_c_unknown_server_does_not_enqueue(
+    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """404-Guard (revoked/retired/unbekannt) -> kein Enqueue."""
+    call_log: list[str] = []
+    sess = _FakeSession(server_active=False)
+    _patch_session(monkeypatch, sess)
+    calls = _patch_enqueue(monkeypatch, call_log)
+    client = nodb_app.test_client()
+
+    resp = client.post(
+        "/api/findings/bulk-acknowledge",
+        json={"server_scope": {"server_id": 999, "risk_band": "act"}, "dry_run": False},
+    )
+    assert resp.status_code == 404, resp.get_data(as_text=True)
+    assert calls == []
+
+
+def test_apply_flavor_a_enqueues_once_per_distinct_server(
+    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Flavor A Apply, OPEN-Findings auf 2 Servern -> genau 2 Enqueue-Aufrufe."""
+    call_log: list[str] = []
+    findings = [
+        _FindingStub(1, server_id=7),
+        _FindingStub(2, server_id=8),
+        _FindingStub(3, server_id=7),  # zweites Finding auf Server 7 -> kein 3. Call
+    ]
+    sess = _FindingsSelectSession(findings)
+    _track_commit(sess, call_log)
+    _patch_session(monkeypatch, sess)
+    calls = _patch_enqueue(monkeypatch, call_log)
+    client = nodb_app.test_client()
+
+    resp = client.post(
+        "/api/findings/bulk-acknowledge",
+        json={"finding_ids": [1, 2, 3], "dry_run": False},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert len(calls) == 2, f"Genau 2 Enqueue-Aufrufe (1 pro Server) erwartet, got {calls}"
+    assert [c[1] for c in calls] == [7, 8], f"Distinct, sortierte server_ids erwartet: {calls}"
+    assert all(c[0] is sess for c in calls), "Alle Aufrufe mit derselben Session"
+    assert all(c[2] == "triage_action" for c in calls), f"Falscher Trigger: {calls}"
+    _assert_enqueue_before_commit(call_log)
+
+
+def test_apply_flavor_a_all_already_acknowledged_does_not_enqueue(
+    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Flavor A Apply, alle Findings bereits ACK (skipped) -> kein Enqueue."""
+    call_log: list[str] = []
+    findings = [
+        _FindingStub(1, server_id=7, status=FindingStatus.ACKNOWLEDGED),
+        _FindingStub(2, server_id=8, status=FindingStatus.RESOLVED),
+    ]
+    sess = _FindingsSelectSession(findings)
+    _patch_session(monkeypatch, sess)
+    calls = _patch_enqueue(monkeypatch, call_log)
+    client = nodb_app.test_client()
+
+    resp = client.post(
+        "/api/findings/bulk-acknowledge",
+        json={"finding_ids": [1, 2], "dry_run": False},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    body = resp.get_json()
+    assert body["count"] == 0
+    assert body["skipped"] == 2
+    assert calls == [], f"Ohne echten Status-Wechsel darf NICHT enqueued werden: {calls}"
+    assert sess.update_statements == [], "Kein UPDATE wenn open_ids leer"
+    assert sess.commit_count == 1
+
+
+def test_apply_flavor_b_zero_matches_does_not_enqueue(
+    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Flavor B Apply ohne Treffer -> Leerlauf-Audit, kein Enqueue."""
+    call_log: list[str] = []
+    sess = _FindingsSelectSession([])
+    _patch_session(monkeypatch, sess)
+    calls = _patch_enqueue(monkeypatch, call_log)
+    client = nodb_app.test_client()
+
+    resp = client.post(
+        "/api/findings/bulk-acknowledge",
+        json={"match": {"cve_id": "CVE-2024-12345"}, "dry_run": False},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    body = resp.get_json()
+    assert body["count"] == 0
+    assert calls == [], f"0 Treffer darf NICHT enqueuen: {calls}"
+    assert sess.commit_count == 1
+
+
+def test_validation_error_does_not_enqueue(
+    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """422 (kein Flavor befuellt) -> kein Enqueue, kein Commit."""
+    call_log: list[str] = []
+    sess = _FakeSession()
+    _patch_session(monkeypatch, sess)
+    calls = _patch_enqueue(monkeypatch, call_log)
+    client = nodb_app.test_client()
+
+    resp = client.post("/api/findings/bulk-acknowledge", json={"dry_run": False})
+    assert resp.status_code == 422, resp.get_data(as_text=True)
+    assert calls == []
+    assert sess.commit_count == 0

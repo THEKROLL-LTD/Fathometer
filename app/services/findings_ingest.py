@@ -8,11 +8,13 @@ Aufgaben (siehe ARCHITECTURE.md §5 und §6):
 1. Pro Vulnerability im Envelope ein Finding-Row bauen.
 2. **Dedup-Upsert** auf `(server_id, finding_type, identifier_key, package_name)`
    via Postgres `INSERT ... ON CONFLICT DO UPDATE`.
-3. **Resolve-Phase**: alle OPEN/ACKNOWLEDGED Findings dieses Servers die nicht
+3. **Reopen-Phase** (TICKET-010/ADR-0052): RESOLVED-Findings deren Key im
+   aktuellen Scan wieder auftaucht -> OPEN (ACK bleibt ACK).
+4. **Resolve-Phase**: alle OPEN/ACKNOWLEDGED Findings dieses Servers die nicht
    im aktuellen Scan-Set sind -> RESOLVED.
-4. Trivy-DB-Frische aus `scan.Metadata.DataSource` und `scan.Metadata.UpdatedAt`
+5. Trivy-DB-Frische aus `scan.Metadata.DataSource` und `scan.Metadata.UpdatedAt`
    extrahieren und in `servers` denormalisieren (plus `last_scan_at`).
-5. `Scan`-Buchhaltungs-Row anlegen (kein Roh-JSON — ADR-0005).
+6. `Scan`-Buchhaltungs-Row anlegen (kein Roh-JSON — ADR-0005).
 
 Performance: bulk-Insert mit ON CONFLICT in EINER Statement-Round. Bei 306
 Vulns muss das in <5s durchlaufen (DoD von Block C).
@@ -75,6 +77,7 @@ class ScanIngestResult:
     findings_inserted: int
     findings_updated: int
     findings_resolved: int
+    findings_reopened: int
     findings_class_os_pkgs: int
     findings_class_lang_pkgs: int
     findings_class_other: int
@@ -416,6 +419,44 @@ def ingest_scan(
     # sind das ~5000 CVE-IDs in einer Query, voellig unkritisch.
     _enrich_with_feeds(session, rows)
 
+    # ---- 1c. Reopen-Phase: RESOLVED-Wiedergaenger wieder oeffnen --------
+    # TICKET-010 / ADR-0052 (Bug A): das Upsert unten fasst `status` nie an —
+    # ein Finding, das die Resolve-Phase einmal auf RESOLVED gesetzt hat,
+    # bliebe sonst fuer immer geschlossen, auch wenn sein `(identifier_key,
+    # package_name)`-Tupel im aktuellen Scan wieder auftaucht (z.B. nach
+    # einem partiellen Scan oder trivy-db-Aussetzer). Daher VOR dem Upsert
+    # explizit `resolved -> open` fuer alle Wiedergaenger. ACK bleibt ACK
+    # (User-Entscheidung 1, ADR-0052): ein vom Operator abgehaktes Finding
+    # wird durch Redetect NICHT wieder aufgemacht — Operator-Entscheid
+    # schlaegt Scanner. Gleicher Python-Filter-Trick wie die Resolve-Phase
+    # (Composite-Key-Vergleich in Python statt Tuple-IN). Idempotent: ein
+    # bereits offenes Finding ist nicht im SELECT-Ergebnis.
+    reopened_count = 0
+    if rows:
+        resolved_existing = session.execute(
+            select(
+                Finding.id,
+                Finding.identifier_key,
+                Finding.package_name,
+            ).where(
+                Finding.server_id == server_id,
+                Finding.finding_type == FindingType.VULNERABILITY,
+                Finding.status == FindingStatus.RESOLVED,
+            )
+        ).all()
+        ids_to_reopen = [
+            row.id
+            for row in resolved_existing
+            if (row.identifier_key, row.package_name) in current_keys
+        ]
+        if ids_to_reopen:
+            session.execute(
+                update(Finding)
+                .where(Finding.id.in_(ids_to_reopen))
+                .values(status=FindingStatus.OPEN, resolved_at=None)
+            )
+            reopened_count = len(ids_to_reopen)
+
     # ---- 2. Bulk-Upsert via INSERT ... ON CONFLICT --------------------
     # `ON CONFLICT` auf dem Unique-Constraint `uq_findings_natural_key`.
     # Felder die wir bei Update aktualisieren: alles ausser `status`,
@@ -558,6 +599,7 @@ def ingest_scan(
         findings_inserted=inserted_count,
         findings_updated=updated_count,
         findings_resolved=resolved_count,
+        findings_reopened=reopened_count,
         findings_class_os_pkgs=class_counter[FindingClass.OS_PKGS],
         findings_class_lang_pkgs=class_counter[FindingClass.LANG_PKGS],
         findings_class_other=class_counter[FindingClass.OTHER],

@@ -53,6 +53,7 @@ from app.models import (
     ApplicationGroup,
     ApplicationGroupEvaluation,
     Finding,
+    FindingStatus,
     LLMJob,
     Server,
 )
@@ -1433,11 +1434,18 @@ async def _do_pass2(job_id: int) -> None:
             session.commit()
             return
 
+        # TICKET-010 Etappe 2 (ADR-0052): identische WHERE-Semantik wie
+        # ``pass2_enqueue.enqueue_pass2_for_server`` (OPEN-only). Der
+        # Worker-Fingerprint MUSS ueber dasselbe OPEN-Set laufen wie der
+        # Enqueue-Fingerprint — sonst matchen die Fingerprints bei Groups
+        # mit non-open Findings nie und jeder Ingest enqueued die Group
+        # erneut (Dauer-Re-Enqueue, nie konvergent).
         findings = list(
             session.execute(
                 select(Finding)
                 .where(Finding.application_group_id == group_id)
                 .where(Finding.server_id == server_id)
+                .where(Finding.status == FindingStatus.OPEN)
             )
             .scalars()
             .all()
@@ -1445,7 +1453,7 @@ async def _do_pass2(job_id: int) -> None:
         if not findings:
             job.status = "done"
             job.completed_at = datetime.now(UTC)
-            job.result = {"skipped": True, "reason": "no findings in group on server"}
+            job.result = {"skipped": True, "reason": "no open findings in group on server"}
             session.commit()
             return
 
@@ -1513,9 +1521,15 @@ async def _do_pass2(job_id: int) -> None:
             with get_session() as detached_session:
                 group_re = detached_session.get(ApplicationGroup, group_id)
                 server_re = detached_session.get(Server, server_id)
+                # TICKET-010 Etappe 2 (ADR-0052): Guard gegen Status-Aenderung
+                # zwischen Phase 1 und Phase 2 (Triage-/Ingest-Race) — nur
+                # noch offene Findings gehen in den LLM-Input.
                 findings_re = list(
                     detached_session.execute(
-                        select(Finding).where(Finding.id.in_(group_findings_ids))
+                        select(Finding).where(
+                            Finding.id.in_(group_findings_ids),
+                            Finding.status == FindingStatus.OPEN,
+                        )
                     )
                     .scalars()
                     .all()
@@ -1525,6 +1539,23 @@ async def _do_pass2(job_id: int) -> None:
                         f"pass2 group/server vanished mid-job: "
                         f"group_id={group_id} server_id={server_id}"
                     )
+                if not findings_re:
+                    # Alle Findings der Group wurden zwischen Phase 1 und
+                    # Phase 2 geschlossen — ein LLM-Call mit leerer
+                    # Findings-Liste waere ungueltig (``worst_finding_id``
+                    # muss in ``finding_ids`` liegen, die Validierung in
+                    # ``llm_risk_reviewer`` schluege garantiert fehl). Job
+                    # analog zum Phase-1-Pfad als done/skipped abschliessen.
+                    job_re = detached_session.get(LLMJob, job_id)
+                    if job_re is not None:
+                        job_re.status = "done"
+                        job_re.completed_at = datetime.now(UTC)
+                        job_re.result = {
+                            "skipped": True,
+                            "reason": "no open findings in group on server",
+                        }
+                        detached_session.commit()
+                    return
                 # Hydrate die Server-Snapshot-Listen damit `_render_pass2_prompt`
                 # alle Felder hat (Server hat keine ORM-Relations dafuer).
                 _hydrate_server_snapshot(detached_session, server_re)

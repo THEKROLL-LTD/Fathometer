@@ -147,6 +147,8 @@ def result_to_jsonb(result: Any) -> dict[str, Any]:
             "findings_inserted": int(result.findings_inserted),
             "findings_updated": int(result.findings_updated),
             "findings_resolved": int(result.findings_resolved),
+            # TICKET-010/ADR-0052 (Bug A): Reopen-on-Redetect-Zaehler.
+            "findings_reopened": int(result.findings_reopened),
             "class_os_pkgs": int(result.class_os_pkgs),
             "class_lang_pkgs": int(result.class_lang_pkgs),
             "class_other": int(result.class_other),

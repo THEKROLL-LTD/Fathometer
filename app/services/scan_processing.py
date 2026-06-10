@@ -72,6 +72,7 @@ class ScanProcessingResult(BaseModel):
     findings_inserted: int
     findings_updated: int
     findings_resolved: int
+    findings_reopened: int
     class_os_pkgs: int
     class_lang_pkgs: int
     class_other: int
@@ -82,6 +83,7 @@ class ScanProcessingResult(BaseModel):
         "findings_inserted",
         "findings_updated",
         "findings_resolved",
+        "findings_reopened",
         "class_os_pkgs",
         "class_lang_pkgs",
         "class_other",
@@ -320,6 +322,8 @@ def process_scan_envelope(
             "findings_inserted": result.findings_inserted,
             "findings_updated": result.findings_updated,
             "findings_resolved": result.findings_resolved,
+            # TICKET-010/ADR-0052 (Bug A): Reopen-on-Redetect-Zaehler.
+            "findings_reopened": result.findings_reopened,
             "class_os_pkgs": result.findings_class_os_pkgs,
             "class_lang_pkgs": result.findings_class_lang_pkgs,
             "class_other": result.findings_class_other,
@@ -342,6 +346,7 @@ def process_scan_envelope(
         findings_inserted=result.findings_inserted,
         findings_updated=result.findings_updated,
         findings_resolved=result.findings_resolved,
+        findings_reopened=result.findings_reopened,
         class_os_pkgs=result.findings_class_os_pkgs,
         class_lang_pkgs=result.findings_class_lang_pkgs,
         class_other=result.findings_class_other,

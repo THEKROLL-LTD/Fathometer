@@ -429,6 +429,19 @@
 .workflow-table .workflow-table__cve   { color: var(--text-primary); width: 160px; white-space: nowrap; }
 .workflow-table .workflow-table__reason { color: var(--text-secondary); }
 .workflow-table__reason b { color: var(--text-primary); font-weight: 400; }
+/* Drift-Hint (TICKET-010 / ADR-0052 Entscheidung 2): Eval-Snapshot weicht
+   vom Live-Worst ab -> dezenter "re-evaluation pending"-Marker neben der
+   Reason. Gleiche Optik in Workflow-Tabelle und Group-Card. */
+.workflow-table__reason-hint,
+.sd-app-group__reason-hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--status-degraded);
+  white-space: nowrap;
+  margin-left: 8px;
+}
 
 .workflow-card__footer {
   display: flex;

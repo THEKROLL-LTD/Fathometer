@@ -67,6 +67,7 @@ from app.schemas.bulk_request import (
     BulkAckRequest,
     BulkAckServerScope,
 )
+from app.services.pass2_enqueue import enqueue_pass2_for_server
 
 # Maximale Anzahl IDs in `metadata.finding_ids` (ADR-0044 §(4); Praezedenz
 # llm_worker.py). `metadata.count` traegt immer die volle Zahl.
@@ -332,6 +333,12 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
     open_ids = [f.id for f in findings if f.status == FindingStatus.OPEN]
     skipped = len(finding_ids) - len(open_ids)
 
+    # TICKET-010 Etappe 4 (Vorbereitung): distinct server_ids der Findings,
+    # die gleich wirklich wechseln — VOR dem UPDATE einsammeln, weil
+    # `synchronize_session` die ORM-Objekte expiren kann (Status danach
+    # bereits ACKNOWLEDGED). Leeres Set heisst spaeter: kein Enqueue.
+    changed_server_ids = sorted({f.server_id for f in findings if f.status == FindingStatus.OPEN})
+
     if open_ids:
         sess.execute(
             update(Finding)
@@ -366,6 +373,14 @@ def bulk_acknowledge() -> Response | tuple[Response, int]:
         },
         session=sess,
     )
+
+    # TICKET-010 Etappe 4: Triage-Aktion triggert das Pass-2-Re-Eval sofort —
+    # ohne Sofort-Trigger passiert das Re-Eval erst beim naechsten Scan
+    # (24-h-Luecke). Ein Aufruf pro betroffenem Server; wenn kein Finding
+    # wirklich gewechselt hat (alle skipped), ist das Set leer -> kein Aufruf.
+    for changed_server_id in changed_server_ids:
+        enqueue_pass2_for_server(sess, changed_server_id, trigger="triage_action")
+
     sess.commit()
 
     log.info(
@@ -497,6 +512,14 @@ def _handle_server_scope(sess: Any, req: BulkAckRequest, scope: BulkAckServerSco
         },
         session=sess,
     )
+
+    # TICKET-010 Etappe 4: Triage-Aktion triggert das Pass-2-Re-Eval sofort —
+    # ohne Sofort-Trigger passiert das Re-Eval erst beim naechsten Scan
+    # (24-h-Luecke). Nur wenn das UPDATE wirklich Findings gewechselt hat
+    # (rowcount > 0); die server_id ist im Scope-Flavor eh bekannt.
+    if count > 0:
+        enqueue_pass2_for_server(sess, scope.server_id, trigger="triage_action")
+
     sess.commit()
 
     log.info(

@@ -71,6 +71,9 @@ def _make_fake_ingest_result() -> Any:
         findings_inserted=8,
         findings_updated=2,
         findings_resolved=1,
+        # Bewusst != 0 und != allen anderen Counts, damit Mapping-Tests einen
+        # Feld-Vertausch erkennen wuerden (TICKET-010 Etappe 1).
+        findings_reopened=4,
         findings_class_os_pkgs=5,
         findings_class_lang_pkgs=3,
         findings_class_other=2,
@@ -331,6 +334,58 @@ class TestPass2EnqueueDelegation:
         assert jobs_queued_calls[0].kwargs["metadata"]["pass2_queued"] == 3
 
 
+class TestScanIngestedAuditMetadata:
+    """TICKET-010 Etappe 1: ``scan.ingested``-Audit-Event traegt den
+    ``findings_reopened``-Zaehler aus dem ScanIngestResult."""
+
+    def test_scan_ingested_metadata_contains_findings_reopened(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_ingest_result = _make_fake_ingest_result()
+        monkeypatch.setattr(
+            "app.services.scan_processing.run_ingest",
+            lambda *a, **kw: fake_ingest_result,
+        )
+        fake_settings_row = MagicMock()
+        fake_settings_row.block_p_llm_mode = "off"
+        monkeypatch.setattr(
+            "app.services.scan_processing.get_settings_row",
+            lambda s: fake_settings_row,
+        )
+        monkeypatch.setattr(
+            "app.services.scan_processing.pretriage",
+            lambda f, s, snap: MagicMock(
+                band=MagicMock(value="medium"), reason="r", computed_at=datetime.now(UTC)
+            ),
+        )
+        mock_log = MagicMock()
+        monkeypatch.setattr("app.services.scan_processing.log_event", mock_log)
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = []
+
+        process_scan_envelope(session, _make_fake_server(), _make_minimal_envelope_bytes())
+
+        ingested_calls = [
+            c for c in mock_log.call_args_list if c.args and c.args[0] == "scan.ingested"
+        ]
+        assert len(ingested_calls) == 1, mock_log.call_args_list
+        metadata = ingested_calls[0].kwargs["metadata"]
+        assert metadata["findings_reopened"] == fake_ingest_result.findings_reopened
+        # Vollstaendiges Key-Set des Audit-Events (Drift-Schutz).
+        assert set(metadata.keys()) == {
+            "scan_id",
+            "findings_total",
+            "findings_inserted",
+            "findings_updated",
+            "findings_resolved",
+            "findings_reopened",
+            "class_os_pkgs",
+            "class_lang_pkgs",
+            "class_other",
+        }, metadata
+
+
 class TestProcessScanEnvelopeResult:
     """Ergebnis-Counts sind korrekt gemapt."""
 
@@ -367,6 +422,7 @@ class TestProcessScanEnvelopeResult:
         assert result.findings_inserted == fake_ingest_result.findings_inserted
         assert result.findings_updated == fake_ingest_result.findings_updated
         assert result.findings_resolved == fake_ingest_result.findings_resolved
+        assert result.findings_reopened == fake_ingest_result.findings_reopened
         assert result.class_os_pkgs == fake_ingest_result.findings_class_os_pkgs
         assert result.class_lang_pkgs == fake_ingest_result.findings_class_lang_pkgs
         assert result.class_other == fake_ingest_result.findings_class_other

@@ -174,7 +174,12 @@ def test_application_group_card_renders_with_risk_band(db_app: Flask) -> None:
 
 
 def test_application_group_card_renders_worst_finding_block(db_app: Flask) -> None:
-    """`worst_finding_id` gesetzt + worst_finding im Context -> Worst-Block."""
+    """`worst_finding` im Context -> Worst-Block (Live-Worst, TICKET-010).
+
+    Seit TICKET-010 / ADR-0052 ist `worst_finding` die einzige
+    Render-Bedingung — `evaluation.worst_finding_id` (Snapshot) ist keine
+    Datenquelle mehr.
+    """
     sid, gid, fids = _seed_group_with_findings(
         db_app,
         label="openssh-server",
@@ -191,12 +196,12 @@ def test_application_group_card_renders_worst_finding_block(db_app: Flask) -> No
         worst_finding_id=fids[0],
     )
     assert 'data-test="group-worst-finding"' in html
-    assert "WORST FINDING" in html
+    assert "Worst Finding" in html
     assert "CVE-openssh-server-0" in html
 
 
 def test_application_group_card_no_worst_block_when_not_set(db_app: Flask) -> None:
-    """Keine `worst_finding_id` -> kein Worst-Block."""
+    """Kein `worst_finding` im Context -> kein Worst-Block (Live-Gate)."""
     sid, gid, _fids = _seed_group_with_findings(
         db_app, label="nginx", risk_band="monitor", worst=False, n_findings=2
     )

@@ -57,6 +57,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0049](0049-agent-uninstaller.md) | Agent-Uninstaller: lokales `fathometer-uninstall.sh` (air-gap-first) + `/uninstall.sh`-Alias, entfernt alles vom Installer Mitgebrachte, rein lokal (kein serverseitiges Deregister) — ergänzt ADR-0021 | Akzeptiert |
 | [0050](0050-remove-llm-chat-assessment.md) | Server-weites "Request AI Assessment"-Chat-Feature entfernt (UI/Routes/Prompts/Chat-Services/JS/3 DB-Tabellen, Migration 0017); Provider-Config + Risk-Reviewer bleiben — löst Block G ab | Akzeptiert |
 | [0051](0051-apache-2-0-license.md) | Lizenzierung unter Apache License 2.0 (LICENSE/NOTICE, pyproject, SPDX-Header in app/, README); Rechteinhaber THEKROLL LTD — löst `Proprietary` ab | Akzeptiert |
+| [0052](0052-operator-sichten-jetzt-zustand.md) | Operator-Sichten zeigen Jetzt-Zustand (TICKET-010): Reopen-on-Redetect im Ingest (`resolved → open`, ACK bleibt ACK), Pass-2 bewertet/fingerprintet nur OPEN (präzisiert ADR-0023/0028), Server-Detail-Worst-Finding live statt Eval-Snapshot + „re-evaluation pending"-Drift-Hint, Triage-Aktionen triggern sofortiges Re-Eval | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

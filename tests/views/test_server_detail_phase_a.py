@@ -198,8 +198,16 @@ def test_load_application_groups_projection_shape() -> None:
             risk_band_computed_at=None,
         ),
     ]
+    # TICKET-010 / ADR-0052: Query (4) ist jetzt der Live-Worst-Finding-Batch
+    # (DISTINCT ON application_group_id) — Rows tragen die Group-ID mit.
     finding_rows = [
-        _row(id=100, identifier_key="CVE-2026-1", package_name="openssh", title="bug"),
+        _row(
+            application_group_id=10,
+            id=100,
+            identifier_key="CVE-2026-1",
+            package_name="openssh",
+            title="bug",
+        ),
     ]
     sess = _fake_session([counts_rows, group_rows, eval_rows, finding_rows])
     result = _load_application_groups_for_server(sess, 1)
@@ -218,7 +226,8 @@ def test_load_application_groups_projection_shape() -> None:
     second = result[1]
     assert second["group"].label == "bundle-x"
     assert second["evaluation"].risk_band == "act"
-    assert second["worst_finding"] is None  # worst_finding_id war None
+    # Kein Live-Worst-Row fuer Group 20 im Fixture -> defensiv None.
+    assert second["worst_finding"] is None
 
 
 def test_load_application_groups_missing_evaluation_ranks_as_pending() -> None:
@@ -238,7 +247,9 @@ def test_load_application_groups_missing_evaluation_ranks_as_pending() -> None:
             risk_band_computed_at=None,
         ),
     ]
-    sess = _fake_session([counts_rows, group_rows, eval_rows])
+    # TICKET-010: Query (4) — Live-Worst-Finding-Batch — laeuft jetzt immer;
+    # leeres Resultat ist der defensive Fall (worst_finding -> None).
+    sess = _fake_session([counts_rows, group_rows, eval_rows, []])
     result = _load_application_groups_for_server(sess, 1)
     # ACT-Rank (60) > PENDING-Rank (40) -> ACT zuerst, dann PENDING.
     assert [e["group"].label for e in result] == ["grp-act", "grp-pending"]

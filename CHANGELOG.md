@@ -4,6 +4,45 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — TICKET-010 (ADR-0052): Operator-Sichten zeigen Jetzt-Zustand
+
+Drei zusammenhängende Konsistenz-Bugs (Befund ftp-server / CVE-2026-31431):
+fälschlich für immer RESOLVED bleibende Wiedergänger-Findings, Pass-2-Eval über
+geschlossene Findings (Dauer-Re-Enqueue-Schleife) und Server-Detail-Cards die
+geschlossene CVEs als „Worst Finding" zeigten. Kein Schema, keine Migration,
+kein neuer Endpoint. Quality-Gates grün: `ruff`/`mypy app/`, Default-`pytest`
+2329 passed. db_integration-Läufe + Operator-Browser-Smoke stehen beim User an.
+
+### Fixed
+
+- **Reopen-on-Redetect (Bug A):** der Scan-Ingest reopened jetzt vor dem Upsert
+  alle RESOLVED-Findings deren `(identifier_key, package_name)` im aktuellen
+  Scan wieder auftaucht (`status='open'`, `resolved_at=NULL`). ACK bleibt ACK —
+  Operator-Entscheid schlägt Scanner. Neues Feld `findings_reopened` in
+  `ScanIngestResult`/`ScanProcessingResult`, `scan.ingested`-Audit-Metadata und
+  Worker-JSONB. Bestands-Heal automatisch beim nächsten Scan pro Server.
+- **Pass-2 bewertet nur OPEN (Bug B):** beide Finding-Loads in `_do_pass2`
+  filtern auf `status='open'` — identische Fingerprint-Domäne wie
+  `pass2_enqueue`. Beendet die Dauer-Re-Enqueue-Schleife bei Groups mit
+  non-open Findings; geschlossene Findings sind nicht mehr als
+  `worst_finding_id` wählbar. Race-Guard: werden alle Findings zwischen
+  Job-Pickup und LLM-Call geschlossen, endet der Job als `skipped` ohne Call.
+  Einmaliger Cache-Miss-Burst pro betroffener (group, server)-Kombination.
+- **Server-Detail Live-Worst-Finding (Bug C):** der Group-Loader ermittelt das
+  Worst-Finding pro Group live via `DISTINCT ON` über offene Findings
+  (§15-Triage-Order) statt den Eval-Snapshot aufzulösen; die Eval-Row liefert
+  nur noch Band/Reason/Action-Type. Bei Drift zwischen Snapshot- und Live-Worst
+  rendern Workflow-Card und Group-Card den Hint „re-evaluation pending".
+
+### Added
+
+- **Sofort-Re-Eval bei Triage-Aktionen:** Acknowledge/Reopen/Group-Ack/Bulk-Ack
+  (UI + API, alle Flavors) triggern nach erfolgreichem Status-Write
+  `enqueue_pass2_for_server(trigger="triage_action")` — idempotent und
+  fingerprint-gated, ein Aufruf pro betroffenem Server, kein Aufruf wenn nichts
+  geändert wurde. Vorher passierte das Re-Eval erst beim nächsten Scan
+  (24-h-Lücke).
+
 ## [Unreleased] — ADR-0050: "Request AI Assessment"-Chat-Feature entfernt
 
 Das server-weite interaktive LLM-Chat-Assessment (Block G) wird ersatzlos

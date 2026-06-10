@@ -81,6 +81,7 @@ from app.services.findings_bucket_query import (
     pending_bucket_header,
     resolve_bucket_to_finding_ids,
 )
+from app.services.pass2_enqueue import enqueue_pass2_for_server
 from app.settings_service import get_settings_row
 
 log = structlog.get_logger(__name__)
@@ -512,6 +513,20 @@ def bulk_acknowledge() -> WerkzeugResponse | str:
     user_id_value = getattr(current_user, "id", None)
     user_id_int: int | None = int(user_id_value) if user_id_value is not None else None
 
+    # TICKET-010 Etappe 4 (Vorbereitung): distinct server_ids der Findings,
+    # die gleich wirklich von OPEN -> ACKNOWLEDGED wechseln. MUSS vor dem
+    # UPDATE laufen — danach matcht der OPEN-Filter nicht mehr. Leeres Set
+    # (z. B. alle bereits acknowledged) heisst spaeter: kein Enqueue.
+    changed_server_ids: list[int] = list(
+        sess.execute(
+            select(Finding.server_id)
+            .where(Finding.id.in_(final_ids), Finding.status == FindingStatus.OPEN)
+            .distinct()
+        )
+        .scalars()
+        .all()
+    )
+
     # Idempotenz: nur OPEN-Findings wechseln. So bleibt ein Bucket+Finding-
     # Overlap (Header selektiert, Member nochmal manuell) ohne Doppel-Audit.
     sess.execute(
@@ -553,6 +568,14 @@ def bulk_acknowledge() -> WerkzeugResponse | str:
         metadata=metadata,
         session=sess,
     )
+
+    # TICKET-010 Etappe 4: Triage-Aktion triggert das Pass-2-Re-Eval sofort —
+    # ohne Sofort-Trigger passiert das Re-Eval erst beim naechsten Scan
+    # (24-h-Luecke). Ein Aufruf pro betroffenem Server; wenn kein Finding
+    # wirklich gewechselt hat, ist `changed_server_ids` leer -> kein Aufruf.
+    for changed_server_id in changed_server_ids:
+        enqueue_pass2_for_server(sess, changed_server_id, trigger="triage_action")
+
     sess.commit()
 
     if _is_htmx_request():
@@ -620,6 +643,10 @@ def acknowledge(finding_id: int) -> WerkzeugResponse | str:
     user_id_value = getattr(current_user, "id", None)
     user_id_int: int | None = int(user_id_value) if user_id_value is not None else None
 
+    # TICKET-010 Etappe 4: Vorher-Status merken — Ack auf ein bereits
+    # acknowledged Finding aendert nichts und darf kein Re-Eval triggern.
+    previous_status = finding.status
+
     finding.status = FindingStatus.ACKNOWLEDGED
     finding.acknowledged_at = now
     finding.acknowledged_by = user_id_int
@@ -644,6 +671,14 @@ def acknowledge(finding_id: int) -> WerkzeugResponse | str:
         metadata={"has_comment": has_comment, "note_id": note_id},
         session=sess,
     )
+
+    # TICKET-010 Etappe 4: Triage-Aktion triggert das Pass-2-Re-Eval sofort —
+    # ohne Sofort-Trigger passiert das Re-Eval erst beim naechsten Scan
+    # (24-h-Luecke). Nur wenn der Status wirklich gewechselt hat (No-Op-Ack
+    # darf nicht enqueuen); der Helper ist idempotent + fingerprint-gated.
+    if previous_status != FindingStatus.ACKNOWLEDGED:
+        enqueue_pass2_for_server(sess, finding.server_id, trigger="triage_action")
+
     sess.commit()
 
     return _redirect_or_partial(finding)
@@ -675,6 +710,10 @@ def reopen(finding_id: int) -> WerkzeugResponse | str:
     user_id_value = getattr(current_user, "id", None)
     user_id_int: int | None = int(user_id_value) if user_id_value is not None else None
 
+    # TICKET-010 Etappe 4: Vorher-Status merken — Reopen auf ein bereits
+    # offenes Finding aendert nichts und darf kein Re-Eval triggern.
+    previous_status = finding.status
+
     finding.status = FindingStatus.OPEN
     finding.acknowledged_at = None
     finding.acknowledged_by = None
@@ -699,6 +738,14 @@ def reopen(finding_id: int) -> WerkzeugResponse | str:
         metadata={"has_comment": has_comment, "note_id": note_id},
         session=sess,
     )
+
+    # TICKET-010 Etappe 4: Triage-Aktion triggert das Pass-2-Re-Eval sofort —
+    # ohne Sofort-Trigger passiert das Re-Eval erst beim naechsten Scan
+    # (24-h-Luecke). Nur wenn der Status wirklich gewechselt hat (No-Op-
+    # Reopen darf nicht enqueuen).
+    if previous_status != FindingStatus.OPEN:
+        enqueue_pass2_for_server(sess, finding.server_id, trigger="triage_action")
+
     sess.commit()
 
     return _redirect_or_partial(finding)
@@ -915,6 +962,13 @@ def group_acknowledge() -> WerkzeugResponse | str:
         },
         session=sess,
     )
+
+    # TICKET-010 Etappe 4: Triage-Aktion triggert das Pass-2-Re-Eval sofort —
+    # ohne Sofort-Trigger passiert das Re-Eval erst beim naechsten Scan
+    # (24-h-Luecke). `affected_ids` ist hier garantiert nicht leer (Early-
+    # Return oben), d. h. es hat wirklich mindestens ein Finding gewechselt.
+    enqueue_pass2_for_server(sess, server_id, trigger="triage_action")
+
     sess.commit()
 
     if _is_htmx_request():

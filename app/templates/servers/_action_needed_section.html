@@ -6,8 +6,16 @@
          `label`        : str  — vollstaendiges Label "PHASE · Aktion".
          `variant`      : str  — CSS-Variant-Slug ("escalate-distro" etc.).
          `count`        : int  — Anzahl Groups in der Card.
-         `groups`       : list[dict] — Entries mit `group`/`findings`/
-                                       `worst_finding`/`evaluation`.
+         `groups`       : list[dict] — Entries mit `group`/`evaluation`/
+                                       `count`/`worst_finding`/
+                                       `worst_finding_drift`.
+                                       `worst_finding` ist das LIVE-Worst aus
+                                       den OFFENEN Findings (TICKET-010 /
+                                       ADR-0052) — `evaluation.
+                                       worst_finding_id` ist keine
+                                       Datenquelle mehr. `worst_finding_
+                                       drift=True` -> Hint "re-evaluation
+                                       pending" neben der Reason.
 
    Sicherheit:
      - Group-Labels, Reason und Finding-Identifier sind Pydantic-validiert.
@@ -53,6 +61,8 @@
                     {% if entry.evaluation and entry.evaluation.risk_band_reason %}
                       {{ entry.evaluation.risk_band_reason }}
                     {% else %}—{% endif %}
+                    {%- if entry.worst_finding_drift %} <span class="workflow-table__reason-hint"
+                          data-test="action-card-{{ card.id }}-drift-hint">re-evaluation pending</span>{% endif %}
                   </td>
                 </tr>
               {% endfor %}

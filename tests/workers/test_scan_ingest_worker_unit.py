@@ -145,6 +145,7 @@ class TestResultToJsonb:
             findings_inserted=80,
             findings_updated=15,
             findings_resolved=5,
+            findings_reopened=2,
             class_os_pkgs=60,
             class_lang_pkgs=30,
             class_other=10,
@@ -155,6 +156,7 @@ class TestResultToJsonb:
         assert d["findings_inserted"] == 80
         assert d["findings_updated"] == 15
         assert d["findings_resolved"] == 5
+        assert d["findings_reopened"] == 2
         assert d["class_os_pkgs"] == 60
         assert d["class_lang_pkgs"] == 30
         assert d["class_other"] == 10
@@ -169,6 +171,7 @@ class TestResultToJsonb:
             findings_inserted=5,
             findings_updated=3,
             findings_resolved=2,
+            findings_reopened=1,
             class_os_pkgs=7,
             class_lang_pkgs=2,
             class_other=1,
@@ -192,7 +195,7 @@ class TestResultToJsonb:
         assert d == {}
 
     def test_expected_keys_present(self) -> None:
-        """Alle acht erwarteten Schluesselnamen sind im result-dict."""
+        """Alle neun erwarteten Schluesselnamen sind im result-dict."""
         from app.services.scan_processing import ScanProcessingResult
 
         r = ScanProcessingResult(
@@ -201,6 +204,7 @@ class TestResultToJsonb:
             findings_inserted=0,
             findings_updated=0,
             findings_resolved=0,
+            findings_reopened=0,
             class_os_pkgs=0,
             class_lang_pkgs=0,
             class_other=0,
@@ -212,6 +216,7 @@ class TestResultToJsonb:
             "findings_inserted",
             "findings_updated",
             "findings_resolved",
+            "findings_reopened",
             "class_os_pkgs",
             "class_lang_pkgs",
             "class_other",

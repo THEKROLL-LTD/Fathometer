@@ -6,7 +6,8 @@
 TICKET-007: der Pass-2-Trigger lief frueher genau einmal pro Scan-Upload im
 Ingest. Dieser Helper kapselt die Enqueue-Logik idempotent, sodass mehrere
 Trigger-Punkte (Scan-Ingest, Pass-1-Completion-Hook, Final-Failed-Hook,
-Backstop-Sweep) denselben Code benutzen — ohne Doppel-Jobs zu erzeugen.
+Backstop-Sweep, Triage-Aktionen wie Acknowledge/Reopen/Bulk-Ack —
+TICKET-010 Etappe 4) denselben Code benutzen — ohne Doppel-Jobs zu erzeugen.
 
 Bezug: ARCHITECTURE.md §12 (Risk-Reviewer), ADR-0023 (Two-Pass-Architektur),
 ADR-0028 (application_group_evaluations-Junction).
@@ -38,6 +39,7 @@ Pass2Trigger = Literal[
     "pass1_completion",
     "pass1_final_failed",
     "backstop_sweep",
+    "triage_action",
 ]
 
 # Pass-2-Jobs die noch laufen/warten blockieren ein Re-Enqueue derselben Group.
