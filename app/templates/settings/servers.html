@@ -187,6 +187,19 @@
                       Revoke
                     </button>
                   </form>
+                  <form method="post"
+                        action="{{ url_for('servers.delete_findings', server_id=srv.id) }}"
+                        x-data
+                        @submit="if (!confirm('Delete ALL findings for this server? This is irreversible — only do this to re-import a broken scan state.')) $event.preventDefault();">
+                    {{ delete_findings_form.csrf_token }}
+                    <button type="submit"
+                            class="s-overflow__item s-overflow__item--danger"
+                            data-test="server-delete-findings-{{ srv.id }}"
+                            style="width: 100%;"
+                            aria-label="Delete all findings for {{ srv.name }}">
+                      Delete findings
+                    </button>
+                  </form>
                 </div>
               </div>
             {% else %}

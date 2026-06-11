@@ -4,6 +4,24 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Server-Action „Delete findings"
+
+Neue Operator-Action im Settings-Server-Dropdown (`/settings/servers`) neben
+Rotate-key/Retire/Revoke, um einen defekten Scan-Stand durch Neu-Einspielen zu
+reparieren. Quality-Gates grün: `ruff`/`mypy app/`.
+
+### Added
+
+- **`POST /servers/{id}/delete-findings`:** löscht **alle** Findings eines
+  Servers (jeden Status) unwiderruflich. Der Server-Eintrag und die Audit-Spur
+  bleiben erhalten, `finding_notes` fallen per FK-CASCADE mit; der nächste
+  Scan-Ingest hängt frische Findings wieder an dieselbe `server_id`. Bewusst
+  kein Soft-Delete und kein Per-Finding-Audit — nur ein
+  `server.findings_deleted`-Event mit `deleted_count` in `metadata`. Im
+  Dropdown als Danger-Item mit `confirm()`-Dialog; CSRF wie bei Retire/Revoke.
+  Neue Audit-Action `server.findings_deleted` in `KNOWN_ACTIONS`
+  (Audit-View-Filter).
+
 ## [Unreleased] — TICKET-010 (ADR-0052): Operator-Sichten zeigen Jetzt-Zustand
 
 Drei zusammenhängende Konsistenz-Bugs (Befund ftp-server / CVE-2026-31431):

@@ -8,6 +8,9 @@ Funktionen:
 - `POST /settings/servers/<id>/revoke` — `revoked_at = now`, Key effektiv tot.
 - `POST /settings/servers/<id>/retire` — `retired_at = now`, alle OPEN-Findings
   -> RESOLVED mit Grund `server_retired`. Audit-Event mit Liste.
+- `POST /settings/servers/<id>/delete-findings` — loescht *alle* Findings des
+  Servers (jeden Status) unwiderruflich; Server bleibt bestehen. Fuer
+  Reparatur eines defekten Scan-Stands durch Neu-Einspielen.
 
 Auth: `login_required`. CSRF ueber Flask-WTF. Templates folgen Block-D-Politur;
 hier liefert der `frontend-implementer` das polierte HTML nach.
@@ -21,7 +24,7 @@ from typing import Any
 import structlog
 from flask import Blueprint, flash, redirect, url_for
 from flask_login import login_required
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, select, update
 from werkzeug.wrappers import Response as WerkzeugResponse
 
 from app.audit import log_event
@@ -45,6 +48,7 @@ def list_servers() -> Any:
         servers=rows,
         revoke_form=CSRFOnlyForm(),
         retire_form=CSRFOnlyForm(),
+        delete_findings_form=CSRFOnlyForm(),
     )
 
 
@@ -137,6 +141,51 @@ def retire_server(server_id: int) -> WerkzeugResponse:
     sess.commit()
     flash(
         f"Server '{server.name}' decommissioned. {len(affected_ids)} open findings set to 'resolved'.",
+        "success",
+    )
+    return redirect(url_for("servers.list_servers"))
+
+
+@servers_bp.post("/<int:server_id>/delete-findings")
+@login_required
+def delete_findings(server_id: int) -> WerkzeugResponse:
+    """Loescht *alle* Findings eines Servers (jeden Status), unwiderruflich.
+
+    Use-Case: defekter Scan-Stand reparieren durch Neu-Einspielen. Der
+    Server-Eintrag selbst bleibt unangetastet — der naechste Scan-Ingest
+    haengt neue Findings wieder an dieselbe `server_id`. Abhaengige
+    `finding_notes` werden per DB-FK-CASCADE mitgeloescht.
+    """
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid CSRF token.", "error")
+        return redirect(url_for("servers.list_servers"))
+
+    sess = get_session()
+    server = sess.execute(select(Server).where(Server.id == server_id)).scalar_one_or_none()
+    if server is None:
+        flash("Server not found.", "error")
+        return redirect(url_for("servers.list_servers"))
+
+    deleted_count = sess.execute(
+        select(func.count()).select_from(Finding).where(Finding.server_id == server_id)
+    ).scalar_one()
+    sess.execute(
+        delete(Finding)
+        .where(Finding.server_id == server_id)
+        .execution_options(synchronize_session=False)
+    )
+
+    log_event(
+        "server.findings_deleted",
+        target_type="server",
+        target_id=server.id,
+        metadata={"name": server.name, "deleted_count": deleted_count},
+        session=sess,
+    )
+    sess.commit()
+    flash(
+        f"Deleted {deleted_count} findings for '{server.name}'.",
         "success",
     )
     return redirect(url_for("servers.list_servers"))
