@@ -23,11 +23,12 @@ import hmac
 import secrets
 from functools import lru_cache
 from typing import TYPE_CHECKING, cast
+from urllib.parse import urlsplit, urlunsplit
 
 import structlog
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from flask import Flask
+from flask import Flask, make_response, redirect, request, url_for
 from flask_login import LoginManager, UserMixin
 from sqlalchemy import select
 
@@ -35,6 +36,8 @@ from app.db import get_session
 from app.models import User as UserModel
 
 if TYPE_CHECKING:
+    from werkzeug.wrappers import Response as WerkzeugResponse
+
     from app.config import Settings
 
 log = structlog.get_logger(__name__)
@@ -43,6 +46,54 @@ log = structlog.get_logger(__name__)
 login_manager: LoginManager = LoginManager()
 login_manager.login_view = "auth.login"
 login_manager.session_protection = "strong"
+
+
+def safe_next(raw: str | None) -> str | None:
+    """Reduziert ein `next`-Ziel auf einen lokalen, relativen Pfad.
+
+    Schutz gegen Open-Redirect: ein vom Client kontrollierter Wert (Query-Param
+    `next` oder HTMX-Header `HX-Current-URL`) darf niemals zu einem fremden Host
+    fuehren. Wir verwerfen Scheme und Netloc und behalten nur `path?query` —
+    absolute oder protokoll-relative URLs (`//evil.example`) werden so entschaerft.
+
+    Gibt `None` zurueck, wenn nichts Brauchbares uebrig bleibt (Caller faellt dann
+    auf sein Default-Ziel zurueck).
+    """
+    if not raw:
+        return None
+    parts = urlsplit(raw)
+    # Nur Pfad + Query behalten; Scheme/Netloc/Fragment wegwerfen.
+    path = parts.path or "/"
+    # Ein Pfad MUSS mit genau einem "/" beginnen — sonst koennte `urlsplit`
+    # bei Eingaben wie "/\evil.example" oder Backslash-Tricks etwas Fremdes
+    # durchlassen. Wir normalisieren auf single-leading-slash.
+    if not path.startswith("/") or path.startswith("//"):
+        return None
+    cleaned = urlunsplit(("", "", path, parts.query, ""))
+    return cleaned or None
+
+
+@login_manager.unauthorized_handler
+def _unauthorized() -> WerkzeugResponse:
+    """Auth-Expiry-Handling fuer Browser- UND HTMX-Requests.
+
+    Default-Flask-Login liefert einen 302 auf die Login-View. Ein HTMX-XHR folgt
+    dem 302 transparent und swappt die Login-Seite ins Partial-Target — das
+    eingebettete Login-Formular sieht der Operator dann mitten im Layout.
+
+    Stattdessen: bei `HX-Request` einen leeren 204 mit `HX-Redirect`-Header.
+    HTMX macht daraufhin einen harten Voll-Seiten-Wechsel auf `/login`. Als
+    `next` nehmen wir `HX-Current-URL` (die echte Seite im Browser), nicht den
+    Partial-Endpoint.
+    """
+    if request.headers.get("HX-Request"):
+        target = safe_next(request.headers.get("HX-Current-URL"))
+        login_url = url_for("auth.login", next=target) if target else url_for("auth.login")
+        resp = make_response("", 204)
+        resp.headers["HX-Redirect"] = login_url
+        return resp
+    target = safe_next(request.full_path)
+    return redirect(url_for("auth.login", next=target) if target else url_for("auth.login"))
 
 
 class AuthUser(UserMixin):
@@ -191,6 +242,7 @@ __all__ = [
     "hash_server_key",
     "init_auth",
     "login_manager",
+    "safe_next",
     "verify_master_key",
     "verify_password",
     "verify_server_key",

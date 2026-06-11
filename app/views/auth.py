@@ -22,7 +22,7 @@ from sqlalchemy import select
 
 from app import limiter
 from app.audit import log_event
-from app.auth import AuthUser, verify_password
+from app.auth import AuthUser, safe_next, verify_password
 from app.db import get_session
 from app.forms import LoginForm
 from app.models import User
@@ -85,7 +85,7 @@ def login() -> Any:
         )
         sess.commit()
         log.info("auth.login.success", user_id=row.id)
-        next_url = request.args.get("next")
+        next_url = safe_next(request.args.get("next"))
         return redirect(next_url or url_for("settings.tags_list"))
 
     return render_template("login.html", form=form)
