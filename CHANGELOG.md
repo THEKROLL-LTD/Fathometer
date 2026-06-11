@@ -4,6 +4,35 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — TICKET-015: Trivy-Bump 0.71.0 + Trivy-Auto-Update im Agent
+
+Agent hält die fathometer-managed Trivy-Binary künftig selbst auf der
+empfohlenen Version, statt nur eine „outdated"-Pill anzuzeigen. Quality-Gates
+grün: `ruff`/`mypy app/`, `shellcheck`, Pure-Unit (`pytest`,
+`tests/agent/test_auto_update.sh`).
+
+### Changed
+
+- **`RECOMMENDED_TRIVY_VERSION` 0.70.0 → 0.71.0**, **`CURRENT_AGENT_VERSION`
+  0.5.0 → 0.6.0** (`app/config.py`, gemeinsam mit `AGENT_VERSION="0.6.0"` im
+  Skript — ADR-0021-Konvention). **`MIN_TRIVY_VERSION` bleibt bewusst 0.70.0**:
+  0.71.0 ist ein Minor-Release ohne Schema-Breaking-Changes, ein MIN-Bump würde
+  0.70.0-Hosts unnötig hart als veraltet markieren.
+
+### Added
+
+- **`auto_update_trivy` im wiederkehrenden Agent-Lauf** (`fathometer-agent.sh`):
+  läuft **nach** dem Agent-Selbst-Update und **vor** dem Scan. Hebt die
+  managed Binary auf `recommended_trivy_version`, wenn die installierte Version
+  kleiner ist. Spiegelt die vetted Installer-Logik (`download_pinned_trivy`):
+  Tarball + `trivy_<v>_checksums.txt`, **Pflicht-SHA256-Verifikation**, atomarer
+  `install` mit `.bak`-Backup, Post-Replace-Re-Verify und Rollback bei
+  Fehlschlag. **Nur** `/opt/fathometer/bin/trivy` wird angefasst — ein
+  System-Trivy (apt/`usr/bin`) nie. **Fail-soft**: jeder Fehler hält die
+  vorhandene Version, der Scan scheitert nie an einem Update. Opt-out /
+  Air-Gap via **`FM_TRIVY_AUTO_UPDATE=0`** (Default an); `tar`/`sha256sum` sind
+  Soft-Deps des Update-Pfads (fehlen sie → Update-Skip, kein Abbruch).
+
 ## [Unreleased] — Server-Action „Delete findings"
 
 Neue Operator-Action im Settings-Server-Dropdown (`/settings/servers`) neben

@@ -358,10 +358,11 @@ def test_envelope_compat(stub_bin: Path) -> None:
 
 
 def test_agent_script_has_host_state_integration() -> None:
-    """Sanity-Check: das Haupt-Skript ist auf 0.4.0 gebumpt und sourct die Lib."""
+    """Sanity-Check: das Haupt-Skript traegt den aktuellen Versions-Bump und
+    sourct die Lib (Version-Bump zieht mit TICKET-015 auf 0.6.0)."""
     agent_sh = Path(__file__).parent.parent.parent / "agent" / "fathometer-agent.sh"
     body = agent_sh.read_text()
-    assert 'AGENT_VERSION="0.5.0"' in body, "Agent-Version-Bump auf 0.5.0 fehlt"
+    assert 'AGENT_VERSION="0.6.0"' in body, "Agent-Version-Bump auf 0.6.0 fehlt"
     assert 'REQUIRED_LIB_HOST_STATE_VERSION="0.3.1"' in body
     assert "lib_host_state.sh" in body, "Agent sourct lib_host_state.sh nicht"
     assert "host_state" in body, "Agent baut host_state nicht in Envelope ein"

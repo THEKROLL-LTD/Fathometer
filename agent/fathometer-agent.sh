@@ -39,7 +39,19 @@
 #     rollback, then re-execs itself once.
 #   - Adds top-level `trivy_db` metadata from `trivy version --format json`.
 #
+# TICKET-015 — v0.6.0 changes:
+#   - Trivy auto-update before every scan (`auto_update_trivy`), run AFTER
+#     the agent self-update and BEFORE the scan. Only the fathometer-managed
+#     binary at /opt/fathometer/bin/trivy is touched; a system trivy (apt,
+#     /usr/bin) is never replaced. Mirrors the installer's vetted download:
+#     tarball + `trivy_<v>_checksums.txt`, MANDATORY SHA256 verification,
+#     atomic `install` with a `.bak` backup and post-replace re-verify +
+#     rollback. Fail-soft throughout: any error keeps the current trivy and
+#     never fails the scan. Opt out via `FM_TRIVY_AUTO_UPDATE=0` (air-gap).
+#
 # Requirements: bash >= 4, curl, jq, gzip, trivy (>= 0.70.0)
+#               (trivy auto-update additionally uses tar + sha256sum;
+#                both are optional — the update is skipped if either is absent)
 #               (https://aquasecurity.github.io/trivy/)
 #
 # Required env:
@@ -47,9 +59,15 @@
 #   FM_API_KEY   server key produced by ./fathometer-register.sh
 #
 # Optional env:
-#   FM_TRIVY_PATH    path to the trivy binary (default: from $PATH)
-#   FM_SCAN_PATH     what to scan (default: /)
-#   FM_TIMEOUT_SEC   upload timeout (default: 60)
+#   FM_TRIVY_PATH          path to the trivy binary (default: from $PATH)
+#   FM_SCAN_PATH           what to scan (default: /)
+#   FM_TIMEOUT_SEC         upload timeout (default: 60)
+#   FM_TRIVY_AUTO_UPDATE   1 (default) = keep the managed trivy on the
+#                          recommended version; 0 = never touch trivy
+#                          (set on air-gapped hosts without GitHub outbound)
+#   FM_TRIVY_MANAGED_DIR   directory of the fathometer-managed trivy binary
+#                          (default: /opt/fathometer/bin). Advanced/testing
+#                          seam; trivy outside this dir is never replaced.
 #
 # Run as root, typically via cron or a systemd timer.
 #
@@ -67,7 +85,7 @@
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.5.0"
+readonly AGENT_VERSION="0.6.0"
 readonly REQUIRED_LIB_HOST_STATE_VERSION="0.3.1"
 readonly TRIVY_BIN="${FM_TRIVY_PATH:-trivy}"
 readonly SCAN_PATH="${FM_SCAN_PATH:-/}"
@@ -218,6 +236,172 @@ auto_update_self() {
   exec "$self_path" "$@"
 }
 
+auto_update_trivy() {
+  # TICKET-015 — hebt die fathometer-managed Trivy-Binary auf
+  # `recommended_trivy_version`. Laeuft NACH `auto_update_self` (also im
+  # bereits selbst-aktualisierten Skript) und VOR `require_cmd "$TRIVY_BIN"`.
+  #
+  # Fail-soft-Vertrag: JEDER Fehler (Download, Checksum, tar, Replace,
+  # Re-Verify) endet in `log` + `return 0` mit der vorhandenen Trivy-Version.
+  # Der Scan darf an einem fehlgeschlagenen Update NIE scheitern.
+
+  # (1) Opt-out / Air-Gap-Guard. Default an; `0` deaktiviert komplett.
+  if [[ "${FM_TRIVY_AUTO_UPDATE:-1}" = "0" ]]; then
+    return 0
+  fi
+  if [[ -z "${FM_URL:-}" ]]; then
+    return 0
+  fi
+
+  # (4) Nur die fathometer-managed Binary anfassen. Zeigt $TRIVY_BIN auf ein
+  # System-Trivy (apt -> /usr/bin/trivy o.ae.), NICHT ersetzen — sonst Kampf
+  # mit dem Paketmanager. Die UI-Pill deckt diesen Fall ohnehin ab.
+  local trivy_resolved
+  trivy_resolved="$(command -v "$TRIVY_BIN" 2>/dev/null || true)"
+  if [[ -z "$trivy_resolved" ]]; then
+    # Kein Trivy auffindbar — `require_cmd "$TRIVY_BIN"` faengt das gleich
+    # mit Exit 1 ab; hier nichts zu aktualisieren.
+    return 0
+  fi
+  trivy_resolved="$(readlink -f "$trivy_resolved" 2>/dev/null || printf '%s' "$trivy_resolved")"
+  # `FM_TRIVY_MANAGED_DIR` ist der vom Installer gepinnte bin-Pfad; der Default
+  # ist hart `/opt/fathometer/bin` (Installer-Konvention). Der Override
+  # existiert ausschliesslich als Test-Seam und fuer abweichende Installer-
+  # Prefixe — er aendert NICHT, dass nur die fathometer-eigene Binary ersetzt
+  # wird (ein System-Trivy unter /usr/bin bleibt unangetastet).
+  local managed_dir="${FM_TRIVY_MANAGED_DIR:-/opt/fathometer/bin}"
+  if [[ "$trivy_resolved" != "$managed_dir/trivy" ]]; then
+    log "Trivy-Update: '$trivy_resolved' is not fathometer-managed ($managed_dir/trivy); skipping"
+    return 0
+  fi
+
+  # (2) Ziel-Version + URL-Template aus dem Backend (derselbe Endpoint wie
+  # der Selbst-Update). Server unerreichbar/unvollstaendig -> fail-soft skip.
+  local ver_json recommended url_template
+  ver_json="$(curl -fsS --max-time 5 "${FM_URL%/}/agent/version" 2>/dev/null || true)"
+  if [[ -z "$ver_json" ]]; then
+    log "Trivy-Update: server unreachable, skipping"
+    return 0
+  fi
+  recommended="$(printf '%s' "$ver_json" | jq -r '.recommended_trivy_version // empty' 2>/dev/null)"
+  url_template="$(printf '%s' "$ver_json" | jq -r '.trivy_release_url_template // empty' 2>/dev/null)"
+  if [[ -z "$recommended" || -z "$url_template" ]]; then
+    log "Trivy-Update: server response missing recommended_trivy_version/url_template, skipping"
+    return 0
+  fi
+
+  # (3) Trigger nur wenn installiert < recommended (version_lt, Z. 78).
+  local installed
+  installed="$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || true)"
+  if [[ -z "$installed" ]]; then
+    log "Trivy-Update: could not read installed trivy version, skipping"
+    return 0
+  fi
+  if ! version_lt "$installed" "$recommended"; then
+    log "Trivy-Update: installed $installed >= recommended $recommended, skipping"
+    return 0
+  fi
+
+  # `tar`/`sha256sum` sind nur fuer den Update-Pfad noetig (neue Soft-Deps).
+  # Fehlt eine -> Update skip statt Abbruch.
+  if ! command -v tar >/dev/null 2>&1; then
+    log "Trivy-Update: 'tar' not available, skipping update (keeping $installed)"
+    return 0
+  fi
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    log "Trivy-Update: 'sha256sum' not available, skipping update (keeping $installed)"
+    return 0
+  fi
+
+  # (5) Arch-Map wie `download_pinned_trivy` (im Recurring-Agent ergaenzt).
+  local arch_raw arch
+  arch_raw="$(uname -m)"
+  case "$arch_raw" in
+    x86_64|amd64) arch="64bit" ;;
+    aarch64|arm64) arch="ARM64" ;;
+    *)
+      log "Trivy-Update: unsupported architecture '$arch_raw', skipping"
+      return 0
+      ;;
+  esac
+
+  local url checksums_url
+  url="$url_template"
+  url="${url//\{version\}/$recommended}"
+  url="${url//\{arch\}/$arch}"
+  checksums_url="$(printf '%s' "$url" | sed -E "s#trivy_${recommended}_Linux-${arch}\\.tar\\.gz#trivy_${recommended}_checksums.txt#")"
+
+  log "Trivy-Update: installed $installed < recommended $recommended; updating from $url"
+
+  local tmp
+  tmp="$(mktemp -d -t fathometer-trivy.XXXXXX)" || {
+    log "Trivy-Update: mktemp failed, keeping $installed"
+    return 0
+  }
+  local tarball="${tmp}/trivy.tar.gz"
+  local checksums="${tmp}/checksums.txt"
+
+  # (5) Download Tarball + Checksums.
+  if ! curl -fsSL --max-time 120 -o "$tarball" "$url"; then
+    log "Trivy-Update: tarball download failed, keeping $installed"
+    rm -rf "$tmp"
+    return 0
+  fi
+  if ! curl -fsSL --max-time 30 -o "$checksums" "$checksums_url"; then
+    log "Trivy-Update: checksums download failed, keeping $installed"
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  # (5) SHA256-Verifikation ist PFLICHT — kein ungeprueftes Binaer-Replace.
+  local expected actual
+  expected="$(grep -F "trivy_${recommended}_Linux-${arch}.tar.gz" "$checksums" | awk '{print $1}' | head -1)"
+  if [[ -z "$expected" ]]; then
+    log "Trivy-Update: no checksum entry for trivy_${recommended}_Linux-${arch}.tar.gz, keeping $installed"
+    rm -rf "$tmp"
+    return 0
+  fi
+  actual="$(sha256sum "$tarball" | awk '{print $1}')"
+  if [[ "$expected" != "$actual" ]]; then
+    log "Trivy-Update: sha256 mismatch (expected $expected, got $actual), keeping $installed"
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  if ! tar -xzf "$tarball" -C "$tmp" trivy; then
+    log "Trivy-Update: failed to extract trivy from tarball, keeping $installed"
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  # (6) Atomar ersetzen mit Backup. Backup zuerst, damit ein Rollback
+  # moeglich bleibt falls die Re-Verifikation scheitert.
+  cp -p "$trivy_resolved" "$trivy_resolved.bak" 2>/dev/null || true
+  if ! install -m 0755 -o root -g root "$tmp/trivy" "$trivy_resolved"; then
+    log "Trivy-Update: install/replace failed, keeping $installed"
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  # (6) Re-Verifikation: meldet die neue Binary nicht >= recommended,
+  # Rollback aus `.bak` und fail-soft weiter mit der alten Version.
+  local new_version
+  new_version="$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || true)"
+  if [[ -z "$new_version" ]] || version_lt "$new_version" "$recommended"; then
+    log "Trivy-Update: post-replace check failed (got '${new_version:-unknown}', want >= $recommended), rolling back"
+    if [[ -f "$trivy_resolved.bak" ]]; then
+      install -m 0755 -o root -g root "$trivy_resolved.bak" "$trivy_resolved" 2>/dev/null \
+        || cp -p "$trivy_resolved.bak" "$trivy_resolved" 2>/dev/null || true
+    fi
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  log "Trivy-Update: updated to $new_version (was $installed); backup at $trivy_resolved.bak"
+  rm -rf "$tmp"
+  return 0
+}
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 \
     || { log "Error: '$1' not found in PATH"; exit 1; }
@@ -237,6 +421,10 @@ require_cmd gzip
 : "${FM_API_KEY:?FM_API_KEY is not set}"
 
 auto_update_self "$@"
+
+# TICKET-015: nach dem (ggf. re-exec'ten) Selbst-Update die managed
+# Trivy-Binary auf die empfohlene Version heben — fail-soft, vor dem Scan.
+auto_update_trivy
 
 require_cmd "$TRIVY_BIN"
 

@@ -50,7 +50,7 @@ Subagent-Aufrufe nennen die Sektionen explizit.
 - `MIN_AGENT_VERSION: str = "0.1.0"` — niedrigste Agent-Version, die das Backend noch akzeptiert.
 - `CURRENT_AGENT_VERSION: str = "0.2.0"` — Version, die der Installer als „aktuell" ausliefert (matched `AGENT_VERSION` in `secscan-agent.sh`).
 - `MIN_TRIVY_VERSION: str = "0.70.0"` — niedrigste Trivy-Version, die als „nicht veraltet" gilt (Quelle: ARCHITECTURE §11 Mindestversion für vollständige EPSS-/KEV-/Attack-Vector-Felder).
-- `RECOMMENDED_TRIVY_VERSION: str = "0.70.0"` — Version, die der Installer als pinned Binary herunterlädt. Wird beim Bump im selben Commit aktualisiert.
+- `RECOMMENDED_TRIVY_VERSION: str = "0.71.0"` — Version, die der Installer als pinned Binary herunterlädt **und** auf die der Agent-Lauf eine managed Trivy-Binary hebt (`auto_update_trivy`, TICKET-015). Wird beim Bump im selben Commit aktualisiert.
 - `TRIVY_RELEASE_URL_TEMPLATE: str = "https://github.com/aquasecurity/trivy/releases/download/v{version}/trivy_{version}_Linux-{arch}.tar.gz"`
 - `TRIVY_DB_STALE_THRESHOLD_DAYS: int = 7` — Schwelle für „Trivy-DB veraltet"-Pill.
 
