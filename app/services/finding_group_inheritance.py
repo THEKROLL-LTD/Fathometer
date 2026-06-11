@@ -12,6 +12,10 @@ bestehende Queries/Filter ohne Join korrekte Werte sehen.
 seinen ``server_id`` UND seinen ``application_group_id`` matched — kein
 Cross-Server-Leak mehr (im Gegensatz zur frueheren Logik, die nur auf
 ``group_id`` jointe und damit den last-write-wins-Bug vererbte).
+
+Seit TICKET-012 (ADR-0054) wird ``risk_band_reason`` NICHT mehr auf Findings
+vererbt — das AI-Assessment ist ausschliesslich Group-Level
+(``ApplicationGroupEvaluation.risk_band_reason``).
 """
 
 from __future__ import annotations
@@ -50,15 +54,9 @@ def inherit_group_risk_to_findings(
         .where(
             (Finding.risk_band.is_distinct_from(ApplicationGroupEvaluation.risk_band))
             | (Finding.risk_band_source.is_distinct_from("llm"))
-            | (
-                Finding.risk_band_reason.is_distinct_from(
-                    ApplicationGroupEvaluation.risk_band_reason
-                )
-            )
         )
         .values(
             risk_band=ApplicationGroupEvaluation.risk_band,
-            risk_band_reason=ApplicationGroupEvaluation.risk_band_reason,
             risk_band_source="llm",
             risk_band_computed_at=func.now(),
         )

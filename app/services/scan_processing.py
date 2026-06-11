@@ -151,7 +151,6 @@ def _run_pretriage(
         evaluation = pretriage(finding, server, snapshot_available)
         new_band = evaluation.band.value
         finding.risk_band = new_band
-        finding.risk_band_reason = evaluation.reason
         finding.risk_band_source = "engine"
         finding.risk_band_computed_at = evaluation.computed_at
         band_counters[new_band] += 1

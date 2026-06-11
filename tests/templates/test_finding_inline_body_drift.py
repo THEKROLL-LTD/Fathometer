@@ -48,6 +48,8 @@ def test_no_wrapper_has_inline_reason_duplicate() -> None:
         assert "{{ f.risk_band_reason }}" not in src, (
             f"{rel} rendert risk_band_reason noch inline statt via Partial"
         )
+        # TICKET-012: keine Per-Finding-AI-Box mehr (auch nicht inline kopiert).
+        assert "AI assessment" not in src, f"{rel} traegt noch eine Per-Finding-AI-assessment-Box"
 
 
 def _finding() -> SimpleNamespace:
@@ -62,7 +64,6 @@ def _finding() -> SimpleNamespace:
         cvss_v3_score=7.5,
         severity="high",
         is_kev=False,
-        risk_band_reason="reason text here",
         status=FindingStatus.OPEN,
         description="A description.",
         primary_url="https://avd.aquasec.com/x",

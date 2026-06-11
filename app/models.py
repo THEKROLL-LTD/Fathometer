@@ -436,7 +436,6 @@ class Finding(Base):
     # `risk_band` ist nullable bis zur ersten Auswertung; die UI rendert in
     # diesem Fall einen "pending pre-triage"-Hint.
     risk_band: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    risk_band_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
     risk_band_source: Mapped[str | None] = mapped_column(
         String(16), nullable=True, default="engine"
     )

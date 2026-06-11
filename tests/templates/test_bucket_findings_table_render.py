@@ -41,7 +41,6 @@ def _make_finding(
     *,
     finding_id: int = 42,
     identifier_key: str = "CVE-2024-1234",
-    risk_band_reason: str | None = None,
     is_kev: bool = False,
     title: str | None = "OpenSSL Buffer Overflow",
     package_name: str | None = "openssl",
@@ -60,7 +59,6 @@ def _make_finding(
     return SimpleNamespace(
         id=finding_id,
         identifier_key=identifier_key,
-        risk_band_reason=risk_band_reason,
         is_kev=is_kev,
         title=title,
         package_name=package_name,
@@ -200,42 +198,19 @@ def test_epss_cvss_em_dash_when_none(app: Flask) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Inline-KI-Bewertung
+# Keine Per-Finding-AI-Box (TICKET-012)
 # ---------------------------------------------------------------------------
 
 
-def test_inline_ai_reason_rendered_when_set(app: Flask) -> None:
-    """Block AA: risk_band_reason gesetzt -> Single-Source-Body (sd-finding__body)
-    mit sd-ai-eyebrow + KI-Bewertung + sd-ai-text + Text."""
-    reason = "vendor (redhat) severity HIGH"
-    html = _render(app, findings=[_make_finding(risk_band_reason=reason)])
+def test_no_inline_ai_assessment_box(app: Flask) -> None:
+    """TICKET-012: der aufgeklappte Body rendert KEINE Per-Finding-AI-Box mehr
+    (weder Reason noch Pending-Fallback). Das Assessment lebt auf der
+    Application-Group-Card."""
+    html = _render(app, findings=[_make_finding()])
     assert "sd-finding__body" in html, html
-    assert "sd-ai-eyebrow" in html, html
-    assert "AI assessment" in html, html
-    assert "sd-ai-text" in html, html
-    assert reason in html, html
-
-
-def test_inline_ai_reason_pending_fallback_when_none(app: Flask) -> None:
-    """Block AA: risk_band_reason None -> Body rendert mit Pending-Fallback."""
-    html = _render(app, findings=[_make_finding(risk_band_reason=None)])
-    assert "sd-finding__body" in html, html
-    assert "sd-ai-text--pending" in html, html
-    assert "pass 2" in html, html
-
-
-def test_inline_ai_reason_pending_fallback_when_empty(app: Flask) -> None:
-    """Block AA: risk_band_reason '' (falsy) -> Body rendert mit Pending-Fallback."""
-    html = _render(app, findings=[_make_finding(risk_band_reason="")])
-    assert "sd-finding__body" in html, html
-    assert "sd-ai-text--pending" in html, html
-
-
-def test_inline_ai_reason_is_html_escaped(app: Flask) -> None:
-    """KRITISCH (XSS): risk_band_reason wird autoescaped, kein |safe."""
-    html = _render(app, findings=[_make_finding(risk_band_reason="<script>alert(1)</script>")])
-    assert "<script>alert(1)</script>" not in html, f"XSS unescaped im Output: {html}"
-    assert "&lt;script&gt;" in html, f"Escaped-Version fehlt: {html}"
+    assert "AI assessment" not in html, html
+    assert "sd-ai-text--pending" not in html, html
+    assert "finding-reason-pending-" not in html, html
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +289,7 @@ def test_no_daisyui_classes_in_summary(app: Flask) -> None:
     ("migrate, not refactor"). Geprueft wird daher nur der Summary-Teil bis
     zum Body-Start.
     """
-    html = _render(app, findings=[_make_finding(is_kev=True, risk_band_reason="x")])
+    html = _render(app, findings=[_make_finding(is_kev=True)])
     summary = html[: html.index('<div class="sd-finding__body"')]
     for needle in ('class="badge ', " btn-", "table table", "link-hover", "checkbox checkbox"):
         assert needle not in summary, f"DaisyUI-Rest in Summary gefunden: {needle!r}"

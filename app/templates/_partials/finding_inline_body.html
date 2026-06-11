@@ -18,28 +18,20 @@
    ein eigener Scope pro Row.
 
    Sicherheit (ADR-0038 §G4 / ADR-0041 §Audit):
-     - `description`, `references`, `primary_url`, `risk_band_reason` werden
-       NIEMALS mit `|safe` gerendert — Jinja-Autoescape ist Pflicht.
+     - `description`, `references`, `primary_url` werden NIEMALS mit `|safe`
+       gerendert — Jinja-Autoescape ist Pflicht.
      - References + Primary-URL sind bereits per Pydantic auf `http(s)://`
        whitelisted; das defensive Template-Re-Check (`startswith`) ist
        Double-Defense.
      - Notes nutzen weiter `markdown_safe` (nh3-Whitelist) im inkludierten
        `_notes_thread.html`.
+
+   Hinweis (TICKET-012): Das AI-Assessment ist ein Group-Level-Wert und wird
+   ausschliesslich auf der Application-Group-Card gerendert, NICHT pro Finding.
 #}
 <div class="sd-finding__body" data-test="finding-body-{{ finding.id }}">
-  {# 1. Body-Header: KI-Bewertung (links) + Action-Button (rechts). #}
+  {# 1. Body-Header: nur noch der Action-Button (rechts). #}
   <div class="sd-finding__bodyhead">
-    <div class="sd-finding__bodyhead-main">
-      {%- if finding.risk_band_reason -%}
-        <p class="sd-ai-eyebrow">AI assessment</p>
-        <p class="sd-ai-text">{{ finding.risk_band_reason }}</p>
-      {%- else -%}
-        <p class="sd-ai-text sd-ai-text--pending"
-           data-test="finding-reason-pending-{{ finding.id }}">
-          AI assessment pending — pass 2 runs asynchronously.
-        </p>
-      {%- endif -%}
-    </div>
     <div class="sd-finding__bodyhead-action">
       {%- if finding.status.value == 'acknowledged' -%}
         <button type="button"

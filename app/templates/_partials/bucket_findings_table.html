@@ -17,8 +17,8 @@
    Design-Adoption droppt die Status-Spalte analog Server-Detail-Triage):
      Checkbox · CVE/Titel · Paket · EPSS · CVSS · Severity · Erstmals.
 
-   Jede Zeile ist ein `<details class="bucket-finding">`; der Body zeigt die
-   Inline-"KI-Bewertung" (sd-ai-eyebrow + sd-ai-text) aus `risk_band_reason`.
+   Jede Zeile ist ein `<details class="bucket-finding">`; der aufgeklappte Body
+   kommt aus dem Single-Source-Partial `finding_inline_body.html`.
 
    Pager (Spec §8): `bucket-card__footer`/`bucket-card__pager`-Look. Buttons
    triggern `hx-get` auf `findings.bucket_fragment` mit neuem `page=`; Target ist
@@ -29,8 +29,8 @@
    `toggleFinding(...)` im Alpine-Scope `bucketBulkSelection()`. `@click.stop`
    verhindert, dass der Checkbox-Klick das `<details>` toggelt.
 
-   Sicherheit: `risk_band_reason` NIE mit |safe — LLM-Output, Jinja-Autoescape
-   ist Pflicht (ADR-0038 §G4). KEIN DaisyUI.
+   Sicherheit: LLM-/Trivy-/User-Daten NIE mit |safe — Jinja-Autoescape ist
+   Pflicht (ADR-0038 §G4). KEIN DaisyUI.
 #}
 {% if findings %}
 <div data-test="bucket-findings-table"

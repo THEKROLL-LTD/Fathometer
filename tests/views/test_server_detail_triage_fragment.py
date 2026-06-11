@@ -64,7 +64,6 @@ def _make_row(
     cvss_v3_score: float | None = 7.5,
     severity: Severity = Severity.HIGH,
     is_kev: bool = False,
-    risk_band_reason: str | None = None,
     status: FindingStatus = FindingStatus.OPEN,
     finding_class: FindingClass = FindingClass.OS_PKGS,
     description: str | None = None,
@@ -89,7 +88,6 @@ def _make_row(
         cvss_v3_score=cvss_v3_score,
         severity=severity,
         is_kev=is_kev,
-        risk_band_reason=risk_band_reason,
         status=status,
         finding_class=finding_class,
         description=description,
@@ -361,7 +359,7 @@ def test_triage_band_fragment_orm_hydration_columns(
     assert id_cols == {"id"}, f"Step-1-Query soll nur `id` projizieren, hat: {sorted(id_cols)}"
     # Step 2: volle ORM-Hydration mit den Inline-Body-Spalten.
     col_names = {c.name for c in captured[-1].selected_columns}
-    for needed in ("id", "description", "references", "primary_url", "risk_band_reason"):
+    for needed in ("id", "description", "references", "primary_url"):
         assert needed in col_names, (
             f"ORM-Hydration unvollstaendig — {needed!r} fehlt in {sorted(col_names)}"
         )

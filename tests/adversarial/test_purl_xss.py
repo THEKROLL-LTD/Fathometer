@@ -43,7 +43,6 @@ def test_finding_field_xss_payload_renders_escaped(app: Flask) -> None:
     finding = SimpleNamespace(
         id=7,
         identifier_key="CVE-2026-77001",
-        risk_band_reason=None,
         is_kev=False,
         title="evil",
         package_name=payload,

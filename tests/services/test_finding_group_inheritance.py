@@ -33,7 +33,7 @@ def _compiled_sql(session: MagicMock) -> str:
     )
 
 
-def test_inherits_junction_band_reason_and_llm_source_without_action_type() -> None:
+def test_inherits_junction_band_and_llm_source_without_action_type() -> None:
     session = _session_with_rowcount(5)
 
     updated = inherit_group_risk_to_findings(session)
@@ -43,12 +43,21 @@ def test_inherits_junction_band_reason_and_llm_source_without_action_type() -> N
     assert "UPDATE findings" in sql
     assert "FROM application_group_evaluations" in sql
     assert "risk_band=application_group_evaluations.risk_band" in sql
-    assert "risk_band_reason=application_group_evaluations.risk_band_reason" in sql
+    # TICKET-012: risk_band_reason wird NICHT mehr auf Findings vererbt
+    # (AI-Assessment ist Group-Level).
+    assert "risk_band_reason" not in sql
     assert "risk_band_source='llm'" in sql
     assert "risk_band_computed_at=now()" in sql
     assert "action_type" not in sql
     assert not hasattr(Finding, "action_type")
     session.commit.assert_not_called()
+
+
+def test_finding_has_no_risk_band_reason_column() -> None:
+    """TICKET-012: Per-Finding-``risk_band_reason`` ist entfernt (Schema-Drop,
+    Migration 0021). AI-Assessment lebt ausschliesslich auf der
+    ``ApplicationGroupEvaluation`` (Group-Level)."""
+    assert not hasattr(Finding, "risk_band_reason")
 
 
 def test_composite_match_joins_group_id_and_server_id() -> None:
@@ -64,7 +73,7 @@ def test_composite_match_joins_group_id_and_server_id() -> None:
     assert "findings.server_id = application_group_evaluations.server_id" in sql
 
 
-def test_idempotency_filter_checks_band_source_and_reason() -> None:
+def test_idempotency_filter_checks_band_and_source() -> None:
     session = _session_with_rowcount()
 
     inherit_group_risk_to_findings(session)
@@ -72,10 +81,8 @@ def test_idempotency_filter_checks_band_source_and_reason() -> None:
     sql = _compiled_sql(session)
     assert "findings.risk_band IS DISTINCT FROM application_group_evaluations.risk_band" in sql
     assert "findings.risk_band_source IS DISTINCT FROM 'llm'" in sql
-    assert (
-        "findings.risk_band_reason IS DISTINCT FROM "
-        "application_group_evaluations.risk_band_reason" in sql
-    )
+    # TICKET-012: kein risk_band_reason-Term mehr in der OR-Bedingung.
+    assert "risk_band_reason" not in sql
 
 
 def test_group_ids_filter_limits_update_to_given_groups() -> None:

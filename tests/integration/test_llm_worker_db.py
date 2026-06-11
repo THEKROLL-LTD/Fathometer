@@ -580,9 +580,10 @@ def test_live_pass2_writes_cache_and_group_band(
 
             inherited_finding = sess.get(Finding, f1.id)
             assert inherited_finding is not None
+            # TICKET-012: Finding erbt Band + Source, aber keinen reason mehr
+            # (AI-Assessment ist Group-Level).
             assert inherited_finding.risk_band == "act"
             assert inherited_finding.risk_band_source == "llm"
-            assert inherited_finding.risk_band_reason == "sshd active, patch available"
             assert (updated_job.result or {}).get("findings_inherited") == 1
 
             cache_rows = list(sess.execute(select(LLMRiskCache)).scalars().all())
@@ -683,9 +684,9 @@ def test_live_pass2_cache_hit_skips_llm_call(
             assert grp.risk_band == "mitigate"
             inherited_finding = sess.get(Finding, f1.id)
             assert inherited_finding is not None
+            # TICKET-012: Finding erbt Band + Source, keinen reason (Group-Level).
             assert inherited_finding.risk_band == "mitigate"
             assert inherited_finding.risk_band_source == "llm"
-            assert inherited_finding.risk_band_reason == "cached reason"
             assert (updated_job.result or {}).get("findings_inherited") == 1
     finally:
         sess.close()

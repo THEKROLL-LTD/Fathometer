@@ -1127,24 +1127,19 @@
    Token-only; LLM-/Trivy-/User-Daten werden autoescaped gerendert.
    ───────────────────────────────────────────────────────────── */
 
-/* Body-Header: KI-Bewertung (links) + Action-Button (rechts). */
+/* Body-Header: nur noch der Action-Button, rechtsbuendig (TICKET-012 — die
+   AI-Bewertung ist Group-Level und lebt auf der Application-Group-Card). */
 .sd-finding__bodyhead {
   display: flex;
   align-items: flex-start;
+  justify-content: flex-end;
   gap: 16px;
   padding-bottom: 4px;
-}
-.sd-finding__bodyhead-main {
-  flex: 1 1 auto;
-  min-width: 0;
 }
 .sd-finding__bodyhead-action {
   flex-shrink: 0;
   padding-left: 16px;
 }
-
-/* Pending-Fallback wenn risk_band_reason fehlt. */
-.sd-ai-text--pending { color: var(--text-tertiary); }
 
 /* Action-Button: Outline in --accent, Mono, Uppercase, 11px. */
 .sd-finding__action-btn {

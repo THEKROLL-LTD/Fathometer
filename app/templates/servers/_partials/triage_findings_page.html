@@ -22,9 +22,9 @@
      - has_prev    : bool — True wenn page > 1.
      - has_next    : bool — True wenn page < total_pages.
 
-   Sicherheit: `f.risk_band_reason` NIE mit |safe rendern (LLM-Output,
-   Jinja-Autoescape ist Pflicht, ADR-0038 §G4). `band` ist server-seitig
-   gegen `_RISK_BAND_SECTION_ORDER` whitelisted — kein User-Input.
+   Sicherheit: LLM-/Trivy-/User-Daten NIE mit |safe rendern (Jinja-Autoescape
+   ist Pflicht, ADR-0038 §G4). `band` ist server-seitig gegen
+   `_RISK_BAND_SECTION_ORDER` whitelisted — kein User-Input.
 #}
 {% from "_macros.html" import kev_badge, quick_copy %}
 {%- if not findings -%}

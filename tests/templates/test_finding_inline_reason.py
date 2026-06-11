@@ -1,12 +1,11 @@
 """Pure-Unit-Tests fuer ``_partials/group_findings_table.html`` (Block X Phase
 G3/G4 + Block AA, ADR-0038 §G3/§G4 + ADR-0041).
 
-Block AA (ADR-0041): der aufgeklappte Body kommt jetzt aus dem Single-Source-
-Partial ``_partials/finding_inline_body.html`` und rendert IMMER (AI-Reason
-oder Pending-Fallback + Action-Button + Description/Primary/References/Notes).
-Die frueheren "kein Body wenn reason None"-Asserts sind damit hinfaellig —
-stattdessen pruefen wir hier den Summary-Markup-Vertrag und die Reason-
-Darstellung. Der volle Body-Vertrag liegt in ``test_finding_inline_body.py``.
+Block AA (ADR-0041): der aufgeklappte Body kommt aus dem Single-Source-
+Partial ``_partials/finding_inline_body.html``. Geprueft wird hier der
+Summary-Markup-Vertrag (details-Row, sd-findings-stack, KEV-Badge) plus die
+TICKET-012-Regression: KEINE Per-Finding-AI-Box mehr im Body. Der volle
+Body-Vertrag liegt in ``test_finding_inline_body.py``.
 
 Render-Strategie:
   - ``app.jinja_env.get_template()`` fuer das Wrapper-Partial.
@@ -35,7 +34,6 @@ def _make_finding(
     *,
     finding_id: int = 42,
     identifier_key: str = "CVE-2024-1234",
-    risk_band_reason: str | None = "vendor (redhat) severity HIGH",
     is_kev: bool = False,
     title: str | None = "OpenSSL Buffer Overflow",
     package_name: str | None = "openssl",
@@ -55,7 +53,6 @@ def _make_finding(
     return SimpleNamespace(
         id=finding_id,
         identifier_key=identifier_key,
-        risk_band_reason=risk_band_reason,
         is_kev=is_kev,
         title=title,
         package_name=package_name,
@@ -108,47 +105,17 @@ def test_finding_row_has_data_test_anchor(app: Flask, monkeypatch: pytest.Monkey
     assert 'data-test="group-finding-row-42"' in html
 
 
-def test_inline_reason_rendered_when_risk_band_reason_set(
-    app: Flask, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reason_text = "vendor (redhat) severity HIGH"
-    finding = _make_finding(risk_band_reason=reason_text)
+def test_no_ai_assessment_box_in_group_body(app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TICKET-012: der Group-Drilldown-Body rendert KEINE Per-Finding-AI-Box
+    (weder Reason noch Pending-Fallback) — das Assessment lebt nur auf der
+    Application-Group-Card."""
+    finding = _make_finding(finding_id=42)
     html = _render_findings_table(app, monkeypatch, [finding])
-    assert "AI assessment" in html
-    assert reason_text in html
+    # Body rendert weiterhin (Action-Button), aber ohne AI-Box.
     assert "sd-finding__body" in html
-    assert "sd-ai-text" in html
-
-
-def test_body_renders_pending_fallback_when_reason_none(
-    app: Flask, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Block AA: bei risk_band_reason=None rendert der Body trotzdem — mit
-    Pending-Fallback-Hint statt der KI-Bewertung."""
-    finding = _make_finding(risk_band_reason=None)
-    html = _render_findings_table(app, monkeypatch, [finding])
-    assert "sd-finding__body" in html
-    assert "pass 2" in html
-    assert "sd-ai-text--pending" in html
-
-
-def test_body_renders_pending_fallback_when_reason_empty(
-    app: Flask, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    finding = _make_finding(risk_band_reason="")
-    html = _render_findings_table(app, monkeypatch, [finding])
-    assert "sd-finding__body" in html
-    assert "sd-ai-text--pending" in html
-
-
-def test_inline_reason_is_html_escaped_against_xss_payload(
-    app: Flask, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    xss_payload = "<script>alert(1)</script>"
-    finding = _make_finding(risk_band_reason=xss_payload)
-    html = _render_findings_table(app, monkeypatch, [finding])
-    assert "<script>alert(1)</script>" not in html
-    assert "&lt;script&gt;" in html
+    assert "AI assessment" not in html
+    assert "sd-ai-text--pending" not in html
+    assert "finding-reason-pending-" not in html
 
 
 def test_finding_uses_sd_findings_stack_wrapper(

@@ -27,7 +27,7 @@ def test_server_host_state_snapshot_at_exists(db_app: Flask) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Findings-Spalten (sechs neue)
+# Findings-Spalten (fuenf — risk_band_reason in 0021/TICKET-012 gedroppt)
 # ---------------------------------------------------------------------------
 
 
@@ -35,9 +35,10 @@ def test_finding_block_o_columns_exist(db_app: Flask) -> None:
     engine = get_engine(db_app)
     inspector = inspect(engine.sync_engine if hasattr(engine, "sync_engine") else engine)
     cols = {col["name"]: col for col in inspector.get_columns("findings")}
+    # TICKET-012 / 0021: `risk_band_reason` wurde auf Finding-Ebene gedroppt
+    # (AI-Assessment ist Group-Level) — nicht mehr im erwarteten Spalten-Set.
     for name in (
         "risk_band",
-        "risk_band_reason",
         "risk_band_source",
         "risk_band_computed_at",
         "severity_by_provider",

@@ -183,8 +183,9 @@ class RiskEvaluation:
 
     `source` ist immer `"engine"` aus diesem Modul — Block P (LLM) baut
     eigene `RiskEvaluation`-Instanzen mit `source="llm"`. Caller schreibt
-    die Felder dann auf das Finding (`risk_band`, `risk_band_reason`,
-    `risk_band_source`, `risk_band_computed_at`).
+    die Felder dann auf das Finding (`risk_band`, `risk_band_source`,
+    `risk_band_computed_at`). `reason` wird seit TICKET-012 nicht mehr
+    auf Finding-Ebene persistiert (AI-Assessment ist Group-Level).
     """
 
     band: RiskBand

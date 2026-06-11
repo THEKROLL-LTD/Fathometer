@@ -27,7 +27,6 @@ def _make_finding(
     *,
     finding_id: int = 42,
     identifier_key: str = "CVE-2024-1234",
-    risk_band_reason: str | None = None,
     is_kev: bool = False,
     title: str | None = "OpenSSL Buffer Overflow",
     package_name: str | None = "openssl",
@@ -48,7 +47,6 @@ def _make_finding(
     return SimpleNamespace(
         id=finding_id,
         identifier_key=identifier_key,
-        risk_band_reason=risk_band_reason,
         is_kev=is_kev,
         title=title,
         package_name=package_name,
@@ -186,11 +184,12 @@ def test_epss_cvss_em_dash_when_none(app: Flask) -> None:
     assert _EM_DASH in html, repr(html)
 
 
-def test_inline_ai_reason_escaped(app: Flask) -> None:
-    html = _render(app, findings=[_make_finding(risk_band_reason="<script>alert(1)</script>")])
-    assert "<script>alert(1)</script>" not in html, html
-    assert "&lt;script&gt;" in html, html
-    assert "AI assessment" in html and "sd-ai-text" in html, html
+def test_no_inline_ai_assessment_box(app: Flask) -> None:
+    """TICKET-012: keine Per-Finding-AI-Box im Pending-Bucket-Body."""
+    html = _render(app, findings=[_make_finding()])
+    assert "sd-finding__body" in html, html
+    assert "AI assessment" not in html, html
+    assert "sd-ai-text--pending" not in html, html
 
 
 def test_checkbox_bulk_contract(app: Flask) -> None:
@@ -203,7 +202,7 @@ def test_checkbox_bulk_contract(app: Flask) -> None:
 def test_no_daisyui_classes_in_summary(app: Flask) -> None:
     """Block AA (ADR-0041): nur die Summary-Row ist DaisyUI-frei — der gemeinsame
     Inline-Body includet das beibehaltene Modal + Notes-Thread mit Legacy-Klassen."""
-    html = _render(app, findings=[_make_finding(is_kev=True, risk_band_reason="x")])
+    html = _render(app, findings=[_make_finding(is_kev=True)])
     summary = html[: html.index('<div class="sd-finding__body"')]
     for needle in ('class="badge ', " btn-", "table table", "link-hover", "checkbox checkbox"):
         assert needle not in summary, f"DaisyUI-Rest in Summary gefunden: {needle!r}"

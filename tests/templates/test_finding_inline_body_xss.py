@@ -2,7 +2,7 @@
 ADR-0041 §Audit / ADR-0038 §G4).
 
 Double-Defense: Pydantic verhindert non-http(s)-URLs schon beim Ingest, das
-Template re-checkt defensiv. Description/References/Primary-URL/Reason werden
+Template re-checkt defensiv. Description/References/Primary-URL werden
 ausschliesslich autoescaped gerendert (kein |safe). Notes laufen ueber
 markdown_safe (nh3-Whitelist).
 """
@@ -22,7 +22,6 @@ def _finding(**over: Any) -> SimpleNamespace:
     base: dict[str, Any] = {
         "id": 1,
         "identifier_key": "CVE-2024-0001",
-        "risk_band_reason": None,
         "status": FindingStatus.OPEN,
         "description": None,
         "primary_url": None,
@@ -70,9 +69,3 @@ def test_primary_url_javascript_filtered(app: Flask) -> None:
     html = _render(app, _finding(primary_url="javascript:alert(document.cookie)"))
     assert "javascript:alert" not in html
     assert "sd-finding__primary-block" not in html
-
-
-def test_reason_script_autoescaped(app: Flask) -> None:
-    html = _render(app, _finding(risk_band_reason="<script>steal()</script>"))
-    assert "<script>steal()</script>" not in html
-    assert "&lt;script&gt;" in html

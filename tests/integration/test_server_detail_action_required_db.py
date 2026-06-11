@@ -1,12 +1,14 @@
 """Block O (ADR-0022): Server-Detail Action-Required-Pill + Host-Snapshot-
-Sektion + Per-Finding-Risk-Band-Reason.
+Sektion.
 
 Tests:
   - Server mit `pending`-Finding -> rote Action-Pill mit Sub-Counter.
   - Server ohne Yes-Bands -> gruene Safe-Pill.
   - Server ohne Snapshot -> graue Update-Agent-Pill.
   - Host-Snapshot-Sektion zeigt erste 5 Listener + "+N more"-Toggle.
-  - Per-Finding-Detail-Box zeigt `risk_band_reason` in Mono-Font.
+
+(TICKET-012: die Per-Finding-AI-Assessment-Box wurde entfernt — das
+AI-Assessment ist Group-Level.)
 """
 
 from __future__ import annotations
@@ -66,7 +68,6 @@ def _add_finding(
     server_id: int,
     identifier_key: str,
     risk_band: str | None = None,
-    risk_band_reason: str | None = None,
     severity: Severity = Severity.HIGH,
 ) -> int:
     factory = get_session_factory(app)
@@ -88,7 +89,6 @@ def _add_finding(
                 first_seen_at=now,
                 last_seen_at=now,
                 risk_band=risk_band,
-                risk_band_reason=risk_band_reason,
             )
             sess.add(f)
             sess.flush()
@@ -140,7 +140,6 @@ def test_server_detail_action_needed_pill_for_pending_finding(db_app: Flask) -> 
         server_id=sid,
         identifier_key="CVE-PE-1",
         risk_band="pending",
-        risk_band_reason="max-severity HIGH · pending LLM review",
     )
     client = db_app.test_client()
     login(client)
@@ -202,31 +201,6 @@ def test_server_detail_host_snapshot_empty_state_without_snapshot(db_app: Flask)
     login(client)
     body = client.get(f"/servers/{sid}").get_data(as_text=True)
     assert 'data-test="host-snapshot-missing"' in body
-
-
-def test_server_detail_finding_row_shows_risk_band_reason(db_app: Flask) -> None:
-    """Finding mit `risk_band_reason` rendert die KI-Bewertung im Inline-Body.
-
-    Block AA (ADR-0041): Findings rendern lazy ueber das Triage-Fragment. Der
-    `risk_band_reason` erscheint im Single-Source-Inline-Body als `sd-ai-text`
-    (kein `finding-risk-reason`-Flat-Marker mehr).
-    """
-    create_admin_user(db_app)
-    sid = _create_server(db_app, name="srv-reason")
-    _add_finding(
-        db_app,
-        server_id=sid,
-        identifier_key="CVE-R-1",
-        risk_band="pending",
-        risk_band_reason="KEV listed · pending LLM review",
-    )
-    client = db_app.test_client()
-    login(client)
-    # Triage-Fragment des `pending`-Bands liefert den Inline-Body mit Reason.
-    body = client.get(f"/servers/{sid}/triage/pending").get_data(as_text=True)
-    assert "sd-ai-text" in body
-    assert "KEV listed" in body
-    assert "pending LLM review" in body
 
 
 def test_server_detail_findings_grouped_by_band_with_section_headers(db_app: Flask) -> None:

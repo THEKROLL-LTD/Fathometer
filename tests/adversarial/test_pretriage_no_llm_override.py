@@ -12,9 +12,12 @@ Block O, ADR-0022 §Re-Evaluation:
 Konkret muss gelten:
   * `finding.risk_band` bleibt unveraendert.
   * `finding.risk_band_source` bleibt `"llm"`.
-  * `finding.risk_band_reason` bleibt unveraendert.
   * `finding.risk_band_computed_at` bleibt unveraendert.
   * Field-Level-Invarianten bleiben auch nach Re-Ingest erhalten.
+
+(Seit TICKET-012 gibt es kein `finding.risk_band_reason` mehr — das
+AI-Assessment ist Group-Level; die Override-Garantie betrifft Band und
+Source.)
 
 Plus: in einer Mischmenge engine+llm muss die Pre-Triage genau die
 engine-Findings re-evaluieren und die llm-Findings unangetastet lassen.
@@ -109,7 +112,6 @@ def _set_llm_band(
     server_id: int,
     identifier_key: str,
     band: str,
-    reason: str,
     computed_at: datetime,
 ) -> int:
     """Markiert ein Finding als LLM-bewertet (Block-P-Simulation)."""
@@ -125,7 +127,6 @@ def _set_llm_band(
             ).scalar_one()
             f.risk_band = band
             f.risk_band_source = "llm"
-            f.risk_band_reason = reason
             f.risk_band_computed_at = computed_at
             fid = f.id
             sess.commit()
@@ -169,7 +170,6 @@ def test_llm_act_band_not_overwritten_on_reingest(db_app: Flask) -> None:
         server_id=sid,
         identifier_key="CVE-2024-50001",
         band="act",
-        reason="LLM determined act",
         computed_at=fixed_ts,
     )
 
@@ -183,12 +183,9 @@ def test_llm_act_band_not_overwritten_on_reingest(db_app: Flask) -> None:
     f = findings[0]
     assert f.id == fid
 
-    # Felder unveraendert.
+    # Felder unveraendert (TICKET-012: kein risk_band_reason mehr auf Finding).
     assert f.risk_band == "act", f"risk_band wurde ueberschrieben: {f.risk_band}"
     assert f.risk_band_source == "llm", f"risk_band_source wurde umgesetzt: {f.risk_band_source}"
-    assert f.risk_band_reason == "LLM determined act", (
-        f"risk_band_reason wurde ueberschrieben: {f.risk_band_reason!r}"
-    )
     assert f.risk_band_computed_at == fixed_ts, (
         f"risk_band_computed_at wurde ueberschrieben: {f.risk_band_computed_at}"
     )
@@ -237,7 +234,6 @@ def test_mixed_engine_and_llm_only_engine_reevaluated(db_app: Flask) -> None:
         server_id=sid,
         identifier_key="CVE-2024-60002",
         band="act",
-        reason="LLM final: exposed and exploitable",
         computed_at=fixed_ts,
     )
 
@@ -272,9 +268,8 @@ def test_mixed_engine_and_llm_only_engine_reevaluated(db_app: Flask) -> None:
     )
     assert engine_f.risk_band_source == "engine"
 
-    # LLM-Finding ist unveraendert.
+    # LLM-Finding ist unveraendert (TICKET-012: kein risk_band_reason mehr).
     llm_f = findings_post["CVE-2024-60002"]
     assert llm_f.risk_band == "act"
     assert llm_f.risk_band_source == "llm"
-    assert llm_f.risk_band_reason == "LLM final: exposed and exploitable"
     assert llm_f.risk_band_computed_at == fixed_ts
