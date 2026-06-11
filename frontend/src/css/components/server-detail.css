@@ -427,6 +427,20 @@
 .workflow-table tr:hover td { background: var(--surface-hover); }
 .workflow-table .workflow-table__group { color: var(--accent); width: 280px; }
 .workflow-table .workflow-table__cve   { color: var(--text-primary); width: 160px; white-space: nowrap; }
+/* Worst-Finding-Link -> Findings-Suche (/findings?q=<cve>). Sichtbare
+   Link-Affordance wie die Group-Links: Accent + persistenter Unterstrich. */
+.workflow-table__cve-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+.workflow-table__cve-link:hover { text-decoration-thickness: 2px; }
+.workflow-table__cve-link:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
 .workflow-table .workflow-table__reason { color: var(--text-secondary); }
 .workflow-table__reason b { color: var(--text-primary); font-weight: 400; }
 /* Lane-Tag in der Group-Spalte (ADR-0053): dezenter patch/no-patch-Hinweis
@@ -453,6 +467,57 @@
   color: var(--status-degraded);
   white-space: nowrap;
   margin-left: 8px;
+}
+
+/* Info-Tooltip neben dem "Reason"-Spaltenkopf (Operator-Workflows): erklaert,
+   dass die Reason ein KI-Assessment des Lane-Worst-Findings ist (was, worauf
+   bezogen, wie erzeugt). Icon erbt die Spaltenkopf-Farbe via `currentColor`
+   (= gleiche Farbe wie der "Reason"-Text). CSS-only, token-only, kein JS. */
+.wf-reason-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: inherit;
+  cursor: help;
+  vertical-align: middle;
+}
+.wf-reason-info__icon { display: block; opacity: 0.65; }
+.wf-reason-info:hover .wf-reason-info__icon,
+.wf-reason-info:focus-visible .wf-reason-info__icon { opacity: 1; }
+.wf-reason-info:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.wf-reason-info__bubble {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: 320px;
+  max-width: 70vw;
+  padding: 10px 12px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-visible);
+  border-radius: var(--radius-sm);
+  /* th erbt uppercase + letter-spacing — im Bubble auf Fliesstext zuruecksetzen */
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-secondary);
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.wf-reason-info:hover .wf-reason-info__bubble,
+.wf-reason-info:focus-within .wf-reason-info__bubble {
+  opacity: 1;
+  visibility: visible;
 }
 
 .workflow-card__footer {

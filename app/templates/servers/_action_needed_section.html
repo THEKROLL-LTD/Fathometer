@@ -28,6 +28,7 @@
      - Default-collapsed: `<details>` ohne `open`-Attribut.
 #}
 {% if action_sections %}
+{%- set reason_help = "Reason is a short risk assessment written by the AI reviewer (pass 2). It explains why this group's findings in this fix lane were placed in the shown risk band — derived from the host's exposure (open listeners, reachable services) and the worst open finding's severity, EPSS and KEV signals. It describes the lane's worst finding, not every finding in the group." -%}
 <section class="sd-section" data-test="action-needed-section">
   <p class="sd-eyebrow">What to do</p>
   <h2 class="sd-h3">Operator workflows</h2>
@@ -52,7 +53,17 @@
               <tr>
                 <th class="workflow-table__group">Group</th>
                 <th class="workflow-table__cve">Worst Finding</th>
-                <th class="workflow-table__reason">Reason</th>
+                <th class="workflow-table__reason">Reason<span
+                      class="wf-reason-info" tabindex="0" role="img"
+                      aria-label="{{ reason_help }}"
+                      data-test="action-card-{{ card.id }}-reason-info"><svg
+                        class="wf-reason-info__icon" viewBox="0 0 16 16" width="13" height="13"
+                        aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.6"
+                        fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="5"
+                        r="0.95" fill="currentColor"/><path d="M8 7.2V11.6" fill="none"
+                        stroke="currentColor" stroke-width="1.4"
+                        stroke-linecap="round"/></svg><span class="wf-reason-info__bubble"
+                        aria-hidden="true">{{ reason_help }}</span></span></th>
               </tr>
             </thead>
             <tbody>
@@ -64,7 +75,9 @@
                           data-test="action-card-{{ card.id }}-lane">{% if entry.fix_lane == 'patch' %}patch{% else %}no patch{% endif %}</span>{% endif -%}
                   </td>
                   <td class="workflow-table__cve">
-                    {% if entry.worst_finding %}{{ entry.worst_finding.identifier_key }}{% else %}—{% endif %}
+                    {% if entry.worst_finding %}<a class="workflow-table__cve-link"
+                          href="{{ url_for('findings.index', q=entry.worst_finding.identifier_key) }}"
+                          data-test="action-card-{{ card.id }}-worst-link">{{ entry.worst_finding.identifier_key }}</a>{% else %}—{% endif %}
                   </td>
                   <td class="workflow-table__reason">
                     {% if entry.evaluation and entry.evaluation.risk_band_reason %}
