@@ -190,6 +190,7 @@ def test_load_application_groups_projection_shape() -> None:
             worst_finding_id=100,
             action_type="patch",
             risk_band_computed_at=None,
+            group_findings_fingerprint=None,
         ),
         _row(
             group_id=20,
@@ -199,6 +200,7 @@ def test_load_application_groups_projection_shape() -> None:
             worst_finding_id=None,
             action_type="patch",
             risk_band_computed_at=None,
+            group_findings_fingerprint=None,
         ),
     ]
     # TICKET-013: Query (4) ist der Live-Worst-Finding-Batch pro Lane
@@ -213,7 +215,10 @@ def test_load_application_groups_projection_shape() -> None:
             title="bug",
         ),
     ]
-    sess = _fake_session([counts_rows, group_rows, eval_rows, finding_rows])
+    # TICKET-014: Query (5) — Lane-OPEN-Set-Projektion (Fingerprint + ID-Set).
+    # Drift wird hier nicht geprueft; leeres Set genuegt fuer die Form-Tests.
+    open_rows: list[Any] = []
+    sess = _fake_session([counts_rows, group_rows, eval_rows, finding_rows, open_rows])
     result = _load_application_groups_for_server(sess, 1)
 
     assert len(result) == 2
@@ -254,11 +259,13 @@ def test_load_application_groups_missing_evaluation_ranks_as_pending() -> None:
             worst_finding_id=None,
             action_type="patch",
             risk_band_computed_at=None,
+            group_findings_fingerprint=None,
         ),
     ]
     # TICKET-013: Query (4) — Live-Worst-Finding-Batch — laeuft jetzt immer;
     # leeres Resultat ist der defensive Fall (worst_finding -> None).
-    sess = _fake_session([counts_rows, group_rows, eval_rows, []])
+    # TICKET-014: Query (5) — Lane-OPEN-Set-Projektion (hier ebenfalls leer).
+    sess = _fake_session([counts_rows, group_rows, eval_rows, [], []])
     result = _load_application_groups_for_server(sess, 1)
     # ACT-Rank (60) > PENDING-Rank (40) -> ACT zuerst, dann PENDING.
     assert [e["group"].label for e in result] == ["grp-act", "grp-pending"]

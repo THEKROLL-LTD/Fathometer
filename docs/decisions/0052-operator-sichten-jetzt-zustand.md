@@ -27,6 +27,9 @@ Konkret in vier Etappen (TICKET-010):
 
 1. **ACK + Redetect: bleibt ACK** — ein vom Operator abgehaktes Finding wird durch Redetect nicht wieder aufgemacht (Operator-Entscheid schlägt Scanner). Nur `resolved → open`.
 2. **Drift-Hint-Wording:** „re-evaluation pending".
+
+   > **Korrektur (TICKET-014, 2026-06-11):** Der Drift-Hint signalisiert „Eval veraltet ggü. Lane-OPEN-Set" (Fingerprint-Mismatch ODER Worst-Finding nicht mehr offen) — **nicht** „Anzeige-Worst ≠ Eval-Worst". Die Divergenz LLM-Wahl vs. deterministischer Triage-Sort ist erwartetes Normalverhalten und kein Drift. Die in Etappe 3 oben beschriebene ID-Drift-Bedingung (`evaluation.worst_finding_id` ≠ Live-Worst-ID) ist damit überholt; maßgeblich ist jetzt `ev.group_findings_fingerprint != group_findings_fingerprint(lane_open_findings)` ODER `ev.worst_finding_id ∉ Lane-OPEN-Set` — dasselbe Kriterium wie das Enqueue-Gate in `pass2_enqueue`. Die Anzeige-Spalte (Live-Worst, Etappe 3) bleibt unverändert.
+
 3. **Etappe 4 (Sofort-Re-Eval bei Triage)** wird mitgenommen — ohne sie passiert das Re-Eval erst beim nächsten Scan (24-h-Lücke).
 
 ## Konsequenzen

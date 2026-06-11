@@ -66,6 +66,7 @@ from app.services.findings_query import (
 )
 from app.services.heartbeat_aggregation import heartbeats_for_servers
 from app.services.listener_exposure import classify_exposure
+from app.services.llm_fingerprints import group_findings_fingerprint
 from app.services.pass2_input_selection import FIX_LANES
 from app.services.risk_engine import RISK_BAND_SORT_RANK, RiskBand, no_band_values, yes_band_values
 from app.services.severity_history import (
@@ -256,10 +257,12 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
           - `evaluation`: Row | None — die `(group, server, lane)`-Eval.
           - `count`: int — OPEN-Findings dieser Lane.
           - `worst_finding`: Row | None — Live-Worst INNERHALB der Lane.
-          - `worst_finding_drift`: bool — Lane-Eval-`worst_finding_id`
-            zeigt auf ein anderes (oder nicht mehr offenes) Finding als der
-            Lane-Live-Worst (ADR-0052 Entscheidung 2, Hint
-            "re-evaluation pending").
+          - `worst_finding_drift`: bool — die Lane-Eval ist veraltet ggue.
+            dem aktuellen Lane-OPEN-Set: Lane-Fingerprint != Eval-
+            `group_findings_fingerprint` ODER `worst_finding_id` nicht mehr
+            offen (ADR-0052 Entscheidung 2 i.d.F. TICKET-014, Hint
+            "re-evaluation pending"). Selbes Kriterium wie das Enqueue-Gate,
+            NICHT "LLM-Worst != Triage-Live-Worst".
 
     Sortierung der Groups: DESC nach der **Max-Urgency ueber ihre Lanes** —
     der hoechste `RISK_BAND_SORT_RANK` unter den Lane-Evals der Group; eine
@@ -321,6 +324,7 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
         ApplicationGroupEvaluation.worst_finding_id,
         ApplicationGroupEvaluation.action_type,
         ApplicationGroupEvaluation.risk_band_computed_at,
+        ApplicationGroupEvaluation.group_findings_fingerprint,
     ).where(
         ApplicationGroupEvaluation.server_id == server_id,
         ApplicationGroupEvaluation.group_id.in_(group_ids),
@@ -363,6 +367,29 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     for row in sess.execute(worst_stmt).all():
         worst_by_lane[(int(row.application_group_id), _lane_of_has_fix(row.has_fix))] = row
 
+    # (5) Lane-OPEN-Set-Projektion (TICKET-014): die `(identifier_key,
+    # package_purl, id)` ALLER OPEN-Findings pro `(group, lane)` — Basis fuer
+    # den Drift-Hint. Aus diesen Rows wird pro Lane sowohl der
+    # `group_findings_fingerprint` (Read-Reuse von `llm_fingerprints`, liest
+    # nur `.identifier_key`/`.package_purl`) als auch das `id`-Set gebildet.
+    # Bewusst getrennt von Query (4): Query (4) liefert per `DISTINCT ON` nur
+    # das Top-Finding pro Lane, hier brauchen wir das gesamte Lane-OPEN-Set.
+    lane_open_stmt = select(
+        Finding.application_group_id,
+        Finding.has_fix,
+        Finding.id,
+        Finding.identifier_key,
+        Finding.package_purl,
+    ).where(
+        Finding.server_id == server_id,
+        Finding.status == FindingStatus.OPEN,
+        Finding.application_group_id.in_(group_ids),
+    )
+    lane_rows_by_lane: dict[tuple[int, str], list[Any]] = {}
+    for row in sess.execute(lane_open_stmt).all():
+        key = (int(row.application_group_id), _lane_of_has_fix(row.has_fix))
+        lane_rows_by_lane.setdefault(key, []).append(row)
+
     result: list[dict[str, Any]] = []
     for grp in groups:
         gid = int(grp.id)
@@ -376,15 +403,34 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
                 continue
             ev = evaluations_by_lane.get((gid, lane))
             worst = worst_by_lane.get((gid, lane))
-            # Drift-Kennzeichnung (ADR-0052 Entscheidung 2): der Lane-Eval-
-            # Snapshot zeigt auf ein anderes Finding als der Lane-Live-Worst
-            # — entweder weil sich das OPEN-Set der Lane geaendert hat oder
-            # weil das Snapshot-Finding inzwischen geschlossen ist (fehlt
-            # dann im Live-Query, ID-Vergleich schlaegt automatisch an).
+            # Drift-Kennzeichnung (ADR-0052 Entscheidung 2, korrigiert durch
+            # TICKET-014): der Hint "re-evaluation pending" haengt am SELBEN
+            # Kriterium wie das Enqueue-Gate (`pass2_enqueue`) — die
+            # gespeicherte Eval ist veraltet ggue. dem aktuellen Lane-OPEN-Set.
+            # Das ist NICHT "LLM-Worst != Triage-Live-Worst" (das ist der
+            # erwartete Normalfall und wuerde dauerhaft falsch-positiv
+            # feuern). Drift gilt genau dann, wenn:
+            #   (a) der Lane-Fingerprint vom Eval-Fingerprint abweicht — das
+            #       OPEN-Set hat sich seit der Eval geaendert (neu/resolved/
+            #       acked/reopened); beim naechsten Scan-/Triage-Trigger wird
+            #       tatsaechlich enqueued und der Hint verschwindet (kein Loop)
+            #   ODER
+            #   (b) das Snapshot-Worst-Finding nicht mehr im Lane-OPEN-Set
+            #       ist (inzwischen geschlossen) — deckt den TICKET-010-Fall.
+            # `worst_finding_id is None` ist kein Drift (Snapshot hat nie auf
+            # ein Finding gezeigt).
+            lane_rows = lane_rows_by_lane.get((gid, lane), [])
+            lane_fp = group_findings_fingerprint(lane_rows)
+            lane_open_ids = {int(r.id) for r in lane_rows}
             drift = bool(
                 ev is not None
-                and ev.worst_finding_id is not None
-                and (worst is None or int(ev.worst_finding_id) != int(worst.id))
+                and (
+                    ev.group_findings_fingerprint != lane_fp
+                    or (
+                        ev.worst_finding_id is not None
+                        and int(ev.worst_finding_id) not in lane_open_ids
+                    )
+                )
             )
             lanes.append(
                 {

@@ -19,6 +19,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+from app.services.llm_fingerprints import group_findings_fingerprint
 from app.views.server_detail import (
     _build_action_sections,
     _load_application_groups_for_server,
@@ -59,6 +60,8 @@ def _eval_row(
     risk_band: str,
     action_type: str,
     worst_finding_id: int | None = None,
+    *,
+    fingerprint: str | None = None,
 ) -> SimpleNamespace:
     return _row(
         group_id=group_id,
@@ -68,6 +71,7 @@ def _eval_row(
         worst_finding_id=worst_finding_id,
         action_type=action_type,
         risk_band_computed_at=None,
+        group_findings_fingerprint=fingerprint,
     )
 
 
@@ -82,6 +86,21 @@ def _worst_row(group_id: int, has_fix: bool, finding_id: int) -> SimpleNamespace
     )
 
 
+def _open_row(group_id: int, has_fix: bool, finding_id: int) -> SimpleNamespace:
+    """Query-(5)-Row (Lane-OPEN-Set-Projektion, TICKET-014)."""
+    return _row(
+        application_group_id=group_id,
+        has_fix=has_fix,
+        id=finding_id,
+        identifier_key=f"CVE-2026-{finding_id}",
+        package_purl="",
+    )
+
+
+def _fp(open_rows: list[Any]) -> str:
+    return group_findings_fingerprint(open_rows)
+
+
 # ---------------------------------------------------------------------------
 # _load_application_groups_for_server — Lane-Split
 # ---------------------------------------------------------------------------
@@ -92,15 +111,22 @@ def test_mixed_group_yields_two_lanes_patch_first() -> None:
     Eintraege, patch zuerst; Lane-Counts korrekt, Group-Total = Summe."""
     counts_rows: list[Any] = [(10, True, 4), (10, False, 3)]
     group_rows = [_group_row(10, "kernel")]
+    patch_open = [_open_row(10, True, 100)]
+    mitigate_open = [_open_row(10, False, 200)]
     eval_rows = [
-        _eval_row(10, "patch", "escalate", "patch", worst_finding_id=100),
-        _eval_row(10, "mitigate", "monitor", "watch", worst_finding_id=200),
+        _eval_row(
+            10, "patch", "escalate", "patch", worst_finding_id=100, fingerprint=_fp(patch_open)
+        ),
+        _eval_row(
+            10, "mitigate", "monitor", "watch", worst_finding_id=200, fingerprint=_fp(mitigate_open)
+        ),
     ]
     worst_rows = [
         _worst_row(10, has_fix=True, finding_id=100),
         _worst_row(10, has_fix=False, finding_id=200),
     ]
-    sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows])
+    open_rows = patch_open + mitigate_open
+    sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows, open_rows])
     result = _load_application_groups_for_server(sess, 1)
 
     assert len(result) == 1
@@ -126,9 +152,10 @@ def test_pure_patch_group_has_single_patch_lane() -> None:
     """Reine patch-Group (nur has_fix=True) hat genau eine patch-Lane."""
     counts_rows: list[Any] = [(10, True, 2)]
     group_rows = [_group_row(10, "openssl")]
-    eval_rows = [_eval_row(10, "patch", "act", "patch")]
+    open_rows = [_open_row(10, True, 100)]
+    eval_rows = [_eval_row(10, "patch", "act", "patch", fingerprint=_fp(open_rows))]
     worst_rows = [_worst_row(10, has_fix=True, finding_id=100)]
-    sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows])
+    sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows, open_rows])
     result = _load_application_groups_for_server(sess, 1)
 
     lanes = result[0]["lanes"]
@@ -137,20 +164,33 @@ def test_pure_patch_group_has_single_patch_lane() -> None:
 
 
 def test_lane_worst_and_drift_are_per_lane() -> None:
-    """Live-Worst und Drift werden pro Lane berechnet: der patch-Eval-
-    Snapshot zeigt auf ein anderes Finding als der patch-Live-Worst, die
-    mitigate-Lane ist in-sync -> nur die patch-Lane driftet."""
+    """Drift wird pro Lane berechnet (TICKET-014): die patch-Lane-Eval zeigt
+    auf ein nicht mehr offenes Finding (999 ∉ {100}) -> Drift; die
+    mitigate-Lane ist in-sync (Fingerprint stimmt, worst offen) -> kein Drift.
+    Die Anzeige-Spalte zeigt unabhaengig davon den Triage-Live-Worst."""
     counts_rows: list[Any] = [(10, True, 2), (10, False, 1)]
     group_rows = [_group_row(10, "mixed")]
+    patch_open = [_open_row(10, True, 100)]
+    mitigate_open = [_open_row(10, False, 200)]
     eval_rows = [
-        _eval_row(10, "patch", "escalate", "patch", worst_finding_id=999),
-        _eval_row(10, "mitigate", "escalate", "mitigate", worst_finding_id=200),
+        _eval_row(
+            10, "patch", "escalate", "patch", worst_finding_id=999, fingerprint=_fp(patch_open)
+        ),
+        _eval_row(
+            10,
+            "mitigate",
+            "escalate",
+            "mitigate",
+            worst_finding_id=200,
+            fingerprint=_fp(mitigate_open),
+        ),
     ]
     worst_rows = [
         _worst_row(10, has_fix=True, finding_id=100),
         _worst_row(10, has_fix=False, finding_id=200),
     ]
-    sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows])
+    open_rows = patch_open + mitigate_open
+    sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows, open_rows])
     lanes = _load_application_groups_for_server(sess, 1)[0]["lanes"]
     by_lane = {lane["fix_lane"]: lane for lane in lanes}
     assert by_lane["patch"]["worst_finding"].id == 100
@@ -174,7 +214,8 @@ def test_group_sort_uses_max_band_over_lanes() -> None:
         _eval_row(20, "patch", "act", "patch"),
     ]
     worst_rows: list[Any] = []
-    sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows])
+    open_rows: list[Any] = []
+    sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows, open_rows])
     result = _load_application_groups_for_server(sess, 1)
     assert [e["group"].label for e in result] == ["mixed-escalate", "pure-act"]
 
@@ -188,7 +229,8 @@ def test_lane_without_eval_counts_as_pending_for_sort() -> None:
     group_rows = [_group_row(10, "pending-lane"), _group_row(20, "act-lane")]
     eval_rows = [_eval_row(20, "patch", "act", "patch")]
     worst_rows: list[Any] = []
-    sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows])
+    open_rows: list[Any] = []
+    sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows, open_rows])
     result = _load_application_groups_for_server(sess, 1)
     # act-Rank (60) > PENDING-Rank (40) -> act-Lane-Group zuerst.
     assert [e["group"].label for e in result] == ["act-lane", "pending-lane"]
