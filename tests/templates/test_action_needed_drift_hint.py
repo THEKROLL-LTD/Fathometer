@@ -38,14 +38,17 @@ def _entry(
     drift: Any = ...,
     evaluation: Any = ...,
     worst_finding: Any = ...,
+    fix_lane: str = "patch",
 ) -> dict[str, Any]:
-    """Group-Entry im Vertrag von `_build_action_sections` / Loader-Dict."""
+    """Flacher (group, lane)-Entry im Vertrag von `_build_action_sections`
+    (ADR-0053: zusaetzlich `fix_lane`)."""
     if evaluation is ...:
         evaluation = SimpleNamespace(risk_band_reason="vendor severity HIGH")
     if worst_finding is ...:
         worst_finding = SimpleNamespace(identifier_key=f"CVE-2026-{group_id}")
     entry: dict[str, Any] = {
         "group": SimpleNamespace(id=group_id, label=f"grp-{group_id}", group_kind="os_package"),
+        "fix_lane": fix_lane,
         "evaluation": evaluation,
         "worst_finding": worst_finding,
         "count": 2,
@@ -119,6 +122,22 @@ def test_drift_hint_renders_next_to_em_dash_fallback(app: Flask) -> None:
     assert _hint_texts(html) == [_HINT_WORDING], (
         f"Hint muss auch neben dem Em-Dash rendern:\n{html}"
     )
+
+
+def test_lane_tag_renders_per_entry(app: Flask) -> None:
+    """ADR-0053: jeder (group, lane)-Entry traegt einen dezenten Lane-Tag
+    (patch/no patch) neben dem Group-Link."""
+    html = _render(app, [_entry(group_id=1, fix_lane="patch")])
+    assert f'data-test="action-card-{_CARD_ID}-lane"' in html, (
+        f"Lane-Tag fehlt im Workflow-Card-HTML:\n{html}"
+    )
+    assert "patch" in html
+
+
+def test_lane_tag_no_patch_label(app: Flask) -> None:
+    """mitigate-Lane -> 'no patch'-Tag."""
+    html = _render(app, [_entry(group_id=1, fix_lane="mitigate")])
+    assert "no patch" in html
 
 
 def test_drift_hint_is_per_row(app: Flask) -> None:

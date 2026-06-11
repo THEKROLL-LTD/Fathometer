@@ -92,6 +92,7 @@ def _make_single_entry_card(
         "groups": [
             {
                 "group": SimpleNamespace(id=group_id, label=group_label, group_kind=group_kind),
+                "fix_lane": "patch",
                 "evaluation": evaluation,
                 "worst_finding": worst_finding,
                 "count": 5,
@@ -105,6 +106,7 @@ def _make_pagination_card(num_groups: int, card_id: str = "escalate-distro-patch
     groups = [
         {
             "group": SimpleNamespace(id=i, label=f"group-{i}", group_kind="os_package"),
+            "fix_lane": "patch",
             "evaluation": SimpleNamespace(risk_band_reason=None),
             "worst_finding": None,
             "count": 1,

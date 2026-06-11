@@ -96,21 +96,12 @@ def _sanitize_prompt_title(raw: str) -> str:
 # Bewertungen), wird aber im Validator auf ``escalate`` umgemappt (mit Warning).
 VALID_RISK_BANDS: frozenset[str] = frozenset({"escalate", "act", "mitigate", "monitor", "noise"})
 
-# v0.9.3: vier aktive Bands plus legacy ``mitigate``. Action-Types kommen
-# strukturell als separates Feld.
-VALID_ACTION_TYPES: frozenset[str] = frozenset({"patch", "mitigate", "watch", "none"})
-
-# Erlaubte ``(risk_band, action_type)``-Kombinationen (Iteration 6, final).
-# Jede andere Kombination wird vom Validator abgelehnt.
-ALLOWED_BAND_ACTION_COMBOS: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("escalate", "patch"),
-        ("escalate", "mitigate"),
-        ("act", "patch"),
-        ("monitor", "watch"),
-        ("noise", "none"),
-    }
-)
+# ADR-0053: ``action_type`` ist kein LLM-Output mehr — die Action-Achse
+# (patch/mitigate) folgt deterministisch aus ``fix_lane``. Das LLM emittiert
+# nur noch ``risk_band``. Die alte ``(risk_band, action_type)``-Combo-Whitelist
+# (``ALLOWED_BAND_ACTION_COMBOS`` / ``VALID_ACTION_TYPES``) entfaellt und wird
+# durch eine Band-Whitelist *pro Lane* ersetzt: ``act`` ist patch-only, im
+# mitigate-Call (``fix_lane == 'mitigate'``) lehnt der Validator ``act`` ab.
 
 # Pattern-Sanitization-Limits (ASCII-only, NUL-frei, Laengen-Range).
 _PATH_PREFIX_MIN: int = 1
@@ -183,16 +174,12 @@ PASS2_RESPONSE_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["group_label", "risk_band", "action_type", "reason"],
+                "required": ["group_label", "risk_band", "reason"],
                 "properties": {
                     "group_label": {"type": "string", "maxLength": 64},
                     "risk_band": {
                         "type": "string",
                         "enum": ["escalate", "act", "mitigate", "monitor", "noise"],
-                    },
-                    "action_type": {
-                        "type": "string",
-                        "enum": ["patch", "mitigate", "watch", "none"],
                     },
                     "worst_finding_id": {"type": ["integer", "null"]},
                     "reason": {"type": "string", "maxLength": MAX_REASON_LEN},
@@ -236,19 +223,19 @@ class Pass1Result(BaseModel):
 
 
 class Pass2Evaluation(BaseModel):
-    """Eine Group-Bewertung aus Pass 2.
+    """Eine Lane-Bewertung aus Pass 2.
 
-    ``action_type`` ist ab v0.9.3 Pflicht-Output (vier zulaessige Werte:
-    ``patch``/``mitigate``/``watch``/``none``). ``investigate`` ist
-    Pre-Triage-only und wird vom LLM nie produziert; Pre-Triage-Groups
-    haben ``ApplicationGroup.action_type IS NULL`` bis Pass 2 laeuft.
+    ADR-0053: ``action_type`` ist KEIN LLM-Output mehr — die Action-Achse
+    (patch/mitigate) folgt deterministisch aus der ``fix_lane`` des Calls und
+    wird erst im Worker (``_upsert_evaluation``, Etappe 5) aus
+    ``(fix_lane, risk_band)`` abgeleitet. Das LLM gibt pro Call nur noch
+    ``risk_band`` + ``worst_finding_id`` + ``reason`` aus.
     """
 
     model_config = ConfigDict(extra="ignore")
 
     group_label: str
     risk_band: Literal["escalate", "act", "mitigate", "monitor", "noise"]
-    action_type: Literal["patch", "mitigate", "watch", "none"]
     reason: str
     worst_finding_id: int | None = None
 
@@ -842,8 +829,16 @@ class LLMRiskReviewer:
         self,
         server: Server,
         groups_with_findings: Sequence[tuple[ApplicationGroup, list[Finding]]],
+        *,
+        fix_lane: str | None = None,
     ) -> tuple[Pass2Result, dict[str, Any]]:
         """LLM-Call mit Server-Kontext + Groups.
+
+        ``fix_lane`` (ADR-0053/TICKET-013) scoped den Call auf eine Lane —
+        ``patch`` oder ``mitigate``. Wird an Render UND Validierung durchgereicht:
+        der mitigate-Prompt nennt ``act`` nicht als Option, der Validator lehnt
+        ``act`` bei ``fix_lane == 'mitigate'`` ab. ``None`` = Uebergangs-Zustand
+        (keine Lane-Restriktion), Caller reichen die Lane ab Etappe 5 immer durch.
 
         Returns ``(validated_result, meta)`` — siehe :meth:`pass1_detect_groups`
         fuer die Meta-Felder.
@@ -852,7 +847,9 @@ class LLMRiskReviewer:
         # an Render UND Validierung durchreichen — worst_finding_id wird
         # gegen die gezeigten IDs geprueft, nicht gegen die volle Group.
         selections = self._select_for_groups(groups_with_findings)
-        user_prompt = self._render_pass2_prompt(server, groups_with_findings, selections)
+        user_prompt = self._render_pass2_prompt(
+            server, groups_with_findings, selections, fix_lane=fix_lane
+        )
         cfg = load_settings()
         # v0.9.x: try/except um chat_completion_json_with_meta — analog Pass-1.
         try:
@@ -880,7 +877,7 @@ class LLMRiskReviewer:
         # blind).
         try:
             validated = self._validate_pass2_response(
-                response, list(groups_with_findings), selections
+                response, list(groups_with_findings), selections, fix_lane=fix_lane
             )
         except LLMInvalidResponseError as exc:
             exc.meta = meta
@@ -894,16 +891,15 @@ class LLMRiskReviewer:
         """Pass-2-Input-Selektion pro Group (TICKET-011)."""
         return {grp.label: select_pass2_findings(fs) for grp, fs in groups_with_findings}
 
-    def _render_pass2_prompt(
-        self,
-        server: Server,
-        groups_with_findings: Sequence[tuple[ApplicationGroup, list[Finding]]],
-        selections: dict[str, SelectionResult] | None = None,
-    ) -> str:
-        if selections is None:
-            selections = self._select_for_groups(groups_with_findings)
-        lines: list[str] = []
-        lines.append("host_context:")
+    @staticmethod
+    def _render_host_context(server: Server) -> list[str]:
+        """Rendert den Host-/Exposure-Kontext-Block fuer Pass 2.
+
+        ADR-0053: ein einziger Renderer, in BEIDEN Lane-Prompts (patch /
+        mitigate) identisch aufgerufen — kein Drift zwischen den zwei
+        Exposure-Narrativen.
+        """
+        lines: list[str] = ["host_context:"]
         lines.append(
             f"  os: {server.os_pretty_name or server.os_family or '-'}"
             f" {server.os_version or ''}".strip()
@@ -932,6 +928,44 @@ class LLMRiskReviewer:
         comms = sorted({p.comm for p in (getattr(server, "processes", []) or []) if p.comm})
         if comms:
             lines.append("  process_commands (unique): " + ", ".join(comms[:80]))
+        return lines
+
+    def _render_pass2_prompt(
+        self,
+        server: Server,
+        groups_with_findings: Sequence[tuple[ApplicationGroup, list[Finding]]],
+        selections: dict[str, SelectionResult] | None = None,
+        *,
+        fix_lane: str | None = None,
+    ) -> str:
+        if selections is None:
+            selections = self._select_for_groups(groups_with_findings)
+        lines: list[str] = self._render_host_context(server)
+
+        # ADR-0053: Lane-Scope. Im mitigate-Call hat ``act`` keine Bedeutung
+        # (patch-only) und wird gar nicht erst als Option genannt; im patch-Call
+        # sind alle vier Bands waehlbar. ``fix_lane is None`` ist der Uebergangs-
+        # Zustand (Caller reichen die Lane erst in Etappe 4/5 durch): Verhalten
+        # wie bisher (alle Bands), nur ohne action_type.
+        if fix_lane == "mitigate":
+            allowed_bands = "{escalate, monitor, noise}"
+            lines.append("")
+            lines.append(
+                "fix_lane: mitigate — ALL findings in this call have NO patch "
+                "available (fixed_version is null). The remediation axis is "
+                "already fixed to mitigation; do NOT use risk_band 'act' "
+                "(act is patch-only). Choose only from escalate/monitor/noise."
+            )
+        elif fix_lane == "patch":
+            allowed_bands = "{escalate, act, monitor, noise}"
+            lines.append("")
+            lines.append(
+                "fix_lane: patch — ALL findings in this call HAVE a patch "
+                "available (fixed_version is set). The remediation axis is "
+                "already fixed to patching; judge only the risk_band."
+            )
+        else:
+            allowed_bands = "{escalate, act, monitor, noise}"
 
         lines.append("")
         lines.append("groups_to_evaluate:")
@@ -999,11 +1033,10 @@ class LLMRiskReviewer:
 
         lines.append(
             "Return per group: group_label (exactly as above), risk_band "
-            "from {escalate, act, monitor, noise}, action_type from "
-            "{patch, mitigate, watch, none}, worst_finding_id (MUST be one "
-            "of the finding ids listed above for that group), reason <= 256 "
-            "chars. The (risk_band, action_type) combination MUST come from "
-            "the whitelist in the system prompt."
+            f"from {allowed_bands}, worst_finding_id (MUST be one of the "
+            "finding ids listed above for that group), reason <= 256 chars. "
+            "Do NOT emit action_type — the remediation axis is already "
+            "determined by the fix_lane of this call."
         )
         return "\n".join(lines)
 
@@ -1012,6 +1045,8 @@ class LLMRiskReviewer:
         response: dict[str, Any],
         groups_with_findings: list[tuple[ApplicationGroup, list[Finding]]],
         selections: dict[str, SelectionResult] | None = None,
+        *,
+        fix_lane: str | None = None,
     ) -> Pass2Result:
         if selections is None:
             selections = self._select_for_groups(groups_with_findings)
@@ -1061,17 +1096,16 @@ class LLMRiskReviewer:
                 )
                 band = "escalate"
 
-            action_type = ev_raw.get("action_type")
-            if not isinstance(action_type, str) or action_type not in VALID_ACTION_TYPES:
+            # ADR-0053: Band-Whitelist pro Lane statt (band, action_type)-Combo.
+            # ``act`` ist patch-only — im mitigate-Call ist ein nicht-patchbares
+            # Finding entweder escalate oder monitor/noise, nie act. Bei
+            # ``fix_lane is None`` (Uebergangs-Zustand, Caller reichen die Lane
+            # erst in Etappe 4/5 durch) gilt keine Lane-Restriktion.
+            if fix_lane == "mitigate" and band == "act":
                 raise LLMInvalidResponseError(
-                    f"Pass2: Group {label!r} hat ungueltiges action_type {action_type!r} "
-                    f"(erlaubt: {sorted(VALID_ACTION_TYPES)})"
-                )
-            if (band, action_type) not in ALLOWED_BAND_ACTION_COMBOS:
-                raise LLMInvalidResponseError(
-                    f"Pass2: Group {label!r} hat unzulaessige (risk_band, action_type) "
-                    f"Kombination ({band!r}, {action_type!r}); "
-                    f"Whitelist: {sorted(ALLOWED_BAND_ACTION_COMBOS)}"
+                    f"Pass2: Group {label!r} hat risk_band 'act' im mitigate-Call "
+                    f"(act ist patch-only, ADR-0053; erlaubt fuer fix_lane "
+                    f"'mitigate': escalate, monitor, noise)"
                 )
 
             reason = ev_raw.get("reason")
@@ -1108,10 +1142,6 @@ class LLMRiskReviewer:
                         Literal["escalate", "act", "mitigate", "monitor", "noise"],
                         band,
                     ),
-                    action_type=cast(
-                        Literal["patch", "mitigate", "watch", "none"],
-                        action_type,
-                    ),
                     reason=reason,
                     worst_finding_id=worst_id,
                 )
@@ -1121,14 +1151,12 @@ class LLMRiskReviewer:
 
 
 __all__ = [
-    "ALLOWED_BAND_ACTION_COMBOS",
     "LABEL_PATTERN",
     "MAX_REASON_LEN",
     "PASS1_RESPONSE_SCHEMA",
     "PASS1_SYSTEM_PROMPT",
     "PASS2_RESPONSE_SCHEMA",
     "PASS2_SYSTEM_PROMPT",
-    "VALID_ACTION_TYPES",
     "VALID_RISK_BANDS",
     "LLMInvalidResponseError",
     "LLMRiskReviewer",

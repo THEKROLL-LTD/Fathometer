@@ -163,7 +163,18 @@ def _install_sessions(monkeypatch: pytest.MonkeyPatch, sessions: list[_FakeSessi
     monkeypatch.setattr(llm_worker, "get_session", _get)
 
 
-def _mk_finding(fid: int, key: str, purl: str, status: FindingStatus) -> SimpleNamespace:
+def _mk_finding(
+    fid: int,
+    key: str,
+    purl: str,
+    status: FindingStatus,
+    *,
+    fixed_version: str | None = "1.0.0",
+) -> SimpleNamespace:
+    # ADR-0053/TICKET-013: ``fixed_version`` bestimmt die fix_lane. Default
+    # gesetzt -> alle Findings dieser Group fallen in die ``patch``-Lane, der
+    # Enqueue erzeugt damit genau einen Job (Single-Lane-Group), passend zu den
+    # ``count == 1``-Konvergenz-Asserts dieser Suite.
     return SimpleNamespace(
         id=fid,
         identifier_key=key,
@@ -172,6 +183,7 @@ def _mk_finding(fid: int, key: str, purl: str, status: FindingStatus) -> SimpleN
         status=status,
         application_group_id=GROUP_ID,
         server_id=SERVER_ID,
+        fixed_version=fixed_version,
     )
 
 
@@ -185,9 +197,12 @@ def _mixed_store() -> list[SimpleNamespace]:
     ]
 
 
-def _job() -> SimpleNamespace:
+def _job(fix_lane: str = "patch") -> SimpleNamespace:
+    # ADR-0053 / TICKET-013 Etappe 5: Pass-2-Jobs tragen die fix_lane im
+    # Payload. Default ``patch`` passt zu ``_mk_finding``s default
+    # ``fixed_version`` (Single-patch-Lane-Group).
     return SimpleNamespace(
-        payload={"group_id": GROUP_ID, "server_id": SERVER_ID},
+        payload={"group_id": GROUP_ID, "server_id": SERVER_ID, "fix_lane": fix_lane},
         status="in_progress",
         completed_at=None,
         result=None,
@@ -222,7 +237,7 @@ def _patch_phase1_helpers(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(llm_worker, "group_findings_fingerprint", _spy_fp)
     monkeypatch.setattr(llm_worker, "cve_data_fingerprint", lambda f: "c" * 16)
     monkeypatch.setattr(llm_worker, "server_context_fingerprint", lambda s, session=None: "s" * 16)
-    monkeypatch.setattr(llm_worker, "make_cache_key", lambda *a: "k" * 64)
+    monkeypatch.setattr(llm_worker, "make_cache_key", lambda *a, **k: "k" * 64)
     return captured
 
 
@@ -236,7 +251,7 @@ async def _run_pass2_cache_hit(
     _install_sessions(monkeypatch, [sess])
     captured = _patch_phase1_helpers(monkeypatch)
 
-    cached = SimpleNamespace(risk_band="medium", reason="r", worst_finding_id=1, action_type="fix")
+    cached = SimpleNamespace(risk_band="monitor", reason="r", worst_finding_id=1, action_type="fix")
     monkeypatch.setattr(llm_worker, "lookup", lambda s, key: cached)
     monkeypatch.setattr(llm_worker, "record_hit", lambda s, c: None)
     upsert_kwargs: dict[str, Any] = {}
@@ -333,7 +348,9 @@ async def test_no_reenqueue_after_worker_eval_on_mixed_group(
     out = await _run_pass2_cache_hit(monkeypatch, store)
     worker_fp = out["upsert"]["gf_fp"]
 
-    stored_eval = SimpleNamespace(group_id=GROUP_ID, group_findings_fingerprint=worker_fp)
+    stored_eval = SimpleNamespace(
+        group_id=GROUP_ID, fix_lane="patch", group_findings_fingerprint=worker_fp
+    )
     count, _ = _run_enqueue(store, evals=[stored_eval])
     assert count == 0, "unchanged OPEN-set re-enqueued: Bug-B loop is back"
 
@@ -493,7 +510,7 @@ async def test_detached_reload_statement_filters_open_and_phase1_ids(
 
     class _CapturingReviewer:
         async def pass2_evaluate_groups(
-            self, server: Any, groups: list[Any]
+            self, server: Any, groups: list[Any], *, fix_lane: str | None = None
         ) -> tuple[Any, dict[str, Any]]:
             llm_inputs.append(groups)
             evaluation = SimpleNamespace(

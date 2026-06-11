@@ -15,8 +15,13 @@ Downgrade fuegt die Spalte als nullable ``String(256)`` ohne Backfill wieder
 ein — die historischen Reason-Werte sind verloren (offensichtlicher
 Spalten-Drop-Fall, kein verlustfreier Roundtrip moeglich).
 
-Revision ID: 0021_drop_findings_risk_band_reason
+Revision ID: 0021_drop_finding_reason
 Revises: 0020_daily_risk_state
+
+Hinweis: die Revision-ID ist absichtlich kuerzer als der Dateiname —
+``alembic_version.version_num`` ist ``VARCHAR(32)``, die lange Form
+``0021_drop_findings_risk_band_reason`` (35 Zeichen) passt nicht hinein
+(analog ``0011_app_group_evals`` vs. Dateiname).
 Create Date: 2026-06-11
 """
 
@@ -27,7 +32,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0021_drop_findings_risk_band_reason"
+revision: str = "0021_drop_finding_reason"
 down_revision: str | None = "0020_daily_risk_state"
 branch_labels: str | None = None
 depends_on: str | None = None

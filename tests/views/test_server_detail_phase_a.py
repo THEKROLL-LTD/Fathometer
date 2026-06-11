@@ -173,9 +173,10 @@ def test_load_application_groups_empty_returns_early() -> None:
 
 def test_load_application_groups_projection_shape() -> None:
     """Projektion liefert Row-Objekte mit den erwarteten Spalten — die
-    Rueckgabe-Dicts haben die alten Keys, aber die Werte sind Row-aehnlich.
+    Rueckgabe-Dicts tragen jetzt eine `lanes`-Liste (TICKET-013).
     """
-    counts_rows: list[Any] = [(10, 3), (20, 5)]
+    # (group_id, has_fix, count) — has_fix=True -> patch-Lane.
+    counts_rows: list[Any] = [(10, True, 3), (20, True, 5)]
     group_rows = [
         _row(id=10, label="openssh", group_kind="os_package", explanation="x"),
         _row(id=20, label="bundle-x", group_kind="application_bundle", explanation=None),
@@ -183,6 +184,7 @@ def test_load_application_groups_projection_shape() -> None:
     eval_rows = [
         _row(
             group_id=10,
+            fix_lane="patch",
             risk_band="escalate",
             risk_band_reason="kev",
             worst_finding_id=100,
@@ -191,6 +193,7 @@ def test_load_application_groups_projection_shape() -> None:
         ),
         _row(
             group_id=20,
+            fix_lane="patch",
             risk_band="act",
             risk_band_reason=None,
             worst_finding_id=None,
@@ -198,11 +201,12 @@ def test_load_application_groups_projection_shape() -> None:
             risk_band_computed_at=None,
         ),
     ]
-    # TICKET-010 / ADR-0052: Query (4) ist jetzt der Live-Worst-Finding-Batch
-    # (DISTINCT ON application_group_id) — Rows tragen die Group-ID mit.
+    # TICKET-013: Query (4) ist der Live-Worst-Finding-Batch pro Lane
+    # (DISTINCT ON application_group_id, has_fix) — Rows tragen has_fix mit.
     finding_rows = [
         _row(
             application_group_id=10,
+            has_fix=True,
             id=100,
             identifier_key="CVE-2026-1",
             package_name="openssh",
@@ -213,26 +217,30 @@ def test_load_application_groups_projection_shape() -> None:
     result = _load_application_groups_for_server(sess, 1)
 
     assert len(result) == 2
-    # Escalate-Group muss zuerst kommen (RISK_BAND_SORT_RANK desc).
+    # Escalate-Group muss zuerst kommen (Max-Band ueber Lanes desc).
     first = result[0]
     assert first["group"].label == "openssh"
     assert first["group"].group_kind == "os_package"
-    assert first["evaluation"].risk_band == "escalate"
-    assert first["evaluation"].action_type == "patch"
     assert first["count"] == 3
-    assert first["worst_finding"] is not None
-    assert first["worst_finding"].identifier_key == "CVE-2026-1"
+    assert len(first["lanes"]) == 1
+    patch_lane = first["lanes"][0]
+    assert patch_lane["fix_lane"] == "patch"
+    assert patch_lane["evaluation"].risk_band == "escalate"
+    assert patch_lane["evaluation"].action_type == "patch"
+    assert patch_lane["count"] == 3
+    assert patch_lane["worst_finding"] is not None
+    assert patch_lane["worst_finding"].identifier_key == "CVE-2026-1"
 
     second = result[1]
     assert second["group"].label == "bundle-x"
-    assert second["evaluation"].risk_band == "act"
+    assert second["lanes"][0]["evaluation"].risk_band == "act"
     # Kein Live-Worst-Row fuer Group 20 im Fixture -> defensiv None.
-    assert second["worst_finding"] is None
+    assert second["lanes"][0]["worst_finding"] is None
 
 
 def test_load_application_groups_missing_evaluation_ranks_as_pending() -> None:
     """Group ohne Junction-Row landet in PENDING-Rank — sortiert ueber act."""
-    counts_rows: list[Any] = [(10, 1), (20, 1)]
+    counts_rows: list[Any] = [(10, True, 1), (20, True, 1)]
     group_rows = [
         _row(id=10, label="grp-act", group_kind="os_package", explanation=None),
         _row(id=20, label="grp-pending", group_kind="os_package", explanation=None),
@@ -240,6 +248,7 @@ def test_load_application_groups_missing_evaluation_ranks_as_pending() -> None:
     eval_rows = [
         _row(
             group_id=10,
+            fix_lane="patch",
             risk_band="act",
             risk_band_reason=None,
             worst_finding_id=None,
@@ -247,14 +256,14 @@ def test_load_application_groups_missing_evaluation_ranks_as_pending() -> None:
             risk_band_computed_at=None,
         ),
     ]
-    # TICKET-010: Query (4) — Live-Worst-Finding-Batch — laeuft jetzt immer;
+    # TICKET-013: Query (4) — Live-Worst-Finding-Batch — laeuft jetzt immer;
     # leeres Resultat ist der defensive Fall (worst_finding -> None).
     sess = _fake_session([counts_rows, group_rows, eval_rows, []])
     result = _load_application_groups_for_server(sess, 1)
     # ACT-Rank (60) > PENDING-Rank (40) -> ACT zuerst, dann PENDING.
     assert [e["group"].label for e in result] == ["grp-act", "grp-pending"]
-    # Die letzte Group hat keine Evaluation -> Pending-Rank-Pfad.
-    assert result[-1]["evaluation"] is None
+    # Die letzte Group hat keine Evaluation auf ihrer Lane -> Pending-Rank.
+    assert result[-1]["lanes"][0]["evaluation"] is None
 
 
 # ---------------------------------------------------------------------------

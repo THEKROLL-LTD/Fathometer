@@ -1,18 +1,22 @@
 """Pure-Unit-Tests fuer TICKET-010 Etappe 3 (Bug C) — Live-Worst-Finding im
 Server-Detail-Loader `_load_application_groups_for_server`.
 
+TICKET-013 / ADR-0053: der Loader gruppiert jetzt pro Fix-Lane; jeder
+Entry traegt eine `lanes`-Liste statt Top-Level-`evaluation`/`worst_finding`.
+Die Single-Lane-Helper hier setzen has_fix=True (patch-Lane).
+
 Deckt:
   * Live-Worst ersetzt Snapshot-Worst: Query (4) liefert eine andere
-    Finding-ID als `evaluation.worst_finding_id` -> Entry traegt die
-    Live-Row, `worst_finding_drift is True`.
+    Finding-ID als `lane.evaluation.worst_finding_id` -> Lane traegt die
+    Live-Row, `lane.worst_finding_drift is True`.
   * Drift-Matrix: False bei ID-Match, False bei evaluation=None, False bei
     worst_finding_id=None, True wenn Snapshot-ID gesetzt aber kein
     Live-Worst mehr existiert (Snapshot-Finding geschlossen).
-  * Statement-Inspektion Query (4): `DISTINCT ON (application_group_id)`,
-    Status-Filter OPEN, `application_group_id IN (<group_ids>)`,
-    ORDER BY beginnt mit application_group_id, danach §15-Triage-Order
-    (is_kev DESC, epss DESC NULLS LAST, cvss DESC NULLS LAST,
-    severity_rank DESC, first_seen_at ASC).
+  * Statement-Inspektion Query (4): `DISTINCT ON (application_group_id,
+    has_fix)`, Status-Filter OPEN, `application_group_id IN (<group_ids>)`,
+    ORDER BY beginnt mit (application_group_id, has_fix), danach
+    §15-Triage-Order (is_kev DESC, epss DESC NULLS LAST, cvss DESC NULLS
+    LAST, severity_rank DESC, first_seen_at ASC).
 
 Die Statement-Checks kompilieren das abgefangene SQLAlchemy-Statement gegen
 den postgresql-Dialekt — reine Statement-Kompilierung, KEINE DB. Das echte
@@ -66,6 +70,7 @@ class _RecordingSession:
 def _eval_row(group_id: int, worst_finding_id: int | None) -> SimpleNamespace:
     return _row(
         group_id=group_id,
+        fix_lane="patch",
         risk_band="escalate",
         risk_band_reason="kev present",
         worst_finding_id=worst_finding_id,
@@ -81,11 +86,21 @@ def _group_row(group_id: int, label: str = "openssh") -> SimpleNamespace:
 def _worst_row(group_id: int, finding_id: int) -> SimpleNamespace:
     return _row(
         application_group_id=group_id,
+        has_fix=True,
         id=finding_id,
         identifier_key=f"CVE-2026-{finding_id}",
         package_name="openssh-server",
         title="some bug",
     )
+
+
+def _patch_lane(entry: dict[str, Any]) -> dict[str, Any]:
+    """Liefert die patch-Lane eines Group-Entries (die Single-Lane-Tests
+    erzeugen ausschliesslich has_fix=True -> patch)."""
+    lanes = entry["lanes"]
+    assert len(lanes) == 1, lanes
+    assert lanes[0]["fix_lane"] == "patch"
+    return lanes[0]
 
 
 def _run_loader(
@@ -96,10 +111,10 @@ def _run_loader(
 ) -> tuple[list[dict[str, Any]], _RecordingSession]:
     """Fuehrt den Loader mit einer Single-Group-Konstellation aus.
 
-    Query-Reihenfolge im Loader: (1) OPEN-Counts, (2) Group-Metadaten,
-    (3) Eval-Junction, (4) Live-Worst-Batch.
+    Query-Reihenfolge im Loader: (1) OPEN-Counts (GROUP BY group_id,
+    has_fix), (2) Group-Metadaten, (3) Eval-Junction, (4) Live-Worst-Batch.
     """
-    counts_rows: list[Any] = [(group_id, 3)]
+    counts_rows: list[Any] = [(group_id, True, 3)]
     group_rows = [_group_row(group_id)]
     sess = _RecordingSession([counts_rows, group_rows, eval_rows, worst_rows])
     result = _load_application_groups_for_server(sess, 1)
@@ -120,18 +135,18 @@ def test_live_worst_replaces_snapshot_worst_and_flags_drift() -> None:
     )
 
     assert len(result) == 1, result
-    entry = result[0]
-    assert entry["worst_finding"] is not None, "Live-Worst-Row muss im Entry landen"
-    assert entry["worst_finding"].id == 200, (
+    lane = _patch_lane(result[0])
+    assert lane["worst_finding"] is not None, "Live-Worst-Row muss im Lane-Entry landen"
+    assert lane["worst_finding"].id == 200, (
         f"worst_finding muss die LIVE-Row (id=200) sein, nicht der Eval-Snapshot "
-        f"(worst_finding_id=100); bekommen: {entry['worst_finding']!r}"
+        f"(worst_finding_id=100); bekommen: {lane['worst_finding']!r}"
     )
-    assert entry["worst_finding"].identifier_key == "CVE-2026-200"
-    assert entry["worst_finding_drift"] is True, (
+    assert lane["worst_finding"].identifier_key == "CVE-2026-200"
+    assert lane["worst_finding_drift"] is True, (
         "Snapshot-ID (100) != Live-ID (200) -> Drift-Hint muss gesetzt sein"
     )
     # Eval-Row bleibt unveraendert Datenquelle fuer Band/Reason.
-    assert entry["evaluation"].risk_band == "escalate"
+    assert lane["evaluation"].risk_band == "escalate"
 
 
 # ---------------------------------------------------------------------------
@@ -145,9 +160,9 @@ def test_drift_false_when_snapshot_matches_live() -> None:
         eval_rows=[_eval_row(10, worst_finding_id=200)],
         worst_rows=[_worst_row(10, finding_id=200)],
     )
-    entry = result[0]
-    assert entry["worst_finding"].id == 200
-    assert entry["worst_finding_drift"] is False, "ID-Match darf keinen Drift melden"
+    lane = _patch_lane(result[0])
+    assert lane["worst_finding"].id == 200
+    assert lane["worst_finding_drift"] is False, "ID-Match darf keinen Drift melden"
 
 
 def test_drift_false_when_evaluation_missing() -> None:
@@ -157,10 +172,10 @@ def test_drift_false_when_evaluation_missing() -> None:
         eval_rows=[],
         worst_rows=[_worst_row(10, finding_id=200)],
     )
-    entry = result[0]
-    assert entry["evaluation"] is None
-    assert entry["worst_finding"] is not None
-    assert entry["worst_finding_drift"] is False, (
+    lane = _patch_lane(result[0])
+    assert lane["evaluation"] is None
+    assert lane["worst_finding"] is not None
+    assert lane["worst_finding_drift"] is False, (
         "Ohne Evaluation gibt es keinen Snapshot der driften koennte"
     )
 
@@ -171,9 +186,9 @@ def test_drift_false_when_snapshot_worst_id_is_none() -> None:
         eval_rows=[_eval_row(10, worst_finding_id=None)],
         worst_rows=[_worst_row(10, finding_id=200)],
     )
-    entry = result[0]
-    assert entry["worst_finding"] is not None
-    assert entry["worst_finding_drift"] is False, (
+    lane = _patch_lane(result[0])
+    assert lane["worst_finding"] is not None
+    assert lane["worst_finding_drift"] is False, (
         "worst_finding_id=None ist kein Drift (Snapshot hat nie auf ein Finding gezeigt)"
     )
 
@@ -185,9 +200,9 @@ def test_drift_true_when_live_worst_missing_but_snapshot_set() -> None:
         eval_rows=[_eval_row(10, worst_finding_id=100)],
         worst_rows=[],
     )
-    entry = result[0]
-    assert entry["worst_finding"] is None
-    assert entry["worst_finding_drift"] is True, (
+    lane = _patch_lane(result[0])
+    assert lane["worst_finding"] is None
+    assert lane["worst_finding_drift"] is True, (
         "Snapshot zeigt auf ein Finding das nicht mehr im OPEN-Set ist -> Drift"
     )
 
@@ -195,14 +210,14 @@ def test_drift_true_when_live_worst_missing_but_snapshot_set() -> None:
 def test_drift_per_group_independent() -> None:
     """Drift wird pro Group berechnet — eine driftende Group steckt die
     andere nicht an."""
-    counts_rows: list[Any] = [(10, 2), (20, 1)]
+    counts_rows: list[Any] = [(10, True, 2), (20, True, 1)]
     group_rows = [_group_row(10, "drifting"), _group_row(20, "in-sync")]
     eval_rows = [_eval_row(10, worst_finding_id=100), _eval_row(20, worst_finding_id=300)]
     worst_rows = [_worst_row(10, finding_id=200), _worst_row(20, finding_id=300)]
     sess = _RecordingSession([counts_rows, group_rows, eval_rows, worst_rows])
     result = _load_application_groups_for_server(sess, 1)
 
-    by_label = {entry["group"].label: entry for entry in result}
+    by_label = {entry["group"].label: _patch_lane(entry) for entry in result}
     assert by_label["drifting"]["worst_finding_drift"] is True
     assert by_label["in-sync"]["worst_finding_drift"] is False
     assert by_label["in-sync"]["worst_finding"].id == 300
@@ -226,11 +241,13 @@ def _compiled_worst_stmt(group_id: int = 10) -> Any:
     return sess.statements[3].compile(dialect=postgresql.dialect())
 
 
-def test_worst_stmt_uses_distinct_on_application_group_id() -> None:
-    """Query (4) ist ein Postgres `DISTINCT ON (application_group_id)`."""
+def test_worst_stmt_uses_distinct_on_group_and_has_fix() -> None:
+    """Query (4) ist ein Postgres `DISTINCT ON (application_group_id, has_fix)`
+    — pro `(group, lane)` ein eigener Live-Worst (TICKET-013)."""
     sql = str(_compiled_worst_stmt())
-    assert "DISTINCT ON (findings.application_group_id)" in sql, (
-        f"DISTINCT ON (findings.application_group_id) fehlt im kompilierten SQL:\n{sql}"
+    assert "DISTINCT ON (findings.application_group_id, findings.has_fix)" in sql, (
+        f"DISTINCT ON (findings.application_group_id, findings.has_fix) fehlt im "
+        f"kompilierten SQL:\n{sql}"
     )
 
 
@@ -258,9 +275,9 @@ def test_worst_stmt_scopes_to_server_and_group_ids() -> None:
 
 
 def test_worst_stmt_order_starts_with_group_then_triage_order() -> None:
-    """ORDER BY beginnt mit application_group_id (DISTINCT-ON-Pflicht),
-    danach §15-Triage: is_kev DESC, epss DESC NULLS LAST, cvss DESC NULLS
-    LAST, severity_rank (CASE) DESC, first_seen_at ASC."""
+    """ORDER BY beginnt mit (application_group_id, has_fix) (DISTINCT-ON-
+    Pflicht), danach §15-Triage: is_kev DESC, epss DESC NULLS LAST, cvss
+    DESC NULLS LAST, severity_rank (CASE) DESC, first_seen_at ASC."""
     sql = str(_compiled_worst_stmt())
     match = re.search(r"ORDER BY (.+)$", sql, flags=re.DOTALL)
     assert match is not None, f"ORDER BY fehlt im kompilierten SQL:\n{sql}"
@@ -268,6 +285,7 @@ def test_worst_stmt_order_starts_with_group_then_triage_order() -> None:
 
     expected_sequence = [
         "findings.application_group_id",
+        "findings.has_fix",
         "findings.is_kev DESC",
         "findings.epss_score DESC NULLS LAST",
         "findings.cvss_v3_score DESC NULLS LAST",
@@ -304,6 +322,7 @@ def test_worst_stmt_projects_template_contract_columns() -> None:
     select_clause = sql.split("FROM")[0]
     for col in (
         "findings.application_group_id",
+        "findings.has_fix",
         "findings.id",
         "findings.identifier_key",
         "findings.package_name",
@@ -322,7 +341,7 @@ def test_group_without_open_findings_never_rendered() -> None:
     damit in group_ids — sie erscheint nicht im Ergebnis, selbst wenn eine
     (stale) Eval-Junction-Row existiert. Query (4) laeuft erst gar nicht
     fuer sie (IN-Filter, siehe Statement-Test oben)."""
-    counts_rows: list[Any] = [(10, 1)]  # nur Group 10 hat offene Findings
+    counts_rows: list[Any] = [(10, True, 1)]  # nur Group 10 hat offene Findings
     group_rows = [_group_row(10, "alive")]
     # Stale Eval-Row fuer Group 20 — darf nichts bewirken, weil Group 20
     # nie in group_ids gelandet ist (Query 2 wuerde sie nicht liefern).
@@ -334,7 +353,7 @@ def test_group_without_open_findings_never_rendered() -> None:
     assert [entry["group"].label for entry in result] == ["alive"]
 
 
-@pytest.mark.parametrize("counts_rows", [[], [(None, 5)]])
+@pytest.mark.parametrize("counts_rows", [[], [(None, True, 5)]])
 def test_no_groups_short_circuits_before_worst_query(counts_rows: list[Any]) -> None:
     """Ohne Groups mit OPEN-Findings bricht der Loader nach Query (1) ab —
     Query (4) wird nie abgesetzt (kein sinnloser DISTINCT-ON-Roundtrip)."""

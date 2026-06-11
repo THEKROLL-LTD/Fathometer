@@ -8,8 +8,9 @@ Phase B.1 — Loader ``_load_application_groups_for_server`` (in
   - Per-Group-Findings-Query ist weg; der Loader fuehrt selbst bei vielen
     Groups eine konstante Anzahl ``FROM finding``-Statements aus
     (Count-Aggregat + Worst-Finding-Batch, also <= 2).
-  - Rueckgabe-Vertrag: ``list[dict]`` mit Keys exakt ``{"group", "count",
-    "worst_finding"}``. Kein ``findings``-Feld mehr.
+  - Rueckgabe-Vertrag (TICKET-013): ``list[dict]`` mit Keys exakt
+    ``{"group", "count", "lanes"}``; ``worst_finding``/``evaluation``/Drift
+    liegen pro Lane in ``entry["lanes"]``. Kein ``findings``-Feld mehr.
 
 Phase B.2 — neuer Endpoint ``GET /servers/<sid>/groups/<gid>/findings``:
 
@@ -249,8 +250,11 @@ def test_initial_render_no_per_group_findings_query(db_app: Flask) -> None:
 
 
 def test_load_application_groups_returns_count_and_worst_finding(db_app: Flask) -> None:
-    """Rueckgabe-Vertrag: jeder Eintrag hat exakt die Keys
-    ``{"group", "count", "worst_finding"}`` — kein ``findings``-Feld mehr.
+    """Rueckgabe-Vertrag (TICKET-013): jeder Eintrag hat exakt die Keys
+    ``{"group", "count", "lanes"}`` — `worst_finding`/`evaluation`/Drift
+    liegen jetzt pro Lane (``entry["lanes"][i]``). Kein ``findings``-Feld.
+
+    Beide Findings hier haben keinen ``fixed_version`` -> mitigate-Lane.
     """
     create_admin_user(db_app)
     sid = _create_server(db_app, name="srv-loader-contract")
@@ -276,11 +280,15 @@ def test_load_application_groups_returns_count_and_worst_finding(db_app: Flask) 
 
     assert len(entries) == 1, entries
     entry = entries[0]
-    assert set(entry.keys()) == {"group", "count", "worst_finding"}, entry
+    assert set(entry.keys()) == {"group", "count", "lanes"}, entry
     assert isinstance(entry["count"], int), entry["count"]
     assert entry["count"] == 2, entry["count"]
-    assert entry["worst_finding"] is not None
-    assert entry["worst_finding"].id == f1
+    # Ohne fixed_version -> beide Findings in der mitigate-Lane.
+    assert [lane["fix_lane"] for lane in entry["lanes"]] == ["mitigate"]
+    mitigate = entry["lanes"][0]
+    assert mitigate["count"] == 2
+    assert mitigate["worst_finding"] is not None
+    assert mitigate["worst_finding"].id == f1
     # Defensive: ``findings`` darf NICHT existieren (Spec-Vertrag aus
     # ADR-0025 §2).
     assert "findings" not in entry, "Vertragsbruch: `findings` darf nicht gerendert werden."

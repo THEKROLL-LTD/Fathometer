@@ -208,6 +208,8 @@ def test_live_e2e_full_pass1_then_pass2_cycle(
     sid, key = register_test_server(db_app, name="srv-live-e2e")
 
     # 1) Initialer Scan: Pass-1 wird queued, Pass-2 nicht (Library leer).
+    #    ADR-0053/TICKET-013: FixedVersion gesetzt -> patch-Lane; das Pass-2-
+    #    Verdikt ``act`` ist patch-only, also passt die Lane.
     resp = _post_scan(
         db_app,
         key,
@@ -216,12 +218,14 @@ def test_live_e2e_full_pass1_then_pass2_cycle(
                 "VulnerabilityID": "CVE-2024-77001",
                 "PkgName": "openssh-server",
                 "InstalledVersion": "1.0",
+                "FixedVersion": "1.1",
                 "Severity": "HIGH",
             },
             {
                 "VulnerabilityID": "CVE-2024-77002",
                 "PkgName": "openssh-server",
                 "InstalledVersion": "1.0",
+                "FixedVersion": "1.1",
                 "Severity": "HIGH",
             },
         ],
@@ -265,7 +269,7 @@ def test_live_e2e_full_pass1_then_pass2_cycle(
             Pass2Evaluation(
                 group_label="openssh-server",
                 risk_band="act",
-                action_type="patch",
+                # ADR-0053: action_type kein LLM-Output mehr (patch-Lane abgeleitet).
                 reason="Patch im Distro-Repo verfuegbar.",
                 worst_finding_id=finding_ids[0],
             )
@@ -306,12 +310,14 @@ def test_live_e2e_full_pass1_then_pass2_cycle(
                 "VulnerabilityID": "CVE-2024-77001",
                 "PkgName": "openssh-server",
                 "InstalledVersion": "1.0",
+                "FixedVersion": "1.1",
                 "Severity": "HIGH",
             },
             {
                 "VulnerabilityID": "CVE-2024-77002",
                 "PkgName": "openssh-server",
                 "InstalledVersion": "1.0",
+                "FixedVersion": "1.1",
                 "Severity": "HIGH",
             },
         ],
@@ -410,8 +416,9 @@ def test_live_e2e_cache_hit_on_identical_rescan(
         evaluations=[
             Pass2Evaluation(
                 group_label="openssl",
-                risk_band="mitigate",
-                action_type="mitigate",
+                # ADR-0053: no-fix Finding -> mitigate-Lane; ``escalate`` ist
+                # erlaubt (act waere patch-only). action_type wird abgeleitet.
+                risk_band="escalate",
                 reason="No clear listener.",
                 worst_finding_id=finding_ids[0],
             )

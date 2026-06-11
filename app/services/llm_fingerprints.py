@@ -70,6 +70,17 @@ def group_findings_fingerprint(findings: list[Finding]) -> str:
     fingerprinten; andernfalls matchen gespeicherter Eval-Fingerprint
     und Enqueue-Fingerprint nie und jede Group mit non-open Findings
     wird bei jedem Ingest erneut enqueued.
+
+    Ab TICKET-013/ADR-0053 uebergeben die Caller das **Lane-OPEN-Set**
+    (nur die Findings einer ``fix_lane`` — ``patch`` = ``fixed_version IS
+    NOT NULL``, ``mitigate`` = ``fixed_version IS NULL``), nicht mehr das
+    volle Group-OPEN-Set. Die Signatur bleibt unveraendert: die Funktion
+    hasht weiterhin genau die uebergebene Finding-Liste; die Lane-
+    Partitionierung des Inputs erfolgt beim Caller. Folge: ein Finding,
+    das einen Fix bekommt (mitigate→patch), aendert **beide** Lane-
+    Fingerprints (eine Lane verliert, die andere gewinnt es) und triggert
+    so Re-Eval beider Lanes, ohne ``fixed_version`` separat in den
+    Fingerprint aufzunehmen.
     """
     tuples = sorted((f.identifier_key, f.package_purl or "") for f in findings)
     payload = json.dumps(tuples, separators=(",", ":"))
@@ -205,6 +216,7 @@ def make_cache_key(
     group_findings_fp: str,
     cve_data_fp: str,
     server_context_fp: str,
+    fix_lane: str | None = None,
 ) -> str:
     """Voller SHA256-hex (64 chars) ueber die vier Inputs plus Versions-Salt.
 
@@ -216,10 +228,22 @@ def make_cache_key(
     dafuer, dass eine materielle Aenderung der Prompt-Semantik den Cache
     einmalig invalidiert — sonst blieben Bestands-Reasons aus alter
     Semantik bis zur naechsten OPEN-Set-Aenderung stehen.
+
+    ``fix_lane`` (TICKET-013/ADR-0053) ist eine optionale zusaetzliche
+    Salt-Komponente: ist sie gesetzt (``"patch"`` / ``"mitigate"``),
+    fliesst sie als ``|lane=<fix_lane>`` in den Payload, damit patch- und
+    mitigate-Lane derselben Gruppe nie denselben Cache-Eintrag treffen.
+    Bleibt sie ``None``, ist der Key **bitidentisch** zum bisherigen
+    Verhalten — nicht-angepasste (noch nicht Lane-aware) Caller bleiben so
+    waehrend der Etappen-Umstellung gruen. Etappe 5 reicht den realen
+    ``fix_lane`` aus dem Job-Payload durch; der Default verschwindet
+    faktisch, sobald alle Caller Lane-aware sind.
     """
     payload = (
         f"{group_id}|{group_findings_fp}|{cve_data_fp}|{server_context_fp}|v{PASS2_PROMPT_VERSION}"
     )
+    if fix_lane is not None:
+        payload = f"{payload}|lane={fix_lane}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

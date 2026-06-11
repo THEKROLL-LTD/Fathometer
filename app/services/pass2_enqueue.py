@@ -31,6 +31,7 @@ from app.models import (
     LLMJob,
 )
 from app.services.llm_fingerprints import group_findings_fingerprint
+from app.services.pass2_input_selection import FIX_LANES, FixLane, partition_by_lane
 
 log = logging.getLogger("fathometer.pass2_enqueue")
 
@@ -42,8 +43,29 @@ Pass2Trigger = Literal[
     "triage_action",
 ]
 
-# Pass-2-Jobs die noch laufen/warten blockieren ein Re-Enqueue derselben Group.
+# Pass-2-Jobs die noch laufen/warten blockieren ein Re-Enqueue derselben Lane.
 _ACTIVE_PASS2_STATUSES = ("queued", "in_progress")
+
+
+def _enqueue_lane_job(
+    session: Session,
+    *,
+    server_id: int,
+    group_id: int,
+    fix_lane: FixLane,
+) -> None:
+    """Fuegt einen Pass-2-Job fuer genau eine ``(group, lane)`` hinzu."""
+    session.add(
+        LLMJob(
+            job_type="risk_evaluation",
+            server_id=server_id,
+            payload={"group_id": group_id, "server_id": server_id, "fix_lane": fix_lane},
+        )
+    )
+    log.debug(
+        "pass2_lane_enqueued",
+        extra={"server_id": server_id, "group_id": group_id, "fix_lane": fix_lane},
+    )
 
 
 def enqueue_pass2_for_server(
@@ -52,16 +74,24 @@ def enqueue_pass2_for_server(
     *,
     trigger: Pass2Trigger,
 ) -> int:
-    """Enqueued Pass-2-Jobs fuer alle Groups auf diesem Server die bewertet
-    werden muessen. Returns die Anzahl tatsaechlich enqueueter Jobs.
+    """Enqueued Pass-2-Jobs pro ``(group, fix_lane)`` auf diesem Server.
+    Returns die Anzahl tatsaechlich enqueueter Jobs.
+
+    ADR-0053 / TICKET-013 Etappe 4: Pass 2 bewertet pro Fix-Lane statt pro
+    Group. Eine Group mit OPEN-Findings beider Lane-Typen (Findings mit und
+    ohne ``fixed_version``) erzeugt bis zu **zwei** Jobs (je einen pro
+    nicht-leerer Lane), eine reine Lane genau einen. Payload je Job:
+    ``{group_id, server_id, fix_lane}``. Leere Lane → kein Job, keine Row.
 
     Idempotent: kann beliebig oft aufgerufen werden ohne Doppel-Jobs zu
-    erzeugen. Eine Group wird NUR enqueued wenn:
-    - sie mindestens ein OPEN Finding auf diesem Server hat,
-    - es noch keinen queued/in_progress Pass-2-Job fuer (group_id, server_id)
-      gibt (Guard gegen Doppel-Enqueue durch fast gleichzeitige Trigger), und
-    - keine ``application_group_evaluations``-Row mit identischem
-      ``group_findings_fingerprint`` existiert (Fingerprint-Skip: schon bewertet).
+    erzeugen. Eine ``(group, lane)`` wird NUR enqueued wenn:
+    - die Lane mindestens ein OPEN Finding auf diesem Server hat,
+    - es noch keinen queued/in_progress Pass-2-Job fuer
+      ``(group_id, server_id, fix_lane)`` gibt (Guard gegen Doppel-Enqueue
+      durch fast gleichzeitige Trigger), und
+    - keine ``application_group_evaluations``-Row dieser Lane mit identischem
+      ``group_findings_fingerprint`` (ueber das **Lane**-OPEN-Set) existiert
+      (Fingerprint-Skip: schon bewertet).
 
     Die neu erzeugten ``LLMJob``-Rows tragen **kein** ``depends_on`` — die
     Sibling-Wait-Semantik in der Pickup-SQL (``_pick_next_job_id``) ist die
@@ -93,9 +123,10 @@ def enqueue_pass2_for_server(
 
     affected_ids = [grp.id for grp in affected_groups]
 
-    # Junction-Rows (bereits berechnete Evals) fuer alle affected_groups.
-    evaluations_by_group_id: dict[int, ApplicationGroupEvaluation] = {
-        ev.group_id: ev
+    # Junction-Rows (bereits berechnete Evals) fuer alle affected_groups —
+    # jetzt bis zu zwei pro Group (eine pro Lane), Schluessel ``(gid, lane)``.
+    evaluations_by_group_lane: dict[tuple[int, str], ApplicationGroupEvaluation] = {
+        (ev.group_id, ev.fix_lane): ev
         for ev in session.execute(
             select(ApplicationGroupEvaluation).where(
                 ApplicationGroupEvaluation.server_id == server_id,
@@ -106,9 +137,11 @@ def enqueue_pass2_for_server(
         .all()
     }
 
-    # Doppel-Enqueue-Guard: Group-IDs mit bereits aktivem Pass-2-Job. Batched
-    # statt N+1-``NOT EXISTS`` — semantisch identisch zum Ticket-Guard.
-    active_pass2_group_ids: set[int] = set()
+    # Doppel-Enqueue-Guard: ``(group_id, fix_lane)`` mit bereits aktivem
+    # Pass-2-Job. Batched statt N+1-``NOT EXISTS``. Jobs ohne ``fix_lane`` im
+    # Payload (Alt-Format vor Etappe 4) blockieren konservativ beide Lanes
+    # der Group, damit ein laufender Legacy-Job kein Doppel-Enqueue zulaesst.
+    active_pass2_group_lanes: set[tuple[int, str | None]] = set()
     for (payload,) in session.execute(
         select(LLMJob.payload).where(
             LLMJob.job_type == "risk_evaluation",
@@ -122,9 +155,11 @@ def enqueue_pass2_for_server(
         if gid is None:
             continue
         try:
-            active_pass2_group_ids.add(int(gid))
+            gid_int = int(gid)
         except (TypeError, ValueError):
             continue
+        lane = payload.get("fix_lane")
+        active_pass2_group_lanes.add((gid_int, lane if lane in FIX_LANES else None))
 
     # OPEN-Findings aller affected_groups in einem Query laden, in Python
     # nach group_id buendeln (vermeidet N+1 in der Fingerprint-Schleife).
@@ -146,24 +181,32 @@ def enqueue_pass2_for_server(
 
     queued = 0
     for grp in affected_groups:
-        if grp.id in active_pass2_group_ids:
-            continue
         findings_in_group = findings_by_group_id.get(grp.id, [])
         if not findings_in_group:
             continue
-        new_fp = group_findings_fingerprint(findings_in_group)
-        existing_eval = evaluations_by_group_id.get(grp.id)
-        if existing_eval is not None and existing_eval.group_findings_fingerprint == new_fp:
-            # Junction-Row existiert und Fingerprint stimmt — kein Pass-2 noetig.
-            continue
-        session.add(
-            LLMJob(
-                job_type="risk_evaluation",
-                server_id=server_id,
-                payload={"group_id": grp.id, "server_id": server_id},
-            )
-        )
-        queued += 1
+        lanes = partition_by_lane(findings_in_group)
+        for lane in FIX_LANES:
+            lane_findings = lanes[lane]
+            if not lane_findings:
+                # Leere Lane — kein Job, keine Row (ADR-0053).
+                continue
+            # Guard: exakt diese Lane aktiv ODER ein Legacy-Job (ohne
+            # fix_lane) der diese Group blockiert.
+            if (grp.id, lane) in active_pass2_group_lanes or (
+                grp.id,
+                None,
+            ) in active_pass2_group_lanes:
+                continue
+            # Fingerprint ueber das **Lane**-OPEN-Set, verglichen mit der
+            # Lane-Eval-Row.
+            new_fp = group_findings_fingerprint(lane_findings)
+            existing_eval = evaluations_by_group_lane.get((grp.id, lane))
+            if existing_eval is not None and existing_eval.group_findings_fingerprint == new_fp:
+                # Junction-Row dieser Lane existiert und Fingerprint stimmt
+                # — kein Pass-2 fuer diese Lane noetig.
+                continue
+            _enqueue_lane_job(session, server_id=server_id, group_id=grp.id, fix_lane=lane)
+            queued += 1
 
     if queued > 0:
         session.flush()

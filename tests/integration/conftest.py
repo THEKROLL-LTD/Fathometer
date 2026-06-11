@@ -58,7 +58,7 @@ class MockReviewer:
         return self._pass1_result, meta
 
     async def pass2_evaluate_groups(
-        self, server: Any, groups: Any
+        self, server: Any, groups: Any, *, fix_lane: str | None = None
     ) -> tuple[Pass2Result, dict[str, Any]]:
         await asyncio.sleep(0)
         self.pass2_call_count += 1

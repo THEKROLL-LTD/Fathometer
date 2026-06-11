@@ -429,6 +429,18 @@
 .workflow-table .workflow-table__cve   { color: var(--text-primary); width: 160px; white-space: nowrap; }
 .workflow-table .workflow-table__reason { color: var(--text-secondary); }
 .workflow-table__reason b { color: var(--text-primary); font-weight: 400; }
+/* Lane-Tag in der Group-Spalte (ADR-0053): dezenter patch/no-patch-Hinweis
+   neben dem Group-Link, da eine Group in patch- UND mitigate-Cards erscheinen
+   kann. */
+.workflow-table__lane-tag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-left: 8px;
+  white-space: nowrap;
+}
 /* Drift-Hint (TICKET-010 / ADR-0052 Entscheidung 2): Eval-Snapshot weicht
    vom Live-Worst ab -> dezenter "re-evaluation pending"-Marker neben der
    Reason. Gleiche Optik in Workflow-Tabelle und Group-Card. */
@@ -1570,6 +1582,25 @@
   margin-top: 8px;
   max-width: 78ch;
 }
+/* Lane-Assessment-Block (ADR-0053): bis zu zwei kompakte Lane-Zeilen pro
+   Group-Card (patch / no patch), je eigene Reason + Worst. Kein eigener
+   Card-Frame — nur vertikaler Abstand, der Header-Hairline trennt. */
+.sd-app-group__lane {
+  margin-top: 10px;
+}
+.sd-app-group__lane-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sd-app-group__lane-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.sd-app-group__lane-tag--patch { color: var(--text-secondary); }
 .sd-app-group__worst {
   margin-top: 12px;
   padding-top: 12px;

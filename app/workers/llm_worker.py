@@ -78,6 +78,7 @@ from app.services.llm_risk_reviewer import (
     Pass2Result,
 )
 from app.services.pass2_enqueue import Pass2Trigger, enqueue_pass2_for_server
+from app.services.pass2_input_selection import FIX_LANES, partition_by_lane
 from app.settings_service import ensure_settings_row
 from app.workers import feed_enrichment
 
@@ -1418,6 +1419,30 @@ async def _do_pass2(job_id: int) -> None:
         if group_id <= 0 or server_id <= 0:
             raise ValueError(f"pass2 payload invalid: {payload!r}")
 
+        # ADR-0053 / TICKET-013 Etappe 5: Pass 2 bewertet pro Fix-Lane. Die Lane
+        # kommt aus dem Enqueue-Payload (Etappe 4). Fehlt sie, ist es ein
+        # Legacy-Job aus der Alt-Queue (enqueued VOR dem Deploy dieser Etappe) —
+        # solche Jobs tragen keine Lane-Semantik und wuerden ueber das volle
+        # Group-OPEN-Set fingerprinten/bewerten, was nach der Lane-Umstellung
+        # keine Eval-Row mehr matcht. Wir ueberspringen sie sauber (done/skipped
+        # mit Warnung) statt sie zu raten: Etappe 4 setzt ``fix_lane`` ab Deploy
+        # immer, der naechste Ingest enqueued die Lanes korrekt nach.
+        fix_lane = payload.get("fix_lane")
+        if fix_lane not in FIX_LANES:
+            log.warning(
+                "llm_worker.pass2_missing_or_invalid_fix_lane job_id=%s "
+                "group_id=%s server_id=%s fix_lane=%r — skipping legacy job",
+                job_id,
+                group_id,
+                server_id,
+                fix_lane,
+            )
+            job.status = "done"
+            job.completed_at = datetime.now(UTC)
+            job.result = {"skipped": True, "reason": "missing or invalid fix_lane in payload"}
+            session.commit()
+            return
+
         # v0.9.x: bei Pass-2-Start audit-loggen ob Pass-1-Siblings fuer
         # den selben Server gescheitert sind. Pass-2 laeuft trotzdem
         # (Variante 3), aber Operator sieht im Audit-Log dass nicht alle
@@ -1457,10 +1482,27 @@ async def _do_pass2(job_id: int) -> None:
             session.commit()
             return
 
+        # ADR-0053 / TICKET-013 Etappe 5: ab hier arbeitet der ganze Pickup nur
+        # noch mit den Findings DIESER Lane (Fingerprint, Selektion, Prompt,
+        # Validierung). Leere Lane sollte praktisch nicht auftreten — Etappe 4
+        # enqueued keine leere Lane; defensiv beenden wir den Job dann sauber
+        # ohne Eval-Row.
+        lane_findings = partition_by_lane(findings)[fix_lane]
+        if not lane_findings:
+            job.status = "done"
+            job.completed_at = datetime.now(UTC)
+            job.result = {
+                "skipped": True,
+                "reason": f"no open findings in fix_lane {fix_lane!r}",
+            }
+            session.commit()
+            return
+        findings = lane_findings
+
         gf_fp = group_findings_fingerprint(findings)
         cve_fp = cve_data_fingerprint(findings)
         sv_fp = server_context_fingerprint(server, session=session)
-        cache_key = make_cache_key(group.id, gf_fp, cve_fp, sv_fp)
+        cache_key = make_cache_key(group.id, gf_fp, cve_fp, sv_fp, fix_lane=fix_lane)
 
         cached = lookup(session, cache_key)
         if cached is not None:
@@ -1469,11 +1511,11 @@ async def _do_pass2(job_id: int) -> None:
                 session,
                 group_id=group_id,
                 server_id=server_id,
+                fix_lane=fix_lane,
                 risk_band=cached.risk_band,
                 reason=cached.reason,
                 worst_finding_id=cached.worst_finding_id,
                 gf_fp=gf_fp,
-                action_type=cached.action_type,
             )
             inherited = inherit_group_risk_to_findings(
                 session, group_ids=[group_id], server_id=server_id
@@ -1483,7 +1525,10 @@ async def _do_pass2(job_id: int) -> None:
             job.result = {
                 "cache_hit": True,
                 "risk_band": cached.risk_band,
-                "action_type": cached.action_type,
+                # ADR-0053 / TICKET-013 Etappe 5: action_type wird aus
+                # (fix_lane, risk_band) abgeleitet (siehe _upsert_evaluation),
+                # nicht mehr vom Cache uebernommen.
+                "action_type": _derive_action_type(fix_lane, cached.risk_band),
                 "findings_inherited": inherited,
             }
             _audit(
@@ -1560,7 +1605,7 @@ async def _do_pass2(job_id: int) -> None:
                 # alle Felder hat (Server hat keine ORM-Relations dafuer).
                 _hydrate_server_snapshot(detached_session, server_re)
                 pass2_result, pass2_meta = await reviewer.pass2_evaluate_groups(
-                    server_re, [(group_re, findings_re)]
+                    server_re, [(group_re, findings_re)], fix_lane=fix_lane
                 )
         except LLMInvalidResponseError as exc:
             # v0.9.5: meta-Dict aus exc nehmen (siehe Pass-1-Aenderung).
@@ -1632,11 +1677,14 @@ async def _do_pass2(job_id: int) -> None:
                 session,
                 group_id=group_id,
                 server_id=server_id,
+                fix_lane=fix_lane,
                 risk_band=evaluation.risk_band,
                 reason=evaluation.reason,
                 worst_finding_id=evaluation.worst_finding_id,
                 gf_fp=gf_fp,
-                action_type=evaluation.action_type,
+                # ADR-0053 / TICKET-013 Etappe 5: ``action_type`` ist kein
+                # LLM-Output mehr — ``_upsert_evaluation`` leitet ihn intern
+                # deterministisch aus ``(fix_lane, risk_band)`` ab.
             )
             inherited = inherit_group_risk_to_findings(
                 session, group_ids=[group_id], server_id=server_id
@@ -1652,7 +1700,8 @@ async def _do_pass2(job_id: int) -> None:
             worst_finding_id=evaluation.worst_finding_id,
             reason=evaluation.reason,
             llm_model=model_name,
-            action_type=evaluation.action_type,
+            # ADR-0053 / TICKET-013 Etappe 3: action_type wird in Etappe 5
+            # aus (fix_lane, risk_band) abgeleitet; Cache speichert solange None.
         )
         job = session.get(LLMJob, job_id)
         if job is not None:
@@ -1661,7 +1710,9 @@ async def _do_pass2(job_id: int) -> None:
             job.result = {
                 "cache_hit": False,
                 "risk_band": evaluation.risk_band,
-                "action_type": evaluation.action_type,
+                # ADR-0053 / TICKET-013 Etappe 5: action_type aus
+                # (fix_lane, risk_band) abgeleitet, nicht mehr LLM-Output.
+                "action_type": _derive_action_type(fix_lane, evaluation.risk_band),
                 "findings_inherited": inherited,
             }
         session.commit()
@@ -1775,31 +1826,73 @@ def _pick_evaluation(result: Pass2Result, group_label: str) -> Pass2Evaluation |
     return None
 
 
+#: Ableitungstabelle ``(fix_lane, risk_band) -> action_type`` (ADR-0053).
+#: Die Action-Achse (patch/mitigate) folgt deterministisch aus der Lane, das
+#: Risiko-Band bleibt LLM-Urteil. ``act`` existiert nur in der patch-Lane
+#: (act ist patch-only, vom Validator durchgesetzt) — ``(mitigate, act)`` ist
+#: daher bewusst NICHT eingetragen.
+_ACTION_TYPE_BY_LANE_BAND: dict[tuple[str, str], str] = {
+    ("patch", "escalate"): "patch",
+    ("patch", "act"): "patch",
+    ("patch", "monitor"): "watch",
+    ("patch", "noise"): "none",
+    ("mitigate", "escalate"): "mitigate",
+    ("mitigate", "monitor"): "watch",
+    ("mitigate", "noise"): "none",
+}
+
+
+def _derive_action_type(fix_lane: str, risk_band: str) -> str:
+    """Leitet den ``action_type`` deterministisch aus ``(fix_lane, risk_band)`` ab.
+
+    ADR-0053: ``action_type`` ist kein LLM-Output mehr — die Action-Achse folgt
+    aus der Lane, das Band aus dem LLM-Urteil. ``(mitigate, act)`` kommt nicht
+    vor (der Validator lehnt ``act`` im mitigate-Call ab); defensiv loggen wir
+    den Fall und behandeln ihn wie ``(mitigate, escalate)`` (-> ``mitigate``),
+    damit ein Validator-Leck nicht die ganze Eval killt.
+    """
+    derived = _ACTION_TYPE_BY_LANE_BAND.get((fix_lane, risk_band))
+    if derived is None:
+        log.warning(
+            "llm_worker.unexpected_lane_band_combo fix_lane=%r risk_band=%r "
+            "— falling back to mitigate (act is patch-only, ADR-0053)",
+            fix_lane,
+            risk_band,
+        )
+        return "mitigate"
+    return derived
+
+
 def _upsert_evaluation(
     session: Any,
     *,
     group_id: int,
     server_id: int,
+    fix_lane: str,
     risk_band: str,
     reason: str | None,
     worst_finding_id: int | None,
     gf_fp: str,
-    action_type: str | None = None,
 ) -> None:
-    """UPSERT in ``application_group_evaluations`` (ADR-0028, Block T).
+    """UPSERT in ``application_group_evaluations`` (ADR-0028, Block T; ADR-0053).
 
     Ersetzt das frühere ``_apply_pass2_to_group``: statt die Eval-Felder
     direkt auf der ``ApplicationGroup``-Row zu setzen (last-write-wins-
-    Bug zwischen Servern), wird die ``(group_id, server_id)``-Junction-Row
-    per ``pg_insert().on_conflict_do_update()`` atomar geschrieben.
+    Bug zwischen Servern), wird die ``(group_id, server_id, fix_lane)``-
+    Junction-Row per ``pg_insert().on_conflict_do_update()`` atomar geschrieben.
 
-    Bei Cache-Hits aus Pre-v0.9.3-Eintraegen ohne ``action_type`` bleibt
-    der Wert ``None`` — die UI ``NULL → 'investigate'``-Abbildung greift
-    ohnehin.
+    ADR-0053 / TICKET-013 Etappe 5: ``fix_lane`` ist Teil des Konflikt-Keys
+    (dritte PK-Spalte) und wird nur in die insert-``values`` aufgenommen, NICHT
+    in ``set_`` (der PK aendert sich beim Update nicht). ``action_type`` ist kein
+    Parameter mehr — er wird hier deterministisch aus ``(fix_lane, risk_band)``
+    abgeleitet (:func:`_derive_action_type`) und persistiert, damit
+    ``_build_action_sections`` weiterhin auf ``action_type`` filtern kann.
     """
+    action_type = _derive_action_type(fix_lane, risk_band)
     stmt = pg_insert(ApplicationGroupEvaluation).values(
         group_id=group_id,
         server_id=server_id,
+        fix_lane=fix_lane,
         risk_band=risk_band,
         risk_band_reason=reason,
         risk_band_source="llm",
@@ -1809,7 +1902,7 @@ def _upsert_evaluation(
         action_type=action_type,
     )
     stmt = stmt.on_conflict_do_update(
-        index_elements=["group_id", "server_id"],
+        index_elements=["group_id", "server_id", "fix_lane"],
         set_={
             "risk_band": stmt.excluded.risk_band,
             "risk_band_reason": stmt.excluded.risk_band_reason,

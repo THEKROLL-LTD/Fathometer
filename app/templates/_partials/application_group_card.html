@@ -1,26 +1,54 @@
-{# Application-Group-Card (Block P, ADR-0023; ADR-0025; ADR-0028).
+{# Application-Group-Card (Block P, ADR-0023; ADR-0025; ADR-0028; ADR-0053).
    Innerhalb .sd-band__body: kein DaisyUI-Card-Frame, kein eigener Background.
    Nur Border-bottom-Hairline + Padding via .sd-app-group.
 
-   Render-Vertrag:
-     - `group`               : ApplicationGroup (id, label, explanation, group_kind)
-     - `evaluation`          : ApplicationGroupEvaluation | None
-     - `count`               : int
-     - `worst_finding`       : Finding | None — LIVE-Worst aus den OFFENEN
-                               Findings (TICKET-010 / ADR-0052, Bug C). Der
-                               Eval-Snapshot (`evaluation.worst_finding_id`)
-                               ist KEINE Render-Bedingung und KEINE
-                               Datenquelle mehr.
-     - `worst_finding_drift` : bool — Eval-Snapshot zeigt auf ein anderes
-                               (oder geschlossenes) Finding als das Live-Worst
-                               -> Hint "re-evaluation pending" (ADR-0052
-                               Entscheidung 2).
-     - `server`              : Server
+   Render-Vertrag (ADR-0053 — Pass-2 pro Fix-Lane):
+     - `group`  : ApplicationGroup (id, label, explanation, group_kind)
+     - `count`  : int — gesamte OPEN-Findings der Group (Summe ueber Lanes).
+     - `lanes`  : list[dict] — bis zu zwei Eintraege (patch zuerst, dann
+                  mitigate), nur Lanes mit count > 0. Pro Lane:
+                    - `fix_lane`            : "patch" | "mitigate"
+                    - `evaluation`          : ApplicationGroupEvaluation | None
+                                              (Lane-Junction-Row; risk_band,
+                                              risk_band_reason).
+                    - `count`               : int — OPEN-Findings dieser Lane.
+                    - `worst_finding`       : Finding | None — LIVE-Worst aus
+                                              den OFFENEN Findings DIESER Lane
+                                              (TICKET-010 / ADR-0052, Bug C).
+                                              Der Eval-Snapshot
+                                              (`evaluation.worst_finding_id`)
+                                              ist KEINE Render-Bedingung und
+                                              KEINE Datenquelle mehr.
+                    - `worst_finding_drift` : bool — Eval-Snapshot zeigt auf ein
+                                              anderes (oder geschlossenes)
+                                              Finding als das Live-Worst
+                                              -> Hint "re-evaluation pending"
+                                              (ADR-0052 Entscheidung 2).
+     - `server` : Server
+
+   Das Header-Band-Badge zeigt das urgentste Band ueber alle Lanes (Max-Band);
+   ohne jede Lane-Evaluation -> `pending`. Der Findings-Drilldown bleibt
+   group-level (alle Findings der Group, nicht pro Lane).
 
    Sicherheit: group.label, group.explanation und risk_band_reason sind
    LLM-Output — kein |safe, Jinja-Autoescape greift.
 #}
-{%- set _band = evaluation.risk_band if evaluation else 'pending' -%}
+{#- Max-Band ueber die Lanes fuer das Header-Badge (urgentste Lane zuerst).
+    _BAND_RANK spiegelt die Triage-Reihenfolge; je hoeher, desto urgenter. -#}
+{%- set _BAND_RANK = {'escalate': 4, 'act': 3, 'monitor': 2, 'noise': 1} -%}
+{#- Namespace, da `{% set %}` innerhalb `{% for %}` sonst nicht nach aussen
+    durchschlaegt (Jinja-Scope). -#}
+{%- set _hdr = namespace(band='pending', rank=-1) -%}
+{%- for lane in lanes -%}
+  {%- if lane.evaluation and lane.evaluation.risk_band -%}
+    {%- set _rank = _BAND_RANK.get(lane.evaluation.risk_band, 0) -%}
+    {%- if _rank > _hdr.rank -%}
+      {%- set _hdr.rank = _rank -%}
+      {%- set _hdr.band = lane.evaluation.risk_band -%}
+    {%- endif -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- set _header_band = _hdr.band -%}
 <div class="sd-app-group"
      data-test="group-card-{{ group.id }}">
   <div class="sd-app-group__header">
@@ -34,39 +62,56 @@
       {% endif %}
     </div>
     <div class="sd-app-group__meta">
-      <span class="sd-badge sd-badge--{{ _band }}">{{ _band | upper }}</span>
+      <span class="sd-badge sd-badge--{{ _header_band }}" data-test="group-band-badge">{{ _header_band | upper }}</span>
       <span class="sd-app-group__count" data-test="group-findings-count">
         {{ count }} {% if count == 1 %}finding{% else %}findings{% endif %}
       </span>
     </div>
   </div>
 
-  {% if evaluation and (evaluation.risk_band_reason or worst_finding_drift) %}
-    <div class="sd-app-group__reason" data-test="group-risk-reason">
-      <p class="sd-ai-eyebrow">AI assessment</p>
-      <p class="sd-ai-text">
-        {%- if evaluation.risk_band_reason %}{{ evaluation.risk_band_reason }}{% endif %}
-        {%- if worst_finding_drift %} <span class="sd-app-group__reason-hint"
-              data-test="group-drift-hint">re-evaluation pending</span>{% endif -%}
-      </p>
-    </div>
-  {% endif %}
-
-  {# Live-Worst (TICKET-010 / ADR-0052): rendert sobald ein offenes Finding
-     existiert — auch ohne Evaluation bzw. bei worst_finding_id=None. #}
-  {% if worst_finding %}
-    <div class="sd-app-group__worst" data-test="group-worst-finding">
-      <p class="sd-eyebrow">Worst Finding</p>
-      <div class="sd-app-group__worst-row">
-        <a href="#finding-{{ worst_finding.id }}"
-           class="sd-app-group__worst-link"
-           data-test="group-worst-finding-link">
-          {{ worst_finding.identifier_key }}
-        </a>
-        <span class="sd-app-group__worst-pkg">{{ worst_finding.package_name }}</span>
+  {%- for lane in lanes -%}
+    {%- set _lane_band = lane.evaluation.risk_band if lane.evaluation and lane.evaluation.risk_band else 'pending' -%}
+    {%- set _lane_label = 'Patch' if lane.fix_lane == 'patch' else 'No patch' -%}
+    <div class="sd-app-group__lane"
+         data-test="group-lane-{{ group.id }}-{{ lane.fix_lane }}">
+      <div class="sd-app-group__lane-head">
+        <span class="sd-app-group__lane-tag sd-app-group__lane-tag--{{ lane.fix_lane }}"
+              data-test="group-lane-label-{{ group.id }}-{{ lane.fix_lane }}">{{ _lane_label }}</span>
+        <span class="sd-badge sd-badge--{{ _lane_band }}"
+              data-test="group-lane-band-{{ group.id }}-{{ lane.fix_lane }}">{{ _lane_band | upper }}</span>
       </div>
+
+      {% if lane.evaluation and (lane.evaluation.risk_band_reason or lane.worst_finding_drift) %}
+        <div class="sd-app-group__reason"
+             data-test="group-lane-reason-{{ group.id }}-{{ lane.fix_lane }}">
+          <p class="sd-ai-eyebrow">AI assessment</p>
+          <p class="sd-ai-text">
+            {%- if lane.evaluation.risk_band_reason %}{{ lane.evaluation.risk_band_reason }}{% endif %}
+            {%- if lane.worst_finding_drift %} <span class="sd-app-group__reason-hint"
+                  data-test="group-lane-drift-hint-{{ group.id }}-{{ lane.fix_lane }}">re-evaluation pending</span>{% endif -%}
+          </p>
+        </div>
+      {% endif %}
+
+      {# Live-Worst (TICKET-010 / ADR-0052): rendert sobald ein offenes Finding
+         dieser Lane existiert — auch ohne Evaluation bzw. bei
+         worst_finding_id=None. #}
+      {% if lane.worst_finding %}
+        <div class="sd-app-group__worst"
+             data-test="group-lane-worst-{{ group.id }}-{{ lane.fix_lane }}">
+          <p class="sd-eyebrow">Worst Finding</p>
+          <div class="sd-app-group__worst-row">
+            <a href="#finding-{{ lane.worst_finding.id }}"
+               class="sd-app-group__worst-link"
+               data-test="group-lane-worst-link-{{ group.id }}-{{ lane.fix_lane }}">
+              {{ lane.worst_finding.identifier_key }}
+            </a>
+            <span class="sd-app-group__worst-pkg">{{ lane.worst_finding.package_name }}</span>
+          </div>
+        </div>
+      {% endif %}
     </div>
-  {% endif %}
+  {%- endfor -%}
 
   <details class="sd-app-group__drilldown"
            data-test="group-findings-details">

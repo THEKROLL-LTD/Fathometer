@@ -8,10 +8,10 @@ Die beiden System-Prompts werden wortgetreu aus den Evidenz-Files unter
 
 * :data:`PASS1_SYSTEM_PROMPT` — Group-Detection (siehe
   ``docs/blocks/P-evidence/prompt-pass1-final.md`` §"Finaler System-Prompt").
-* :data:`PASS2_SYSTEM_PROMPT` — Risk-Evaluation mit 4 aktiven Bands und
-  ``action_type``-Feld (siehe
-  ``docs/blocks/P-evidence/prompt-pass2-final.md`` §"Finaler System-Prompt",
-  Iteration-6-Final).
+* :data:`PASS2_SYSTEM_PROMPT` — Risk-Evaluation pro Fix-Lane (ADR-0053):
+  das LLM emittiert nur noch ``risk_band`` + ``worst_finding_id`` +
+  ``reason``; die Remediation-Achse (patch/mitigate) folgt aus der
+  ``fix_lane`` des Calls, ``act`` ist patch-only.
 
 Beide Konstanten werden in :mod:`app.services.llm_risk_reviewer` re-
 exportiert; bestehende Importe ``from app.services.llm_risk_reviewer
@@ -29,7 +29,11 @@ from __future__ import annotations
 #: (fingerprint-gated), danach wieder normale Cache-Hits. Ohne Salt
 #: blieben Bestands-Reasons aus alter Prompt-Semantik bis zur naechsten
 #: OPEN-Set-Aenderung im Cache stehen.
-PASS2_PROMPT_VERSION = 2
+#: TICKET-013 / ADR-0053: 2 -> 3 — Pass-2-Prompt-Semantik aendert sich auf
+#: Lane-Scope (action_type raus, Bewertung pro fix_lane). Der Bump invalidiert
+#: den Bestands-Cache einmalig, sonst blieben Group-Level-Reasons aus der alten
+#: Semantik bis zur naechsten OPEN-Set-Aenderung stehen.
+PASS2_PROMPT_VERSION = 3
 
 PASS1_SYSTEM_PROMPT: str = """\
 You group Linux-host vulnerability findings by owner-application.
@@ -168,7 +172,18 @@ Response schema:
 PASS2_SYSTEM_PROMPT: str = """\
 You are an experienced IT security analyst. Your task: evaluate each
 application group's risk on this specific Linux host and assign one
-of four risk bands plus one of four action types.
+risk band.
+
+FIX LANE (remediation axis): every finding shown in a single call has
+the SAME patch availability. The call is scoped to one fix_lane:
+  - patch    — a patch IS available for every finding (fixed_version set).
+  - mitigate — NO patch is available for any finding (fixed_version null);
+               remediation can only be a non-patch mitigation (firewall
+               rule, disable service, network isolation, version pin,
+               replacement).
+You do NOT emit an action type — the remediation axis is already fixed
+by the fix_lane of the call. You output ONLY risk_band, worst_finding_id
+and reason.
 
 You receive:
 1. Host context: OS, listeners (proto/addr:port -> process), active
@@ -366,31 +381,19 @@ is monitor. A KEV in a noise component is noise. A HIGH on a public
 listener with a patch available and low/unknown EPSS is act, not
 escalate.
 
-ACTION TYPES (must match risk_band per the table below):
+RISK BAND vs FIX LANE — ``act`` is PATCH-ONLY:
 
-  patch     — A patch IS available and applying it resolves the
-              risk. Pair with escalate (KEV path) or act.
+``act`` means "there is a patch, but it is not urgent — apply it in the
+normal operator cycle". Without a patch ``act`` is meaningless: a
+non-patchable finding is either urgent enough to be ``escalate`` (secure
+it now by other means) or it is not urgent — and then it is by definition
+``monitor`` (very low risk) or ``noise`` (no risk).
 
-  mitigate  — NO patch is available (vendor_status=will_not_fix or
-              eol, has_fix=no). Operator must apply a non-patch
-              mitigation: firewall rule, disable service, network
-              isolation, version pin, replacement. Pair with
-              escalate only.
+Therefore the allowed bands depend on the fix_lane of the call:
+  - fix_lane patch    — escalate, act, monitor, noise
+  - fix_lane mitigate — escalate, monitor, noise (NEVER act)
 
-  watch     — Monitor only, no immediate action. Pair with monitor
-              only.
-
-  none      — Application not active, nothing to do. Pair with
-              noise only.
-
-Allowed (risk_band, action_type) combinations:
-  (escalate, patch)      — KEV+reachable+has_fix, after judgment
-  (escalate, mitigate)   — reachable+severe+no_fix, after judgment
-  (act, patch)           — reachable+severe+has_fix+no KEV signal
-  (monitor, watch)
-  (noise, none)
-
-ANY other combination is invalid — choose carefully.
+In a mitigate-scoped call, ``act`` is not an option; do not use it.
 
 CRITICAL rules for the reason text:
 
@@ -417,13 +420,12 @@ CRITICAL rules for the reason text:
    CVSS. Cite why it dominates in the reason text.
 
 6. NEVER use risk_band values "pending", "unknown", or "mitigate"
-   (legacy). NEVER use action_type "investigate" (pre-triage-only).
+   (legacy). In a mitigate-scoped call NEVER use "act" (patch-only).
 
 For each group, return:
   - group_label (string, must match an input group label exactly)
-  - risk_band (one of: escalate, act, monitor, noise)
-  - action_type (one of: patch, mitigate, watch, none — must be
-    a valid combination with risk_band per the table above)
+  - risk_band (one of: escalate, act, monitor, noise — "act" only
+    when the call's fix_lane is patch)
   - worst_finding_id (integer, must be one of the finding ids
     shown for that group — never an id from the aggregate rest)
   - reason (string, max 256 chars, plain text, no NUL)
@@ -437,7 +439,6 @@ Response schema:
     {
       "group_label": "string",
       "risk_band": "string",
-      "action_type": "string",
       "worst_finding_id": number,
       "reason": "string"
     }

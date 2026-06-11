@@ -102,14 +102,12 @@ def test_validate_pass2_rejects_duplicate_group_labels() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "act",
-                "action_type": "patch",
                 "worst_finding_id": None,
                 "reason": "x",
             },
             {
                 "group_label": "openssl",
                 "risk_band": "monitor",
-                "action_type": "watch",
                 "worst_finding_id": None,
                 "reason": "y",
             },

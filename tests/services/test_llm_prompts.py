@@ -54,8 +54,20 @@ class TestPass2PromptMarkers:
         # "Do NOT use any other signal (no tags, no hostnames, ...)"
         assert "no tags" in PASS2_SYSTEM_PROMPT
 
-    def test_combo_whitelist_marker_present(self) -> None:
-        assert "Allowed (risk_band, action_type) combinations" in PASS2_SYSTEM_PROMPT
+    def test_fix_lane_scope_marker_present(self) -> None:
+        # ADR-0053: der Prompt erklaert die Fix-Lane-Achse (patch/mitigate)
+        # und dass das LLM keinen action_type mehr emittiert.
+        assert "fix_lane" in PASS2_SYSTEM_PROMPT.lower()
+        assert "patch-only" in PASS2_SYSTEM_PROMPT
+
+    def test_act_patch_only_marker_present(self) -> None:
+        # ADR-0053: in der mitigate-Lane ist ``act`` kein gueltiges Band.
+        assert "fix_lane mitigate" in PASS2_SYSTEM_PROMPT
+        assert "NEVER act" in PASS2_SYSTEM_PROMPT
+
+    def test_no_action_type_emit_marker_present(self) -> None:
+        # ADR-0053: das LLM emittiert keinen action_type mehr.
+        assert "do NOT emit an action type" in PASS2_SYSTEM_PROMPT
 
     def test_legacy_bands_forbidden_marker_present(self) -> None:
         # "NEVER use risk_band values "pending", "unknown", or "mitigate" (legacy)."
@@ -63,10 +75,6 @@ class TestPass2PromptMarkers:
         assert "unknown" in PASS2_SYSTEM_PROMPT
         assert "mitigate" in PASS2_SYSTEM_PROMPT
         assert "legacy" in PASS2_SYSTEM_PROMPT.lower()
-
-    def test_investigate_action_type_forbidden_marker_present(self) -> None:
-        # "NEVER use action_type "investigate" (pre-triage-only)."
-        assert "investigate" in PASS2_SYSTEM_PROMPT
 
     def test_path_classification_markers_present(self) -> None:
         # Bugfix 2026-05-24 (ADR-0023 Nachtrag): Pass2 bekommt pro Finding

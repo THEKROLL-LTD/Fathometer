@@ -20,9 +20,13 @@ from app.models import (
     FindingType,
     Severity,
 )
+from app.services.llm_fingerprints import group_findings_fingerprint
 from app.services.pass2_input_selection import (
     EPSS_QUOTA,
+    FIX_LANES,
     PASS2_FINDINGS_BUDGET,
+    fix_lane_of,
+    partition_by_lane,
     select_pass2_findings,
     triage_sort_key,
 )
@@ -270,3 +274,91 @@ def test_rest_fixable_count() -> None:
     ]
     result = select_pass2_findings(selected_pool + rest_pool)
     assert result.rest_fixable_count == 7
+
+
+# ---------------------------------------------------------------------------
+# Fix-Lane (TICKET-013 / ADR-0053): fix_lane_of, partition_by_lane,
+# Fix-wird-verfuegbar-Doppel-Invalidation
+# ---------------------------------------------------------------------------
+
+
+def test_fix_lanes_constant() -> None:
+    assert FIX_LANES == ("patch", "mitigate")
+
+
+def test_fix_lane_of_with_fixed_version_is_patch() -> None:
+    f = _mk(1, fix="6.8.0-117.117")
+    assert fix_lane_of(f) == "patch"
+
+
+def test_fix_lane_of_without_fixed_version_is_mitigate() -> None:
+    f = _mk(1, fix=None)
+    assert fix_lane_of(f) == "mitigate"
+
+
+def test_fix_lane_of_empty_string_is_mitigate() -> None:
+    """Leerer ``fixed_version``-String zaehlt als no-fix (mitigate),
+    konsistent zur generierten ``Finding.has_fix``-Spalte
+    (``fixed_version IS NOT NULL AND fixed_version <> ''``)."""
+    f = _mk(1, fix="")
+    assert fix_lane_of(f) == "mitigate"
+
+
+def test_partition_by_lane_splits_mixed_list() -> None:
+    patchable_a = _mk(1, fix="1.2.3")
+    patchable_b = _mk(2, fix="4.5.6")
+    nofix_a = _mk(3, fix=None)
+    nofix_b = _mk(4, fix="")
+    buckets = partition_by_lane([patchable_a, nofix_a, patchable_b, nofix_b])
+    assert {f.id for f in buckets["patch"]} == {1, 2}
+    assert {f.id for f in buckets["mitigate"]} == {3, 4}
+
+
+def test_partition_by_lane_pure_list_leaves_other_lane_empty() -> None:
+    only_patchable = [_mk(i, fix="1.0") for i in range(1, 4)]
+    buckets = partition_by_lane(only_patchable)
+    assert {f.id for f in buckets["patch"]} == {1, 2, 3}
+    assert buckets["mitigate"] == []
+
+    only_nofix = [_mk(i, fix=None) for i in range(1, 4)]
+    buckets = partition_by_lane(only_nofix)
+    assert buckets["patch"] == []
+    assert {f.id for f in buckets["mitigate"]} == {1, 2, 3}
+
+
+def test_partition_by_lane_always_returns_both_keys_for_empty_input() -> None:
+    buckets = partition_by_lane([])
+    assert buckets == {"patch": [], "mitigate": []}
+
+
+def test_fix_becomes_available_invalidates_both_lane_fingerprints() -> None:
+    """ADR-0053 §Fingerprint, Kern-Szenario: wandert EIN Finding von
+    mitigate→patch (Fix wurde verfuegbar), aendern sich BEIDE Lane-
+    Fingerprints — mitigate verliert das Finding, patch gewinnt es. Das
+    ist der Re-Eval-Trigger, der beide Lanes neu enqueued, ohne
+    ``fixed_version`` separat in den Fingerprint aufzunehmen."""
+    # Group-OPEN-Set: 2 patchbar, 2 ohne Fix (eins davon wandert spaeter).
+    f_patch_1 = _mk(1, fix="1.0")
+    f_patch_2 = _mk(2, fix="2.0")
+    f_nofix_stay = _mk(3, fix=None)
+    f_migrant = _mk(4, fix=None)
+    group = [f_patch_1, f_patch_2, f_nofix_stay, f_migrant]
+
+    before = partition_by_lane(group)
+    patch_fp_before = group_findings_fingerprint(before["patch"])
+    mitigate_fp_before = group_findings_fingerprint(before["mitigate"])
+    assert {f.id for f in before["patch"]} == {1, 2}
+    assert {f.id for f in before["mitigate"]} == {3, 4}
+
+    # Fix wird fuer Finding 4 verfuegbar → mitigate→patch.
+    f_migrant.fixed_version = "9.9.9"
+
+    after = partition_by_lane(group)
+    patch_fp_after = group_findings_fingerprint(after["patch"])
+    mitigate_fp_after = group_findings_fingerprint(after["mitigate"])
+    assert {f.id for f in after["patch"]} == {1, 2, 4}
+    assert {f.id for f in after["mitigate"]} == {3}
+
+    # BEIDE Lane-Fingerprints aendern sich — der Doppel-Invalidations-Trigger.
+    assert patch_fp_after != patch_fp_before, (patch_fp_before, patch_fp_after)
+    assert mitigate_fp_after != mitigate_fp_before, (mitigate_fp_before, mitigate_fp_after)

@@ -310,7 +310,6 @@ async def test_pass2_happy_path() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "act",
-                "action_type": "patch",
                 "worst_finding_id": 1,
                 "reason": "sshd lauscht auf 0.0.0.0:22. Patch verfuegbar im Distro.",
             },
@@ -322,7 +321,6 @@ async def test_pass2_happy_path() -> None:
     e = result.evaluations[0]
     assert e.group_label == "openssl"
     assert e.risk_band == "act"
-    assert e.action_type == "patch"
     assert e.worst_finding_id == 1
 
 
@@ -382,7 +380,6 @@ async def test_pass2_rejects_worst_finding_not_in_group() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "act",
-                "action_type": "patch",
                 "worst_finding_id": 999,  # nicht in Group
                 "reason": "x",
             },
@@ -403,7 +400,6 @@ async def test_pass2_rejects_nul_byte_in_reason() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "monitor",
-                "action_type": "watch",
                 "worst_finding_id": None,
                 "reason": "tricky\x00reason",
             },
@@ -424,7 +420,6 @@ async def test_pass2_rejects_reason_over_256_chars() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "act",
-                "action_type": "patch",
                 "worst_finding_id": None,
                 "reason": "x" * 300,
             },
@@ -446,7 +441,6 @@ async def test_pass2_accepts_null_worst_finding() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "monitor",
-                "action_type": "watch",
                 "worst_finding_id": None,
                 "reason": "watch",
             },
@@ -600,7 +594,6 @@ def test_pass2_validation_rejects_worst_id_not_shown_in_prompt() -> None:
             {
                 "group_label": "openssl",
                 "risk_band": "act",
-                "action_type": "patch",
                 "worst_finding_id": 33,
                 "reason": "x",
             }
@@ -707,18 +700,21 @@ class TestExtractReasoning:
 
 
 # ---------------------------------------------------------------------------
-# v0.9.3 — (risk_band, action_type)-Combo-Whitelist Tests.
+# ADR-0053 — Band-Whitelist pro Fix-Lane (``act`` ist patch-only).
 # ---------------------------------------------------------------------------
 
 
-def _combo_payload(band: str, action_type: str) -> dict[str, Any]:
-    """Baut ein minimales Pass-2-Payload mit der gegebenen Combo."""
+def _combo_payload(band: str) -> dict[str, Any]:
+    """Baut ein minimales Pass-2-Payload mit dem gegebenen Band.
+
+    ADR-0053: ``action_type`` ist kein LLM-Output mehr — das Payload traegt
+    nur noch ``risk_band``.
+    """
     return {
         "evaluations": [
             {
                 "group_label": "openssl",
                 "risk_band": band,
-                "action_type": action_type,
                 "worst_finding_id": 1001,
                 "reason": "test reason",
             }
@@ -726,84 +722,51 @@ def _combo_payload(band: str, action_type: str) -> dict[str, Any]:
     }
 
 
-class TestPass2ComboWhitelist:
-    """Validator akzeptiert nur die fuenf Whitelist-Combos, sonst Reject."""
+class TestPass2LaneBandWhitelist:
+    """ADR-0053: ``act`` ist patch-only; mitigate-Lane lehnt ``act`` ab.
 
-    @pytest.mark.parametrize(
-        ("band", "action_type"),
-        [
-            ("escalate", "patch"),
-            ("escalate", "mitigate"),
-            ("act", "patch"),
-            ("monitor", "watch"),
-            ("noise", "none"),
-        ],
-    )
-    @pytest.mark.asyncio
-    async def test_allowed_combinations_pass(self, band: str, action_type: str) -> None:
-        server = _make_server()
+    ``_validate_pass2_response`` bekommt die Job-``fix_lane`` durchgereicht
+    (in Etappe 5 vom Worker). Hier testen wir den Validator direkt mit
+    explizitem ``fix_lane``.
+    """
+
+    @pytest.mark.parametrize("band", ["escalate", "act", "monitor", "noise"])
+    def test_patch_lane_accepts_all_bands(self, band: str) -> None:
         f1 = _make_finding(1001)
         grp = _make_group("openssl", [1001])
-        reviewer = LLMRiskReviewer(client=_MockClient(_combo_payload(band, action_type)))
-        result, _meta = await reviewer.pass2_evaluate_groups(server, [(grp, [f1])])
-        assert len(result.evaluations) == 1
-        assert result.evaluations[0].action_type == action_type
+        reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+        result = reviewer._validate_pass2_response(
+            _combo_payload(band), [(grp, [f1])], fix_lane="patch"
+        )
+        assert result.evaluations[0].risk_band == band
 
-    @pytest.mark.parametrize(
-        ("band", "action_type"),
-        [
-            ("escalate", "watch"),
-            ("escalate", "none"),
-            ("act", "mitigate"),
-            ("act", "watch"),
-            ("act", "none"),
-            ("monitor", "patch"),
-            ("monitor", "mitigate"),
-            ("monitor", "none"),
-            ("noise", "patch"),
-            ("noise", "mitigate"),
-            ("noise", "watch"),
-        ],
-    )
-    @pytest.mark.asyncio
-    async def test_disallowed_combinations_reject(self, band: str, action_type: str) -> None:
-        server = _make_server()
+    @pytest.mark.parametrize("band", ["escalate", "monitor", "noise"])
+    def test_mitigate_lane_accepts_non_act_bands(self, band: str) -> None:
         f1 = _make_finding(1001)
         grp = _make_group("openssl", [1001])
-        reviewer = LLMRiskReviewer(client=_MockClient(_combo_payload(band, action_type)))
-        with pytest.raises(LLMInvalidResponseError, match="unzulaessige"):
-            await reviewer.pass2_evaluate_groups(server, [(grp, [f1])])
+        reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+        result = reviewer._validate_pass2_response(
+            _combo_payload(band), [(grp, [f1])], fix_lane="mitigate"
+        )
+        assert result.evaluations[0].risk_band == band
 
-    @pytest.mark.asyncio
-    async def test_invalid_action_type_rejected(self) -> None:
-        """``investigate`` ist Pre-Triage-only — LLM darf das nie liefern."""
-        server = _make_server()
+    def test_mitigate_lane_rejects_act(self) -> None:
         f1 = _make_finding(1001)
         grp = _make_group("openssl", [1001])
-        payload = _combo_payload("act", "investigate")
-        reviewer = LLMRiskReviewer(client=_MockClient(payload))
-        with pytest.raises(LLMInvalidResponseError, match="action_type"):
-            await reviewer.pass2_evaluate_groups(server, [(grp, [f1])])
+        reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+        with pytest.raises(LLMInvalidResponseError, match="act"):
+            reviewer._validate_pass2_response(
+                _combo_payload("act"), [(grp, [f1])], fix_lane="mitigate"
+            )
 
-    @pytest.mark.asyncio
-    async def test_missing_action_type_rejected(self) -> None:
-        server = _make_server()
+    @pytest.mark.parametrize("band", ["escalate", "act", "monitor", "noise"])
+    def test_no_lane_accepts_all_bands(self, band: str) -> None:
+        """Uebergangs-Zustand ``fix_lane=None``: keine Lane-Restriktion."""
         f1 = _make_finding(1001)
         grp = _make_group("openssl", [1001])
-        payload = {
-            "evaluations": [
-                {
-                    "group_label": "openssl",
-                    "risk_band": "act",
-                    # action_type fehlt
-                    "worst_finding_id": 1001,
-                    "reason": "test",
-                }
-            ]
-        }
-        reviewer = LLMRiskReviewer(client=_MockClient(payload))
-        with pytest.raises(LLMInvalidResponseError, match="action_type"):
-            await reviewer.pass2_evaluate_groups(server, [(grp, [f1])])
+        reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+        result = reviewer._validate_pass2_response(_combo_payload(band), [(grp, [f1])])
+        assert result.evaluations[0].risk_band == band
 
 
 # ---------------------------------------------------------------------------
@@ -820,13 +783,10 @@ class TestLegacyMitigateBandMapping:
         server = _make_server()
         f1 = _make_finding(1001)
         grp = _make_group("openssl", [1001])
-        payload = _combo_payload("mitigate", "mitigate")
+        payload = _combo_payload("mitigate")
         reviewer = LLMRiskReviewer(client=_MockClient(payload))
         result, _meta = await reviewer.pass2_evaluate_groups(server, [(grp, [f1])])
         assert result.evaluations[0].risk_band == "escalate"
-        # action_type bleibt unveraendert (es war ``mitigate``, das ist
-        # eine valide Combo mit dem gemappten ``escalate``-Band).
-        assert result.evaluations[0].action_type == "mitigate"
 
     @pytest.mark.asyncio
     async def test_legacy_mitigate_band_emits_warning(
@@ -856,7 +816,7 @@ class TestLegacyMitigateBandMapping:
         server = _make_server()
         f1 = _make_finding(1001)
         grp = _make_group("openssl", [1001])
-        payload = _combo_payload("mitigate", "mitigate")
+        payload = _combo_payload("mitigate")
         reviewer = LLMRiskReviewer(client=_MockClient(payload))
         await reviewer.pass2_evaluate_groups(server, [(grp, [f1])])
 
@@ -917,7 +877,7 @@ class TestGptOssSmokeMockMode:
         # separat im model_extra-Bucket.
         evaluation_json = (
             '{"evaluations":[{"group_label":"openssh-server","risk_band":"escalate",'
-            '"action_type":"patch","worst_finding_id":1001,'
+            '"worst_finding_id":1001,'
             '"reason":"sshd 0.0.0.0:22 PUBLIC-EXPOSED; KEV CVE-2024-6387 patchable"}]}'
         )
         harmony_content = (
@@ -936,7 +896,6 @@ class TestGptOssSmokeMockMode:
         ev = result.evaluations[0]
         assert ev.group_label == "openssh-server"
         assert ev.risk_band == "escalate"
-        assert ev.action_type == "patch"
         assert ev.worst_finding_id == 1001
         # Meta muss alle Felder fuer den Debug-Log-Insert mitbringen.
         assert meta["model"] == "openai/gpt-oss-120b"
@@ -1078,7 +1037,6 @@ async def test_pass2_evaluate_groups_attaches_meta_to_validation_error() -> None
             {
                 "group_label": "does-not-exist",  # nicht im Input
                 "risk_band": "act",
-                "action_type": "patch",
                 "worst_finding_id": 1,
                 "reason": "fake",
             },

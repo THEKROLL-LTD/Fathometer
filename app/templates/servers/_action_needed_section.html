@@ -6,12 +6,17 @@
          `label`        : str  — vollstaendiges Label "PHASE · Aktion".
          `variant`      : str  — CSS-Variant-Slug ("escalate-distro" etc.).
          `count`        : int  — Anzahl Groups in der Card.
-         `groups`       : list[dict] — Entries mit `group`/`evaluation`/
+         `groups`       : list[dict] — flache (group, lane)-Entries mit
+                                       `group`/`fix_lane`/`evaluation`/
                                        `count`/`worst_finding`/
-                                       `worst_finding_drift`.
+                                       `worst_finding_drift` (ADR-0053:
+                                       Pass-2 pro Fix-Lane — eine Group kann
+                                       mit beiden Lanes erscheinen, jeweils
+                                       eigenes Lane-Verdikt + Lane-Worst).
+                                       `fix_lane` ist "patch" | "mitigate".
                                        `worst_finding` ist das LIVE-Worst aus
-                                       den OFFENEN Findings (TICKET-010 /
-                                       ADR-0052) — `evaluation.
+                                       den OFFENEN Findings der Lane
+                                       (TICKET-010 / ADR-0052) — `evaluation.
                                        worst_finding_id` ist keine
                                        Datenquelle mehr. `worst_finding_
                                        drift=True` -> Hint "re-evaluation
@@ -53,7 +58,11 @@
             <tbody>
               {% for entry in card.groups %}
                 <tr data-test="action-card-{{ card.id }}-row">
-                  <td class="workflow-table__group"><a href="#group-{{ entry.group.id }}">{{ entry.group.label }}</a></td>
+                  <td class="workflow-table__group">
+                    <a href="#group-{{ entry.group.id }}">{{ entry.group.label }}</a>
+                    {%- if entry.fix_lane %} <span class="workflow-table__lane-tag"
+                          data-test="action-card-{{ card.id }}-lane">{% if entry.fix_lane == 'patch' %}patch{% else %}no patch{% endif %}</span>{% endif -%}
+                  </td>
                   <td class="workflow-table__cve">
                     {% if entry.worst_finding %}{{ entry.worst_finding.identifier_key }}{% else %}—{% endif %}
                   </td>

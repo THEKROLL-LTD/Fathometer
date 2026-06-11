@@ -66,6 +66,7 @@ from app.services.findings_query import (
 )
 from app.services.heartbeat_aggregation import heartbeats_for_servers
 from app.services.listener_exposure import classify_exposure
+from app.services.pass2_input_selection import FIX_LANES
 from app.services.risk_engine import RISK_BAND_SORT_RANK, RiskBand, no_band_values, yes_band_values
 from app.services.severity_history import (
     daily_severity_counts_for_server,
@@ -195,8 +196,18 @@ def _render_tag_editor(server: Server) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _lane_of_has_fix(has_fix: Any) -> str:
+    """Bildet den `Finding.has_fix`-Boolean auf die Fix-Lane ab.
+
+    Single-Source fuer die View-Schicht — verwendet exakt denselben Begriff
+    wie der Selektor-Helper (`pass2_input_selection.fix_lane_of`): ein Finding
+    mit verfuegbarem Fix gehoert in die `patch`-Lane, sonst in `mitigate`.
+    """
+    return "patch" if has_fix else "mitigate"
+
+
 def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[str, Any]]:
-    """Liefert die Application-Groups fuer den Server, sortiert nach Risk-Band.
+    """Liefert die Application-Groups fuer den Server, gruppiert nach Fix-Lane.
 
     Block P (ADR-0023): Findings werden in der Server-Detail-Findings-Section
     nach `application_group_id` gruppiert.
@@ -205,67 +216,92 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     Die Findings-Tabellen pro Group werden vom Browser via HTMX-Lazy-Load
     nachgefordert (`group_findings_fragment`-Endpoint).
 
-    Block Y / ADR-0039 §4: die Queries (2), (3), (4) holen jetzt Projektionen
-    (SQLAlchemy `Row`-Objekte) statt voller ORM-Objekte — die Templates und
+    Block Y / ADR-0039 §4: die Queries holen Projektionen (SQLAlchemy
+    `Row`-Objekte) statt voller ORM-Objekte — die Templates und
     `_build_action_sections` greifen nur auf eine Handvoll Spalten zu.
-    Row-Objekte unterstuetzen Attribut-Zugriff via `row.label`, kompatibel
-    zur bisherigen Schnittstelle.
+
+    TICKET-013 / ADR-0053 (Fix-Lane-Evaluation): Pass 2 bewertet pro
+    Fix-Lane statt pro Gruppe. Die Junction-Tabelle traegt jetzt bis zu
+    zwei Rows pro `(group, server)` — eine `patch`-, eine `mitigate`-Lane.
+    Die Lane-Zugehoerigkeit eines Findings folgt deterministisch aus
+    `Finding.has_fix` (`fixed_version IS NOT NULL AND <> ''`; True -> patch,
+    False -> mitigate) — kein LLM-Output, kein eigener Query.
 
     Vier aggregierte Queries:
 
-      1. Count-Aggregat: pro Group die Anzahl OPEN-Findings auf diesem
-         Server. Liefert gleichzeitig die Liste relevanter Group-IDs.
+      1. Count-Aggregat: `GROUP BY application_group_id, has_fix` — pro
+         `(group, lane)` die Anzahl OPEN-Findings. Liefert gleichzeitig die
+         Liste relevanter Group-IDs (mindestens 1 OPEN-Finding) und das
+         Lane-Inventar pro Group. Nur Lanes mit count > 0 erscheinen.
       2. Group-Metadaten-Batch (Projektion): id, label, group_kind,
          explanation.
-      3. Junction-Batch (Projektion): group_id, risk_band, risk_band_reason,
-         worst_finding_id, action_type, risk_band_computed_at. Fehlende
-         Rows bedeuten "Nicht bewertet" — Group-Card rendert die
-         entsprechende Pille (siehe ADR-0028 §UI-bei-Eval-Lücke).
-      4. Live-Worst-Finding-Batch (TICKET-010 / ADR-0052, Bug C): EIN
-         `DISTINCT ON (application_group_id)`-Query ueber die OPEN-Findings
-         aller `group_ids`, Order pro Group nach §15-Triage (`is_kev DESC,
-         epss DESC NULLS LAST, cvss DESC NULLS LAST, severity_rank DESC,
-         first_seen_at ASC`). Projektion: application_group_id, id,
-         identifier_key, package_name, title. `evaluation.worst_finding_id`
-         (Snapshot) wird fuer die Anzeige NICHT mehr verwendet — die
-         Workflow-/Group-Cards zeigen den Jetzt-Zustand.
+      3. Junction-Batch (Projektion): group_id, **fix_lane**, risk_band,
+         risk_band_reason, worst_finding_id, action_type,
+         risk_band_computed_at. Indiziert nach `(group_id, fix_lane)`.
+         Fehlende Rows bedeuten "Lane nicht bewertet".
+      4. Live-Worst-Finding-Batch (TICKET-010 / ADR-0052, Bug C):
+         `DISTINCT ON (application_group_id, has_fix)` ueber die OPEN-Findings
+         aller `group_ids`, Order beginnt mit `(application_group_id,
+         has_fix)` und folgt dann der §15-Triage-Order — so bekommt jede
+         Lane ihren EIGENEN Live-Worst. Projektion: application_group_id,
+         has_fix, id, identifier_key, package_name, title.
 
-    Sortierung der Groups: DESC nach `RISK_BAND_SORT_RANK` — escalate first,
-    Groups ohne Junction-Row als `pending`-Rank-40 einsortiert (UI-Pille
-    "Nicht bewertet").
+    Rueckgabe-Format: list[dict], EINE dict pro Group, mit Keys:
 
-    Rueckgabe-Format: list[dict] mit Keys `group`, `count`, `evaluation`,
-    `worst_finding`, `worst_finding_drift`. Die Werte sind Row-Objekte oder
-    `None`; `worst_finding_drift` ist `True` wenn der Eval-Snapshot auf ein
-    anderes (oder nicht mehr offenes) Finding zeigt als das Live-Worst —
-    UI rendert dann den Hint "re-evaluation pending" (ADR-0052 Entscheidung
-    2). Kein Fingerprint-Recompute im Request-Pfad; der ID-Vergleich ist
-    gratis.
+      - `group`: Row (id, label, group_kind, explanation).
+      - `count`: int — Summe der OPEN-Findings ueber alle Lanes der Group.
+      - `lanes`: list[dict] — nur Lanes mit >= 1 OPEN-Finding, Reihenfolge
+        `patch` zuerst, dann `mitigate`. Pro Lane-Eintrag:
+          - `fix_lane`: "patch" | "mitigate".
+          - `evaluation`: Row | None — die `(group, server, lane)`-Eval.
+          - `count`: int — OPEN-Findings dieser Lane.
+          - `worst_finding`: Row | None — Live-Worst INNERHALB der Lane.
+          - `worst_finding_drift`: bool — Lane-Eval-`worst_finding_id`
+            zeigt auf ein anderes (oder nicht mehr offenes) Finding als der
+            Lane-Live-Worst (ADR-0052 Entscheidung 2, Hint
+            "re-evaluation pending").
+
+    Sortierung der Groups: DESC nach der **Max-Urgency ueber ihre Lanes** —
+    der hoechste `RISK_BAND_SORT_RANK` unter den Lane-Evals der Group; eine
+    Lane ohne Eval-Row zaehlt als `pending`-Rank. So stehen Groups mit einer
+    escalate-Lane oben, egal in welcher Lane.
     """
-    # (1) Count-Aggregat: liefert sowohl die Group-IDs (mindestens 1 OPEN-
-    # Finding auf diesem Server) als auch den Counter-Wert pro Group fuer
-    # den Card-Header.
+    # (1) Count-Aggregat pro (group, lane): `GROUP BY application_group_id,
+    # has_fix`. Liefert die Group-IDs (>= 1 OPEN-Finding) und das Lane-
+    # Inventar. has_fix=True -> patch, False -> mitigate.
     count_stmt = (
-        select(Finding.application_group_id, func.count(Finding.id))
+        select(
+            Finding.application_group_id,
+            Finding.has_fix,
+            func.count(Finding.id),
+        )
         .where(
             Finding.server_id == server_id,
             Finding.status == FindingStatus.OPEN,
             Finding.application_group_id.is_not(None),
         )
-        .group_by(Finding.application_group_id)
+        .group_by(Finding.application_group_id, Finding.has_fix)
     )
-    counts_by_id: dict[int, int] = {
-        int(group_id): int(n)
-        for group_id, n in sess.execute(count_stmt).all()
-        if group_id is not None
-    }
+    # lane_counts_by_group[group_id][lane] = count (nur Lanes mit count > 0).
+    lane_counts_by_group: dict[int, dict[str, int]] = {}
+    total_count_by_group: dict[int, int] = {}
+    for group_id, has_fix, n in sess.execute(count_stmt).all():
+        if group_id is None:
+            continue
+        gid = int(group_id)
+        lane = _lane_of_has_fix(has_fix)
+        count = int(n)
+        if count <= 0:
+            continue
+        lane_counts_by_group.setdefault(gid, {})[lane] = count
+        total_count_by_group[gid] = total_count_by_group.get(gid, 0) + count
 
-    if not counts_by_id:
+    if not lane_counts_by_group:
         return []
 
     # (2) Group-Metadaten-Batch (Projektion): nur die Spalten die Templates
     # und `_build_action_sections` brauchen.
-    group_ids = list(counts_by_id.keys())
+    group_ids = list(lane_counts_by_group.keys())
     groups_stmt = select(
         ApplicationGroup.id,
         ApplicationGroup.label,
@@ -274,11 +310,12 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     ).where(ApplicationGroup.id.in_(group_ids))
     groups: list[Any] = list(sess.execute(groups_stmt).all())
 
-    # (3) Junction-Batch (Projektion): nur die Spalten die `_build_action_
-    # sections` und Templates lesen.
-    evaluations_by_id: dict[int, Any] = {}
+    # (3) Junction-Batch (Projektion): bis zu zwei Rows pro Group (eine je
+    # Lane). Indiziert nach `(group_id, fix_lane)`.
+    evaluations_by_lane: dict[tuple[int, str], Any] = {}
     eval_stmt = select(
         ApplicationGroupEvaluation.group_id,
+        ApplicationGroupEvaluation.fix_lane,
         ApplicationGroupEvaluation.risk_band,
         ApplicationGroupEvaluation.risk_band_reason,
         ApplicationGroupEvaluation.worst_finding_id,
@@ -289,17 +326,18 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
         ApplicationGroupEvaluation.group_id.in_(group_ids),
     )
     for row in sess.execute(eval_stmt).all():
-        evaluations_by_id[int(row.group_id)] = row
+        evaluations_by_lane[(int(row.group_id), str(row.fix_lane))] = row
 
-    # (4) Live-Worst-Finding-Batch (TICKET-010 / ADR-0052, Bug C): pro Group
-    # das Top-Finding nach §15-Triage-Order — ausschliesslich OPEN-Findings,
-    # damit die Cards den Jetzt-Zustand zeigen statt des Eval-Snapshots.
-    # `DISTINCT ON` verlangt dass die ORDER BY mit der Distinct-Spalte
+    # (4) Live-Worst-Finding-Batch pro Lane (TICKET-010 / ADR-0052, Bug C):
+    # `DISTINCT ON (application_group_id, has_fix)` — pro `(group, lane)` das
+    # Top-Finding nach §15-Triage-Order, ausschliesslich OPEN-Findings.
+    # `DISTINCT ON` verlangt dass die ORDER BY mit den Distinct-Spalten
     # beginnt; danach folgt die Triage-Order (Single-Source fuer den
     # Severity-Rank: `findings_query._severity_rank_expr`).
     worst_stmt = (
         select(
             Finding.application_group_id,
+            Finding.has_fix,
             Finding.id,
             Finding.identifier_key,
             Finding.package_name,
@@ -310,9 +348,10 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
             Finding.status == FindingStatus.OPEN,
             Finding.application_group_id.in_(group_ids),
         )
-        .distinct(Finding.application_group_id)
+        .distinct(Finding.application_group_id, Finding.has_fix)
         .order_by(
             Finding.application_group_id,
+            Finding.has_fix,
             Finding.is_kev.desc(),
             nulls_last(Finding.epss_score.desc()),
             nulls_last(Finding.cvss_v3_score.desc()),
@@ -320,40 +359,55 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
             Finding.first_seen_at.asc(),
         )
     )
-    worst_by_group: dict[int, Any] = {}
+    worst_by_lane: dict[tuple[int, str], Any] = {}
     for row in sess.execute(worst_stmt).all():
-        worst_by_group[int(row.application_group_id)] = row
+        worst_by_lane[(int(row.application_group_id), _lane_of_has_fix(row.has_fix))] = row
 
     result: list[dict[str, Any]] = []
     for grp in groups:
-        ev = evaluations_by_id.get(int(grp.id))
-        worst = worst_by_group.get(int(grp.id))
-        # Drift-Kennzeichnung (ADR-0052 Entscheidung 2): der Eval-Snapshot
-        # zeigt auf ein anderes Finding als das Live-Worst — entweder weil
-        # sich das OPEN-Set geaendert hat oder weil das Snapshot-Finding
-        # inzwischen geschlossen ist (dann fehlt es im Live-Query und der
-        # ID-Vergleich schlaegt automatisch an). UI rendert dazu den Hint
-        # "re-evaluation pending".
-        drift = bool(
-            ev is not None
-            and ev.worst_finding_id is not None
-            and (worst is None or int(ev.worst_finding_id) != int(worst.id))
-        )
+        gid = int(grp.id)
+        lane_counts = lane_counts_by_group.get(gid, {})
+        lanes: list[dict[str, Any]] = []
+        # Reihenfolge: patch zuerst, dann mitigate (FIX_LANES-Order). Nur
+        # Lanes mit >= 1 OPEN-Finding erscheinen.
+        for lane in FIX_LANES:
+            count = lane_counts.get(lane, 0)
+            if count <= 0:
+                continue
+            ev = evaluations_by_lane.get((gid, lane))
+            worst = worst_by_lane.get((gid, lane))
+            # Drift-Kennzeichnung (ADR-0052 Entscheidung 2): der Lane-Eval-
+            # Snapshot zeigt auf ein anderes Finding als der Lane-Live-Worst
+            # — entweder weil sich das OPEN-Set der Lane geaendert hat oder
+            # weil das Snapshot-Finding inzwischen geschlossen ist (fehlt
+            # dann im Live-Query, ID-Vergleich schlaegt automatisch an).
+            drift = bool(
+                ev is not None
+                and ev.worst_finding_id is not None
+                and (worst is None or int(ev.worst_finding_id) != int(worst.id))
+            )
+            lanes.append(
+                {
+                    "fix_lane": lane,
+                    "evaluation": ev,
+                    "count": count,
+                    "worst_finding": worst,
+                    "worst_finding_drift": drift,
+                }
+            )
         result.append(
             {
                 "group": grp,
-                "evaluation": ev,
-                "count": counts_by_id.get(int(grp.id), 0),
-                "worst_finding": worst,
-                "worst_finding_drift": drift,
+                "count": total_count_by_group.get(gid, 0),
+                "lanes": lanes,
             }
         )
 
-    # Sortierung: DESC nach RISK_BAND_SORT_RANK. Groups ohne Junction-Row
-    # ranked als PENDING (40) ein — Operator soll "Nicht bewertet"-Cards oben
-    # sehen, nicht versteckt am Ende.
-    def _rank(entry: dict[str, Any]) -> int:
-        ev = entry["evaluation"]
+    # Sortierung: DESC nach Max-Urgency ueber die Lanes der Group. Eine Lane
+    # ohne Junction-Row zaehlt als PENDING-Rank — Operator soll Groups mit
+    # einer escalate-Lane oben sehen, egal in welcher Lane.
+    def _lane_rank(lane_entry: dict[str, Any]) -> int:
+        ev = lane_entry["evaluation"]
         if ev is None:
             return RISK_BAND_SORT_RANK[RiskBand.PENDING]
         try:
@@ -361,7 +415,13 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
         except (KeyError, ValueError):
             return 0
 
-    result.sort(key=_rank, reverse=True)
+    def _group_rank(entry: dict[str, Any]) -> int:
+        lanes = entry["lanes"]
+        if not lanes:
+            return RISK_BAND_SORT_RANK[RiskBand.PENDING]
+        return max(_lane_rank(lane) for lane in lanes)
+
+    result.sort(key=_group_rank, reverse=True)
     return result
 
 
@@ -381,6 +441,23 @@ def _build_action_sections(
     Tripel aus der ADR-Tabelle. NULL-``action_type``-Groups (vor dem ersten
     Pass-2-Re-Eval) matchen **keine** Card und sind absichtlich unsichtbar;
     sie tauchen wieder auf sobald der Worker das Feld setzt.
+
+    TICKET-013 / ADR-0053 (Fix-Lane-Evaluation): die Eingabe ist jetzt der
+    Lane-Kontrakt von :func:`_load_application_groups_for_server` — eine
+    dict pro Group mit ``lanes: list[...]``. Das Matching iteriert ueber
+    ``(group, lane)``: jede Lane mit ``evaluation is not None`` ist ein
+    flacher Eintrag, der wie bisher auf ``risk_band``, ``action_type`` und
+    ``group_kind`` gematcht wird. Eine Group kann so in **zwei** Cards
+    erscheinen (patch-Lane -> Patch-Card, mitigate-Lane -> mitigate-Card) —
+    je mit ihrem Lane-Worst (live, ADR-0052). Die fuenf Card-Specs bleiben
+    unveraendert; es gibt **kein** ``act + mitigate`` (``act`` ist per
+    Band-Whitelist patch-only).
+
+    Eintrags-Format (flach, pro `(group, lane)`):
+    ``{"group", "fix_lane", "evaluation", "count", "worst_finding",
+    "worst_finding_drift"}`` — das Template liest ``entry.group``,
+    ``entry.evaluation.risk_band_reason``, ``entry.worst_finding`` und
+    ``entry.worst_finding_drift``.
     """
     card_specs: list[dict[str, Any]] = [
         {
@@ -430,16 +507,33 @@ def _build_action_sections(
         },
     ]
 
+    # Flache `(group, lane)`-Eintraege aus dem Lane-Kontrakt aufbauen — nur
+    # Lanes mit Eval-Row (ohne Junction-Row gibt es weder Band noch
+    # Action-Type; die Lane matcht keine Card).
+    lane_entries: list[dict[str, Any]] = []
+    for group_entry in application_groups:
+        grp = group_entry["group"]
+        for lane in group_entry["lanes"]:
+            ev = lane.get("evaluation")
+            if ev is None:
+                continue
+            lane_entries.append(
+                {
+                    "group": grp,
+                    "fix_lane": lane["fix_lane"],
+                    "evaluation": ev,
+                    "count": lane["count"],
+                    "worst_finding": lane["worst_finding"],
+                    "worst_finding_drift": lane["worst_finding_drift"],
+                }
+            )
+
     result: list[dict[str, Any]] = []
     for spec in card_specs:
         matches: list[dict[str, Any]] = []
-        for entry in application_groups:
+        for entry in lane_entries:
             grp = entry["group"]
-            ev = entry.get("evaluation")
-            if ev is None:
-                # Block T: ohne Junction-Row gibt es weder Band noch
-                # Action-Type — Group wird in keiner Card aufgefuehrt.
-                continue
+            ev = entry["evaluation"]
             if ev.risk_band != spec["risk_band"]:
                 continue
             if ev.action_type != spec["action_type"]:

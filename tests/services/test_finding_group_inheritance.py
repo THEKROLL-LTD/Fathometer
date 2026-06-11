@@ -4,6 +4,10 @@ Composite-Match (Block T): ``Finding.application_group_id ==
 ApplicationGroupEvaluation.group_id AND Finding.server_id ==
 ApplicationGroupEvaluation.server_id``. Verhindert Cross-Server-Leak
 (Server-A's Findings erben nur aus ``(group, A)``-Junction).
+
+Lane-Match (TICKET-013, ADR-0053): zusaetzlicher Join auf ``fix_lane ==
+CASE WHEN Finding.has_fix THEN 'patch' ELSE 'mitigate' END`` — patchbares
+und no-fix Finding derselben Group erben aus verschiedenen Junction-Rows.
 """
 
 from __future__ import annotations
@@ -71,6 +75,50 @@ def test_composite_match_joins_group_id_and_server_id() -> None:
     # last-write-wins-Cross-Server-Leak.
     assert "findings.application_group_id = application_group_evaluations.group_id" in sql
     assert "findings.server_id = application_group_evaluations.server_id" in sql
+
+
+def test_lane_case_join_restricts_inheritance_to_own_lane() -> None:
+    """TICKET-013/ADR-0053: Finding erbt aus der Junction-Row seiner eigenen
+    Fix-Lane. Die dritte Join-Bedingung matcht ``fix_lane`` gegen eine
+    deterministische CASE-Diskriminante ueber ``Finding.has_fix``."""
+    session = _session_with_rowcount()
+
+    inherit_group_risk_to_findings(session)
+
+    sql = _compiled_sql(session)
+    # Lane-Spalte der Junction muss gegen einen CASE-Ausdruck gejoint werden.
+    assert "application_group_evaluations.fix_lane" in sql
+    assert "CASE WHEN" in sql
+    # Diskriminante ist die generierte has_fix-Spalte (== bool(fixed_version),
+    # identisch zur Enqueue-/Worker-Partitionierung — kein Lane-Drift).
+    assert "findings.has_fix" in sql
+    # Beide Lane-Werte erscheinen als CASE-Zweige.
+    assert "'patch'" in sql
+    assert "'mitigate'" in sql
+
+
+def test_lane_case_separates_patchable_and_nofix_findings() -> None:
+    """Konzeptioneller Kern-Gewinn (ADR-0053): die Lane-Bedingung stellt
+    sicher, dass ein patchbares (``has_fix`` true → 'patch') und ein no-fix
+    Finding (``has_fix`` false → 'mitigate') derselben Group aus
+    **verschiedenen** Junction-Rows erben — und damit unterschiedliche Bands
+    tragen koennen.
+
+    Geprueft an der kompilierten CASE-Form: die WHERE-Klausel bindet die
+    Junction-``fix_lane`` an genau die Lane des jeweiligen Findings, statt sie
+    (wie vor TICKET-013) gegen jede Group-Row zu joinen."""
+    session = _session_with_rowcount()
+
+    inherit_group_risk_to_findings(session)
+
+    sql = _compiled_sql(session)
+    # Patchbares Finding (has_fix=true) → 'patch'-Zweig.
+    assert "WHEN findings.has_fix THEN 'patch'" in sql
+    # No-fix Finding (has_fix=false) → 'mitigate'-Zweig (ELSE).
+    assert "ELSE 'mitigate'" in sql
+    # Die Lane-Bindung haengt an der Junction-fix_lane (Equality-Join), nicht
+    # an einer freien Group-Row.
+    assert "application_group_evaluations.fix_lane = CASE WHEN" in sql
 
 
 def test_idempotency_filter_checks_band_and_source() -> None:

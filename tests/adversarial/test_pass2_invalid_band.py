@@ -95,7 +95,6 @@ def test_validate_pass2_rejects_invalid_risk_band(bad_band: str) -> None:
             {
                 "group_label": "openssl",
                 "risk_band": bad_band,
-                "action_type": "patch",
                 "worst_finding_id": None,
                 "reason": "x",
             }
@@ -111,27 +110,19 @@ def test_valid_risk_bands_does_not_contain_pending_or_unknown() -> None:
     assert "unknown" not in VALID_RISK_BANDS
 
 
-# Whitelist-Mapping band → valider action_type pro ADR-0023 §"Update v0.9.3 (a)".
-# ``mitigate`` mappt der Validator intern auf ``escalate`` (Legacy-Backcompat).
-_BAND_TO_ACTION: dict[str, str] = {
-    "escalate": "patch",
-    "act": "patch",
-    "mitigate": "mitigate",  # legacy → wird intern auf escalate gemappt
-    "monitor": "watch",
-    "noise": "none",
-}
-
-
 @pytest.mark.parametrize("good_band", sorted(VALID_RISK_BANDS))
 def test_validate_pass2_accepts_whitelisted_bands(good_band: str) -> None:
-    """Jeder Whitelist-Eintrag wird angenommen (mit passendem action_type-Combo)."""
+    """Jeder Whitelist-Eintrag wird angenommen (ADR-0053: kein action_type mehr).
+
+    Ohne ``fix_lane`` (Uebergangs-Zustand) gilt keine Lane-Restriktion — alle
+    Bands sind erlaubt. ``mitigate`` mappt intern auf ``escalate`` (Legacy).
+    """
     reviewer = LLMRiskReviewer(client=_StubClient())  # type: ignore[arg-type]
     payload = {
         "evaluations": [
             {
                 "group_label": "openssl",
                 "risk_band": good_band,
-                "action_type": _BAND_TO_ACTION[good_band],
                 "worst_finding_id": None,
                 "reason": "x",
             }
@@ -141,3 +132,55 @@ def test_validate_pass2_accepts_whitelisted_bands(good_band: str) -> None:
     # ``mitigate`` mappt intern auf ``escalate`` (Legacy-Path).
     expected = "escalate" if good_band == "mitigate" else good_band
     assert result.evaluations[0].risk_band == expected
+
+
+def test_validate_pass2_rejects_act_in_mitigate_lane() -> None:
+    """ADR-0053: ``act`` ist patch-only — im mitigate-Call → Reject."""
+    reviewer = LLMRiskReviewer(client=_StubClient())  # type: ignore[arg-type]
+    payload = {
+        "evaluations": [
+            {
+                "group_label": "openssl",
+                "risk_band": "act",
+                "worst_finding_id": None,
+                "reason": "x",
+            }
+        ]
+    }
+    with pytest.raises(LLMInvalidResponseError, match="act"):
+        reviewer._validate_pass2_response(payload, [(_g(), [_f(1)])], fix_lane="mitigate")
+
+
+def test_validate_pass2_accepts_act_in_patch_lane() -> None:
+    """ADR-0053: ``act`` in der patch-Lane ist gueltig."""
+    reviewer = LLMRiskReviewer(client=_StubClient())  # type: ignore[arg-type]
+    payload = {
+        "evaluations": [
+            {
+                "group_label": "openssl",
+                "risk_band": "act",
+                "worst_finding_id": None,
+                "reason": "x",
+            }
+        ]
+    }
+    result = reviewer._validate_pass2_response(payload, [(_g(), [_f(1)])], fix_lane="patch")
+    assert result.evaluations[0].risk_band == "act"
+
+
+@pytest.mark.parametrize("band", ["escalate", "monitor", "noise"])
+def test_validate_pass2_accepts_non_act_bands_in_mitigate_lane(band: str) -> None:
+    """ADR-0053: mitigate-Lane erlaubt escalate/monitor/noise."""
+    reviewer = LLMRiskReviewer(client=_StubClient())  # type: ignore[arg-type]
+    payload = {
+        "evaluations": [
+            {
+                "group_label": "openssl",
+                "risk_band": band,
+                "worst_finding_id": None,
+                "reason": "x",
+            }
+        ]
+    }
+    result = reviewer._validate_pass2_response(payload, [(_g(), [_f(1)])], fix_lane="mitigate")
+    assert result.evaluations[0].risk_band == band

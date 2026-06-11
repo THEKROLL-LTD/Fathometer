@@ -330,6 +330,36 @@ def test_make_cache_key_carries_prompt_version_salt() -> None:
     assert key != unsalted
 
 
+def test_make_cache_key_carries_fix_lane_salt() -> None:
+    """TICKET-013/ADR-0053: ``fix_lane`` ist eine zusaetzliche Salt-
+    Komponente. patch- und mitigate-Lane derselben Gruppe duerfen bei
+    sonst identischen Argumenten nie denselben Cache-Eintrag treffen; ein
+    Aufruf ohne ``fix_lane`` bleibt bitidentisch zum bisherigen Verhalten
+    (Rueckwaertskompatibilitaet waehrend der Etappen-Umstellung)."""
+    args = (1, "aa" * 8, "bb" * 8, "cc" * 8)
+
+    patch = make_cache_key(*args, fix_lane="patch")
+    mitigate = make_cache_key(*args, fix_lane="mitigate")
+    none = make_cache_key(*args, fix_lane=None)
+    no_arg = make_cache_key(*args)
+
+    # Lane-Salt trennt die beiden Lanes derselben Gruppe.
+    assert patch != mitigate, (patch, mitigate)
+
+    # ``fix_lane=None`` ist bit-identisch zum Aufruf ganz ohne ``fix_lane``.
+    assert none == no_arg, (none, no_arg)
+
+    # Gesetzter Lane-Salt veraendert den Key gegenueber dem Default-Pfad.
+    assert patch != no_arg, (patch, no_arg)
+    assert mitigate != no_arg, (mitigate, no_arg)
+
+    # Erwartungs-Payload dynamisch rekonstruiert (kein hartcodierter Hash).
+    base = f"1|{'aa' * 8}|{'bb' * 8}|{'cc' * 8}|v{PASS2_PROMPT_VERSION}"
+    assert patch == hashlib.sha256(f"{base}|lane=patch".encode()).hexdigest(), patch
+    assert mitigate == hashlib.sha256(f"{base}|lane=mitigate".encode()).hexdigest(), mitigate
+    assert none == hashlib.sha256(base.encode()).hexdigest(), none
+
+
 def test_prompt_version_is_at_least_two() -> None:
     # Version 1 war die Prompt-Semantik vor TICKET-011 (ohne Salt).
     assert PASS2_PROMPT_VERSION >= 2

@@ -39,12 +39,46 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from app.models import Finding, Severity
 
 #: Default-Budget — bewusst identisch zum historischen ``fs[:32]``-Cap.
 #: Budget-Tuning ist explizit nicht Teil von TICKET-011.
 PASS2_FINDINGS_BUDGET = 32
+
+#: Die zwei Fix-Lanes (ADR-0053 / TICKET-013). ``patch`` = Finding hat einen
+#: Fix verfuegbar, ``mitigate`` = kein Fix verfuegbar.
+FixLane = Literal["patch", "mitigate"]
+FIX_LANES: tuple[FixLane, ...] = ("patch", "mitigate")
+
+
+def fix_lane_of(finding: Finding) -> FixLane:
+    """Deterministische Fix-Lane eines Findings (ADR-0053 / TICKET-013).
+
+    ``patch`` wenn ein Fix verfuegbar ist, sonst ``mitigate``. Die
+    Diskriminante ist ``bool(finding.fixed_version)`` — das ist exakt das
+    Praedikat der generierten DB-Spalte ``Finding.has_fix``
+    (``fixed_version IS NOT NULL AND fixed_version <> ''``), damit
+    Enqueue (Etappe 4), Worker-Persist (Etappe 5) und der SQL-Lane-CASE
+    der Inheritance (Etappe 6) **dieselbe** Partition sehen. Ein leerer
+    ``fixed_version``-String zaehlt damit als ``mitigate``, nicht als
+    ``patch``.
+    """
+    return "patch" if finding.fixed_version else "mitigate"
+
+
+def partition_by_lane(findings: Iterable[Finding]) -> dict[FixLane, list[Finding]]:
+    """Partitioniert Findings in die zwei Fix-Lanes.
+
+    Liefert immer beide Keys; leere Lanes haben eine leere Liste. Caller
+    ueberspringen leere Lanes (kein Job, keine Eval-Row — ADR-0053).
+    """
+    buckets: dict[FixLane, list[Finding]] = {"patch": [], "mitigate": []}
+    for f in findings:
+        buckets[fix_lane_of(f)].append(f)
+    return buckets
+
 
 #: Stufe 2: Anzahl Top-EPSS-Slots (Budget // 4).
 EPSS_QUOTA = PASS2_FINDINGS_BUDGET // 4
@@ -199,8 +233,12 @@ def _build_result(selected: list[Finding], rest: list[Finding]) -> SelectionResu
 
 __all__ = [
     "EPSS_QUOTA",
+    "FIX_LANES",
     "PASS2_FINDINGS_BUDGET",
+    "FixLane",
     "SelectionResult",
+    "fix_lane_of",
+    "partition_by_lane",
     "select_pass2_findings",
     "triage_sort_key",
 ]

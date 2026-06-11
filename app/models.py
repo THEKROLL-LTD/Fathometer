@@ -913,6 +913,12 @@ class ApplicationGroupEvaluation(Base):
         primary_key=True,
         nullable=False,
     )
+    # Dritte PK-Spalte (ADR-0053 / TICKET-013): deterministische Partition der
+    # OPEN-Findings einer Group auf einem Server, abgeleitet aus
+    # ``Finding.fixed_version`` (patch = fixed_version IS NOT NULL,
+    # mitigate = IS NULL). KEINE persistierte Finding-Spalte, kein LLM-Output —
+    # wird zur Render-/Enqueue-/Inheritance-Zeit aus ``fixed_version`` berechnet.
+    fix_lane: Mapped[str] = mapped_column(String(8), primary_key=True, nullable=False)
 
     # Bewertung. ``risk_band`` ist NOT NULL — "Nicht bewertet" wird durch
     # das Fehlen der Zeile ausgedrueckt, nicht durch NULL.
@@ -944,9 +950,14 @@ class ApplicationGroupEvaluation(Base):
             "('patch','mitigate','watch','none','investigate')",
             name="ck_app_group_evals_action_type",
         ),
+        CheckConstraint(
+            "fix_lane IN ('patch','mitigate')",
+            name="ck_app_group_evals_fix_lane",
+        ),
         Index(
             "ix_app_group_evals_server",
             "server_id",
+            "fix_lane",
             "risk_band",
         ),
         Index(
