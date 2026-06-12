@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Fathometer">
+  
+  <rect x="1" y="1" width="62" height="62" rx="8" fill="#0A0A0A" stroke="#333333" stroke-width="1.5"></rect>
+  
+  <g fill="none" stroke="#999999" stroke-linecap="round">
+    
+    <path d="M 13 42 A 19 19 0 0 1 51 42" stroke-width="2.4"></path>
+    
+    <line x1="13" y1="42" x2="17" y2="42" stroke-width="2.2"></line>
+    <line x1="32" y1="23" x2="32" y2="27" stroke-width="2.2"></line>
+    <line x1="51" y1="42" x2="47" y2="42" stroke-width="2.2"></line>
+  </g>
+  
+  <g>
+    <line x1="32" y1="42" x2="20.5" y2="26.8" stroke="#00E5FF" stroke-width="2.6" stroke-linecap="round"></line>
+    <circle cx="20.5" cy="26.8" r="3.4" fill="#00E5FF"></circle>
+  </g>
+  
+  <circle cx="32" cy="42" r="2.2" fill="#EDEDED"></circle>
+</svg>
