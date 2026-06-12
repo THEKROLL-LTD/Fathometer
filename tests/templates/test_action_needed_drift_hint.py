@@ -75,6 +75,9 @@ def _render(app: Flask, entries: list[dict[str, Any]]) -> str:
         return render_template(
             "servers/_action_needed_section.html",
             action_sections=[_card(entries)],
+            # ADR-0055: das Section-Template referenziert jetzt `server` fuer den
+            # Per-Group-Chat-Help-Button (in Produktion via detail.html-Include).
+            server=SimpleNamespace(id=42, name="host-42"),
         )
 
 

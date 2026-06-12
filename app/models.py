@@ -96,12 +96,26 @@ class AttackVector(enum.StrEnum):
     UNKNOWN = "unknown"
 
 
+class ChatMessageRole(enum.StrEnum):
+    """Rolle einer Group-Chat-Message (ADR-0055, Block AE).
+
+    Der DB-Wert ist der lowercase-String (``system``/``user``/``assistant``),
+    nicht der Enum-Name — sichergestellt ueber ``values_callable`` in
+    :func:`_pg_enum`.
+    """
+
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
 # Postgres-Enum-Typnamen — exakt so in der Migration erzeugt.
 SEVERITY_ENUM_NAME = "severity"
 FINDING_TYPE_ENUM_NAME = "finding_type"
 FINDING_CLASS_ENUM_NAME = "finding_class"
 FINDING_STATUS_ENUM_NAME = "finding_status"
 ATTACK_VECTOR_ENUM_NAME = "attack_vector"
+CHAT_MESSAGE_ROLE_ENUM_NAME = "chat_message_role"
 
 
 def _pg_enum(enum_cls: type[enum.Enum], name: str) -> Any:
@@ -1309,8 +1323,112 @@ class FeedPullLog(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# Block AE (ADR-0055) — Per-Group AI-Chat.
+#
+# Genau eine Konversation pro ``(server, application_group)`` (UNIQUE), DB-
+# persistiert ueber Reloads. Der eingefrorene Findings-Snapshot lebt im
+# persistierten System-Prompt (erste Message, Rolle ``system``); kein
+# Findings-Bridge-Table. "New Chat" loescht die Konversation (CASCADE auf die
+# Messages), die naechste Nachricht legt sie frisch an.
+# ---------------------------------------------------------------------------
+
+
+class GroupChatConversation(Base):
+    """Eine Chat-Konversation pro ``(server, application_group)`` (ADR-0055).
+
+    ``application_group_id`` ist ``BigInteger`` analog ``ApplicationGroupEvaluation``
+    /``LLMDebugLog`` — ``application_groups.id`` ist BigInteger. ``server_id`` ist
+    ``Integer`` (``servers.id`` ist Integer). Beide FKs ``ON DELETE CASCADE``:
+    Server- oder Group-Loeschung raeumt die Konversation samt Messages ab.
+    """
+
+    __tablename__ = "group_chat_conversations"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    server_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("servers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    application_group_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("application_groups.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # ``Setting.llm_model`` zum Snapshot-Zeitpunkt — die Konversation bleibt an
+    # ihr Modell gebunden, auch wenn der Operator den Provider spaeter umstellt.
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_message_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # Zeitpunkt des eingefrorenen Findings-Snapshots (Debug/Audit). Der Snapshot
+    # selbst liegt im System-Prompt, nicht in einer Bridge-Tabelle.
+    findings_snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    messages: Mapped[list[GroupChatMessage]] = relationship(
+        "GroupChatMessage",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="(GroupChatMessage.created_at, GroupChatMessage.id)",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "server_id",
+            "application_group_id",
+            name="uq_group_chat_conversations_server_group",
+        ),
+    )
+
+
+class GroupChatMessage(Base):
+    """Eine Message im Group-Chat-Verlauf (ADR-0055).
+
+    ``role`` nutzt den nativen Postgres-Enum ``chat_message_role``; der DB-Wert
+    ist der lowercase-String. Lookup-Index ``(conversation_id, created_at, id)``
+    fuer chronologisches Laden des Verlaufs.
+    """
+
+    __tablename__ = "group_chat_messages"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("group_chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[ChatMessageRole] = mapped_column(
+        _pg_enum(ChatMessageRole, CHAT_MESSAGE_ROLE_ENUM_NAME), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    conversation: Mapped[GroupChatConversation] = relationship(
+        "GroupChatConversation", back_populates="messages"
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_group_chat_messages_conversation",
+            "conversation_id",
+            "created_at",
+            "id",
+        ),
+    )
+
+
 __all__ = [
     "ATTACK_VECTOR_ENUM_NAME",
+    "CHAT_MESSAGE_ROLE_ENUM_NAME",
     "FINDING_CLASS_ENUM_NAME",
     "FINDING_STATUS_ENUM_NAME",
     "FINDING_TYPE_ENUM_NAME",
@@ -1320,6 +1438,7 @@ __all__ = [
     "AttackVector",
     "AuditEvent",
     "Base",
+    "ChatMessageRole",
     "CisaKevCatalog",
     "DailyRiskState",
     "EpssScore",
@@ -1329,6 +1448,8 @@ __all__ = [
     "FindingNote",
     "FindingStatus",
     "FindingType",
+    "GroupChatConversation",
+    "GroupChatMessage",
     "LLMDebugLog",
     "LLMJob",
     "LLMRiskCache",

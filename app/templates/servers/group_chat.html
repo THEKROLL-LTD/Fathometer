@@ -1,0 +1,160 @@
+{# Per-Group-AI-Chat-Sub-View `/servers/<sid>/groups/<gid>/chat` (ADR-0055, Block AE).
+
+   Eingebettet in dieselbe Detail-Pane wie der Settings-Sub-View. Bei
+   HX-Request (`hx_partial=True`) rendert `_partial_shell.html` nur den
+   `detail_pane`-Block in `#detail-pane-content`; sonst Vollseite (`base_app.html`).
+
+   Markup-Port aus `docs/design/ServerDetail.jsx` (`WorkflowChat`, Z.293-468),
+   Englisch (ADR-0045 — die deutschen Screenshots sind ein alter Stand).
+
+   Variablen-Vertrag (gesetzt von `app/api/group_chat.py::_render_chat_view`):
+     - `server`        : Server (eager-loaded tags) — `.name` im Titel.
+     - `sid` / `gid`   : ints fuer url_for.
+     - `group_label`   : str — Anzeigelabel der Group.
+     - `lane`          : str | None — Fix-Lane (`patch`/`mitigate`).
+     - `worst_finding` : Row | None (`.identifier_key`/`.title`).
+     - `reason`        : str | None — Risk-Reviewer-Reason.
+     - `messages`      : list[GroupChatMessage] (user/assistant, chronologisch);
+                         leer -> Empty-State mit Suggestion-Chips.
+     - `suggestions`   : list[ChatSuggestion] — CHAT_SUGGESTIONS (`.label` sichtbar,
+                         `.prompt` in `data-prompt` → an das LLM gesendet).
+     - `conversation`  : GroupChatConversation | None.
+     - `csrf_form`     : CSRFOnlyForm — CSRF-Token (JS liest aus <meta>).
+     - `hx_partial`    : bool — HX-Request -> Fragment.
+
+   Sicherheit:
+     - KEIN `|safe` auf message.content / reason / worst / group_label.
+     - Stream-Deltas haengt das JS via `textContent` an — kein innerHTML-Sink.
+     - Kein Pflicht-Kommentarfeld (ADR-0006): Composer ohne `required`.
+     - Kein Snapshot-Stale-Hinweis (AE-group-chat.md §12.2).
+#}
+{% extends ("_partial_shell.html" if hx_partial else "base_app.html") %}
+
+{% block title %}AI Assistant · {{ server.name }} · Fathometer{% endblock %}
+
+{% block detail_pane %}
+{%- set lane_badge = 'sd-badge--mitigate' if lane == 'mitigate' else 'sd-badge--act' -%}
+{%- set lane_text = 'no patch' if lane == 'mitigate' else 'patch' if lane == 'patch' else lane -%}
+<div class="server-detail sd-chat-view"
+     data-test="group-chat-root"
+     x-data="groupChat({
+       postMessageUrl: '{{ url_for('group_chat.post_message', sid=sid, gid=gid) }}',
+       streamUrl: '{{ url_for('group_chat.stream', sid=sid, gid=gid) }}',
+       newChatUrl: '{{ url_for('group_chat.new_chat', sid=sid, gid=gid) }}',
+       backUrl: '{{ url_for('server_detail.show', server_id=sid) }}'
+     })">
+
+  {# ── Header strip — Back + centred title + New Chat (mirrors Settings head) ── #}
+  <div class="sd-settings-head">
+    <a class="sd-back"
+       href="{{ url_for('server_detail.show', server_id=sid) }}"
+       hx-get="{{ url_for('server_detail.show', server_id=sid) }}"
+       hx-target="#detail-pane"
+       hx-push-url="true"
+       aria-label="Back to server detail view"
+       data-test="group-chat-back">
+      <span class="sd-back__arrow" aria-hidden="true">&#x2190;</span>
+      <span>Back</span>
+    </a>
+    <h1 class="sd-settings-title">
+      AI Assistant · <b>{{ server.name }}</b>
+    </h1>
+    <button type="button"
+            class="sd-newchat"
+            x-on:click="newChat()"
+            x-bind:disabled="busy"
+            aria-label="New chat"
+            title="Clear history and start over"
+            data-test="group-chat-newchat">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+      <span>New Chat</span>
+    </button>
+  </div>
+
+  {# ── Context line — slim inline meta (Group-Badge + Worst + Reason) ── #}
+  <div class="sd-chat-meta" data-test="group-chat-meta">
+    <span class="sd-chat-meta__prompt" aria-hidden="true">&rsaquo;</span>
+    <span class="sd-chat-meta__seg">
+      <span class="sd-chat-meta__k">Group</span>
+      {% if lane %}<span class="sd-badge {{ lane_badge }}">{{ lane_text }}</span>{% endif %}
+      <span class="sd-chat-meta__group">{{ group_label }}</span>
+    </span>
+    <span class="sd-chat-meta__sep" aria-hidden="true">·</span>
+    <span class="sd-chat-meta__seg">
+      <span class="sd-chat-meta__k">Worst</span>
+      {% if worst_finding %}
+        <a class="sd-chat-meta__v workflow-table__cve-link"
+           href="{{ url_for('findings.index', q=worst_finding.identifier_key) }}"
+           data-test="group-chat-worst-link">{{ worst_finding.identifier_key }}</a>
+      {% else %}
+        <span class="sd-chat-meta__v">—</span>
+      {% endif %}
+    </span>
+    {% if reason %}
+      <span class="sd-chat-meta__seg sd-chat-meta__seg--reason">
+        <span class="sd-chat-meta__k">Reason</span>
+        <span class="sd-chat-meta__v">{{ reason }}</span>
+      </span>
+    {% endif %}
+  </div>
+
+  {# ── Conversation thread ── #}
+  <div class="sd-chat-thread" data-test="group-chat-thread" x-ref="thread">
+    {# Empty-State: Intro + Suggestion-Chips. x-show, damit New-Chat es ohne
+       Reload zurueckholt. Initial sichtbar gdw. keine Messages persistiert sind. #}
+    <div class="sd-chat__empty"
+         data-test="group-chat-empty"
+         x-show="empty"
+         {% if messages %}style="display: none;"{% endif %}>
+      <p class="sd-chat__empty-line">
+        Ask the AI anything about <b>{{ group_label }}</b> — risk, patch order,
+        exploit status, or whether a defer is worth it.
+      </p>
+      <div class="sd-chat__suggest">
+        {% for s in suggestions %}
+          <button type="button"
+                  class="sd-chat__chip"
+                  data-prompt="{{ s.prompt }}"
+                  x-on:click="sendSuggestion($event.currentTarget.getAttribute('data-prompt'))"
+                  data-test="group-chat-chip">{{ s.label }}</button>
+        {% endfor %}
+      </div>
+    </div>
+
+    {# Persistierte Messages (user/assistant) via Single-Source-Partial. #}
+    <div x-ref="messages" data-test="group-chat-messages">
+      {% for message in messages %}
+        {% include "servers/_partials/group_chat_message.html" %}
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── Composer dock — pinned to the bottom of the chat viewport ── #}
+  <div class="sd-chat-dock">
+    <div class="sd-chat__composer">
+      <textarea class="sd-chat__input"
+                rows="1"
+                placeholder="Ask about this group…"
+                aria-label="Ask about this group"
+                x-ref="input"
+                x-model="draft"
+                x-on:keydown="onKeyDown($event)"
+                data-test="group-chat-input"></textarea>
+      <button type="button"
+              class="sd-chat__send"
+              x-on:click="send()"
+              x-bind:disabled="busy || !draft.trim()"
+              aria-label="Send"
+              data-test="group-chat-send">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+          <path d="M4 12h13M11 6l6 6-6 6" />
+        </svg>
+      </button>
+    </div>
+    <p class="sd-chat__foot">Enter to send · Shift+Enter for a new line · Esc to go back</p>
+  </div>
+
+</div>
+{% endblock %}

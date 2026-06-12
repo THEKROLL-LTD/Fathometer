@@ -58,6 +58,9 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0050](0050-remove-llm-chat-assessment.md) | Server-weites "Request AI Assessment"-Chat-Feature entfernt (UI/Routes/Prompts/Chat-Services/JS/3 DB-Tabellen, Migration 0017); Provider-Config + Risk-Reviewer bleiben — löst Block G ab | Akzeptiert |
 | [0051](0051-apache-2-0-license.md) | Lizenzierung unter Apache License 2.0 (LICENSE/NOTICE, pyproject, SPDX-Header in app/, README); Rechteinhaber THEKROLL LTD — löst `Proprietary` ab | Akzeptiert |
 | [0052](0052-operator-sichten-jetzt-zustand.md) | Operator-Sichten zeigen Jetzt-Zustand (TICKET-010): Reopen-on-Redetect im Ingest (`resolved → open`, ACK bleibt ACK), Pass-2 bewertet/fingerprintet nur OPEN (präzisiert ADR-0023/0028), Server-Detail-Worst-Finding live statt Eval-Snapshot + „re-evaluation pending"-Drift-Hint, Triage-Aktionen triggern sofortiges Re-Eval | Akzeptiert |
+| [0053](0053-fix-lane-evaluation.md) | Fix-Lane-Evaluation: Pass 2 pro (Group, Server, Fix-Lane) — eine Group kann je Lane ein eigenes Verdikt/Worst-Finding haben (TICKET-013) | Akzeptiert |
+| [0054](0054-per-finding-risk-band-reason-removed.md) | Per-Finding-Risk-Band-Reason entfernt — Reason ist Group-Level (TICKET-012) | Akzeptiert |
+| [0055](0055-per-group-ai-chat.md) | Per-Group AI-Chat auf der Server-Detail-Seite: Help-Button pro Group-Row, eine Konversation pro (Server, Group) ohne Archiv, SSE-Streaming, Snapshot-Kontext aus Fingerprint/Services/Listener/Group-Findings, kein Token-Cap, Schema `group_chat_*` (Migration 0023) — nutzt den Re-Open-Trigger von ADR-0050 (Block AE) | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

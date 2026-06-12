@@ -4,6 +4,57 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block AE (ADR-0055): Per-Group AI-Chat
+
+Wieder-Einführung eines LLM-Chats — anders als der mit ADR-0050 entfernte
+server-weite Chat: **fokussiert pro `(Server, Application-Group)`**, ausgelöst
+über einen „Help"-Button pro Group-Row in den Operator-Workflows. Kontext ist
+ein **Snapshot bei Chat-Start** (Host-Fingerprint, Services, Listener inkl.
+Exposure und alle OPEN-Findings der Group eingefroren im persistierten
+System-Prompt), Antworten streamen per SSE, **kein Token-Cap** (der Cap bleibt
+allein dem Risk-Reviewer). Der *server-weite* Chat bleibt verworfen. Quality-Gates
+grün: `ruff`/`mypy app/`, Pure-Unit (`pytest`, +69 Tests inkl.
+`tests/adversarial/`-Prompt-Injection + XSS). Alembic-Roundtrip `0023` +
+db_integration (UNIQUE/CASCADE) + SSE-E2E stehen beim User an.
+
+### Added
+
+- **Per-Group-AI-Chat** (`app/api/group_chat.py`, ADR-0055): vier Browser-Routen
+  unter `/servers/<id>/groups/<gid>/chat[…]` — `GET …/chat` (Sub-View-Fragment
+  bzw. Vollseite, legt nichts an), `POST …/chat/messages` (User-Message anhängen;
+  **Lazy-Create + Snapshot** beim ersten Mal), `GET …/chat/stream` (**SSE**-Token-
+  Stream über `LlmClient.stream_chat`, Assistant-Message nach Stream-Ende in
+  eigener DB-Session persistiert), `POST …/chat/new` (Konversation
+  **CASCADE-löschen**, Empty-State zurück). Alle `@login_required`, CSRF auf POST,
+  `flask-limiter` (Stream 60/h, Messages 30/min, Show 120/min), gemeinsamer
+  404-Guard (aktiver Server **und** Group mit OPEN-Findings hier —
+  `group_findings_fragment`-Semantik gegen Cross-Server/Cross-Group-IDOR). **Kein**
+  `llm_budget`-Aufruf, **kein** Function-Calling (ADR-0002), Modell nur aus
+  `Setting.llm_model`.
+- **Genau eine Konversation pro `(Server, Group)`**, DB-persistiert über
+  Reloads/Sessions; „New Chat" löscht sie unwiderruflich (CASCADE auf die
+  Messages), die nächste Nachricht legt sie frisch an. Kein Archiv, keine
+  Mehrfach-Historie.
+- **Help-Button pro Group-Row** (`sd-ask-btn`) in den Operator-Workflows der
+  Server-Detail-Seite; öffnet den Chat-Sub-View in derselben Detail-Pane
+  (analog Settings-Sub-View). `CHAT_SUGGESTIONS`-Chips im Empty-State
+  (single-source-Konstante für Template + Test, Start-Suggestion
+  „Explain attack vector").
+- **Schema (Migration `0023`, additiv):** Tabellen `group_chat_conversations`
+  (`UNIQUE(server_id, application_group_id)`, `model`, `findings_snapshot_at`,
+  beide FKs `ON DELETE CASCADE`; `application_group_id` ist `BigInteger`) und
+  `group_chat_messages` (Lookup-Index `(conversation_id, created_at, id)`, optionale
+  `prompt_tokens`/`completion_tokens`), neuer Postgres-Enum `chat_message_role`
+  (`system`/`user`/`assistant`). **Kein Findings-Bridge-Table** — der Snapshot
+  lebt im System-Prompt (erste Message, `role=system`).
+- **Prompt-Builder** `app/services/group_chat_prompt.py`
+  (`build_group_system_prompt`): group-scoped, englisch (ADR-0045), mit
+  Anti-Injection-Markern `<<TRIVY_DATA_START>>`/`<<TRIVY_DATA_END>>`,
+  portierter `_safe`-Display-Sanitization (Control-Chars/NUL raus, Längen-Cap)
+  und **Marker-Neutralisierung** (eingebettete Marker in manipulierten
+  Scanner-Strings werden entschärft, damit untrusted Daten den Datenblock nicht
+  vorzeitig schließen können).
+
 ## [Unreleased] — TICKET-015: Trivy-Bump 0.71.0 + Trivy-Auto-Update im Agent
 
 Agent hält die fathometer-managed Trivy-Binary künftig selbst auf der

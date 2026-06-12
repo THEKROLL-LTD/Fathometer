@@ -83,12 +83,6 @@ function HeaderStrip({ host, onOpenSettings }) {
       </div>
 
       <div className="sd-header__right">
-        <button type="button" className="sd-ai-button">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" aria-hidden="true">
-            <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
-          </svg>
-          <span>KI-Bewertung anfordern</span>
-        </button>
         <button
           type="button"
           className="sd-icon-button"
@@ -201,7 +195,15 @@ function Sysline({ host }) {
 }
 
 // ── 4) Operator Workflows ──────────────────────────────────────
-function WorkflowCard({ wf }) {
+function ChatGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="square" strokeLinejoin="miter" aria-hidden="true">
+      <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
+    </svg>
+  );
+}
+
+function WorkflowCard({ wf, onChat }) {
   return (
     <details className="workflow-card">
       <summary className="workflow-card__summary">
@@ -218,6 +220,7 @@ function WorkflowCard({ wf }) {
               <th className="workflow-table__group">Group</th>
               <th className="workflow-table__cve">Worst Finding</th>
               <th className="workflow-table__reason">Reason</th>
+              <th className="workflow-table__ask" aria-label="KI-Assistent"></th>
             </tr>
           </thead>
           <tbody>
@@ -226,6 +229,18 @@ function WorkflowCard({ wf }) {
                 <td className="workflow-table__group">{r.group}</td>
                 <td className="workflow-table__cve">{r.worst}</td>
                 <td className="workflow-table__reason">{r.reason}</td>
+                <td className="workflow-table__ask">
+                  <button
+                    type="button"
+                    className="sd-ask-btn"
+                    onClick={() => onChat({ ...r, phase: wf.phase, title: wf.title })}
+                    aria-label={`Ask AI about ${r.group}`}
+                    title={`Ask AI about ${r.group}`}
+                  >
+                    <ChatGlyph />
+                    <span>Help</span>
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -242,13 +257,223 @@ function WorkflowCard({ wf }) {
   );
 }
 
-function Workflows() {
+// ── Per-group KI chat drawer ───────────────────────────────────
+const CHAT_SUGGESTIONS = [
+  'How real is the risk here?',
+  'In what order should I patch?',
+  'Are there known active exploits?',
+  'Can I safely defer this?',
+];
+
+function buildPreamble(ctx) {
+  const h = SD.HOST;
+  return (
+    `You are the Fathometer AI triage assistant for security operators. ` +
+    `Answer concisely, precisely and technically in English — short paragraphs, no marketing fluff, no Markdown headings. ` +
+    `If you are unsure, say so. You advise on exactly one package group.\n\n` +
+    `HOST: ${h.host} · ${h.os} · kernel ${h.kernel} · ${h.arch}. Last scan ${h.lastScan}.\n` +
+    `WORKFLOW PHASE: ${ctx.phase} (${ctx.title}).\n` +
+    `GROUP: ${ctx.group}.\n` +
+    `WORST FINDING: ${ctx.worst}.\n` +
+    `SCANNER REASON: ${ctx.reason}\n\n` +
+    `Answer the operator's questions strictly in the context of this group.`
+  );
+}
+
+function TypingDots() {
+  return (
+    <span className="sd-chat-typing" aria-label="AI is typing">
+      <span className="sd-chat-typing__dot" />
+      <span className="sd-chat-typing__dot" />
+      <span className="sd-chat-typing__dot" />
+    </span>
+  );
+}
+
+function WorkflowChat({ host, ctx, conversations, setConversations, onBack }) {
+  const key = ctx.group;
+  const messages = conversations[key] || [];
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const threadRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Escape returns to the detail view; focus the composer on open.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onBack(); };
+    window.addEventListener('keydown', onKey);
+    const t = setTimeout(() => inputRef.current && inputRef.current.focus(), 260);
+    return () => { window.removeEventListener('keydown', onKey); clearTimeout(t); };
+  }, [onBack]);
+
+  // Keep the thread pinned to the latest message (no scrollIntoView).
+  useEffect(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, busy]);
+
+  const setMessages = useCallback((updater) => {
+    setConversations(prev => {
+      const cur = prev[key] || [];
+      const next = typeof updater === 'function' ? updater(cur) : updater;
+      return { ...prev, [key]: next };
+    });
+  }, [key, setConversations]);
+
+  const send = useCallback(async (raw) => {
+    const text = (raw != null ? raw : input).trim();
+    if (!text || busy) return;
+    setInput('');
+    setError(null);
+    const history = messages.concat({ role: 'user', content: text });
+    setMessages(history);
+    setBusy(true);
+    try {
+      const apiMessages = [
+        { role: 'user', content: buildPreamble(ctx) },
+        { role: 'assistant', content: 'Understood. I will advise on this group.' },
+        ...history,
+      ];
+      const reply = await window.claude.complete({ messages: apiMessages });
+      setMessages(h => h.concat({ role: 'assistant', content: (reply || '').trim() || '—' }));
+    } catch (err) {
+      setError('Could not load a response. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }, [input, busy, messages, setMessages, ctx]);
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  };
+
+  const newChat = useCallback(() => {
+    if (busy) return;
+    setMessages([]);
+    setInput('');
+    setError(null);
+    if (inputRef.current) inputRef.current.focus();
+  }, [busy, setMessages]);
+
+  return (
+    <div className="server-detail sd-chat-view">
+      {/* Header strip — back link + centred title, mirrors Settings */}
+      <div className="sd-settings-head">
+        <button type="button" className="sd-back" onClick={onBack} aria-label="Back">
+          <span className="sd-back__arrow" aria-hidden="true">←</span>
+          <span>Back</span>
+        </button>
+        <h1 className="sd-settings-title">
+          AI Assistant · <b>{host.host}</b>
+        </h1>
+        <button
+          type="button"
+          className="sd-newchat"
+          onClick={newChat}
+          disabled={busy || messages.length === 0}
+          aria-label="New chat"
+          title="Clear history and start over"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="square" strokeLinejoin="miter" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span>New Chat</span>
+        </button>
+      </div>
+
+      {/* Context line — slim inline meta, styled like the header sysline.
+         Server lives in the page title above. */}
+      <div className="sd-chat-meta">
+        <span className="sd-chat-meta__prompt" aria-hidden="true">›</span>
+        <span className="sd-chat-meta__seg">
+          <span className="sd-chat-meta__k">Group</span>
+          <span className={`sd-badge sd-badge--${ctx.phase.toLowerCase()}`}>{ctx.phase}</span>
+          <span className="sd-chat-meta__group">{ctx.group}</span>
+        </span>
+        <span className="sd-chat-meta__sep" aria-hidden="true">·</span>
+        <span className="sd-chat-meta__seg">
+          <span className="sd-chat-meta__k">Worst</span>
+          <span className="sd-chat-meta__v">{ctx.worst}</span>
+        </span>
+        <span className="sd-chat-meta__seg sd-chat-meta__seg--reason">
+          <span className="sd-chat-meta__k">Reason</span>
+          <span className="sd-chat-meta__v">{ctx.reason}</span>
+        </span>
+      </div>
+
+      {/* Conversation */}
+      <div className="sd-chat-thread" ref={threadRef}>
+        {messages.length === 0 && !busy && (
+          <div className="sd-chat__empty">
+            <p className="sd-chat__empty-line">
+              Ask the AI anything about <b>{ctx.group}</b> — risk, patch order,
+              exploit status, or whether a defer is worth it.
+            </p>
+            <div className="sd-chat__suggest">
+              {CHAT_SUGGESTIONS.map(s => (
+                <button key={s} type="button" className="sd-chat__chip" onClick={() => send(s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.map((m, i) => (
+          <div key={i} className={`sd-msg sd-msg--${m.role}`}>
+            {m.role === 'assistant' && <span className="sd-msg__tag">AI</span>}
+            <div className="sd-msg__bubble">{m.content}</div>
+          </div>
+        ))}
+
+        {busy && (
+          <div className="sd-msg sd-msg--assistant">
+            <span className="sd-msg__tag">AI</span>
+            <div className="sd-msg__bubble sd-msg__bubble--typing"><TypingDots /></div>
+          </div>
+        )}
+
+        {error && <div className="sd-chat__error">{error}</div>}
+      </div>
+
+      {/* Composer — sticks to the bottom of the scroll viewport */}
+      <div className="sd-chat-dock">
+        <div className="sd-chat__composer">
+          <textarea
+            ref={inputRef}
+            className="sd-chat__input"
+            rows={1}
+            placeholder="Ask about this group…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+          />
+          <button
+            type="button"
+            className="sd-chat__send"
+            onClick={() => send()}
+            disabled={!input.trim() || busy}
+            aria-label="Send"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="square" strokeLinejoin="miter" aria-hidden="true">
+              <path d="M4 12h13M11 6l6 6-6 6" />
+            </svg>
+          </button>
+        </div>
+        <p className="sd-chat__foot">Enter to send · Shift+Enter for a new line · Esc to go back</p>
+      </div>
+    </div>
+  );
+}
+
+function Workflows({ onChat }) {
   return (
     <section className="sd-section">
       <p className="sd-eyebrow">Was zu tun ist</p>
       <h2 className="sd-h3">Operator-Workflows</h2>
       <div className="sd-workflows">
-        {SD.WORKFLOWS.map((wf, i) => <WorkflowCard key={i} wf={wf} />)}
+        {SD.WORKFLOWS.map((wf, i) => <WorkflowCard key={i} wf={wf} onChat={onChat} />)}
       </div>
     </section>
   );
@@ -675,11 +900,28 @@ function TriageQueue() {
 
 // ── Top-level ServerDetail ────────────────────────────────────
 function ServerDetail({ skeletonMode = false } = {}) {
-  const [view, setView] = useState('detail');   // 'detail' | 'settings'
+  const [view, setView] = useState('detail');   // 'detail' | 'settings' | 'chat'
+  const [chatCtx, setChatCtx] = useState(null);
+  // Persist threads per group across opening/closing the chat sub-view.
+  const [conversations, setConversations] = useState({});
   const host = SD.HOST;
+
+  const openChat = useCallback((ctx) => { setChatCtx(ctx); setView('chat'); }, []);
 
   if (view === 'settings') {
     return <ServerSettings host={host} onBack={() => setView('detail')} />;
+  }
+
+  if (view === 'chat' && chatCtx) {
+    return (
+      <WorkflowChat
+        host={host}
+        ctx={chatCtx}
+        conversations={conversations}
+        setConversations={setConversations}
+        onBack={() => setView('detail')}
+      />
+    );
   }
 
   return (
@@ -687,7 +929,7 @@ function ServerDetail({ skeletonMode = false } = {}) {
       <HeaderStrip host={host} onOpenSettings={() => setView('settings')} />
       <Sysline host={host} />
 
-      <Workflows />
+      <Workflows onChat={openChat} />
       <HeaderStats skel={skeletonMode} />
       <Heartbeat   skel={skeletonMode} />
       <SeverityTrend skel={skeletonMode} />

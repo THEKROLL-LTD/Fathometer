@@ -10,6 +10,8 @@ import './dashboard_scan_sync.js';
 import './dashboard_last_refresh.js';
 // Block X Phase A0: Server-Detail-Helper (ScanFlashSync, PillPanels, HeartbeatTip).
 import { initServerDetailModule } from './server_detail.js';
+// Block AE (ADR-0055): Per-Group-AI-Chat (Alpine groupChat + EventSource/SSE).
+import './group_chat.js';
 
 // Hook fuer HTMX-Pane-Swaps: initServerDetailModule auf neu eingefuegte
 // .server-detail-Elemente anwenden. (Block X Track A: Wrapper-Klasse

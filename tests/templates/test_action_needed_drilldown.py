@@ -139,7 +139,13 @@ def _render_section(app: Flask, action_sections: list) -> str:  # type: ignore[t
 
     source = _load_template_source()
     with app.test_request_context("/servers/42"):
-        return render_template_string(source, action_sections=action_sections)
+        # ADR-0055: das Section-Template referenziert jetzt `server` fuer den
+        # Per-Group-Chat-Help-Button (in Produktion via detail.html-Include).
+        return render_template_string(
+            source,
+            action_sections=action_sections,
+            server=SimpleNamespace(id=42, name="host-42"),
+        )
 
 
 # ===========================================================================
@@ -171,21 +177,25 @@ def test_drilldown_table_uses_workflow_card_class(app: Flask) -> None:
 
 
 def test_drilldown_table_has_three_columns_in_documented_order(app: Flask) -> None:
-    """Drilldown-Tabelle hat genau drei <th>-Tags in Reihenfolge Group -> Worst Finding -> Reason.
+    """Drilldown-Tabelle: Reihenfolge Group -> Worst Finding -> Reason, dann die
+    leere Help-Spalte (4.).
 
     ADR-0038 Phase D2: dokumentierte Spalten-Reihenfolge ist verbindlich.
+    ADR-0055 (Block AE): vierte, kopflose Spalte ``workflow-table__ask`` traegt
+    den Per-Group-Chat-Help-Button.
     """
     card = _make_single_entry_card()
     html = _render_section(app, [card])
 
-    # Anzahl der <th>-Elemente exakt drei.
+    # Anzahl der <th>-Elemente exakt vier (drei beschriftet + Help-Spalte).
     # Hinweis: ``html.count("<th")`` wuerde auch ``<thead>`` treffen — daher
     # ``</th>`` zaehlen (kein False-Positive von ``<thead>``).
     th_count = html.count("</th>")
-    assert th_count == 3, (
-        f"Drilldown-Tabelle soll genau 3 <th>-Elemente haben, gefunden: {th_count}. "
+    assert th_count == 4, (
+        f"Drilldown-Tabelle soll genau 4 <th>-Elemente haben, gefunden: {th_count}. "
         f"HTML (Ausschnitt): {html[:800]!r}"
     )
+    assert 'class="workflow-table__ask"' in html
 
     # Reihenfolge via Substring-Index-Vergleich.
     expected_order = ["Group", "Worst Finding", "Reason"]

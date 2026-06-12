@@ -134,6 +134,17 @@ _ACCEPTANCE_PATH_PREFIXES: tuple[str, ...] = (
     "tests/workers/test_scan_ingest_e2e_flow.py",
 )
 
+# Explizite Pure-Unit-Ausnahmen innerhalb sonst-DB-lastiger Pfad-Prefixe.
+# Diese Files introspektieren nur ORM-Metadata (kein DB-Fixture, kein
+# Postgres) und sollen in der Default-Selektion laufen — die
+# ``_ACCEPTANCE_PATH_PREFIXES``-Heuristik wuerde sie sonst faelschlich als
+# ``db_integration`` markieren, weil sie unter ``tests/models/`` liegen.
+_PURE_UNIT_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "tests/models/test_group_chat.py",
+    }
+)
+
 # Files die in der LOW-Kategorie sind und schon zu Mocks refactored wurden.
 # Diese werden NICHT mit todo_mock markiert. Wird erweitert wenn weitere
 # LOW-Files migriert sind.
@@ -176,6 +187,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         # der Split nie matchte. Folge: acceptance/db_integration-Marker wurden
         # NIE gesetzt, Heavy-Tests nur per Fixture-Skip ausgeschlossen.
         rel_path = os.path.relpath(str(item.fspath), str(config.rootpath))
+
+        # Pure-Unit-Override vor der Prefix-Heuristik: explizit DB-freie Files
+        # innerhalb eines sonst-DB-lastigen Prefix bleiben ungemarkt (laufen
+        # in der Default-Selektion).
+        if rel_path in _PURE_UNIT_OVERRIDES:
+            continue
 
         if any(rel_path.startswith(p) for p in _ACCEPTANCE_PATH_PREFIXES):
             item.add_marker(pytest.mark.acceptance)

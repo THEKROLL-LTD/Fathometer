@@ -1,0 +1,34 @@
+{# Single-Source-Bubble-Partial fuer den Per-Group-AI-Chat (ADR-0055, Block AE).
+
+   EINE Quelle fuer BEIDE Render-Pfade (CLAUDE.md §HTMX-OOB-Single-Source):
+     1. Initial-Render — die Thread-Schleife in `servers/group_chat.html`
+        rendert jede persistierte user/assistant-Message ueber dieses Partial.
+     2. POST `/chat/messages`-Response — der Server rendert die frische
+        User-Bubble ueber genau dieses Partial (`bubble_html` im JSON).
+
+   Das JS (`group_chat.js`) baut die STREAMING-Assistant-Bubble client-seitig
+   mit demselben Klassen-/ID-Schema nach (siehe `_appendAssistantBubble`); der
+   Drift-Test deckt user/assistant ab und das JS spiegelt die Struktur 1:1.
+
+   Variablen-Vertrag (`app/api/group_chat.py::_user_bubble_partial` +
+   Thread-Schleife):
+     - `message`    : GroupChatMessage (`.role` = `user`|`assistant`,
+                      `.content` = str). `.role` ist ein ChatMessageRole-Enum;
+                      wir vergleichen ueber `.value`.
+     - `stream_url` : str | None — EventSource-Ziel; nur bei der frischen
+                      User-Bubble gesetzt (das JS liest es aus der
+                      JSON-Response, nicht aus dem Markup).
+
+   ID-Konvention (`<feature>-<entity>-<id>-<slot>`): `chat-msg-<id>` am Bubble-
+   Wrapper, der Content-Container traegt `data-msg-bubble`. NIEMALS `|safe` auf
+   `message.content` — Jinja-Autoescape ist der XSS-Schutz im Initial-Pfad,
+   `textContent` im Stream-Pfad.
+#}
+{%- set _role = message.role.value if message.role is not string else message.role -%}
+<div class="sd-msg sd-msg--{{ _role }}"
+     id="chat-msg-{{ message.id }}"
+     data-msg-role="{{ _role }}"
+     data-test="chat-msg">
+  {%- if _role == 'assistant' %}<span class="sd-msg__tag">AI</span>{% endif %}
+  <div class="sd-msg__bubble" data-msg-bubble>{{ message.content }}</div>
+</div>

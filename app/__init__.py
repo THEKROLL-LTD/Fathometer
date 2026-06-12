@@ -394,6 +394,7 @@ def create_app() -> Flask:
     # 7. Blueprints.
     app.register_blueprint(health_bp)
 
+    from app.api.group_chat import group_chat_bp
     from app.views._sidebar_context import sidebar_partials_bp
     from app.views.agent_install import agent_install_bp
     from app.views.audit_view import audit_bp
@@ -415,6 +416,7 @@ def create_app() -> Flask:
     app.register_blueprint(servers_bp)
     app.register_blueprint(server_detail_bp)
     app.register_blueprint(server_settings_bp)
+    app.register_blueprint(group_chat_bp)
     app.register_blueprint(findings_bp)
     app.register_blueprint(audit_bp)
     app.register_blueprint(dashboard_bp)

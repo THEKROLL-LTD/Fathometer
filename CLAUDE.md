@@ -134,6 +134,7 @@ Erlaubte Form:
 - PDF-Export
 - Verteiltes Rate-Limit-Backend (Redis), Multi-Instance-Deploy
 - SBOM-Erfassung, License-Findings
+- **Server-weiter LLM-Chat** (unfokussiertes „Request AI assessment" über alle Findings eines Servers) — bleibt verworfen (ADR-0050). **Ausnahme ab Block AE (ADR-0055):** der **fokussierte Per-Group-Chat** pro `(Server, Application-Group)` ist **in-scope** (Help-Button pro Group-Row, Snapshot-Kontext, SSE). Nur dieser Group-Chat, kein server-weiter.
 
 Wenn ein Agent Scope erweitern will: ablehnen und neue ADR erfordern.
 
