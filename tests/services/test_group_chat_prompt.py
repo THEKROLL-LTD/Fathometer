@@ -527,7 +527,10 @@ def test_safe_applied_to_finding_title_in_prompt() -> None:
 
 
 def test_chat_suggestions_single_source() -> None:
-    assert [s.label for s in CHAT_SUGGESTIONS] == ["Explain attack vector"]
+    assert [s.label for s in CHAT_SUGGESTIONS] == [
+        "Explain attack vector",
+        "List exploitable findings",
+    ]
 
 
 def test_chat_suggestion_prompt_decoupled_from_label() -> None:
@@ -537,6 +540,17 @@ def test_chat_suggestion_prompt_decoupled_from_label() -> None:
     assert sug.prompt != sug.label
     assert "compromise THIS server" in sug.prompt
     assert "concrete attack path" in sug.prompt
+
+
+def test_list_exploitable_suggestion_present_and_decoupled() -> None:
+    # Zweite Schnellwahl (ADR-0055/Task): listet alle real exploitable Findings
+    # der Group auf. Label kurz, Prompt ausformuliert und host-spezifisch.
+    sug = next(s for s in CHAT_SUGGESTIONS if s.label == "List exploitable findings")
+    assert sug.prompt != sug.label
+    assert "every finding" in sug.prompt
+    assert "THIS host" in sug.prompt
+    # Verlangt eine vollstaendige Liste statt Zusammenfassung (Admin-Ziel).
+    assert "do not summarize them away" in sug.prompt
 
 
 def test_build_user_intro_contains_group_label() -> None:

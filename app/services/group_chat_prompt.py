@@ -62,10 +62,10 @@ class ChatSuggestion(NamedTuple):
     prompt: str
 
 
-# Vorgegebene Start-Suggestion (AE-group-chat.md §6) — single-source fuer
-# Empty-State-Template + Test. Bewusst genau ein Eintrag; das Markup rendert
-# die Liste generisch (label sichtbar, prompt in ``data-prompt``), weitere
-# Suggestions sind ohne Markup-Aenderung moeglich.
+# Vorgegebene Start-Suggestions (AE-group-chat.md §6) — single-source fuer
+# Empty-State-Template + Test. Das Markup rendert die Liste generisch (label
+# sichtbar, prompt in ``data-prompt``); weitere Suggestions sind ohne Markup-
+# Aenderung moeglich.
 CHAT_SUGGESTIONS: list[ChatSuggestion] = [
     ChatSuggestion(
         label="Explain attack vector",
@@ -75,6 +75,18 @@ CHAT_SUGGESTIONS: list[ChatSuggestion] = [
             "concrete attack path: the entry point, which reachable listener or "
             "service is involved, and what the attacker gains. Be specific to "
             "this host — skip generic CVE background — and keep it brief."
+        ),
+    ),
+    ChatSuggestion(
+        label="List exploitable findings",
+        prompt=(
+            "List every finding in this group that genuinely opens an attack "
+            "vector on THIS host — i.e. is actually reachable and exploitable "
+            "given the host's exposure, not merely high-scoring. For each, give "
+            "one line: the CVE / finding id, the package, and a short why (which "
+            "reachable listener or service exposes it and what the attacker "
+            "gains). List every finding that qualifies — do not summarize them "
+            "away; these are the ones I must handle directly."
         ),
     ),
 ]

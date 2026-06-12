@@ -111,7 +111,10 @@ def test_empty_state_renders_suggestion_chips(app: Flask) -> None:
 
 
 def test_chat_suggestions_is_the_known_constant() -> None:
-    assert [s.label for s in CHAT_SUGGESTIONS] == ["Explain attack vector"]
+    assert [s.label for s in CHAT_SUGGESTIONS] == [
+        "Explain attack vector",
+        "List exploitable findings",
+    ]
 
 
 def test_empty_state_hidden_when_messages_present(app: Flask) -> None:
