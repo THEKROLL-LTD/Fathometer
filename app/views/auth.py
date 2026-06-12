@@ -18,14 +18,14 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required, login_user, logout_user
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app import limiter
 from app.audit import log_event
 from app.auth import AuthUser, safe_next, verify_password
 from app.db import get_session
 from app.forms import LoginForm
-from app.models import User
+from app.models import Server, User
 from app.settings_service import is_setup_completed
 
 log = structlog.get_logger(__name__)
@@ -39,7 +39,7 @@ def login() -> Any:
         return redirect(url_for("setup.index"))
 
     if current_user.is_authenticated:
-        return redirect(url_for("settings.tags_list"))
+        return redirect(_post_login_target())
 
     form = LoginForm()
     if form.validate_on_submit():
@@ -86,7 +86,7 @@ def login() -> Any:
         sess.commit()
         log.info("auth.login.success", user_id=row.id)
         next_url = safe_next(request.args.get("next"))
-        return redirect(next_url or url_for("settings.tags_list"))
+        return redirect(next_url or _post_login_target())
 
     return render_template("login.html", form=form)
 
@@ -115,6 +115,20 @@ def logout() -> Any:
 # liefert konsistent `False` zurueck (Mismatch) — wichtig: nicht im Logger
 # loggen, aber das laeuft eh ueber den Redaction-Filter.
 _DUMMY_HASH = "$argon2id$v=19$m=65536,t=3,p=4$ZHVtbXktc2FsdC1ub3QtcmVhbA$ZHVtbXktaGFzaC1ub3QtdXNlZA"
+
+
+def _post_login_target() -> str:
+    """Bestimmt das Landing-Ziel nach dem Login.
+
+    Default ist das Dashboard (`/`). Bei einer frischen Installation ohne
+    angelegte Server waere das Dashboard leer — dann leiten wir stattdessen
+    direkt auf die Server-Verwaltung, wo der Operator den ersten Server anlegt.
+    """
+    sess = get_session()
+    server_count = int(sess.execute(select(func.count(Server.id))).scalar() or 0)
+    if server_count == 0:
+        return url_for("servers.list_servers")
+    return url_for("dashboard.index")
 
 
 def _login_rate_limit() -> str:

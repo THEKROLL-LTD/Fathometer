@@ -9,7 +9,8 @@
          id, name, revoked_at, retired_at, last_scan_at,
          expected_scan_interval_h, os_pretty_name, kernel_version,
          architecture, trivy_db_updated_at, tag_links[*].tag (name, color).
-     - `revoke_form`, `retire_form` (CSRFOnlyForm)
+     - `revoke_form`, `retire_form`, `delete_findings_form`,
+       `delete_server_form` (CSRFOnlyForm)
 
    Stale-Logik (siehe ARCHITECTURE §14):
      - Server "stale" wenn last_scan_at aelter als expected_scan_interval_h.
@@ -198,6 +199,39 @@
                             style="width: 100%;"
                             aria-label="Delete all findings for {{ srv.name }}">
                       Delete findings
+                    </button>
+                  </form>
+                </div>
+              </div>
+            {% elif srv.revoked_at %}
+              <div class="s-overflow"
+                   x-data="{ open: false }"
+                   :class="{ 's-overflow--open': open }"
+                   @click.outside="open = false"
+                   @keydown.escape.window="open = false">
+                <button type="button"
+                        class="s-overflow__btn"
+                        @click="open = !open"
+                        :aria-expanded="open ? 'true' : 'false'"
+                        aria-haspopup="menu"
+                        aria-label="Actions for {{ srv.name }}"
+                        data-test="server-actions-{{ srv.id }}">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <circle cx="3" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="13" cy="8" r="1.3" />
+                  </svg>
+                </button>
+                <div class="s-overflow__menu" role="menu" x-show="open" x-cloak>
+                  <form method="post"
+                        action="{{ url_for('servers.delete_server', server_id=srv.id) }}"
+                        x-data
+                        @submit="if (!confirm('Delete this server permanently? All of its findings and data are removed from the database. This cannot be undone.')) $event.preventDefault();">
+                    {{ delete_server_form.csrf_token }}
+                    <button type="submit"
+                            class="s-overflow__item s-overflow__item--danger"
+                            data-test="server-delete-{{ srv.id }}"
+                            style="width: 100%;"
+                            aria-label="Delete server {{ srv.name }}">
+                      Delete server
                     </button>
                   </form>
                 </div>

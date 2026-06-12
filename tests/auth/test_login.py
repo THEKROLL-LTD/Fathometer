@@ -23,6 +23,7 @@ from tests._helpers import (
     ADMIN_USERNAME,
     create_admin_user,
     login,
+    register_test_server,
 )
 
 
@@ -43,19 +44,40 @@ def seeded_client(seeded_db_app: Flask) -> FlaskClient:
 # ---------------------------------------------------------------------------
 
 
-def test_login_success_redirects_and_sets_session(seeded_client: FlaskClient) -> None:
+def test_login_success_redirects_to_servers_when_no_servers(seeded_client: FlaskClient) -> None:
+    """Frische Installation ohne Server -> Landing auf /settings/servers/.
+
+    Das Dashboard waere ohne angelegte Server leer; der Operator soll direkt
+    dort landen, wo er den ersten Server anlegt (siehe app/views/auth.py
+    `_post_login_target`).
+    """
     resp = seeded_client.post(
         "/login",
         data={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
         follow_redirects=False,
     )
     assert resp.status_code == 302, (resp.status_code, resp.data[:200])
-    # Bei /settings/tags landet man nach Login (siehe app/views/auth.py).
-    assert "/settings/tags" in resp.headers["Location"], resp.headers["Location"]
+    assert "/settings/servers" in resp.headers["Location"], resp.headers["Location"]
 
     # Session-Cookie muss gesetzt sein.
     with seeded_client.session_transaction() as sess:
         assert "_user_id" in sess, list(sess.keys())
+
+
+def test_login_success_redirects_to_dashboard_when_servers_exist(
+    seeded_db_app: Flask, seeded_client: FlaskClient
+) -> None:
+    """Sobald mindestens ein Server existiert -> Landing auf dem Dashboard `/`."""
+    register_test_server(seeded_db_app, name="landinghost")
+
+    resp = seeded_client.post(
+        "/login",
+        data={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302, (resp.status_code, resp.data[:200])
+    location = resp.headers["Location"]
+    assert location.endswith("/") and "/settings/" not in location, location
 
 
 def test_login_success_writes_auth_success_audit_event(

@@ -133,7 +133,16 @@ def _ctx_servers() -> dict:
         "revoke_form": _csrf_form(),
         "retire_form": _csrf_form(),
         "delete_findings_form": _csrf_form(),
+        "delete_server_form": _csrf_form(),
     }
+
+
+def _ctx_servers_revoked() -> dict:
+    """Wie `_ctx_servers`, aber der Server ist revoked — exerziert den
+    Delete-Server-Action-Zweig in `settings/servers.html`."""
+    ctx = _ctx_servers()
+    ctx["servers"][0].revoked_at = _NOW
+    return ctx
 
 
 def _ctx_tags() -> dict:
@@ -288,6 +297,18 @@ def test_external_feeds_on_about_not_provider(app: Flask) -> None:
     provider_html = _render(app, "settings/llm_provider.html", "_ctx_llm_provider")
     assert "External feeds" not in provider_html
     assert "s-feeds" not in provider_html
+
+
+def test_revoked_server_offers_delete_action(app: Flask) -> None:
+    """Ein revoked Server zeigt die 'Delete server'-Action; ein aktiver nicht."""
+    revoked_html = _render(app, "settings/servers.html", "_ctx_servers_revoked")
+    assert "Delete server" in revoked_html
+    assert 'data-test="server-delete-1"' in revoked_html
+    assert "/settings/servers/1/delete" in revoked_html
+
+    active_html = _render(app, "settings/servers.html", "_ctx_servers")
+    assert "Delete server" not in active_html
+    assert "no actions" not in active_html  # aktiver Server hat das Actions-Menue
 
 
 @pytest.mark.parametrize("template,builder,indicator", _PAGES)

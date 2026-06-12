@@ -31,7 +31,8 @@
   {%- if action.startswith('auth.failed') or action == 'ratelimit.tripped' -%}alert
   {%- elif action == 'finding.reopened' or action.startswith('finding.note')
         or action.startswith('key.rotated') or action == 'master_key.rotated'
-        or action == 'server.revoked' or action == 'server.retired' -%}notice
+        or action == 'server.revoked' or action == 'server.retired'
+        or action == 'server.deleted' -%}notice
   {%- endif -%}
 {%- endmacro %}
 
