@@ -102,6 +102,25 @@
 
   {# ── Conversation thread ── #}
   <div class="sd-chat-thread" data-test="group-chat-thread" x-ref="thread">
+    {# Findings-Budget-Hinweis (ADR-0058): nur wenn tatsaechlich gekuerzt wurde.
+       Bewusst KEIN Chat-Bubble — eine gelb abgesetzte Info, role="note". Steht
+       ausserhalb von x-ref="messages", damit „New Chat" (JS leert nur messages)
+       ihn nicht entfernt; scrollt im Verlauf nach oben aus dem Sichtbereich. #}
+    {% if findings_truncated %}
+      <aside class="sd-chat-notice" role="note" aria-label="Context note"
+             data-test="group-chat-notice">
+        <span class="sd-chat-notice__tag">Context note</span>
+        <p class="sd-chat-notice__body">
+          To keep replies fast and affordable, the assistant is given the
+          <b>{{ findings_shown }}</b> most important of <b>{{ findings_total }}</b>
+          open findings in this group — every critical and known-exploited one,
+          plus the highest-risk of the rest. The other
+          {{ findings_total - findings_shown }} are passed only as an aggregate
+          summary (counts, max EPSS, KEV and fixable totals), not individually.
+        </p>
+      </aside>
+    {% endif %}
+
     {# Empty-State: Intro + Suggestion-Chips. x-show, damit New-Chat es ohne
        Reload zurueckholt. Initial sichtbar gdw. keine Messages persistiert sind. #}
     <div class="sd-chat__empty"

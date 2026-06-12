@@ -17,13 +17,14 @@ sind hier NICHT dupliziert.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from flask import Flask
 
 import app.api.group_chat as gc
-from app.models import ChatMessageRole
+from app.models import ChatMessageRole, Severity
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -50,17 +51,34 @@ class _ExecResult:
 
 
 class _FakeFinding:
-    """Stand-in fuer ein OPEN-Finding der Group (volles ORM-Objekt-Surrogat)."""
+    """Stand-in fuer ein OPEN-Finding der Group (volles ORM-Objekt-Surrogat).
 
-    def __init__(self, fid: int) -> None:
+    Traegt genug Felder fuer ``select_pass2_findings`` (ADR-0058): Triage-Key
+    (``is_kev``/``epss_score``/``cvss_v3_score``/``severity``/``first_seen_at``/
+    ``identifier_key``/``id``) plus Pfad-/Fix-Felder fuer Quote und Aggregat.
+    """
+
+    def __init__(
+        self,
+        fid: int,
+        *,
+        severity: Severity = Severity.HIGH,
+        is_kev: bool = False,
+        epss: float = 0.1,
+        fixed_version: str | None = "1.0.1",
+    ) -> None:
         self.id = fid
         self.identifier_key = f"CVE-2026-{fid:04d}"
         self.title = "demo finding"
-        self.severity = "high"
+        self.severity = severity
         self.cvss_v3_score = 7.5
-        self.epss_score = 0.1
-        self.is_kev = False
+        self.epss_score = epss
+        self.is_kev = is_kev
         self.attack_vector = "network"
+        self.first_seen_at = datetime(2026, 5, 1, tzinfo=UTC)
+        self.target_path = None
+        self.package_name = f"pkg-{fid}"
+        self.fixed_version = fixed_version
 
 
 class _FakeServer:
@@ -263,8 +281,8 @@ def _default_groups() -> list[dict[str, Any]]:
     ]
 
 
-def _stub_render_view(server: Any, sid: int, gid: int, conv: Any) -> str:
-    return f"VIEW sid={sid} gid={gid} conv={'yes' if conv else 'none'}"
+def _stub_render_view(server: Any, sid: int, gid: int, conv: Any, findings: Any) -> str:
+    return f"VIEW sid={sid} gid={gid} conv={'yes' if conv else 'none'} n={len(findings)}"
 
 
 def _stub_bubble(message: Any, sid: int, gid: int) -> str:
@@ -370,6 +388,47 @@ def test_post_message_lazy_create_builds_snapshot(
     body = resp.get_json()
     assert body["stream_url"].endswith("/servers/1/groups/1/chat/stream")
     assert "bubble_html" in body
+
+
+def test_post_message_lazy_create_trims_findings_and_aggregates(
+    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0058: bei > Budget Findings traegt der Snapshot nur die wichtigsten
+    ``GROUP_CHAT_FINDINGS_BUDGET`` Findings-Zeilen + eine Aggregat-Zeile."""
+    from app.services.group_chat_prompt import GROUP_CHAT_FINDINGS_BUDGET
+
+    findings = [_FakeFinding(i) for i in range(1, 31)]  # 30 > Budget (15)
+    sess = _FakeSession(server=_FakeServer(1), open_findings=findings, conversation=None)
+    _patch(monkeypatch, sess)
+    resp = nodb_app.test_client().post(
+        "/servers/1/groups/1/chat/messages", json={"content": "explain"}
+    )
+    assert resp.status_code == 200
+
+    msgs = [o for o in sess.added if isinstance(o, gc.GroupChatMessage)]
+    system_msg = next(m for m in msgs if m.role == ChatMessageRole.SYSTEM)
+    content = system_msg.content
+    # Genau Budget viele einzelne Findings-Zeilen (jede traegt "| sev=").
+    assert content.count("| sev=") == GROUP_CHAT_FINDINGS_BUDGET
+    # Aggregat-Zeile fuer den Rest (30 - 15 = 15).
+    rest = len(findings) - GROUP_CHAT_FINDINGS_BUDGET
+    assert f"{rest} more findings not shown" in content
+
+
+def test_chat_findings_context_truncated() -> None:
+    """Reiner Kontext-Helper (kein Flask): > Budget -> truncated + Zahlen."""
+    from app.services.group_chat_prompt import GROUP_CHAT_FINDINGS_BUDGET
+
+    ctx = gc._chat_findings_context([_FakeFinding(i) for i in range(1, 31)])
+    assert ctx["findings_total"] == 30
+    assert ctx["findings_shown"] == GROUP_CHAT_FINDINGS_BUDGET
+    assert ctx["findings_truncated"] is True
+
+
+def test_chat_findings_context_no_truncation() -> None:
+    """<= Budget -> kein Trim, kein Hinweis."""
+    ctx = gc._chat_findings_context([_FakeFinding(1), _FakeFinding(2)])
+    assert ctx == {"findings_total": 2, "findings_shown": 2, "findings_truncated": False}
 
 
 def test_post_message_resume_no_new_snapshot(

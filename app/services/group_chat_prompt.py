@@ -3,8 +3,17 @@
 Im Gegensatz zum entfernten server-weiten Chat (ADR-0050) ist dieser Prompt
 auf **genau eine** Application-Group eines Servers fokussiert. Der gerenderte
 System-Prompt ist ein **Snapshot** (ADR-0055 Entscheidung 3): Host-Fingerprint,
-Active Services, Listener (inkl. Exposure) und alle OPEN-Findings der Group
-werden zum Chat-Start eingefroren und persistiert.
+Active Services, Listener (inkl. Exposure) und die Findings der Group werden zum
+Chat-Start eingefroren und persistiert.
+
+**Findings-Budget (ADR-0058):** Nicht mehr *alle* OPEN-Findings landen im
+Prompt, sondern die nach ``select_pass2_findings`` ausgewaehlten
+``GROUP_CHAT_FINDINGS_BUDGET`` wichtigsten (alle KEV/CRITICAL als Pflicht-Slots,
+dann EPSS-/Pfad-Quote) plus eine **Aggregat-Zeile** fuer den nicht gezeigten
+Rest. Begruendung: der Snapshot wird pro Chat-Turn erneut an den Provider
+geschickt — ``alle`` Findings einer 745-Findings-Group sind ~25k Tokens *pro
+Nachricht*. Der Aufrufer (Blueprint) berechnet die Selektion und uebergibt
+``group_findings`` (= selektierte Teilmenge) plus ``findings_aggregate``.
 
 Sicherheits-Konvention (ARCHITECTURE §10, Marker-Doktrin):
 
@@ -30,6 +39,13 @@ from typing import Any, NamedTuple
 # Marker-Konstanten — Tests pruefen exakte Balance/Disziplin.
 TRIVY_DATA_START = "<<TRIVY_DATA_START>>"
 TRIVY_DATA_END = "<<TRIVY_DATA_END>>"
+
+# Findings-Budget fuer den Chat-Snapshot (ADR-0058). Bewusst kleiner als das
+# Pass-2-Budget (32): Pass 2 ist ein einmaliger Band-Entscheid, der Chat
+# re-sendet den Snapshot pro Turn. 15 = Kompromiss aus Kontext und Pro-Turn-
+# Kosten. Der Aufrufer ruft ``select_pass2_findings(findings, budget=…)`` mit
+# dieser Konstante; alle KEV/CRITICAL bleiben Pflicht-Slots der Selektion.
+GROUP_CHAT_FINDINGS_BUDGET = 15
 
 
 class ChatSuggestion(NamedTuple):
@@ -67,6 +83,27 @@ CHAT_SUGGESTIONS: list[ChatSuggestion] = [
 # Beschreibungen oder Title-Felder.
 _TITLE_MAX = 200
 _FIELD_MAX = 64
+
+
+class FindingsAggregate(NamedTuple):
+    """Aggregat ueber die **nicht gezeigten** Findings einer Group (ADR-0058).
+
+    Wird vom Blueprint aus dem ``SelectionResult`` von ``select_pass2_findings``
+    gefuellt und an :func:`build_group_system_prompt` gereicht. Reine Zahlen —
+    keine untrusted Strings, daher keine ``_safe``-Sanitization noetig. Felder
+    spiegeln ``SelectionResult.rest_*`` 1:1.
+    """
+
+    #: Anzahl Findings, die NICHT einzeln im Prompt stehen (0 -> keine Zeile).
+    rest_count: int
+    #: ``((severity_value, count), ...)`` in Severity-Order, nur > 0.
+    severity_counts: tuple[tuple[str, int], ...]
+    #: Hoechster EPSS-Score im Rest (oder None).
+    max_epss: float | None
+    #: Anzahl Rest-Findings mit verfuegbarem Fix.
+    fixable_count: int
+    #: Anzahl KEV-Findings im Rest (Invariante: 0 solange #KEV <= Budget).
+    kev_count: int
 
 
 def _neutralize_markers(text: str) -> str:
@@ -250,11 +287,45 @@ def _format_group_context(
     )
 
 
-def _format_findings(group_findings: Sequence[Any]) -> str:
-    """Findings-Block der Group: eine Zeile pro Finding, leere Group -> Hinweis."""
-    if not group_findings:
+def _format_aggregate(aggregate: FindingsAggregate) -> str:
+    """Eine Aggregat-Zeile fuer die nicht gezeigten Findings (ADR-0058).
+
+    Reine Zahlen aus dem ``SelectionResult`` — kein untrusted Input. Format:
+    ``... and N more findings not shown: critical=a, high=b; max_epss=0.91;
+    kev=2; fixable=40``. Severity-Counts kommen vorsortiert (Severity-Order,
+    nur > 0); fehlen sie ganz, wird ``severity=mixed`` als Fallback genannt.
+    """
+    if aggregate.severity_counts:
+        sev = ", ".join(f"{name}={count}" for name, count in aggregate.severity_counts)
+    else:
+        sev = "severity=mixed"
+    epss = "n/a" if aggregate.max_epss is None else f"{aggregate.max_epss:.2f}"
+    return (
+        f"... and {aggregate.rest_count} more findings not shown "
+        f"(summary): {sev}; max_epss={epss}; "
+        f"kev={aggregate.kev_count}; fixable={aggregate.fixable_count}"
+    )
+
+
+def _format_findings(
+    group_findings: Sequence[Any],
+    aggregate: FindingsAggregate | None = None,
+) -> str:
+    """Findings-Block der Group: eine Zeile pro (selektiertem) Finding.
+
+    ``group_findings`` ist die vom Aufrufer bereits selektierte Teilmenge
+    (ADR-0058). ``aggregate`` fasst den nicht gezeigten Rest zusammen und wird
+    — falls vorhanden und ``rest_count > 0`` — als eine zusaetzliche
+    ``... and N more ...``-Zeile angehaengt. Leere Group **und** kein Rest ->
+    Hinweis.
+    """
+    has_rest = aggregate is not None and aggregate.rest_count > 0
+    if not group_findings and not has_rest:
         return "FINDINGS: No open findings in this group."
     lines = [_format_finding_line(f) for f in group_findings]
+    if has_rest:
+        assert aggregate is not None  # has_rest impliziert aggregate
+        lines.append(_format_aggregate(aggregate))
     return "FINDINGS:\n" + "\n".join(lines)
 
 
@@ -267,6 +338,7 @@ def build_group_system_prompt(
     reason: str | None,
     host_snapshot: Mapping[str, Any],
     group_findings: Sequence[Any],
+    findings_aggregate: FindingsAggregate | None = None,
 ) -> str:
     """Baut den System-Prompt fuer eine neue Per-Group-Chat-Konversation.
 
@@ -279,6 +351,10 @@ def build_group_system_prompt(
     5. Listener inkl. Exposure (zwischen den Markern).
     6. Group-Kontext: label, lane, worst, reason (zwischen den Markern).
     7. Findings der Group (zwischen den Markern), leere Group -> Hinweis.
+
+    ``group_findings`` ist die vom Aufrufer **selektierte** Teilmenge (ADR-0058,
+    ``select_pass2_findings``); ``findings_aggregate`` fasst den nicht gezeigten
+    Rest zusammen (``None`` -> kein Rest, kein Budget-Trim).
 
     **Alle** untrusted Daten (Fingerprint/Services/Listener/Group-Kontext/
     Findings) liegen zwischen ``<<TRIVY_DATA_START>>`` und
@@ -324,7 +400,7 @@ def build_group_system_prompt(
                 worst_finding=worst_finding,
                 reason=reason,
             ),
-            _format_findings(group_findings),
+            _format_findings(group_findings, findings_aggregate),
         ]
     )
 
@@ -348,9 +424,11 @@ def build_user_intro(group_label: str) -> str:
 
 __all__ = [
     "CHAT_SUGGESTIONS",
+    "GROUP_CHAT_FINDINGS_BUDGET",
     "TRIVY_DATA_END",
     "TRIVY_DATA_START",
     "ChatSuggestion",
+    "FindingsAggregate",
     "build_group_system_prompt",
     "build_user_intro",
 ]

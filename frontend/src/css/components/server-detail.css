@@ -2083,6 +2083,37 @@
   padding: 9px 12px;
 }
 
+/* Findings-Budget-Hinweis (ADR-0058). Bewusst KEIN Chat-Bubble: gelb
+   abgesetzte Info, klar als Nicht-Konversation erkennbar. `flex: none` damit
+   sie im Flex-Thread nicht streckt; sie scrollt mit nach oben aus dem Sicht-
+   bereich. */
+.sd-chat-notice {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 12px;
+  border: 1px solid var(--status-notice);
+  border-left-width: 2px;
+  background: rgba(255, 214, 10, 0.05);
+}
+.sd-chat-notice__tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--status-notice);
+}
+.sd-chat-notice__body {
+  margin: 0;
+  max-width: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.sd-chat-notice__body b { color: var(--text-primary); font-weight: 400; }
+
 /* ── Composer dock — pinned to the bottom of the chat view ─────────────── */
 .sd-chat-dock {
   flex: none;

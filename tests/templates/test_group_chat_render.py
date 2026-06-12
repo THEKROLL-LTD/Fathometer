@@ -50,6 +50,9 @@ def _render_view(app: Flask, **over: Any) -> str:
         "suggestions": CHAT_SUGGESTIONS,
         "conversation": None,
         "hx_partial": True,
+        "findings_total": 4,
+        "findings_shown": 4,
+        "findings_truncated": False,
     }
     ctx.update(over)
     with app.test_request_context("/servers/7/groups/3/chat"):
@@ -116,6 +119,35 @@ def test_empty_state_hidden_when_messages_present(app: Flask) -> None:
     # Empty-State-Block vorhanden, aber initial display:none.
     assert 'data-test="group-chat-empty"' in html
     assert 'style="display: none;"' in html
+
+
+# ── Findings-Budget-Hinweis (ADR-0058) ─────────────────────────────────────
+
+
+def test_notice_shown_when_findings_truncated(app: Flask) -> None:
+    html = _render_view(app, findings_truncated=True, findings_shown=15, findings_total=745)
+    assert 'data-test="group-chat-notice"' in html
+    assert 'class="sd-chat-notice"' in html
+    assert 'role="note"' in html
+    # Konkrete Zahlen sichtbar (X wichtigste von N).
+    assert "15" in html
+    assert "745" in html
+    # Restzahl ausgerechnet (N - X).
+    assert "730" in html
+
+
+def test_notice_hidden_when_not_truncated(app: Flask) -> None:
+    html = _render_view(app, findings_truncated=False, findings_shown=4, findings_total=4)
+    assert 'data-test="group-chat-notice"' not in html
+
+
+def test_notice_sits_outside_messages_container(app: Flask) -> None:
+    """Der Hinweis steht VOR dem Messages-Container, damit „New Chat" (JS leert
+    nur ``x-ref=messages``) ihn nicht mit entfernt."""
+    html = _render_view(app, findings_truncated=True, findings_shown=15, findings_total=745)
+    assert html.index('data-test="group-chat-notice"') < html.index(
+        'data-test="group-chat-messages"'
+    )
 
 
 # ── Help-Button in der Workflow-Table ──────────────────────────────────────

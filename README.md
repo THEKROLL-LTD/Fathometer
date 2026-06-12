@@ -27,6 +27,11 @@
   to wade through by hand.
 - **Explained downgrades** — every "not exploitable here" verdict states which
   condition is missing, so you can check the call.
+- **Ask the AI in context** — a per-group assistant (the *Help* button on any
+  Server-detail group) answers questions about that exact host and package
+  group: risk, patch order, exploit status, whether a defer is worth it. It's
+  given a focused snapshot — the most important findings of the group plus an
+  aggregate of the rest, not a raw dump — so replies stay fast and to the point.
 - **Agent push model** — lightweight agents run Trivy on each host and push
   results; Fathometer never needs credentials to your servers and works
   air-gapped.

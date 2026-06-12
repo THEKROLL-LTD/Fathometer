@@ -63,6 +63,7 @@
   --status-degraded:    #FF9500;
   --status-down:        #FF3B30;
   --status-restricted:  #FF4444;  /* "[ ACCESS RESTRICTED ]" badge */
+  --status-notice:      #FFD60A;  /* Informational notices (e.g. chat context banner) — systemYellow */
   --color-accent-green: #39FF14;
 
   /* ── Backdrops ─────────────────────────────────────────── */

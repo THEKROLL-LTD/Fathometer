@@ -90,12 +90,15 @@ from app.models import (
 )
 from app.services.group_chat_prompt import (
     CHAT_SUGGESTIONS,
+    GROUP_CHAT_FINDINGS_BUDGET,
+    FindingsAggregate,
     build_group_system_prompt,
 )
 from app.services.llm_client import (
     LlmNotConfiguredError,
     build_client_from_settings,
 )
+from app.services.pass2_input_selection import SelectionResult, select_pass2_findings
 from app.settings_service import get_settings_row
 from app.views.server_detail import (
     _load_application_groups_for_server,
@@ -262,8 +265,57 @@ def _provider_configured() -> bool:
     return bool(row.llm_base_url and row.llm_model)
 
 
+def _select_for_chat(findings: list[Finding]) -> SelectionResult:
+    """Deterministische Findings-Selektion fuer den Chat-Snapshot (ADR-0058).
+
+    Wiederverwendet die getestete Pass-2-Heuristik (alle KEV/CRITICAL als
+    Pflicht-Slots, dann EPSS-/Pfad-Quote, Rest als Aggregat), aber mit dem
+    kleineren Chat-Budget ``GROUP_CHAT_FINDINGS_BUDGET`` — der Snapshot wird pro
+    Turn erneut gesendet, ein 745-Findings-Dump ist nicht tragbar.
+    """
+    return select_pass2_findings(findings, budget=GROUP_CHAT_FINDINGS_BUDGET)
+
+
+def _aggregate_from_selection(selection: SelectionResult) -> FindingsAggregate | None:
+    """``FindingsAggregate`` aus dem ``SelectionResult`` (oder ``None``).
+
+    ``None`` wenn nichts gekuerzt wurde (``rest_count == 0``) — dann braucht der
+    Prompt keine Aggregat-Zeile und das UI keinen Hinweis.
+    """
+    if selection.rest_count <= 0:
+        return None
+    return FindingsAggregate(
+        rest_count=selection.rest_count,
+        severity_counts=selection.rest_severity_counts,
+        max_epss=selection.rest_max_epss,
+        fixable_count=selection.rest_fixable_count,
+        kev_count=selection.rest_kev_count,
+    )
+
+
+def _chat_findings_context(findings: list[Finding]) -> dict[str, Any]:
+    """Banner-Kontext fuer das Template (ADR-0058).
+
+    ``findings_total``/``findings_shown``/``findings_truncated`` beschreiben die
+    aktuelle Selektion. Bewusst eine **Live-Preview** der aktuellen OPEN-
+    Findings — der eingefrorene Snapshot kann nach einem Re-Scan leicht
+    abweichen (gleiche Staleness-Doktrin wie ADR-0055).
+    """
+    selection = _select_for_chat(findings)
+    shown = len(selection.selected)
+    return {
+        "findings_total": shown + selection.rest_count,
+        "findings_shown": shown,
+        "findings_truncated": selection.rest_count > 0,
+    }
+
+
 def _render_chat_view(
-    server: Server, sid: int, gid: int, conv: GroupChatConversation | None
+    server: Server,
+    sid: int,
+    gid: int,
+    conv: GroupChatConversation | None,
+    findings: list[Finding],
 ) -> str:
     """Rendert die Chat-Sub-View (HX-Fragment oder Vollseite).
 
@@ -282,12 +334,16 @@ def _render_chat_view(
       - ``conversation``: GroupChatConversation | None.
       - ``csrf_form``: CSRFOnlyForm — CSRF-Token fuer die POST-Forms.
       - ``hx_partial``: bool — HX-Request -> Detail-Pane-Fragment.
+      - ``findings_total`` / ``findings_shown`` / ``findings_truncated``
+        (ADR-0058): Banner-Kontext fuer den gelben „nur die X wichtigsten von N
+        Findings"-Hinweis; ``findings_truncated`` gated den Hinweis.
       - URL-Endpoints (url_for): ``group_chat.post_message``,
         ``group_chat.stream``, ``group_chat.new_chat`` (je mit ``sid``/``gid``),
         ``server_detail.show`` (Back-Link).
     """
     ctx = _group_context(sid, gid)
     hx_request = request.headers.get("HX-Request") == "true"
+    findings_ctx = _chat_findings_context(findings)
     return render_template(
         "servers/group_chat.html",
         server=server,
@@ -302,6 +358,7 @@ def _render_chat_view(
         conversation=conv,
         csrf_form=CSRFOnlyForm(),
         hx_partial=hx_request,
+        **findings_ctx,
     )
 
 
@@ -332,9 +389,9 @@ def _user_bubble_partial(message: GroupChatMessage, sid: int, gid: int) -> str:
 @limiter.limit("120/minute")
 def show(sid: int, gid: int) -> str:
     """GET /servers/<sid>/groups/<gid>/chat — rendert die Chat-Sub-View."""
-    server, _findings = _guard_or_404(sid, gid)
+    server, findings = _guard_or_404(sid, gid)
     conv = _conversation_for(sid, gid)
-    return _render_chat_view(server, sid, gid, conv)
+    return _render_chat_view(server, sid, gid, conv, findings)
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +430,10 @@ def post_message(sid: int, gid: int) -> Any:
 
     if conv is None:
         # Lazy-Create + Snapshot: System-Prompt einfrieren (ADR-0055 §3).
+        # Findings-Budget (ADR-0058): nur die wichtigsten an das LLM, Rest als
+        # Aggregat — der Snapshot wird pro Turn re-gesendet.
         ctx = _group_context(sid, gid)
+        selection = _select_for_chat(findings)
         system_prompt = build_group_system_prompt(
             server=server,
             group_label=ctx["group_label"],
@@ -381,7 +441,8 @@ def post_message(sid: int, gid: int) -> Any:
             worst_finding=ctx["worst_finding"],
             reason=ctx["reason"],
             host_snapshot=_load_host_snapshot(sess, sid),
-            group_findings=findings,
+            group_findings=list(selection.selected),
+            findings_aggregate=_aggregate_from_selection(selection),
         )
         conv = GroupChatConversation(
             server_id=sid,
@@ -607,7 +668,7 @@ def new_chat(sid: int, gid: int) -> str:
     Loeschung trifft genau die ``(server, group)``-Konversation. CASCADE/
     ``delete-orphan`` raeumt die Messages mit ab.
     """
-    server, _findings = _guard_or_404(sid, gid)
+    server, findings = _guard_or_404(sid, gid)
     sess = get_session()
     sess.execute(
         delete(GroupChatConversation).where(
@@ -616,7 +677,7 @@ def new_chat(sid: int, gid: int) -> str:
         )
     )
     sess.commit()
-    return _render_chat_view(server, sid, gid, None)
+    return _render_chat_view(server, sid, gid, None, findings)
 
 
 # Der GET-SSE-Stream ist CSRF-irrelevant (CSRFProtect rueht GETs nicht an); die

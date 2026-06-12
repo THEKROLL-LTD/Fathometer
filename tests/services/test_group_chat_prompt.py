@@ -28,8 +28,10 @@ from app.models import (
 )
 from app.services.group_chat_prompt import (
     CHAT_SUGGESTIONS,
+    GROUP_CHAT_FINDINGS_BUDGET,
     TRIVY_DATA_END,
     TRIVY_DATA_START,
+    FindingsAggregate,
     _safe,
     build_group_system_prompt,
     build_user_intro,
@@ -380,6 +382,84 @@ def test_empty_group_renders_no_findings_message() -> None:
     prompt = _build(group_findings=[])
     block = _data_block(prompt)
     assert "No open findings in this group." in block
+
+
+# ---------------------------------------------------------------------------
+# Findings-Budget + Aggregat (ADR-0058)
+# ---------------------------------------------------------------------------
+
+
+def test_group_chat_findings_budget_value() -> None:
+    """Budget ist bewusst kleiner als das Pass-2-Budget (32)."""
+    assert GROUP_CHAT_FINDINGS_BUDGET == 15
+
+
+def test_aggregate_line_rendered_when_rest_present() -> None:
+    """Aggregat-Zeile fasst den nicht gezeigten Rest zusammen (Counts/EPSS/KEV)."""
+    agg = FindingsAggregate(
+        rest_count=730,
+        severity_counts=(("critical", 3), ("high", 120), ("medium", 607)),
+        max_epss=0.91,
+        fixable_count=412,
+        kev_count=2,
+    )
+    prompt = _build(
+        group_findings=[_make_finding(identifier_key="CVE-2026-0001")],
+        findings_aggregate=agg,
+    )
+    block = _data_block(prompt)
+    assert "CVE-2026-0001" in block
+    assert "730 more findings not shown" in block
+    assert "critical=3, high=120, medium=607" in block
+    assert "max_epss=0.91" in block
+    assert "kev=2" in block
+    assert "fixable=412" in block
+    # Marker-Disziplin bleibt erhalten — kein literaler Marker im Aggregat.
+    assert TRIVY_DATA_START not in block
+    assert TRIVY_DATA_END not in block
+
+
+def test_aggregate_omitted_when_none() -> None:
+    """Ohne Aggregat (kein Trim) keine ``... more ...``-Zeile."""
+    prompt = _build(
+        group_findings=[_make_finding(identifier_key="CVE-2026-0001")],
+        findings_aggregate=None,
+    )
+    block = _data_block(prompt)
+    assert "more findings not shown" not in block
+
+
+def test_aggregate_with_zero_rest_renders_nothing() -> None:
+    """``rest_count == 0`` -> keine Aggregat-Zeile (defensiv)."""
+    agg = FindingsAggregate(
+        rest_count=0,
+        severity_counts=(),
+        max_epss=None,
+        fixable_count=0,
+        kev_count=0,
+    )
+    prompt = _build(
+        group_findings=[_make_finding(identifier_key="CVE-2026-0001")],
+        findings_aggregate=agg,
+    )
+    block = _data_block(prompt)
+    assert "more findings not shown" not in block
+
+
+def test_aggregate_only_rest_no_selected_still_renders() -> None:
+    """Leere Selektion aber Rest vorhanden -> Aggregat-Zeile statt Empty-Hinweis."""
+    agg = FindingsAggregate(
+        rest_count=5,
+        severity_counts=(("high", 5),),
+        max_epss=None,
+        fixable_count=0,
+        kev_count=0,
+    )
+    prompt = _build(group_findings=[], findings_aggregate=agg)
+    block = _data_block(prompt)
+    assert "No open findings in this group." not in block
+    assert "5 more findings not shown" in block
+    assert "max_epss=n/a" in block
 
 
 def test_multiple_findings_each_on_own_line() -> None:
