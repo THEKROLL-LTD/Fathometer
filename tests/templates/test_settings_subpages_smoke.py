@@ -132,6 +132,7 @@ def _ctx_servers() -> dict:
         "servers": [srv],
         "revoke_form": _csrf_form(),
         "retire_form": _csrf_form(),
+        "delete_findings_form": _csrf_form(),
     }
 
 
