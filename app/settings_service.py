@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from app.config import load_settings
 from app.db import get_session
 from app.models import Setting, Severity
 
@@ -50,7 +51,10 @@ def ensure_settings_row(session: Session | None = None) -> Setting:
             severity_threshold=Severity.HIGH,
             stale_threshold_h=48,
             stale_trivy_db_threshold_h=30,
-            llm_daily_token_cap=1_000_000,
+            # Env ``FM_LLM_TOKEN_BUDGET_DAILY`` seedet nur den Initial-Cap
+            # frischer Installs; danach ist ``llm_daily_token_cap`` (DB,
+            # Operator-steuerbar via Provider-Tab) die alleinige Autorität.
+            llm_daily_token_cap=int(load_settings().llm_token_budget_daily),
         )
         .on_conflict_do_nothing(index_elements=["id"])
     )

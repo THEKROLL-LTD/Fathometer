@@ -703,12 +703,12 @@ def test_live_pass2_cache_hit_skips_llm_call(
 
 def test_budget_exhausted_pauses_pickup(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
     """Wenn das Tagesbudget verbraucht ist, pickt der Tick keinen Job."""
-    monkeypatch.setenv("FM_LLM_TOKEN_BUDGET_DAILY", "1000")
     sess = _open_sess(db_app)
     try:
         with db_app.app_context():
             row = ensure_settings_row(sess)
             row.block_p_llm_mode = "observation"
+            row.llm_daily_token_cap = 1000
             row.llm_token_budget_used_today = 1000  # exact-am-Limit
             row.llm_token_budget_reset_at = datetime.now(UTC) + timedelta(hours=2)
             sess.commit()

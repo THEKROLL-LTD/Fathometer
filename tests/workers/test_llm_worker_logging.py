@@ -449,7 +449,7 @@ def _patch_snapshot_db_reads(
 
     * ``session.execute(text("SELECT count(*) ... ")).scalar()`` → ``queued``
     * ``ensure_settings_row(session).llm_token_budget_used_today`` → ``tokens_used``
-    * ``load_settings().llm_token_budget_daily`` → ``budget``
+    * ``ensure_settings_row(session).llm_daily_token_cap`` → ``budget``
     """
     from contextlib import contextmanager
 
@@ -468,9 +468,10 @@ def _patch_snapshot_db_reads(
     def _fake_get_session() -> Iterator[_FakeSession]:
         yield _FakeSession()
 
-    fake_row = SimpleNamespace(llm_token_budget_used_today=tokens_used)
-    fake_settings = SimpleNamespace(llm_token_budget_daily=budget)
+    fake_row = SimpleNamespace(
+        llm_token_budget_used_today=tokens_used,
+        llm_daily_token_cap=budget,
+    )
 
     monkeypatch.setattr(llm_worker, "get_session", _fake_get_session)
     monkeypatch.setattr(llm_worker, "ensure_settings_row", lambda _s: fake_row)
-    monkeypatch.setattr(llm_worker, "load_settings", lambda: fake_settings)

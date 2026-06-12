@@ -4,6 +4,23 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Fix (ADR-0056): Risk-Reviewer-Tages-Cap aus der DB statt Env
+
+### Fixed
+
+- **Risk-Reviewer-Token-Cap kommt jetzt aus `Setting.llm_daily_token_cap`**
+  (Operator-steuerbar via Provider-Tab) statt aus dem Env
+  `FM_LLM_TOKEN_BUDGET_DAILY` (ADR-0056, korrigiert eine Block-P-Drift gegen
+  ADR-0014). Vorher ignorierte der Worker den im UI gesetzten Cap komplett und
+  erzwang das Pod-lokale Env — Web-Pod (Default 2 M) und Worker-Pod
+  (`FM_LLM_TOKEN_BUDGET_DAILY=1 M`) sahen unterschiedliche Limits, der „Budget &
+  cache"-Screen zeigte einen anderen Wert als der Worker erzwang
+  (`budget_pct=101`, `job_pickup_paused` trotz 64 wartender Jobs). `budget_check`
+  und der `budget_pct`-Status-Snapshot lesen nun `llm_daily_token_cap`; der
+  „Budget & cache"-Screen zeigt denselben DB-Wert. Worker übernimmt Änderungen
+  binnen ≤ 60 s ohne Pod-Restart. `FM_LLM_TOKEN_BUDGET_DAILY` ist nur noch der
+  Install-Seed für frische Rows (`ensure_settings_row`), kein Laufzeit-Cap mehr.
+
 ## [Unreleased] — Block AE (ADR-0055): Per-Group AI-Chat
 
 Wieder-Einführung eines LLM-Chats — anders als der mit ADR-0050 entfernte

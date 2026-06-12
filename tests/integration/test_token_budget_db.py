@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, time, timedelta
 
-import pytest
 from flask import Flask
 from sqlalchemy import select
 
@@ -38,12 +37,12 @@ def _open_session(app: Flask) -> object:
     return get_session_factory(app)()
 
 
-def test_budget_check_true_when_under_limit(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FM_LLM_TOKEN_BUDGET_DAILY", "10000")
+def test_budget_check_true_when_under_limit(db_app: Flask) -> None:
     sess = _open_session(db_app)
     try:
         with db_app.app_context():
             row = ensure_settings_row(sess)
+            row.llm_daily_token_cap = 10000
             row.llm_token_budget_used_today = 100
             sess.commit()
             assert budget_check(sess) is True
@@ -51,14 +50,12 @@ def test_budget_check_true_when_under_limit(db_app: Flask, monkeypatch: pytest.M
         sess.close()
 
 
-def test_budget_check_false_at_or_above_limit(
-    db_app: Flask, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("FM_LLM_TOKEN_BUDGET_DAILY", "5000")
+def test_budget_check_false_at_or_above_limit(db_app: Flask) -> None:
     sess = _open_session(db_app)
     try:
         with db_app.app_context():
             row = ensure_settings_row(sess)
+            row.llm_daily_token_cap = 5000
             row.llm_token_budget_used_today = 5000
             sess.commit()
             assert budget_check(sess) is False

@@ -119,13 +119,14 @@ class Settings(BaseSettings):
     llm_pass1_findings_per_batch: int = Field(default=50, ge=5, le=2000)
 
     # ----- Block P (ADR-0023) — Worker- und Token-Budget-Settings -----
-    # Tages-Token-Budget. Worker pausiert beim Erreichen des Limits bis zum
-    # naechsten 00:00-UTC-Reset. Default 1M Tokens analog ADR-0023 §"Token-
-    # Budget".
-    # v0.9.3: angehoben von 1M auf 2M Tokens — Reasoning-Modelle wie
-    # ``openai/gpt-oss-120b`` produzieren ~3x mehr Tokens (Pass-2-Real:
-    # ~1500 statt 500). Bei ~100 Calls/Tag bleibt das bei DeepInfra
-    # weiterhin unter $1-2/Monat.
+    # DEPRECATED als Laufzeit-Cap (ADR-0056): dieses Env-Field ist seit
+    # ADR-0056 NUR noch der Install-Seed fuer ``Setting.llm_daily_token_cap``
+    # (gesetzt in ``ensure_settings_row``). Der Worker erzwingt zur Laufzeit
+    # den DB-Cap ``llm_daily_token_cap`` (Operator-steuerbar via Provider-Tab),
+    # NICHT mehr diesen Wert — siehe ``app/services/llm_budget.py``.
+    # Default 2M Tokens: Reasoning-Modelle (z. B. ``openai/gpt-oss-120b``)
+    # produzieren ~3x mehr Tokens (Pass-2-Real ~1500 statt 500); bei ~100
+    # Calls/Tag bleibt das bei DeepInfra unter $1-2/Monat.
     llm_token_budget_daily: int = Field(default=2_000_000, ge=1000, le=10_000_000_000)
     # Worker-Poll-Intervall (Sekunden). Default 2s — laut ADR irrelevant
     # gegenueber LLM-Latenzen von 30-90s, aber bei `mode=off`/empty-queue

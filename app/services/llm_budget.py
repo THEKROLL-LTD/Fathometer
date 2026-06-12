@@ -8,7 +8,7 @@ Vier Operationen plus Helfer:
 * :func:`maybe_reset_budget` — wenn ``now() >= reset_at``: ``used_today =
   0``, ``reset_at = naechster 00:00 UTC``. Worker ruft das pro Tick als
   Erstes auf. Returns ``True`` wenn ein Reset stattfand.
-* :func:`budget_check` — ``True`` wenn ``used_today < llm_token_budget_daily``.
+* :func:`budget_check` — ``True`` wenn ``used_today < llm_daily_token_cap``.
 * :func:`budget_consume` — increment + commit. Returns neuer Wert.
 * :func:`mark_exhausted_audit_once` — schreibt einmaligen
   ``llm.budget_exhausted``-Audit pro Tag (Audit-Lookup gegen den aktuellen
@@ -17,9 +17,12 @@ Vier Operationen plus Helfer:
   Pass2: 2000).
 
 Die Singleton-Row der ``settings``-Tabelle haelt
-``llm_token_budget_used_today`` und ``llm_token_budget_reset_at``. Das
-Tages-Cap kommt aus :func:`app.config.load_settings`
-(``llm_token_budget_daily``, Env ``FM_LLM_TOKEN_BUDGET_DAILY``).
+``llm_token_budget_used_today``, ``llm_token_budget_reset_at`` und den
+Operator-steuerbaren Tages-Cap ``llm_daily_token_cap`` (UI: Provider-Tab
+„Daily token cap"). Das frühere Env-Cap ``FM_LLM_TOKEN_BUDGET_DAILY`` /
+``load_settings().llm_token_budget_daily`` wird NICHT mehr erzwungen —
+es seedet nur noch den Initialwert frischer Rows (siehe
+``app.settings_service.ensure_settings_row``).
 """
 
 from __future__ import annotations
@@ -28,7 +31,6 @@ from datetime import UTC, datetime, time, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.config import load_settings
 from app.models import LLMJob, Setting
 from app.settings_service import ensure_settings_row
 
@@ -74,10 +76,16 @@ def maybe_reset_budget(session: Session) -> bool:
 
 
 def budget_check(session: Session) -> bool:
-    """``True`` wenn das Tages-Cap noch nicht erreicht ist."""
+    """``True`` wenn das Tages-Cap noch nicht erreicht ist.
+
+    Der Cap ist Operator-steuerbar via ``settings.llm_daily_token_cap``
+    (UI: Provider-Tab „Daily token cap"). Worker und Web-Container lesen
+    denselben DB-Wert — kein Env-/Pod-Drift mehr (vormals
+    ``load_settings().llm_token_budget_daily``).
+    """
     row = ensure_settings_row(session)
-    daily = load_settings().llm_token_budget_daily
-    return int(row.llm_token_budget_used_today or 0) < int(daily)
+    daily = int(row.llm_daily_token_cap or 0)
+    return int(row.llm_token_budget_used_today or 0) < daily
 
 
 def budget_consume(session: Session, tokens: int) -> int:
@@ -137,7 +145,7 @@ def mark_exhausted_audit_once(session: Session) -> bool:
         session=session,
         metadata={
             "used_today": int(row.llm_token_budget_used_today or 0),
-            "daily_cap": int(load_settings().llm_token_budget_daily),
+            "daily_cap": int(row.llm_daily_token_cap or 0),
             "reset_at": reset_at.isoformat(),
         },
     )

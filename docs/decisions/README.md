@@ -61,6 +61,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0053](0053-fix-lane-evaluation.md) | Fix-Lane-Evaluation: Pass 2 pro (Group, Server, Fix-Lane) — eine Group kann je Lane ein eigenes Verdikt/Worst-Finding haben (TICKET-013) | Akzeptiert |
 | [0054](0054-per-finding-risk-band-reason-removed.md) | Per-Finding-Risk-Band-Reason entfernt — Reason ist Group-Level (TICKET-012) | Akzeptiert |
 | [0055](0055-per-group-ai-chat.md) | Per-Group AI-Chat auf der Server-Detail-Seite: Help-Button pro Group-Row, eine Konversation pro (Server, Group) ohne Archiv, SSE-Streaming, Snapshot-Kontext aus Fingerprint/Services/Listener/Group-Findings, kein Token-Cap, Schema `group_chat_*` (Migration 0023) — nutzt den Re-Open-Trigger von ADR-0050 (Block AE) | Akzeptiert |
+| [0056](0056-budget-cap-db-not-env.md) | Risk-Reviewer-Tages-Cap kommt aus `Setting.llm_daily_token_cap` (DB, Operator-steuerbar via Provider-Tab) statt aus Env `FM_LLM_TOKEN_BUDGET_DAILY` — korrigiert eine Block-P-Drift gegen ADR-0014, behebt Web-vs-Worker-Cap-Divergenz; Env nur noch Install-Seed | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

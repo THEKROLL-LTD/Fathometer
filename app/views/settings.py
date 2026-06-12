@@ -36,7 +36,6 @@ from werkzeug.wrappers import Response as WerkzeugResponse
 
 from app.audit import log_event
 from app.auth import generate_master_key, hash_master_key, verify_master_key
-from app.config import load_settings
 from app.db import get_session
 from app.forms import (
     CSRFOnlyForm,
@@ -624,12 +623,13 @@ def _llm_reviewer_stats(sess: Any) -> dict[str, Any]:
     cache_total_stmt = select(func.count(LLMRiskCache.cache_key))
     cache_total = int(sess.execute(cache_total_stmt).scalar() or 0)
 
-    # 5. Token-Budget.
+    # 5. Token-Budget. Das Limit ist der Operator-steuerbare DB-Cap
+    # ``llm_daily_token_cap`` (Provider-Tab) — derselbe Wert den der Worker
+    # in ``llm_budget.budget_check`` erzwingt (kein Env-Drift).
     setting_row = get_settings_row(sess)
-    app_settings = load_settings()
     token_budget = {
         "used_today": int(setting_row.llm_token_budget_used_today or 0),
-        "daily_limit": int(app_settings.llm_token_budget_daily),
+        "daily_limit": int(setting_row.llm_daily_token_cap or 0),
         "resets_at": setting_row.llm_token_budget_reset_at,
     }
 

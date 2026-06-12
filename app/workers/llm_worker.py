@@ -761,11 +761,13 @@ def _maybe_emit_status_snapshot(*, in_flight: int, cap: int) -> None:
             queued = int(queued_val) if queued_val is not None else 0
             row = ensure_settings_row(session)
             tokens_used = int(row.llm_token_budget_used_today or 0)
-            # ``llm_token_budget_daily`` lebt im Pydantic-Settings-Layer, nicht
-            # in der DB-Row (siehe `app/services/llm_budget.py`).
-            budget = max(1, int(load_settings().llm_token_budget_daily or 1))
+            # Tages-Cap ist Operator-steuerbar via ``settings.llm_daily_token_cap``
+            # (UI: Provider-Tab) und wird von ``llm_budget.budget_check`` erzwungen.
+            # Vormals ``load_settings().llm_token_budget_daily`` (Env) — das führte
+            # zu Web-vs-Worker-Drift, weil beide Pods unterschiedliche Env-Werte
+            # sehen konnten.
+            budget = max(1, int(row.llm_daily_token_cap or 1))
             budget_pct = int(100 * tokens_used / budget)
-            _ = row  # silence linter falls die Row sonst unused waere.
     except Exception:  # pragma: no cover — DB-Hickup darf Worker nicht killen.
         log.warning("llm_worker.status_query_failed", exc_info=True)
 
