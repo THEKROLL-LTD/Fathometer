@@ -27,6 +27,7 @@ def _seed_settings(
     *,
     base_url: str | None,
     model: str | None,
+    chat_model: str = "deepseek-ai/DeepSeek-V4-Flash",
     api_key_enc: bytes | None = None,
 ) -> None:
     factory = get_session_factory(app)
@@ -38,7 +39,8 @@ def _seed_settings(
                 row = Setting(id=1)
                 sess.add(row)
             row.llm_base_url = base_url
-            row.llm_model = model
+            row.llm_reviewer_model = model
+            row.llm_chat_model = chat_model
             row.llm_provider_name = "test"
             row.llm_daily_token_cap = 1_000_000
             row.llm_api_key_encrypted = api_key_enc
@@ -90,7 +92,8 @@ def test_post_settings_invalid_base_url_returns_400(db_app: Flask) -> None:
             "provider_name": "test",
             "base_url": "http://evil.com",  # not https, not localhost
             "api_key": "",
-            "model": "deepseek-ai/DeepSeek-V3",
+            "reviewer_model": "openai/gpt-oss-120b",
+            "chat_model": "deepseek-ai/DeepSeek-V4-Flash",
             "daily_token_cap": "1000000",
         },
         follow_redirects=False,
@@ -111,7 +114,8 @@ def test_post_settings_missing_model_returns_400(db_app: Flask) -> None:
             "provider_name": "test",
             "base_url": "https://api.openai.com/v1",
             "api_key": "",
-            "model": "",  # required
+            "reviewer_model": "",  # required
+            "chat_model": "deepseek-ai/DeepSeek-V4-Flash",
             "daily_token_cap": "1000000",
         },
         follow_redirects=False,
@@ -132,7 +136,8 @@ def test_post_settings_invalid_provider_name_returns_400(db_app: Flask) -> None:
             "provider_name": "Has Spaces!",  # invalid pattern
             "base_url": "https://api.openai.com/v1",
             "api_key": "",
-            "model": "deepseek-ai/DeepSeek-V3",
+            "reviewer_model": "openai/gpt-oss-120b",
+            "chat_model": "deepseek-ai/DeepSeek-V4-Flash",
             "daily_token_cap": "1000000",
         },
         follow_redirects=False,
@@ -191,10 +196,12 @@ def test_test_connection_with_settings_success(
     resp = client.post("/settings/llm/test-connection")
     assert resp.status_code == 200, resp.get_data(as_text=True)
     body = resp.get_json()
-    assert body["success"] is True
-    assert body["latency_ms"] == 123
-    assert body["model"] == "deepseek-ai/DeepSeek-V3"
-    assert body["error"] is None
+    # ADR-0057 §4: 2-Teil-Objekt {reviewer, chat}.
+    assert body["reviewer"]["success"] is True
+    assert body["reviewer"]["latency_ms"] == 123
+    assert body["reviewer"]["error"] is None
+    assert body["chat"]["success"] is True
+    assert body["chat"]["error"] is None
 
 
 def test_test_connection_failure(db_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -226,8 +233,11 @@ def test_test_connection_failure(db_app: Flask, monkeypatch: pytest.MonkeyPatch)
     resp = client.post("/settings/llm/test-connection")
     assert resp.status_code == 200  # success-Feld unterscheidet, nicht der HTTP-Status
     body = resp.get_json()
-    assert body["success"] is False
-    assert body["error"] is not None
+    # ADR-0057 §4: 2-Teil-Objekt; beide Teile spiegeln den Auth-Fehler.
+    assert body["reviewer"]["success"] is False
+    assert body["reviewer"]["error"] is not None
+    assert body["chat"]["success"] is False
+    assert body["chat"]["error"] is not None
 
 
 def test_test_connection_requires_login(db_app: Flask) -> None:
@@ -256,7 +266,8 @@ def test_post_settings_persists_all_fields(db_app: Flask) -> None:
             "provider_name": "deepinfra",
             "base_url": "https://api.deepinfra.com/v1/openai",
             "api_key": "sk-new-key-value",
-            "model": "deepseek-ai/DeepSeek-V3",
+            "reviewer_model": "openai/gpt-oss-120b",
+            "chat_model": "deepseek-ai/DeepSeek-V4-Flash",
             "daily_token_cap": "500000",
         },
         follow_redirects=False,
@@ -271,7 +282,8 @@ def test_post_settings_persists_all_fields(db_app: Flask) -> None:
             assert row is not None
             assert row.llm_provider_name == "deepinfra"
             assert row.llm_base_url == "https://api.deepinfra.com/v1/openai"
-            assert row.llm_model == "deepseek-ai/DeepSeek-V3"
+            assert row.llm_reviewer_model == "openai/gpt-oss-120b"
+            assert row.llm_chat_model == "deepseek-ai/DeepSeek-V4-Flash"
             assert row.llm_daily_token_cap == 500000
             assert row.llm_api_key_encrypted is not None
             assert len(row.llm_api_key_encrypted) > 0

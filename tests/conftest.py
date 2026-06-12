@@ -142,6 +142,8 @@ _ACCEPTANCE_PATH_PREFIXES: tuple[str, ...] = (
 _PURE_UNIT_OVERRIDES: frozenset[str] = frozenset(
     {
         "tests/models/test_group_chat.py",
+        # ADR-0057: introspektiert nur ORM-Metadata (kein DB-Fixture).
+        "tests/models/test_setting_model_split.py",
     }
 )
 

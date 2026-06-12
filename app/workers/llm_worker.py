@@ -2083,7 +2083,7 @@ async def _get_or_build_async_client(session: Session) -> tuple[LlmClient, str]:
             cfg.encryption_key.get_secret_value(),
         )
     base_url = settings_row.llm_base_url or ""
-    model = settings_row.llm_model or ""
+    model = settings_row.llm_reviewer_model or ""
     if not base_url or not model:
         # Konsistent mit ``build_client_from_settings``: ohne Provider-
         # Konfig faellt der Live-Pfad ohnehin frueher (Mode=off oder

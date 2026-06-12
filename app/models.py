@@ -670,7 +670,20 @@ class Setting(Base):
     llm_provider_name: Mapped[str | None] = mapped_column(String(64))
     llm_base_url: Mapped[str | None] = mapped_column(String(256))
     llm_api_key_encrypted: Mapped[bytes | None] = mapped_column()
-    llm_model: Mapped[str | None] = mapped_column(String(128))
+    # Zwei Modelle, ein geteilter Provider (ADR-0057, Block AF):
+    # - `llm_reviewer_model`: Modell des Risk-Reviewers (Block-P-Worker,
+    #   Pass 1 + Pass 2). Nullable wie das ehemalige `llm_model` — ein System
+    #   ohne konfigurierten Provider hat hier `NULL` (alte Semantik erhalten).
+    # - `llm_chat_model`: Modell des fokussierten Per-Group-Chats (Block AE).
+    #   NOT NULL via permanentem `server_default` — der Default backfillt
+    #   bestehende Zeilen und schuetzt frische `ensure_settings_row`-Inserts
+    #   vor der NOT-NULL-Verletzung (das Feld wird beim Insert nicht geseedet).
+    llm_reviewer_model: Mapped[str | None] = mapped_column(String(128))
+    llm_chat_model: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        server_default="deepseek-ai/DeepSeek-V4-Flash",
+    )
     llm_daily_token_cap: Mapped[int] = mapped_column(Integer, nullable=False, default=1_000_000)
 
     setup_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1356,8 +1369,9 @@ class GroupChatConversation(Base):
         ForeignKey("application_groups.id", ondelete="CASCADE"),
         nullable=False,
     )
-    # ``Setting.llm_model`` zum Snapshot-Zeitpunkt — die Konversation bleibt an
-    # ihr Modell gebunden, auch wenn der Operator den Provider spaeter umstellt.
+    # ``Setting.llm_chat_model`` zum Snapshot-Zeitpunkt — die Konversation
+    # bleibt an ihr Modell gebunden, auch wenn der Operator den Provider
+    # spaeter umstellt.
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

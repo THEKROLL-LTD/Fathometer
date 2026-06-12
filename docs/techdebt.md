@@ -746,6 +746,35 @@ trivial nachruestbar, wenn der Operator ihn anfordert.
 
 ---
 
+## TD-018 — Roher LLM-Provider-Exception-Text im Log-Statement
+
+**Was:** `app/services/llm_client.py:280` loggt im Test-Connection-/Probe-Pfad
+`log.warning("llm_client.test_connection_failed", error=err)`, wobei `err` der
+rohe Exception-Text (`"<ExcClass>: <msg[:200]>"`) ist. Der structlog-Redaction-
+Filter (`logging_setup.py`) maskiert nur nach **Feldnamen**
+(`password|key|token|hash|authorization`); das Feld heisst `error` und matcht
+nicht — der Wert wird unmaskiert geloggt. Falls der OpenAI-SDK-Exception-Text je
+ein API-Key-Fragment enthaelt, landet es im Log.
+
+**Warum:** Pre-existing seit Commit `cdecfbe6` (2026-05-15, Block-G-Aera), vom
+Security-Auditor bei Block AF (2026-06-12) als GELB-Nebenbefund entdeckt.
+**Nicht** durch Block AF eingefuehrt — AF haertet den HTTP-**Response**-Pfad
+sogar (Error-Code-Mapping statt Roh-Durchreichung, kein Leak in der JSON). Nur
+der Log-Pfad ist betroffen, nicht die Operator-sichtbare Response.
+
+**Loesung:** In `llm_client.py:280` nur die Exception-**Klasse** loggen
+(`error_type=type(exc).__name__`) statt `error=err` mit Message. Das
+Redaction-Pattern um `error` zu erweitern ist **zu breit** (wuerde legitime
+Diagnose-Felder schlucken) — gezielt das eine Log-Statement entschaerfen.
+
+**Aufwand:** ~15 min (ein Log-Statement + Regression-Test).
+
+**Wann:** Naechster `backend-implementer`-Touch an `llm_client.py` oder als
+Mini-Hardening-Ticket. Querverweis: Block AF / ADR-0057, `logging_setup.py`
+Redaction-Filter.
+
+---
+
 ## Konventionen fuer neue Eintraege
 
 - ID: `TD-NNN`, fortlaufend.

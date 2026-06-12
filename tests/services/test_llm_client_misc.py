@@ -146,7 +146,7 @@ def test_encrypt_deterministic_kdf_but_nondeterministic_ciphertext() -> None:
 
 
 def test_build_client_from_settings_raises_when_unconfigured() -> None:
-    row = Setting(id=1, llm_base_url=None, llm_model=None, llm_daily_token_cap=1000)
+    row = Setting(id=1, llm_base_url=None, llm_reviewer_model=None, llm_daily_token_cap=1000)
     with pytest.raises(LlmNotConfiguredError):
         build_client_from_settings(row, encryption_key="x" * 32)
 
@@ -156,7 +156,7 @@ def test_build_client_from_settings_works_without_api_key() -> None:
     row = Setting(
         id=1,
         llm_base_url="http://localhost:11434/v1",
-        llm_model="llama3.1",
+        llm_reviewer_model="llama3.1",
         llm_daily_token_cap=1000,
         llm_api_key_encrypted=None,
     )
@@ -170,9 +170,97 @@ def test_build_client_from_settings_decrypts_api_key() -> None:
     row = Setting(
         id=1,
         llm_base_url="https://api.deepinfra.com/v1/openai",
-        llm_model="deepseek-ai/DeepSeek-V3",
+        llm_reviewer_model="deepseek-ai/DeepSeek-V3",
         llm_daily_token_cap=1000,
         llm_api_key_encrypted=enc,
     )
     client = build_client_from_settings(row, encryption_key=secret)
     assert client.model == "deepseek-ai/DeepSeek-V3"
+
+
+# ---------------------------------------------------------------------------
+# build_client_from_settings — Reviewer- vs. Chat-Modell (ADR-0057)
+# ---------------------------------------------------------------------------
+
+
+def test_build_client_default_uses_reviewer_model() -> None:
+    """Ohne `model_override` wird das Reviewer-Modell genutzt (Default-Pfad).
+
+    Auch wenn `llm_chat_model` einen anderen Wert traegt — der interne Default
+    (Worker/Reviewer-Pfad) ignoriert das Chat-Modell.
+    """
+    row = Setting(
+        id=1,
+        llm_base_url="https://api.deepinfra.com/v1/openai",
+        llm_reviewer_model="openai/gpt-oss-120b",
+        llm_chat_model="deepseek-ai/DeepSeek-V4-Flash",
+        llm_daily_token_cap=1000,
+        llm_api_key_encrypted=None,
+    )
+    client = build_client_from_settings(row, encryption_key="x" * 32)
+    assert client.model == "openai/gpt-oss-120b"
+
+
+def test_build_client_with_model_override_uses_override() -> None:
+    """`model_override` (Chat-Pfad) ueberschreibt das Reviewer-Modell."""
+    row = Setting(
+        id=1,
+        llm_base_url="https://api.deepinfra.com/v1/openai",
+        llm_reviewer_model="openai/gpt-oss-120b",
+        llm_chat_model="deepseek-ai/DeepSeek-V4-Flash",
+        llm_daily_token_cap=1000,
+        llm_api_key_encrypted=None,
+    )
+    client = build_client_from_settings(
+        row, encryption_key="x" * 32, model_override=row.llm_chat_model
+    )
+    assert client.model == "deepseek-ai/DeepSeek-V4-Flash"
+
+
+def test_build_client_override_works_when_reviewer_model_is_none() -> None:
+    """Chat-Pfad funktioniert auch wenn das Reviewer-Modell `None` ist —
+    das effektiv genutzte Modell ist der Override."""
+    row = Setting(
+        id=1,
+        llm_base_url="https://api.deepinfra.com/v1/openai",
+        llm_reviewer_model=None,
+        llm_chat_model="deepseek-ai/DeepSeek-V4-Flash",
+        llm_daily_token_cap=1000,
+        llm_api_key_encrypted=None,
+    )
+    client = build_client_from_settings(
+        row, encryption_key="x" * 32, model_override="deepseek-ai/DeepSeek-V4-Flash"
+    )
+    assert client.model == "deepseek-ai/DeepSeek-V4-Flash"
+
+
+def test_build_client_raises_when_reviewer_model_none_and_no_override() -> None:
+    """Reviewer-Modell `None` + kein Override -> effektives Modell leer ->
+    `LlmNotConfiguredError` (auch wenn base_url + chat_model gesetzt sind)."""
+    row = Setting(
+        id=1,
+        llm_base_url="https://api.deepinfra.com/v1/openai",
+        llm_reviewer_model=None,
+        llm_chat_model="deepseek-ai/DeepSeek-V4-Flash",
+        llm_daily_token_cap=1000,
+        llm_api_key_encrypted=None,
+    )
+    with pytest.raises(LlmNotConfiguredError):
+        build_client_from_settings(row, encryption_key="x" * 32)
+
+
+def test_build_client_raises_when_base_url_missing_even_with_override() -> None:
+    """Fehlende base_url ist der gemeinsame Provider-Gate -> `LlmNotConfiguredError`,
+    auch mit gueltigem `model_override` (Chat-Pfad)."""
+    row = Setting(
+        id=1,
+        llm_base_url=None,
+        llm_reviewer_model="openai/gpt-oss-120b",
+        llm_chat_model="deepseek-ai/DeepSeek-V4-Flash",
+        llm_daily_token_cap=1000,
+        llm_api_key_encrypted=None,
+    )
+    with pytest.raises(LlmNotConfiguredError):
+        build_client_from_settings(
+            row, encryption_key="x" * 32, model_override="deepseek-ai/DeepSeek-V4-Flash"
+        )

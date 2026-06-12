@@ -21,16 +21,25 @@
     return meta ? meta.getAttribute("content") || "" : "";
   }
 
+  // Baut die 2-Teil-Fehler-Form, damit das Template nie auf undefined
+  // (testResult.reviewer/.chat) zugreift.
+  function errorResult(code) {
+    const part = { success: false, latency_ms: null, model: null, error: code };
+    return { reviewer: { ...part }, chat: { ...part } };
+  }
+
   function llmProviderForm({
     presets,
     initialBaseUrl,
-    initialModel,
+    initialReviewerModel,
+    initialChatModel,
     testConnectionUrl,
   }) {
     return {
       presets: presets || [],
       baseUrl: initialBaseUrl || "",
-      model: initialModel || "",
+      reviewerModel: initialReviewerModel || "",
+      chatModel: initialChatModel || "",
       testConnectionUrl: testConnectionUrl,
       testing: false,
       testResult: null,
@@ -40,7 +49,8 @@
         const p = this.presets[parseInt(idxStr, 10)];
         if (!p) return;
         this.baseUrl = p.base_url;
-        this.model = p.model;
+        this.reviewerModel = p.reviewer_model;
+        this.chatModel = p.chat_model;
       },
 
       async testConnection() {
@@ -59,15 +69,16 @@
           try {
             payload = await res.json();
           } catch (e) {
-            payload = { success: false, error: "invalid_response" };
+            payload = errorResult("invalid_response");
+          }
+          if (!payload || !payload.reviewer || !payload.chat) {
+            const code =
+              payload && payload.error ? payload.error : "invalid_response";
+            payload = errorResult(code);
           }
           this.testResult = payload;
         } catch (e) {
-          this.testResult = {
-            success: false,
-            error: "network_error",
-            message: String(e),
-          };
+          this.testResult = errorResult("network_error");
         } finally {
           this.testing = false;
         }

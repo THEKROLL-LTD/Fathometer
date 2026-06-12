@@ -298,15 +298,25 @@ class LlmNotConfiguredError(RuntimeError):
 
 
 def build_client_from_settings(
-    setting: Setting, *, encryption_key: str, timeout: float = 240.0
+    setting: Setting,
+    *,
+    encryption_key: str,
+    timeout: float = 240.0,
+    model_override: str | None = None,
 ) -> LlmClient:
     """Baut einen `LlmClient` aus der `Setting`-Zeile.
 
-    Wirft `LlmNotConfiguredError` wenn `llm_base_url` oder `llm_model`
-    fehlen. API-Key darf leer sein (Ollama-Localhost), wird dann beim
-    Decrypt auf "ollama" gemappt.
+    Ohne `model_override` wird das **Reviewer**-Modell (`llm_reviewer_model`)
+    verwendet — der rueckwaertskompatible Default fuer interne Aufrufer
+    (Worker-/Test-Connection-Reviewer-Pfad). Der Chat-Pfad
+    (`group_chat.py`) reicht `model_override=setting.llm_chat_model` durch.
+
+    Wirft `LlmNotConfiguredError` wenn `llm_base_url` oder das **effektiv
+    genutzte** Modell fehlen. API-Key darf leer sein (Ollama-Localhost),
+    wird dann beim Decrypt auf "ollama" gemappt.
     """
-    if not setting.llm_base_url or not setting.llm_model:
+    model = model_override or setting.llm_reviewer_model
+    if not setting.llm_base_url or not model:
         raise LlmNotConfiguredError("LLM-Provider noch nicht konfiguriert")
     plain_key = ""
     if setting.llm_api_key_encrypted:
@@ -314,7 +324,7 @@ def build_client_from_settings(
     return LlmClient(
         base_url=setting.llm_base_url,
         api_key=plain_key,
-        model=setting.llm_model,
+        model=model,
         timeout=timeout,
     )
 

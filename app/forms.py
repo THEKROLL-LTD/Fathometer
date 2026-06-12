@@ -332,7 +332,8 @@ class LlmSettingsForm(FlaskForm):
     - `base_url`: Whitelist via `app.services.llm_client.validate_base_url`
       (HTTPS oder `http://localhost`/`http://127.0.0.1`).
     - `api_key`: optional; leer = behalte alten Wert.
-    - `model`: druckbares ASCII, max 128.
+    - `reviewer_model`: druckbares ASCII, max 128 (Risk-Reviewer-Modell).
+    - `chat_model`: druckbares ASCII, max 128 (Per-Group-Chat-Modell).
     - `daily_token_cap`: Integer >= 1.
     """
 
@@ -348,8 +349,12 @@ class LlmSettingsForm(FlaskForm):
         "API key (leave empty to keep the existing one)",
         validators=[OptionalValidator(), Length(max=512)],
     )
-    model = StringField(
-        "Model name",
+    reviewer_model = StringField(
+        "Reviewer model",
+        validators=[DataRequired(), Length(max=128)],
+    )
+    chat_model = StringField(
+        "Chat model",
         validators=[DataRequired(), Length(max=128)],
     )
     daily_token_cap = IntegerField(
@@ -376,14 +381,22 @@ class LlmSettingsForm(FlaskForm):
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
 
-    def validate_model(self, field: StringField) -> None:
+    @staticmethod
+    def _validate_model_value(field: StringField, *, label: str) -> None:
+        """Gemeinsame Modell-Feld-Validierung fuer Reviewer- und Chat-Modell."""
         value = (field.data or "").strip()
         if not value:
-            raise ValidationError("Model name required.")
+            raise ValidationError(f"{label} required.")
         # Druckbares ASCII (0x20-0x7E), kein Whitespace am Anfang/Ende
         # nach strip() bereits eliminiert.
         if any(ord(ch) < 0x20 or ord(ch) > 0x7E for ch in value):
             raise ValidationError("Only printable ASCII allowed.")
+
+    def validate_reviewer_model(self, field: StringField) -> None:
+        self._validate_model_value(field, label="Reviewer model")
+
+    def validate_chat_model(self, field: StringField) -> None:
+        self._validate_model_value(field, label="Chat model")
 
 
 class BulkActionForm(FlaskForm):

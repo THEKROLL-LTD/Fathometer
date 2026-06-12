@@ -10,19 +10,25 @@ Felder:
 - `provider_name` — freier Anzeigename, Pattern wie Tag-Namen.
 - `base_url` — Whitelist via `llm_client.validate_base_url`.
 - `api_key` — optional; leer = behalte alten Wert.
-- `model` — druckbares ASCII, max 128 Zeichen.
+- `reviewer_model` — druckbares ASCII, max 128 Zeichen (Risk-Reviewer).
+- `chat_model` — druckbares ASCII, max 128 Zeichen (Per-Group-Chat).
 - `daily_token_cap` — Integer >= 1.
 
+Ein Provider (geteilter `base_url` / `api_key`), zwei Modelle (ADR-0057).
+
 Beim Speichern:
-1. Wenn `base_url` ODER `model` sich aendert -> Audit `llm.provider_changed`.
+1. Wenn `base_url`, `llm_reviewer_model` ODER `llm_chat_model` sich
+   aendert -> Audit `llm.provider_changed`.
 2. API-Key Fernet-encrypt mit `FM_ENCRYPTION_KEY`.
 3. Audit `settings.updated` mit den geaenderten Feldnamen
    (Klartext-Werte werden NIE in `metadata` gelegt).
 
-`POST /settings/llm/test-connection` ruft eine 1-Token-Probe-Anfrage
-gegen den **aktuellen** Settings-Stand (nicht die Form-Werte, damit
-ein Test ohne Speichern den persistierten State testet — fuer das
-Form-orientierte Testen schickt der Frontend den Key noch nicht).
+`POST /settings/llm/test-connection` ruft **zwei** 1-Token-Probe-Anfragen
+(Reviewer-Modell + Chat-Modell, geteilter `base_url`/`api_key`) gegen den
+**aktuellen** Settings-Stand (nicht die Form-Werte, damit ein Test ohne
+Speichern den persistierten State testet — fuer das Form-orientierte
+Testen schickt der Frontend den Key noch nicht). Antwort ist ein
+2-Teil-Objekt `{reviewer, chat}` (ADR-0057 §4).
 """
 
 from __future__ import annotations
@@ -52,17 +58,26 @@ log = structlog.get_logger(__name__)
 llm_settings_bp = Blueprint("llm_settings", __name__, url_prefix="/settings/llm")
 
 
+# Default-Modelle (ADR-0057 §Entscheidung 2). Geteilter Provider, zwei Modelle.
+DEFAULT_REVIEWER_MODEL = "openai/gpt-oss-120b"
+DEFAULT_CHAT_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
+
+
 # Preset-Liste fuer den Dropdown im Template — siehe ARCHITECTURE §12.
+# Jeder Eintrag traegt beide Modelle (Reviewer + Chat); der Preset-Pick im
+# Provider-Tab fuellt base_url + beide Modell-Felder vor (ADR-0057 §4).
 LLM_PRESETS: list[dict[str, str]] = [
     {
-        # v0.9.3 (ADR-0023 §"Update v0.9.3"): Default-Modell-Wechsel auf
+        # v0.9.3 (ADR-0023 §"Update v0.9.3"): Reviewer-Default
         # ``openai/gpt-oss-120b`` — semantisch staerkstes Modell in der
         # Block-P-Test-Suite, Apache 2.0 self-hostable, Provider-flexibel.
+        # Chat-Default ``deepseek-ai/DeepSeek-V4-Flash`` (ADR-0057).
         # Einziges Preset: nur DeepInfra ist verprobt; weitere Provider
         # bleiben per manueller Base-URL/Model-Eingabe moeglich.
         "name": "DeepInfra",
         "base_url": "https://api.deepinfra.com/v1/openai",
-        "model": "openai/gpt-oss-120b",
+        "reviewer_model": DEFAULT_REVIEWER_MODEL,
+        "chat_model": DEFAULT_CHAT_MODEL,
     },
 ]
 
@@ -87,7 +102,8 @@ def show() -> Any:
     form = LlmSettingsForm(
         provider_name=setting_row.llm_provider_name or "",
         base_url=setting_row.llm_base_url or "",
-        model=setting_row.llm_model or "",
+        reviewer_model=setting_row.llm_reviewer_model or "",
+        chat_model=setting_row.llm_chat_model or DEFAULT_CHAT_MODEL,
         daily_token_cap=setting_row.llm_daily_token_cap,
     )
     return render_settings(
@@ -123,14 +139,20 @@ def update() -> Any:
 
     new_provider_name = (form.provider_name.data or "").strip() or None
     new_base_url = (form.base_url.data or "").strip() or None
-    new_model = (form.model.data or "").strip() or None
+    # Reviewer-Modell ist nullable (System ohne Provider hat hier None).
+    new_reviewer = (form.reviewer_model.data or "").strip() or None
+    # Chat-Modell ist NOT NULL (server_default) — leeren String NICHT zu None
+    # machen; DataRequired verhindert leer ohnehin.
+    new_chat = (form.chat_model.data or "").strip()
     new_cap = int(form.daily_token_cap.data or setting_row.llm_daily_token_cap)
     new_api_key_plain = (form.api_key.data or "").strip()
 
-    # Provider-Wechsel-Detect: base_url ODER model aendert sich.
-    provider_changed = (setting_row.llm_base_url or None) != new_base_url or (
-        setting_row.llm_model or None
-    ) != new_model
+    # Provider-Wechsel-Detect: base_url, Reviewer- ODER Chat-Modell aendert sich.
+    provider_changed = (
+        (setting_row.llm_base_url or None) != new_base_url
+        or (setting_row.llm_reviewer_model or None) != new_reviewer
+        or (setting_row.llm_chat_model or None) != new_chat
+    )
 
     if provider_changed:
         log_event(
@@ -140,18 +162,27 @@ def update() -> Any:
             metadata={
                 "old_base_url": setting_row.llm_base_url,
                 "new_base_url": new_base_url,
-                "old_model": setting_row.llm_model,
-                "new_model": new_model,
+                "old_reviewer_model": setting_row.llm_reviewer_model,
+                "new_reviewer_model": new_reviewer,
+                "old_chat_model": setting_row.llm_chat_model,
+                "new_chat_model": new_chat,
             },
             session=sess,
         )
 
     setting_row.llm_provider_name = new_provider_name
     setting_row.llm_base_url = new_base_url
-    setting_row.llm_model = new_model
+    setting_row.llm_reviewer_model = new_reviewer
+    setting_row.llm_chat_model = new_chat
     setting_row.llm_daily_token_cap = new_cap
 
-    changed_fields = ["provider_name", "base_url", "model", "daily_token_cap"]
+    changed_fields = [
+        "provider_name",
+        "base_url",
+        "reviewer_model",
+        "chat_model",
+        "daily_token_cap",
+    ]
     if new_api_key_plain:
         enc = encrypt_api_key(new_api_key_plain, _settings_obj().encryption_key.get_secret_value())
         setting_row.llm_api_key_encrypted = enc
@@ -176,10 +207,17 @@ def update() -> Any:
 @login_required
 @limiter.limit("60/hour")
 def test_connection() -> Any:
-    """Probe-Anfrage gegen die aktuell gespeicherten Settings."""
+    """Doppel-Probe gegen die aktuell gespeicherten Settings (ADR-0057 §4).
+
+    Zwei 1-Token-Proben gegen den geteilten `base_url`/`api_key`:
+    Reviewer-Modell + Chat-Modell. `400 llm_not_configured` nur wenn
+    `base_url` fehlt (gemeinsamer Gate). Ist das Reviewer-Modell `None`,
+    wird das Reviewer-Teilergebnis als ``not_configured`` markiert (kein
+    Call), statt den ganzen Request abzulehnen.
+    """
     sess = get_session()
     setting_row = get_settings_row(sess)
-    if not setting_row.llm_base_url or not setting_row.llm_model:
+    if not setting_row.llm_base_url:
         return jsonify(
             {
                 "success": False,
@@ -193,22 +231,96 @@ def test_connection() -> Any:
     except ValueError as exc:
         return jsonify({"success": False, "error": "invalid_base_url", "message": str(exc)}), 400
 
+    enc_key = _settings_obj().encryption_key.get_secret_value()
+
+    reviewer_model = (setting_row.llm_reviewer_model or "").strip() or None
+    chat_model = (setting_row.llm_chat_model or "").strip() or None
+
+    if reviewer_model is None:
+        # Reviewer-Modell nicht konfiguriert -> kein Call, Teilergebnis.
+        reviewer_part = _not_configured_part()
+    else:
+        reviewer_part = _probe_model(setting_row, encryption_key=enc_key, model_override=None)
+
+    if chat_model is None:
+        # Sollte durch server_default nie passieren; defensiv behandelt.
+        chat_part = _not_configured_part()
+    else:
+        chat_part = _probe_model(setting_row, encryption_key=enc_key, model_override=chat_model)
+
+    return jsonify({"reviewer": reviewer_part, "chat": chat_part})
+
+
+def _not_configured_part() -> dict[str, Any]:
+    """Teilergebnis fuer ein nicht konfiguriertes Modell (kein Provider-Call)."""
+    return {"success": False, "latency_ms": None, "model": None, "error": "not_configured"}
+
+
+def _probe_model(
+    setting_row: Any,
+    *,
+    encryption_key: str,
+    model_override: str | None,
+) -> dict[str, Any]:
+    """Fuehrt eine einzelne 1-Token-Probe aus und mappt das Ergebnis auf die
+    Teil-Shape `{success, latency_ms, model, error}`.
+
+    Fehler werden auf einen kurzen, maschinen-lesbaren Error-Code reduziert —
+    niemals der rohe Provider-Exception-Text oder der API-Key (ADR-0057 §4).
+    Bei Fehler ist `model` der **versuchte** Modellname.
+    """
     from app.services.llm_client import build_client_from_settings
 
-    enc_key = _settings_obj().encryption_key.get_secret_value()
+    # Effektiv genutztes Modell (fuer den Fehler-Fall-`model`-Wert).
+    attempted_model = model_override or setting_row.llm_reviewer_model
     try:
-        client = build_client_from_settings(setting_row, encryption_key=enc_key)
-    except (ValueError, RuntimeError) as exc:
-        return jsonify({"success": False, "error": "client_init_failed", "message": str(exc)}), 400
+        client = build_client_from_settings(
+            setting_row,
+            encryption_key=encryption_key,
+            model_override=model_override,
+        )
+    except (ValueError, RuntimeError):
+        return {
+            "success": False,
+            "latency_ms": None,
+            "model": attempted_model,
+            "error": "client_init_failed",
+        }
 
     result = asyncio.run(_probe(client))
-    payload = {
-        "success": result.success,
-        "latency_ms": result.latency_ms,
-        "model": result.model,
-        "error": result.error,
+    if result.success:
+        return {
+            "success": True,
+            "latency_ms": result.latency_ms,
+            "model": result.model or attempted_model,
+            "error": None,
+        }
+    return {
+        "success": False,
+        "latency_ms": None,
+        "model": attempted_model,
+        "error": _map_error_code(result.error),
     }
-    return jsonify(payload)
+
+
+def _map_error_code(raw_error: str | None) -> str:
+    """Mappt eine rohe `ConnectionTestResult.error`-Message auf einen kurzen,
+    maschinen-lesbaren Code — ohne Provider-Detail/Key zu leaken.
+
+    `ConnectionTestResult.error` hat das Format ``"<ExcClass>: <msg[:200]>"``.
+    Wir matchen auf charakteristische Substrings und fallen sonst auf
+    ``"provider_error"`` zurueck.
+    """
+    if not raw_error:
+        return "provider_error"
+    lowered = raw_error.lower()
+    if "not found" in lowered or "404" in lowered or "does not exist" in lowered:
+        return "model_not_found"
+    if "timeout" in lowered or "timed out" in lowered:
+        return "timeout"
+    if "authentication" in lowered or "401" in lowered or "api key" in lowered:
+        return "auth_error"
+    return "provider_error"
 
 
 async def _probe(client: LlmClient) -> ConnectionTestResult:

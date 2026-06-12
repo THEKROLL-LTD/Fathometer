@@ -73,12 +73,19 @@ def _make_settings_row(
     *,
     base_url: str = "https://api.deepinfra.com/v1/openai",
     model: str = "deepseek-ai/DeepSeek-V3",
+    chat_model: str = "deepseek-ai/DeepSeek-V4-Flash",
     api_key_encrypted: bytes | None = b"ciphertext-A",
 ) -> SimpleNamespace:
-    """Leichtgewichtiger Stand-in fuer eine ``Setting``-Row."""
+    """Leichtgewichtiger Stand-in fuer eine ``Setting``-Row.
+
+    Traegt beide Modell-Felder (ADR-0057): der Reviewer-Pfad liest
+    ``llm_reviewer_model``; ``llm_chat_model`` ist bewusst gesetzt um zu
+    verifizieren, dass der Reviewer-Fingerprint es **nicht** mitfuehrt.
+    """
     return SimpleNamespace(
         llm_base_url=base_url,
-        llm_model=model,
+        llm_reviewer_model=model,
+        llm_chat_model=chat_model,
         llm_api_key_encrypted=api_key_encrypted,
     )
 
@@ -132,7 +139,7 @@ def _patch_settings_chain(
         build_calls.append(
             {
                 "base_url": setting.llm_base_url,
-                "model": setting.llm_model,
+                "model": setting.llm_reviewer_model,
                 "api_key_encrypted": setting.llm_api_key_encrypted,
                 "encryption_key": encryption_key,
             }
@@ -217,11 +224,11 @@ async def test_first_call_builds_client_and_sets_fingerprint(
     assert llm_worker._cached_client is fake_client
     assert llm_worker._cached_client_fingerprint == (
         settings_row.llm_base_url,
-        settings_row.llm_model,
+        settings_row.llm_reviewer_model,
         # SHA-256 von "plain-key-A"
         llm_worker._compute_client_fingerprint(
             settings_row.llm_base_url,
-            settings_row.llm_model,
+            settings_row.llm_reviewer_model,
             "plain-key-A",
         )[2],
     )
@@ -379,10 +386,10 @@ async def test_api_key_change_only_triggers_rebuild(
     fp = llm_worker._cached_client_fingerprint
     assert fp is not None
     assert fp[0] == settings_row.llm_base_url
-    assert fp[1] == settings_row.llm_model
+    assert fp[1] == settings_row.llm_reviewer_model
     # Aktueller Cached-Hash entspricht "plain-B".
     expected = llm_worker._compute_client_fingerprint(
-        settings_row.llm_base_url, settings_row.llm_model, "plain-B"
+        settings_row.llm_base_url, settings_row.llm_reviewer_model, "plain-B"
     )[2]
     assert fp[2] == expected
 
@@ -498,6 +505,98 @@ async def test_empty_api_key_produces_consistent_fingerprint(
     assert fp is not None
     # Empty-Key-Hash konsistent mit dem expliziten Compute.
     expected = llm_worker._compute_client_fingerprint(
-        settings_row.llm_base_url, settings_row.llm_model, ""
+        settings_row.llm_base_url, settings_row.llm_reviewer_model, ""
     )
     assert fp == expected
+
+
+# ---------------------------------------------------------------------------
+# 9) Reviewer-Fingerprint folgt ``llm_reviewer_model`` — NICHT ``llm_chat_model``
+#    (ADR-0057: Chat-Modell ist kein Teil des Reviewer-Client-Fingerprints)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(5)
+async def test_reviewer_model_change_triggers_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Aenderung von ``llm_reviewer_model`` zwischen Aufrufen -> Rebuild.
+
+    Der Reviewer-Client liest ausschliesslich das Reviewer-Modell; ein Wechsel
+    muss den Fingerprint aendern und einen neuen Client bauen.
+    """
+    settings_row = _make_settings_row(model="openai/gpt-oss-120b")
+    fake_old = _make_fake_client(model="openai/gpt-oss-120b")
+    fake_new = _make_fake_client(model="some/other-reviewer")
+
+    state = _patch_settings_chain(
+        monkeypatch,
+        settings_row=settings_row,
+        plain_keys=["plain", "plain"],
+        fake_clients=[fake_old, fake_new],
+    )
+
+    session = MagicMock()
+    c1, _ = await llm_worker._get_or_build_async_client(session)
+    assert c1 is fake_old
+
+    settings_row.llm_reviewer_model = "some/other-reviewer"
+    c2, _ = await llm_worker._get_or_build_async_client(session)
+
+    assert c2 is fake_new, "Reviewer-Modell-Wechsel muss neuen Client bauen"
+    fake_old.aclose.assert_awaited_once()
+    assert len(state["build_calls"]) == 2
+    fp = llm_worker._cached_client_fingerprint
+    assert fp is not None
+    assert fp[1] == "some/other-reviewer", fp
+
+
+@pytest.mark.timeout(5)
+async def test_chat_model_change_does_not_rebuild_reviewer_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Aenderung von ``llm_chat_model`` allein -> KEIN Rebuild des Reviewer-
+    Clients. Das Chat-Modell ist nicht Teil des Reviewer-Fingerprints
+    (ADR-0057 §Entscheidung 3). Belegt, dass eine Chat-Modell-Umstellung im
+    Provider-Tab den laufenden Reviewer-Client nicht unnoetig neu aufbaut.
+    """
+    settings_row = _make_settings_row(
+        model="openai/gpt-oss-120b",
+        chat_model="deepseek-ai/DeepSeek-V4-Flash",
+    )
+    fake_client = _make_fake_client(model="openai/gpt-oss-120b")
+
+    state = _patch_settings_chain(
+        monkeypatch,
+        settings_row=settings_row,
+        plain_keys=["plain", "plain"],
+        fake_clients=[fake_client],
+    )
+
+    session = MagicMock()
+    c1, _ = await llm_worker._get_or_build_async_client(session)
+    fp_before = llm_worker._cached_client_fingerprint
+
+    # Nur das Chat-Modell wechseln — der Reviewer-Pfad darf das ignorieren.
+    settings_row.llm_chat_model = "some/other-chat-model"
+    c2, _ = await llm_worker._get_or_build_async_client(session)
+
+    assert c1 is c2, "Chat-Modell-Wechsel darf den Reviewer-Client NICHT rebuilden"
+    assert len(state["build_calls"]) == 1, "Build darf nur einmal laufen"
+    fake_client.aclose.assert_not_awaited()
+    assert llm_worker._cached_client_fingerprint == fp_before
+
+
+def test_reviewer_fingerprint_independent_of_chat_model() -> None:
+    """Reiner Fingerprint-Compute: das Chat-Modell ist gar kein Eingang.
+
+    Der Fingerprint-Helper kennt nur ``(base_url, model, api_key)`` — ein
+    expliziter Beleg, dass das Chat-Modell strukturell ausserhalb des
+    Reviewer-Fingerprints liegt.
+    """
+    fp = llm_worker._compute_client_fingerprint("https://x", "openai/gpt-oss-120b", "k")
+    # Gleicher Reviewer-Input -> gleicher Fingerprint, egal welches Chat-Modell
+    # der Operator setzt (das Chat-Modell flowt hier nirgends ein).
+    fp_again = llm_worker._compute_client_fingerprint("https://x", "openai/gpt-oss-120b", "k")
+    assert fp == fp_again
+    assert fp[1] == "openai/gpt-oss-120b"

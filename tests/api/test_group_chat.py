@@ -114,7 +114,7 @@ class _FakeMessage:
 class _FakeSettings:
     def __init__(self, *, configured: bool = True) -> None:
         self.llm_base_url = "https://api.example.com/v1" if configured else None
-        self.llm_model = "deepseek-ai/DeepSeek-V3" if configured else None
+        self.llm_chat_model = "deepseek-ai/DeepSeek-V3" if configured else None
         self.llm_api_key_encrypted = b"enc" if configured else None
 
 
@@ -617,6 +617,113 @@ def test_stream_emits_delta_and_done_frames_and_persists(
     assert persisted["prompt_tokens"] == 42
     assert persisted["completion_tokens"] == 7
     assert fake_client.closed is True
+
+
+# ===========================================================================
+# ADR-0057 — Chat nutzt das Chat-Modell (model_override) + Chat-Modell-Guard
+# ===========================================================================
+
+
+def test_run_stream_builds_client_with_chat_model_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_run_stream`` baut den Client mit ``model_override=llm_chat_model``.
+
+    Reiner Async-Generator-Test (kein Flask): wir patchen
+    ``build_client_from_settings`` und pruefen das ``model_override``-Kwarg.
+    """
+    captured: dict[str, Any] = {}
+
+    fake_client = _FakeClient(["x"])
+
+    def _fake_build(settings_row: Any, *, encryption_key: str, model_override: Any) -> Any:
+        captured["model_override"] = model_override
+        captured["encryption_key"] = encryption_key
+        return fake_client
+
+    monkeypatch.setattr(gc, "build_client_from_settings", _fake_build)
+
+    settings_row = _FakeSettings()
+    settings_row.llm_chat_model = "deepseek-ai/DeepSeek-V4-Flash"
+
+    async def _drive() -> list[Any]:
+        out: list[Any] = []
+        agen = gc._run_stream([{"role": "user", "content": "hi"}], settings_row, "k" * 32)
+        async for item in agen:
+            out.append(item)
+        return out
+
+    import asyncio
+
+    events = asyncio.run(_drive())
+
+    # Das Chat-Modell (nicht das Reviewer-Modell) wurde als Override gereicht.
+    assert captured["model_override"] == "deepseek-ai/DeepSeek-V4-Flash"
+    assert captured["encryption_key"] == "k" * 32
+    # Generator hat das Delta + einen Usage-Block geliefert und den Client geschlossen.
+    kinds = [e[0] for e in events]
+    assert "delta" in kinds and "usage" in kinds
+    assert fake_client.closed is True
+
+
+def test_stream_guard_uses_chat_model(nodb_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """SSE-Stream-Guard prueft ``llm_chat_model``: fehlt es -> 400 llm_not_configured.
+
+    base_url ist gesetzt, nur das Chat-Modell ist leer. Belegt, dass der Stream-
+    Guard am Chat-Modell-Feld haengt (ADR-0057), nicht am Reviewer-Modell.
+    """
+    conv = _FakeConversation(cid=5)
+    sess = _FakeSession(
+        server=_FakeServer(1),
+        open_findings=[_FakeFinding(1)],
+        conversation=conv,
+        messages=[_FakeMessage(ChatMessageRole.SYSTEM, "sysprompt", 1)],
+    )
+
+    settings = _FakeSettings()
+    settings.llm_chat_model = None  # Provider-base_url da, aber kein Chat-Modell.
+    _patch(monkeypatch, sess, settings_row=lambda _s=None: settings)
+
+    resp = nodb_app.test_client().get("/servers/1/groups/1/chat/stream")
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert resp.get_json()["error"] == "llm_not_configured"
+
+
+def test_post_message_guard_uses_chat_model(
+    nodb_app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``post_message``-Guard (``_provider_configured``) haengt am Chat-Modell:
+    base_url gesetzt, aber ``llm_chat_model`` leer -> 400 llm_not_configured."""
+    sess = _FakeSession(server=_FakeServer(1), open_findings=[_FakeFinding(1)])
+    settings = _FakeSettings()
+    settings.llm_chat_model = None
+    _patch(monkeypatch, sess, settings_row=lambda _s=None: settings)
+
+    resp = nodb_app.test_client().post("/servers/1/groups/1/chat/messages", json={"content": "hi"})
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert resp.get_json()["error"] == "llm_not_configured"
+    assert sess.added == []
+
+
+def test_lazy_create_snapshots_chat_model(nodb_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Der Konversations-Snapshot friert exakt ``llm_chat_model`` ein (ADR-0057).
+
+    Belegt, dass ``GroupChatConversation.model`` das Chat-Modell traegt, nicht
+    irgendein anderes Settings-Feld.
+    """
+    sess = _FakeSession(server=_FakeServer(1), open_findings=[_FakeFinding(1)], conversation=None)
+    settings = _FakeSettings()
+    settings.llm_chat_model = "custom/chat-model-xyz"
+    _patch(monkeypatch, sess, settings_row=lambda _s=None: settings)
+
+    resp = nodb_app.test_client().post(
+        "/servers/1/groups/1/chat/messages", json={"content": "explain"}
+    )
+    assert resp.status_code == 200
+
+    convs = [o for o in sess.added if isinstance(o, gc.GroupChatConversation)]
+    assert len(convs) == 1
+    assert convs[0].model == "custom/chat-model-xyz"
 
 
 def test_stream_provider_error_emits_generic_error_frame(

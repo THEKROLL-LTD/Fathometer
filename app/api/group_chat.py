@@ -20,7 +20,7 @@ Vier Browser-facing Routen (Login-Pflicht, CSRF auf POST, ``flask-limiter``):
     Haengt eine User-Message an. Existiert keine Konversation -> Lazy-Create:
     Host-Snapshot + Group-Findings + Worst/Reason/Lane laden, System-Prompt
     via :func:`build_group_system_prompt` bauen und mit System- + User-Message
-    persistieren (``findings_snapshot_at=now``, ``model=Setting.llm_model``).
+    persistieren (``findings_snapshot_at=now``, ``model=Setting.llm_chat_model``).
     Existiert sie -> nur User-Message anhaengen (KEIN neuer Snapshot). Antwort:
     User-Bubble-Partial + ``stream_url``. ``400 llm_not_configured`` wenn der
     Provider fehlt.
@@ -43,7 +43,7 @@ Cross-Group-IDOR ab.
 
 Anti-Patterns vermieden:
 - KEIN Function-Calling/Tools (ADR-0002).
-- KEINE Modellwahl pro Konversation (nur ``Setting.llm_model``).
+- KEINE Modellwahl pro Konversation (nur ``Setting.llm_chat_model``).
 - KEIN ``llm_budget``-Aufruf (ADR-0055 Entscheidung 4).
 - Niemals API-Key in Logs/SSE-Fehlerframes (generischer ``event: error``).
 
@@ -259,10 +259,15 @@ def _group_context(sid: int, gid: int) -> dict[str, Any]:
 
 
 def _provider_configured() -> bool:
-    """True wenn ``llm_base_url`` UND ``llm_model`` gesetzt sind."""
+    """True wenn ``llm_base_url`` UND ``llm_chat_model`` gesetzt sind.
+
+    Der Modell-Teil ist durch den ``server_default`` von ``llm_chat_model``
+    faktisch immer truthy — das eigentliche „nicht konfiguriert" ist die
+    fehlende ``llm_base_url`` (der geteilte Provider-Gate).
+    """
     sess = get_session()
     row = get_settings_row(sess)
-    return bool(row.llm_base_url and row.llm_model)
+    return bool(row.llm_base_url and row.llm_chat_model)
 
 
 def _select_for_chat(findings: list[Finding]) -> SelectionResult:
@@ -447,7 +452,7 @@ def post_message(sid: int, gid: int) -> Any:
         conv = GroupChatConversation(
             server_id=sid,
             application_group_id=gid,
-            model=cast(str, settings_row.llm_model),
+            model=settings_row.llm_chat_model,
             created_at=now,
             last_message_at=now,
             findings_snapshot_at=now,
@@ -513,7 +518,11 @@ async def _run_stream(
     encryption_key: str,
 ) -> Any:
     """Async-Generator-Helfer: Deltas + finaler Usage-Block."""
-    client = build_client_from_settings(settings_row, encryption_key=encryption_key)
+    client = build_client_from_settings(
+        settings_row,
+        encryption_key=encryption_key,
+        model_override=settings_row.llm_chat_model,
+    )
     try:
         async for delta in client.stream_chat(history):
             yield ("delta", delta)
@@ -590,7 +599,7 @@ def stream(sid: int, gid: int) -> Response:
 
     sess = get_session()
     settings_row = get_settings_row(sess)
-    if not settings_row.llm_base_url or not settings_row.llm_model:
+    if not settings_row.llm_base_url or not settings_row.llm_chat_model:
         resp_err = jsonify({"error": "llm_not_configured"})
         resp_err.status_code = 400
         return resp_err

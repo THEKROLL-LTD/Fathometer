@@ -649,7 +649,7 @@ def _llm_reviewer_stats(sess: Any) -> dict[str, Any]:
     return {
         "current_mode": setting_row.block_p_llm_mode,
         "current_concurrency": int(setting_row.llm_worker_job_concurrency),
-        "active_model": setting_row.llm_model,
+        "active_model": setting_row.llm_reviewer_model,
         "job_counts": job_counts,
         "would_call_count": would_call_count,
         "groups_total": groups_total,

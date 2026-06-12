@@ -173,7 +173,14 @@ def _ctx_llm_provider() -> dict:
     return {
         "form": LlmSettingsForm(),
         "has_existing_key": True,
-        "presets": [{"name": "OpenAI", "base_url": "https://x", "model": "gpt"}],
+        "presets": [
+            {
+                "name": "OpenAI",
+                "base_url": "https://x",
+                "reviewer_model": "gpt",
+                "chat_model": "ds",
+            }
+        ],
     }
 
 

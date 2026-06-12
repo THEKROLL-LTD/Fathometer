@@ -5,7 +5,7 @@
    JS-Snippet `static/js/llm_settings.js` wird global in `base_app.html`
    geladen; die Alpine-Component `llmProviderForm` bleibt unveraendert
    gebunden (Methoden applyPreset/testConnection, State
-   baseUrl/model/testing/testResult).
+   baseUrl/reviewerModel/chatModel/testing/testResult).
 
    Variablen (siehe app/views/llm_settings.py::show):
      - `form` (LlmSettingsForm)
@@ -34,7 +34,8 @@
         x-data="llmProviderForm({
           presets: {{ presets | tojson | forceescape }},
           initialBaseUrl: {{ (form.base_url.data or '') | tojson | forceescape }},
-          initialModel: {{ (form.model.data or '') | tojson | forceescape }},
+          initialReviewerModel: {{ (form.reviewer_model.data or '') | tojson | forceescape }},
+          initialChatModel: {{ (form.chat_model.data or '') | tojson | forceescape }},
           testConnectionUrl: {{ url_for('llm_settings.test_connection') | tojson | forceescape }}
         })">
     {{ form.csrf_token }}
@@ -52,7 +53,7 @@
               <option value="{{ loop.index0 }}">{{ p.name }}</option>
             {% endfor %}
           </select>
-          <span class="s-field__hint">Sets base URL and model. You still need to enter the API key.</span>
+          <span class="s-field__hint">Sets base URL and both models. You still need to enter the API key.</span>
         </div>
 
         <div class="s-field">
@@ -74,9 +75,19 @@
         </div>
 
         <div class="s-field">
-          <label class="s-field__label" for="{{ form.model.id }}">Model name</label>
-          {{ form.model(**{"class": "s-input s-input--mono", "x-model": "model"}) }}
-          {% for err in form.model.errors %}
+          <label class="s-field__label" for="{{ form.reviewer_model.id }}">Reviewer model</label>
+          {{ form.reviewer_model(**{"class": "s-input s-input--mono", "x-model": "reviewerModel"}) }}
+          <span class="s-field__hint">Used by the risk reviewer (Pass 1 + 2).</span>
+          {% for err in form.reviewer_model.errors %}
+            <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
+          {% endfor %}
+        </div>
+
+        <div class="s-field">
+          <label class="s-field__label" for="{{ form.chat_model.id }}">Chat model</label>
+          {{ form.chat_model(**{"class": "s-input s-input--mono", "x-model": "chatModel"}) }}
+          <span class="s-field__hint">Used by the per-group AI chat.</span>
+          {% for err in form.chat_model.errors %}
             <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
           {% endfor %}
         </div>
@@ -125,15 +136,27 @@
       </div>
 
       <div x-show="testResult" x-cloak style="margin-top: 16px;" role="status">
-        <template x-if="testResult && testResult.success">
-          <p class="s-section__hint" style="color: var(--status-operational); margin-top: 0;">
-            OK — latency <span x-text="testResult.latency_ms"></span> ms,
-            model <code x-text="testResult.model"></code>.
-          </p>
-        </template>
-        <template x-if="testResult && !testResult.success">
-          <p class="s-section__hint" style="color: var(--status-restricted); margin-top: 0;">
-            Error: <span x-text="testResult.error || testResult.message || 'unknown'"></span>
+        <template x-for="row in [
+                    {label: 'Reviewer', part: testResult && testResult.reviewer},
+                    {label: 'Chat', part: testResult && testResult.chat}
+                  ]" :key="row.label">
+          <p class="s-section__hint"
+             style="margin-top: 0;"
+             :style="{ color: (row.part && row.part.success) ? 'var(--status-operational)' : 'var(--status-restricted)' }">
+            <span x-text="(row.part && row.part.success) ? '✓' : '✗'"></span>
+            <b style="font-weight: 600;" x-text="row.label"></b>
+            —
+            <code x-text="(row.part && row.part.model) || '—'"></code>
+            <template x-if="row.part && row.part.success">
+              <span>
+                <template x-if="row.part.latency_ms !== null && row.part.latency_ms !== undefined">
+                  <span>, latency <span x-text="row.part.latency_ms"></span> ms</span>
+                </template>
+              </span>
+            </template>
+            <template x-if="row.part && !row.part.success">
+              <span>, error <span x-text="(row.part && row.part.error) || 'unknown'"></span></span>
+            </template>
           </p>
         </template>
       </div>

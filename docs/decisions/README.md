@@ -62,6 +62,7 @@ Kurze, datierte Entscheidungs-Dokumente zu Architektur-Punkten die später nicht
 | [0054](0054-per-finding-risk-band-reason-removed.md) | Per-Finding-Risk-Band-Reason entfernt — Reason ist Group-Level (TICKET-012) | Akzeptiert |
 | [0055](0055-per-group-ai-chat.md) | Per-Group AI-Chat auf der Server-Detail-Seite: Help-Button pro Group-Row, eine Konversation pro (Server, Group) ohne Archiv, SSE-Streaming, Snapshot-Kontext aus Fingerprint/Services/Listener/Group-Findings, kein Token-Cap, Schema `group_chat_*` (Migration 0023) — nutzt den Re-Open-Trigger von ADR-0050 (Block AE) | Akzeptiert |
 | [0056](0056-budget-cap-db-not-env.md) | Risk-Reviewer-Tages-Cap kommt aus `Setting.llm_daily_token_cap` (DB, Operator-steuerbar via Provider-Tab) statt aus Env `FM_LLM_TOKEN_BUDGET_DAILY` — korrigiert eine Block-P-Drift gegen ADR-0014, behebt Web-vs-Worker-Cap-Divergenz; Env nur noch Install-Seed | Akzeptiert |
+| [0057](0057-separate-reviewer-and-chat-models.md) | Getrennte LLM-Modelle für Risk-Reviewer (`llm_reviewer_model`, Rename aus `llm_model`, Default `openai/gpt-oss-120b`) und Per-Group-Chat (`llm_chat_model`, neu, Default `deepseek-ai/DeepSeek-V4-Flash`, forced Backfill), ein geteilter Provider; Test-Connection probt beide; Migration `0024` (Block AF) — amendet ADR-0023/0055, Provider-Abstraktion aus ADR-0002 unverändert | Akzeptiert |
 
 ## Wann eine neue ADR schreiben
 

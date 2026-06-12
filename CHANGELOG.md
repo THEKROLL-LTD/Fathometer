@@ -4,6 +4,48 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block AF (ADR-0057): Getrennte Modelle für Reviewer und Chat
+
+Das bisher geteilte `Setting.llm_model` wird in **zwei** Felder getrennt:
+**`llm_reviewer_model`** (Rename, nullable, Default `openai/gpt-oss-120b`,
+Konsument Risk-Reviewer/Worker Pass 1 + 2) und **`llm_chat_model`** (neu,
+`NOT NULL` mit `server_default` `deepseek-ai/DeepSeek-V4-Flash`, Konsument
+Per-Group-Chat). **Ein geteilter Provider, zwei Modelle** —
+`llm_base_url`/`llm_api_key_encrypted` bleiben gemeinsam, kein Multi-Provider.
+Quality-Gates grün: `ruff`/`ruff format`/`mypy app/`, Pure-Unit (`pytest`,
++62 Tests). Alembic-Roundtrip `0024`, Live-Test-Connection-Doppelprobe und
+Operator-Browser-Smoke stehen beim User an.
+
+### Changed
+
+- **`settings.llm_model` → `llm_reviewer_model`** (Rename, Migration `0024`,
+  `down_revision=0023_block_ae_group_chat`): der Risk-Reviewer (`llm_worker.py`,
+  Fingerprint-Cache) liest nun `llm_reviewer_model`; `settings.py::active_model`
+  (Reviewer-Screen) ebenso.
+- **`build_client_from_settings(..., model_override=None)`** — neuer optionaler
+  Parameter; ohne Override greift das Reviewer-Modell, der Chat übergibt
+  `llm_chat_model`. `LlmNotConfiguredError`-Check auf das effektiv genutzte
+  Modell.
+- **Per-Group-Chat nutzt `llm_chat_model`** (`group_chat.py`): SSE-Stream +
+  `GroupChatConversation.model`-Snapshot frieren das Chat-Modell ein; laufende
+  Konversationen bleiben an ihr gesnapshottetes Modell gebunden.
+- **Provider-Tab zeigt zwei Modell-Felder** („Reviewer model" / „Chat model"):
+  Preset füllt beide, `llm.provider_changed` feuert bei base_url-, Reviewer-
+  oder Chat-Modell-Änderung (Audit-Metadata trägt old/new für beide).
+- **Test-Connection probt beide Modelle** (`POST /settings/llm/test-connection`):
+  zwei 1-Token-Proben gegen den geteilten Provider, neue 2-Teil-Response
+  `{reviewer:{success,latency_ms,model,error}, chat:{…}}`; `error` ist ein
+  gemappter Code (`model_not_found`/`provider_error`/`timeout`/`auth_error`/…) —
+  kein API-Key, kein roher Exception-Text in der Response.
+
+### Added
+
+- **`settings.llm_chat_model`** (`String(128)`, `NOT NULL`, `server_default`
+  `deepseek-ai/DeepSeek-V4-Flash`): dediziertes Chat-Modell. Der forced Backfill
+  setzt es für **alle** Zeilen — bei Providern, die das Modell nicht hosten,
+  schlägt der Chat mit `404` fehl (bewusst akzeptiert, ADR-0057 §Konsequenzen;
+  die Test-Connection-Doppelprobe deckt es auf).
+
 ## [Unreleased] — Fix (ADR-0056): Risk-Reviewer-Tages-Cap aus der DB statt Env
 
 ### Fixed
