@@ -4,6 +4,26 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block AJ (ADR-0063 §Integration): Upstream-Verdikt im Group-Chat-Snapshot
+
+Schliesst die ADR-0055-Snapshot-Erweiterung aus ADR-0063 §Integration: liegt für
+eine `(Server, Group)` ein abgeschlossenes Upstream-Check-Verdikt vor, wird es
+beim Chat-Start in den eingefrorenen System-Prompt aufgenommen — der Operator
+kann mit dem Assistenten darüber reden („warum kein Fix?", „was heisst mitigate
+hier?"). Beratend, friert mit dem Snapshot ein, ändert nie den Risk-Band. **Kein
+Schema, keine Migration** — liest `upstream_check_results`. Quality-Gates grün.
+
+### Added
+
+- **`build_group_system_prompt(upstream_verdict=None)`** (`group_chat_prompt.py`):
+  optionaler 8. Daten-Block „UPSTREAM CHECK (advisory · candidate · verify)"
+  zwischen den TRIVY-Markern (untrusted → `_safe` + Marker-Neutralisierung),
+  rendert delivery / fixed release / latest version / suggested action / sources /
+  checked-at. Omitted bei `None`.
+- **`_upstream_verdict_for_snapshot`** (`group_chat.py post_message`): beim
+  Lazy-Create wird das Verdikt server-seitig via `lookup_state_for_group`
+  (Reuse AI-2) ermittelt und nur bei `status == 'done'` eingefroren.
+
 ## [Unreleased] — Block AI-2 (ADR-0063): Agentische Upstream-Update-Suche — Operator-UI
 
 Macht das in AI-1 gebaute Backend operator-nutzbar: Konfiguration im

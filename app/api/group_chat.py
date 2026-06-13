@@ -404,6 +404,30 @@ def show(sid: int, gid: int) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _upstream_verdict_for_snapshot(sess: Any, sid: int, gid: int, settings_row: Any) -> Any | None:
+    """Das (gecachte) Upstream-Check-Verdikt fuer den Chat-Snapshot (ADR-0063
+    §Integration).
+
+    Reuse des AI-2-State-Lookups (server-seitige Worst-Upstream-Finding-
+    Ableitung → Seed → Cache-Zeile). Nur **abgeschlossene** Verdikte
+    (``status == 'done'``, egal ob TTL-frisch) gehen in den Snapshot;
+    ``queued``/``running``/``error``/idle → ``None`` (kein Block). Beratend und
+    friert mit dem Snapshot ein (ADR-0055-Semantik: ein spaeterer Re-Check
+    aendert eine laufende Konversation nicht — „New Chat" zieht den frischen
+    Stand). Lokaler Import haelt den Modul-Import-Graphen schlank.
+    """
+    from app.services.upstream_check_state import STATE_DONE, lookup_state_for_group
+    from app.services.upstream_research import is_upstream_check_configured
+
+    if not is_upstream_check_configured(settings_row):
+        return None
+    state = lookup_state_for_group(sess, sid, gid, configured=True)
+    row = state.row
+    if row is not None and getattr(row, "status", None) == STATE_DONE:
+        return row
+    return None
+
+
 @group_chat_bp.post("/messages")
 @login_required
 @limiter.limit("30/minute")
@@ -448,6 +472,7 @@ def post_message(sid: int, gid: int) -> Any:
             host_snapshot=_load_host_snapshot(sess, sid),
             group_findings=list(selection.selected),
             findings_aggregate=_aggregate_from_selection(selection),
+            upstream_verdict=_upstream_verdict_for_snapshot(sess, sid, gid, settings_row),
         )
         conv = GroupChatConversation(
             server_id=sid,
