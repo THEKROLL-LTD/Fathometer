@@ -193,6 +193,63 @@ def test_backstop_sweep_swallows_db_exception(monkeypatch: pytest.MonkeyPatch) -
     llm_worker._run_pass2_backstop_sweep_safe()
 
 
+# --- _run_pass2_drift_reconcile_sweep_safe (TICKET-016) --------------------
+
+
+def test_drift_reconcile_sweep_enqueues_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ruft den idempotenten Helper pro aktivem+evaluiertem Server mit
+    ``trigger='drift_reconcile'`` — der Helper enthält Fingerprint-Gate + Dedup."""
+    sess = MagicMock()
+    sess.execute.return_value.fetchall.return_value = [(3,), (4,), (8,)]
+    _patch_session(monkeypatch, sess)
+    mock_enq = _patch_enqueue(monkeypatch, return_value=0)
+    llm_worker._run_pass2_drift_reconcile_sweep_safe()
+    assert mock_enq.call_count == 3
+    assert {c.args[1] for c in mock_enq.call_args_list} == {3, 4, 8}
+    assert all(c.kwargs["trigger"] == "drift_reconcile" for c in mock_enq.call_args_list)
+
+
+def test_drift_reconcile_sweep_no_candidates_no_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
+    sess = MagicMock()
+    sess.execute.return_value.fetchall.return_value = []
+    _patch_session(monkeypatch, sess)
+    mock_enq = _patch_enqueue(monkeypatch)
+    llm_worker._run_pass2_drift_reconcile_sweep_safe()
+    mock_enq.assert_not_called()
+
+
+def test_drift_reconcile_sweep_sql_filters_active_and_eval_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kandidaten = aktive (nicht revoked/retired) Server MIT Eval-Rows."""
+    captured: dict[str, Any] = {}
+    sess = MagicMock()
+
+    def _exec(sql: Any, *a: Any, **kw: Any) -> Any:
+        captured["sql"] = str(sql)
+        r = MagicMock()
+        r.fetchall.return_value = []
+        return r
+
+    sess.execute.side_effect = _exec
+    _patch_session(monkeypatch, sess)
+    _patch_enqueue(monkeypatch)
+    llm_worker._run_pass2_drift_reconcile_sweep_safe()
+    sql = captured["sql"]
+    assert "application_group_evaluations" in sql
+    assert "revoked_at is null" in sql.lower()
+    assert "retired_at is null" in sql.lower()
+
+
+def test_drift_reconcile_sweep_swallows_db_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    sess = MagicMock()
+    sess.execute.side_effect = RuntimeError("db down")
+    _patch_session(monkeypatch, sess)
+    _patch_enqueue(monkeypatch)
+    # Darf NICHT re-raisen (DB-Hickup killt den Worker nicht).
+    llm_worker._run_pass2_drift_reconcile_sweep_safe()
+
+
 # --- Sub-Tick-Cadence ------------------------------------------------------
 
 
@@ -219,3 +276,30 @@ def test_subtick_runs_sweep_on_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
     # Sofortiger zweiter Lauf: noch innerhalb des 300s-Fensters -> kein Sweep.
     llm_worker._run_subticks()
     assert sweep_spy.call_count == 1
+
+
+def test_subtick_runs_drift_reconcile_on_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TICKET-016: _run_subticks triggert den Drift-Sweep einmal, dann erst
+    wieder nach dem 900s-Fenster. Regression-Guard, damit ein zukuenftiger
+    Cadence-Edit die Drift-Heilung nicht still deaktiviert."""
+    llm_worker.reset_shutdown_for_tests()  # setzt _last_pass2_drift_reconcile_at = 0.0
+    for name in (
+        "_run_stale_reaper",
+        "_run_debug_log_eviction",
+        "_run_feed_enrichment_check",
+        "_run_scan_ingest_retention_sweep_safe",
+        "_process_scan_ingest_job_safe",
+        "_run_pass2_backstop_sweep_safe",
+    ):
+        monkeypatch.setattr(llm_worker, name, lambda *a, **kw: None)
+    sess = MagicMock()
+    monkeypatch.setattr(llm_worker, "_pick_next_scan_ingest_job_id", lambda s: None)
+    _patch_session(monkeypatch, sess)
+    drift_spy = MagicMock()
+    monkeypatch.setattr(llm_worker, "_run_pass2_drift_reconcile_sweep_safe", drift_spy)
+
+    llm_worker._run_subticks()
+    assert drift_spy.call_count == 1
+    # Sofortiger zweiter Lauf: noch im 900s-Fenster -> kein erneuter Sweep.
+    llm_worker._run_subticks()
+    assert drift_spy.call_count == 1

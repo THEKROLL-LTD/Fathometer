@@ -167,6 +167,16 @@ SCAN_INGEST_RETENTION_SWEEP_INTERVAL_SEC: float = 3600.0
 # aus irgendeinem Grund nicht gefeuert hat (Worker-Crash, DB-Hickup).
 PASS2_BACKSTOP_SWEEP_INTERVAL_SEC: float = 300.0
 
+# TICKET-016: Drift-Reconciliation-Sweep-Cadence (15 min). Heilt den
+# „re-evaluation pending"-Drift-Hint (ADR-0052) selbst: der Backstop-Sweep oben
+# deckt nur Server mit kuerzlicher Pass-1-Aktivitaet ab — ein Server, dessen
+# OPEN-Set sich ohne neue Group-Detection aendert (Reopen/Resolve/EPSS-Feed),
+# driftet sonst bis zum naechsten Scan/Triage. Dieser Sweep ruft den
+# idempotenten `enqueue_pass2_for_server` ueber alle aktiven+evaluierten Server;
+# der Helper enqueued NUR driftende Lanes ohne pending Job (Fingerprint-Gate +
+# Dedup-Guard), sonst no-op.
+PASS2_DRIFT_RECONCILE_SWEEP_INTERVAL_SEC: float = 900.0
+
 # ADR-0035-Addendum (TD-013): Check alle 5 min ob `daily_risk_state`-Paare
 # fehlen. Geschrieben wird nur wenn welche fehlen — der Anti-Join in
 # `finalize_pending_days` ist das Gate (idempotent, bei vollstaendiger
@@ -187,6 +197,8 @@ _last_feed_pull_check_at: float = 0.0
 _last_retention_sweep_at: float = 0.0
 # TICKET-007: Letzter Lauf des Pass-2-Backstop-Sweeps.
 _last_pass2_backstop_sweep_at: float = 0.0
+# TICKET-016: Letzter Lauf des Pass-2-Drift-Reconciliation-Sweeps.
+_last_pass2_drift_reconcile_at: float = 0.0
 # ADR-0035-Addendum (TD-013): Letzter Lauf des daily_risk_state-Finalize-Checks.
 _last_daily_risk_state_at: float = 0.0
 
@@ -336,7 +348,7 @@ def reset_shutdown_for_tests() -> None:
     """Test-Hook — setzt das Shutdown-Flag zurueck (zwischen Tests)."""
     global _shutdown, _last_heartbeat_at, _last_reaper_at, _last_debug_log_eviction_at
     global _last_feed_pull_check_at, _last_retention_sweep_at, _last_pass2_backstop_sweep_at
-    global _last_daily_risk_state_at
+    global _last_daily_risk_state_at, _last_pass2_drift_reconcile_at
     _shutdown = False
     _last_heartbeat_at = 0.0
     _last_reaper_at = 0.0
@@ -344,6 +356,7 @@ def reset_shutdown_for_tests() -> None:
     _last_feed_pull_check_at = 0.0
     _last_retention_sweep_at = 0.0
     _last_pass2_backstop_sweep_at = 0.0
+    _last_pass2_drift_reconcile_at = 0.0
     _last_daily_risk_state_at = 0.0
     # v0.9.5: Stop-Event clearen damit Test-Re-Runs den Heartbeat-Thread
     # nicht im Stop-State festhalten.
@@ -810,7 +823,7 @@ def _run_subticks() -> None:
     """
     global _last_reaper_at, _last_debug_log_eviction_at, _last_feed_pull_check_at
     global _last_retention_sweep_at, _last_pass2_backstop_sweep_at
-    global _last_daily_risk_state_at
+    global _last_daily_risk_state_at, _last_pass2_drift_reconcile_at
     now_mono = time.monotonic()
 
     # Stale-Reaper alle 60s (beide Tabellen: llm_jobs + scan_ingest_jobs).
@@ -851,6 +864,14 @@ def _run_subticks() -> None:
     if now_mono - _last_pass2_backstop_sweep_at > PASS2_BACKSTOP_SWEEP_INTERVAL_SEC:
         _run_pass2_backstop_sweep_safe()
         _last_pass2_backstop_sweep_at = now_mono
+
+    # TICKET-016: Pass-2-Drift-Reconciliation-Sweep alle 15 min. Heilt den
+    # „re-evaluation pending"-Drift-Hint (ADR-0052) selbst — deckt den Fall ab,
+    # den der Backstop-Sweep oben NICHT abdeckt (OPEN-Set-Aenderung ohne neue
+    # Pass-1-Aktivitaet). Idempotent — bei nicht-driftenden Lanes no-op.
+    if now_mono - _last_pass2_drift_reconcile_at > PASS2_DRIFT_RECONCILE_SWEEP_INTERVAL_SEC:
+        _run_pass2_drift_reconcile_sweep_safe()
+        _last_pass2_drift_reconcile_at = now_mono
 
     # ADR-0035-Addendum (TD-013): daily_risk_state-Finalize-Check alle 5 min.
     # Friert fehlende (server, day)-Paare ein; bei vollstaendiger Tabelle No-Op.
@@ -937,6 +958,49 @@ def _run_pass2_backstop_sweep_safe() -> None:
             session.commit()
     except Exception:  # pragma: no cover — DB-Hickup darf den Worker nicht killen
         log.exception("llm_worker.pass2_backstop_sweep_failed")
+
+
+def _run_pass2_drift_reconcile_sweep_safe() -> None:
+    """TICKET-016: heilt den „re-evaluation pending"-Drift-Hint selbst.
+
+    Der Backstop-Sweep (oben) fängt nur Server mit kürzlicher Pass-1-Aktivität.
+    Ändert sich das OPEN-Set einer Group OHNE neue Group-Detection
+    (Reopen/Resolve/EPSS-Feed-Update), driftet ihre Lane-Eval (gespeicherter
+    ``group_findings_fingerprint`` ≠ aktuelles Lane-OPEN-Set bzw.
+    ``worst_finding_id`` nicht mehr offen) — der Drift-Hint in der Server-Detail
+    zeigt „re-evaluation pending", aber ohne Scan/Triage wird nichts enqueued
+    und der Hint hängt bis zum nächsten 24h-Scan.
+
+    Dieser Sweep ruft den **idempotenten** ``enqueue_pass2_for_server`` über alle
+    aktiven (nicht revoked/retired) Server, die bereits Eval-Rows tragen (also
+    driften KÖNNEN). Der Helper enthält das **Fingerprint-Gate** UND den
+    **Dedup-Guard** (kein Re-Enqueue, wenn ein ``queued``/``in_progress``-Pass-2-
+    Job für ``(group, server, fix_lane)`` existiert) — er enqueued NUR genuin
+    driftende Lanes ohne pending Job, sonst no-op. Der Render-Pfad bleibt
+    read-only (kein Enqueue-on-GET, ADR-0052-Doktrin). Bei normalem Betrieb
+    (keine Drifts) ein billiger No-Op-Lauf.
+    """
+    try:
+        with get_session() as session:
+            candidate_server_ids = [
+                int(row[0])
+                for row in session.execute(
+                    text(
+                        """
+                        SELECT DISTINCT e.server_id
+                        FROM application_group_evaluations e
+                        JOIN servers s ON s.id = e.server_id
+                        WHERE s.revoked_at IS NULL
+                          AND s.retired_at IS NULL
+                        """
+                    )
+                ).fetchall()
+            ]
+            for sid in candidate_server_ids:
+                enqueue_pass2_for_server(session, sid, trigger="drift_reconcile")
+            session.commit()
+    except Exception:  # pragma: no cover — DB-Hickup darf den Worker nicht killen
+        log.exception("llm_worker.pass2_drift_reconcile_sweep_failed")
 
 
 # ---------------------------------------------------------------------------

@@ -41,6 +41,7 @@ Pass2Trigger = Literal[
     "pass1_final_failed",
     "backstop_sweep",
     "triage_action",
+    "drift_reconcile",
 ]
 
 # Pass-2-Jobs die noch laufen/warten blockieren ein Re-Enqueue derselben Lane.

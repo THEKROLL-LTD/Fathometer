@@ -4,6 +4,26 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — TICKET-016: Drift-Reconciliation-Sweep (self-healing „re-evaluation pending")
+
+Der „re-evaluation pending"-Drift-Hint (ADR-0052) hing bisher, wenn sich das
+OPEN-Set einer Group **ohne** neue Pass-1-Aktivität änderte (Reopen/Resolve/
+EPSS-Feed-Update) — der bestehende Backstop-Sweep deckt nur Server mit
+kürzlicher Group-Detection ab, also wurde nichts re-enqueued bis zum nächsten
+24h-Scan. Quality-Gates grün. Alembic: keine Migration.
+
+### Added
+
+- **`_run_pass2_drift_reconcile_sweep_safe`** (Worker-Sub-Tick, alle 15 min,
+  `PASS2_DRIFT_RECONCILE_SWEEP_INTERVAL_SEC`): ruft den idempotenten
+  `enqueue_pass2_for_server` über alle aktiven (nicht revoked/retired) Server
+  mit Eval-Rows. Der Helper enthält das **Fingerprint-Gate** UND den
+  **Dedup-Guard** (kein Re-Enqueue, wenn ein `queued`/`in_progress`-Pass-2-Job
+  für `(group, server, fix_lane)` existiert) — enqueued NUR driftende Lanes ohne
+  pending Job, sonst no-op. Render-Pfad bleibt read-only (kein Enqueue-on-GET).
+  Neuer `Pass2Trigger`-Wert `drift_reconcile`. Re-Open: bei sehr großen Flotten
+  den Sweep bounden/spreaden.
+
 ## [Unreleased] — Block AK (ADR-0064): Upstream-Fix als Finding-Level-Enrichment statt eigener Lane
 
 Nimmt die separate `upstream`-Fix-Lane aus Block AG zurück: für den Operator sind
