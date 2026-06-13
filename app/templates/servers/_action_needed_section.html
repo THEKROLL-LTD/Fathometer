@@ -13,9 +13,11 @@
                                        Pass-2 pro Fix-Lane — eine Group kann
                                        mit beiden Lanes erscheinen, jeweils
                                        eigenes Lane-Verdikt + Lane-Worst).
-                                       `fix_lane` ist "patch" | "upstream" |
-                                       "mitigate" (ADR-0061: lang-pkgs-Fix
-                                       nicht host-applizierbar).
+                                       `fix_lane` ist 2-wertig "patch" |
+                                       "mitigate" (ADR-0064: die upstream-Lane
+                                       ist in mitigate kollabiert; "Fix existiert
+                                       upstream" ist Finding-Level via
+                                       `entry.upstream_check.seed`).
                                        `worst_finding` ist das LIVE-Worst aus
                                        den OFFENEN Findings der Lane
                                        (TICKET-010 / ADR-0052) — `evaluation.
@@ -75,7 +77,7 @@
                   <td class="workflow-table__group">
                     <a href="#group-{{ entry.group.id }}">{{ entry.group.label }}</a>
                     {%- if entry.fix_lane %} <span class="workflow-table__lane-tag"
-                          data-test="action-card-{{ card.id }}-lane">{% if entry.fix_lane == 'patch' %}patch{% elif entry.fix_lane == 'upstream' %}upstream{% else %}no patch{% endif %}</span>{% endif -%}
+                          data-test="action-card-{{ card.id }}-lane">{% if entry.fix_lane == 'patch' %}patch{% else %}no patch{% endif %}</span>{% endif -%}
                   </td>
                   <td class="workflow-table__cve">
                     {% if entry.worst_finding %}<a class="workflow-table__cve-link"
@@ -84,6 +86,14 @@
                     {%- if entry.worst_finding and entry.worst_finding.host_update_available and entry.worst_finding.owning_package %}
                       <span class="workflow-table__host-update"
                             data-test="action-card-{{ card.id }}-host-update">host update ready: {{ entry.worst_finding.owning_package }}{% if entry.worst_finding.available_version %} {{ entry.worst_finding.available_version }}{% endif %}</span>{% endif -%}
+                    {#- ADR-0064: "Fix existiert upstream" ist jetzt Finding-Level (kein
+                        eigener Lane-Zweig mehr). Wenn der Research-Seed eine Fix-Version
+                        traegt, zeigen wir sie hier — der Fix existiert upstream, der Host
+                        braucht aber einen Rebuild (kein Repo-Update). seed-Strings sind
+                        Scanner-/Trivy-Daten -> Autoescape, kein |safe. -#}
+                    {%- if entry.upstream_check and entry.upstream_check.seed and entry.upstream_check.seed.fixing_component_version %}
+                      <span class="workflow-table__upstream-fix"
+                            data-test="action-card-{{ card.id }}-upstream-fix">fixed upstream: {{ entry.upstream_check.seed.vulnerable_component }} {{ entry.upstream_check.seed.fixing_component_version }} — needs rebuild</span>{% endif -%}
                   </td>
                   <td class="workflow-table__reason">
                     {% if entry.evaluation and entry.evaluation.risk_band_reason %}
@@ -112,12 +122,14 @@
                     </a>
                   </td>
                 </tr>
-                {# Upstream-Update-Check-Panel — NUR in der escalate-upstream-Card
-                   und nur wenn das Feature konfiguriert ist (ADR-0063, P2.3).
+                {# Upstream-Update-Check-Panel — NUR in der escalate-mitigate-Card
+                   (ADR-0064: die upstream-Lane ist in mitigate kollabiert) und nur
+                   wenn das Feature konfiguriert ist sowie das researchbare Finding
+                   existiert (state != 'idle' ⇔ seed vorhanden; ADR-0063, P2.3).
                    Eigene volle Sub-Zeile unter der Group-Row; das Panel-Partial
                    ist Single-Source (Initial-Render == Poll/POST-Response). Andere
-                   Cards (patch/mitigate/act) bekommen keinen Button. #}
-                {% if card.id == 'escalate-upstream' and upstream_check_configured and entry.upstream_check %}
+                   Cards (patch/act) und idle-Rows bekommen keinen Button. #}
+                {% if card.id == 'escalate-mitigate' and upstream_check_configured and entry.upstream_check and entry.upstream_check.state != 'idle' %}
                   <tr class="workflow-table__upstream-row" data-test="action-card-{{ card.id }}-upstream-row">
                     <td class="workflow-table__upstream-cell" colspan="4">
                       {% with state = entry.upstream_check.state,

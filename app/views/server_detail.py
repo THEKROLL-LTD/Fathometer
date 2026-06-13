@@ -224,18 +224,19 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     `Row`-Objekte) statt voller ORM-Objekte — die Templates und
     `_build_action_sections` greifen nur auf eine Handvoll Spalten zu.
 
-    ADR-0053 (Fix-Lane-Evaluation), erweitert ADR-0061: Pass 2 bewertet pro
-    Fix-Lane statt pro Gruppe. Die Junction-Tabelle traegt jetzt bis zu
-    drei Rows pro `(group, server)` — `patch`-, `upstream`- und
-    `mitigate`-Lane. Die Lane-Zugehoerigkeit eines Findings folgt
-    deterministisch aus `Finding.finding_class` UND `Finding.has_fix` ueber
-    den Single-Source-SQL-Spiegel `risk_engine.fix_lane_sql_case`
-    (`not has_fix` -> mitigate, `has_fix & os-pkgs` -> patch, `has_fix &
-    lang-pkgs/other` -> upstream) — kein LLM-Output, kein eigener Query.
-    Da `has_fix` allein die Lane NICHT mehr bestimmt (eine Group kann
-    os-pkgs+fix -> patch UND lang-pkgs+fix -> upstream haben, beide
-    `has_fix=True`), gruppieren/distinct'en die Queries auf den
-    Lane-CASE-Ausdruck statt auf `has_fix`.
+    ADR-0053 (Fix-Lane-Evaluation): Pass 2 bewertet pro Fix-Lane statt pro
+    Gruppe. Die Junction-Tabelle traegt bis zu zwei Rows pro `(group, server)`
+    — `patch`- und `mitigate`-Lane. Die Lane-Zugehoerigkeit eines Findings
+    folgt deterministisch aus `Finding.finding_class`, `Finding.has_fix` UND
+    `Finding.host_update_available` ueber den Single-Source-SQL-Spiegel
+    `risk_engine.fix_lane_sql_case` (`not has_fix` -> mitigate, `has_fix &
+    os-pkgs` -> patch, `has_fix & host_update_available` -> patch, sonst ->
+    mitigate). ADR-0064: die fruehere `upstream`-Lane (lang-pkgs-Fix) ist in
+    `mitigate` kollabiert; „Fix existiert upstream" ist jetzt Finding-Level.
+    Kein LLM-Output, kein eigener Query. Da `has_fix` allein die Lane NICHT
+    bestimmt (eine Group kann os-pkgs+fix -> patch UND lang-pkgs+fix ->
+    mitigate haben, beide `has_fix=True`), gruppieren/distinct'en die Queries
+    auf den Lane-CASE-Ausdruck statt auf `has_fix`.
 
     Vier aggregierte Queries:
 
@@ -262,8 +263,8 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
       - `group`: Row (id, label, group_kind, explanation).
       - `count`: int — Summe der OPEN-Findings ueber alle Lanes der Group.
       - `lanes`: list[dict] — nur Lanes mit >= 1 OPEN-Finding, Reihenfolge
-        `patch`, `upstream`, `mitigate` (FIX_LANES-Order). Pro Lane-Eintrag:
-          - `fix_lane`: "patch" | "upstream" | "mitigate".
+        `patch`, `mitigate` (FIX_LANES-Order). Pro Lane-Eintrag:
+          - `fix_lane`: "patch" | "mitigate".
           - `evaluation`: Row | None — die `(group, server, lane)`-Eval.
           - `count`: int — OPEN-Findings dieser Lane.
           - `worst_finding`: Row | None — Live-Worst INNERHALB der Lane.
@@ -282,9 +283,9 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     # (1) Count-Aggregat pro (group, lane): `GROUP BY application_group_id,
     # <lane_case>`. Liefert die Group-IDs (>= 1 OPEN-Finding) und das Lane-
     # Inventar. Lane folgt aus dem Single-Source-SQL-Spiegel
-    # `fix_lane_sql_case` (finding_class + has_fix), NICHT mehr aus has_fix
-    # allein — sonst kollabierten os-pkgs+fix (patch) und lang-pkgs+fix
-    # (upstream) faelschlich in einen Bucket.
+    # `fix_lane_sql_case` (finding_class + has_fix + host_update_available),
+    # NICHT aus has_fix allein — sonst kollabierten os-pkgs+fix (patch) und
+    # host-updatebare lang-pkgs (patch) faelschlich mit dem mitigate-Rest.
     count_lane_case = fix_lane_sql_case(
         Finding.finding_class, Finding.has_fix, Finding.host_update_available
     )
@@ -426,7 +427,7 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
         gid = int(grp.id)
         lane_counts = lane_counts_by_group.get(gid, {})
         lanes: list[dict[str, Any]] = []
-        # Reihenfolge: patch, upstream, mitigate (FIX_LANES-Order). Nur
+        # Reihenfolge: patch, mitigate (FIX_LANES-Order). Nur
         # Lanes mit >= 1 OPEN-Finding erscheinen.
         for lane in FIX_LANES:
             count = lane_counts.get(lane, 0)
@@ -527,11 +528,14 @@ def _build_action_sections(
     ``group_kind`` gematcht wird. Eine Group kann so in **zwei** Cards
     erscheinen (patch-Lane -> Patch-Card, mitigate-Lane -> mitigate-Card) —
     je mit ihrem Lane-Worst (live, ADR-0052). Es gibt **kein** ``act +
-    mitigate``/``act + upstream`` (``act`` ist per Band-Whitelist patch-only).
-    ADR-0061: die ``upstream``-Lane (lang-pkgs-Fix, nicht host-applizierbar)
-    teilt sich den abgeleiteten ``action_type == "mitigate"`` mit der echten
-    no-patch-Lane; die zwei escalate-Cards werden daher zusaetzlich ueber
-    ``fix_lane`` diskriminiert (``escalate-mitigate`` vs. ``escalate-upstream``).
+    mitigate`` (``act`` ist per Band-Whitelist patch-only).
+    ADR-0064: die fruehere ``upstream``-Lane (lang-pkgs-Fix, nicht
+    host-applizierbar) ist in ``mitigate`` kollabiert; es gibt nur noch eine
+    ``escalate-mitigate``-Card (kein ``fix_lane``-Diskriminator mehr). Ein
+    evtl. existierender Upstream-Fix ist Finding-Level-Enrichment pro Row
+    (siehe :func:`_attach_upstream_check_states`). ``entry["fix_lane"]`` ist
+    jetzt 2-wertig (``patch``/``mitigate``) und bleibt am Eintrag fuer das
+    Template-Label.
 
     Eintrags-Format (flach, pro `(group, lane)`):
     ``{"group", "fix_lane", "evaluation", "count", "worst_finding",
@@ -559,28 +563,15 @@ def _build_action_sections(
             "show_labels": True,
         },
         {
+            # ADR-0064: die fruehere upstream-Lane ist in mitigate kollabiert.
+            # Diese eine escalate-mitigate-Card deckt beide Faelle ab (no-fix +
+            # has-fix lang-pkgs). Ein evtl. existierender Upstream-Fix ist
+            # Finding-Level-Enrichment (pro Row), keine eigene Card mehr.
             "id": "escalate-mitigate",
-            "label": "ESCALATE · No patch — mitigate",
+            "label": "ESCALATE · No host patch — mitigate",
             "variant": "escalate-mitigate",
             "risk_band": "escalate",
             "action_type": "mitigate",
-            "fix_lane": "mitigate",
-            "group_kind": None,
-            "show_labels": True,
-        },
-        {
-            # ADR-0061: lang-pkgs-Fixes sind nicht host-applizierbar. Die
-            # upstream-Lane teilt sich den abgeleiteten action_type "mitigate"
-            # mit der echten no-patch-mitigate-Lane (escalate->mitigate), daher
-            # diskriminiert hier zusaetzlich ``fix_lane``. Card-Copy macht
-            # klar: ein Fix existiert upstream, ist aber nur per Rebuild des
-            # besitzenden Pakets applizierbar (kein dnf/apt-Patch).
-            "id": "escalate-upstream",
-            "label": "ESCALATE · Upstream fix — mitigate until rebuild",
-            "variant": "escalate-upstream",
-            "risk_band": "escalate",
-            "action_type": "mitigate",
-            "fix_lane": "upstream",
             "group_kind": None,
             "show_labels": True,
         },
@@ -635,10 +626,6 @@ def _build_action_sections(
                 continue
             if ev.action_type != spec["action_type"]:
                 continue
-            # ADR-0061: ``fix_lane``-Diskriminator nur wo gesetzt (escalate-
-            # mitigate vs. escalate-upstream teilen action_type "mitigate").
-            if spec.get("fix_lane") is not None and entry["fix_lane"] != spec["fix_lane"]:
-                continue
             if spec["group_kind"] is not None and grp.group_kind != spec["group_kind"]:
                 continue
             matches.append(entry)
@@ -664,33 +651,39 @@ def _build_action_sections(
 def _attach_upstream_check_states(
     sess: Any, server_id: int, action_sections: list[dict[str, Any]]
 ) -> bool:
-    """Haengt den initialen Upstream-Check-State an die ``escalate-upstream``-Card.
+    """Haengt den initialen Upstream-Check-State an die ``escalate-mitigate``-Card.
 
-    Block AI-2, ADR-0063 §UI/UX: damit P2 den Initial-State (idle/running/done/
-    cached/disabled) ohne sofortigen Poll rendern kann, wird pro Lane-Eintrag
-    der ``escalate-upstream``-Card die zugehoerige ``upstream_check_results``-
-    Zeile **batch-geladen** und als ``entry["upstream_check"]``
+    Block AI-2, ADR-0063 §UI/UX; re-gehaengt mit ADR-0064 (Block AK): die
+    fruehere ``escalate-upstream``-Card ist entfallen, der Check-Anker ist
+    jetzt das schlimmste researchbare (has-fix lang-pkgs) Finding der Group —
+    das liegt in der ``mitigate``-Lane, also haengt der State an den
+    ``escalate-mitigate``-Card-Rows. Damit P2 den Initial-State (idle/running/
+    done/cached/disabled) ohne sofortigen Poll rendern kann, wird pro
+    Lane-Eintrag der Card die zugehoerige ``upstream_check_results``-Zeile
+    **batch-geladen** und als ``entry["upstream_check"]``
     (:class:`UpstreamCheckState`) angehaengt.
 
     Server-seitige Identitaet (kein Client-Input): das zu pruefende Finding ist
-    das Worst-Finding der ``upstream``-Lane der jeweiligen Group
+    das schlimmste researchbare Finding der Group
     (:func:`worst_upstream_finding` -> :func:`build_research_seed`). Der Card-
     ``worst_finding`` ist nur eine Projektion und nicht ausreichend fuer den
     Seed — daher ein eigener (gebuendelter) Lookup, NUR fuer diese eine Card
-    (kein N+1 ueber alle Cards).
+    (kein N+1 ueber alle Cards). Rows ohne researchbares Finding (no-fix
+    lang-pkgs / os-pkgs in mitigate) erhalten ``seed=None`` -> idle, P2 zeigt
+    dort weder Button noch Panel.
 
     Liefert das ``configured``-Flag (``is_upstream_check_configured``) zurueck —
     P2 zeigt den Button nur, wenn konfiguriert. Mutiert ``action_sections``
     in-place (haengt ``upstream_check`` an jeden Group-Eintrag der Card).
     """
-    upstream_card = next((s for s in action_sections if s.get("id") == "escalate-upstream"), None)
+    upstream_card = next((s for s in action_sections if s.get("id") == "escalate-mitigate"), None)
     configured = is_upstream_check_configured(get_settings_row(sess))
     if upstream_card is None:
         return configured
 
-    # Pro Group-Eintrag der Card: Worst-Upstream-Finding -> Seed (server-seitig).
-    # ``key`` ist die Group-ID — eine Group erscheint in dieser Card hoechstens
-    # einmal (die upstream-Lane ist je Group eindeutig).
+    # Pro Group-Eintrag der Card: Worst-researchbares-Finding -> Seed
+    # (server-seitig). ``key`` ist die Group-ID — eine Group erscheint in
+    # dieser Card hoechstens einmal (die mitigate-Lane ist je Group eindeutig).
     seeds: list[tuple[int, Any]] = []
     seed_by_gid: dict[int, Any] = {}
     for entry in upstream_card["groups"]:
@@ -1024,8 +1017,9 @@ def show(server_id: int) -> Any:
     # Host-Snapshot. Wenn die View nicht im `list`-Mode laeuft, sind die
     # `application_groups` leer und die Sektion bleibt unsichtbar.
     action_sections = _build_action_sections(application_groups)
-    # Block AI-2 (ADR-0063): Initial-State der escalate-upstream-Card ohne
-    # Extra-Roundtrip an die Card-Eintraege haengen (P2 rendert ihn direkt).
+    # Block AI-2 (ADR-0063) / ADR-0064: Initial-State des Upstream-Checks ohne
+    # Extra-Roundtrip an die escalate-mitigate-Card-Eintraege haengen (P2
+    # rendert ihn direkt, nur fuer Rows mit researchbarem Finding).
     upstream_check_configured = _attach_upstream_check_states(sess, server.id, action_sections)
 
     quick_counts = _quick_counts_for_server(sess, server.id)

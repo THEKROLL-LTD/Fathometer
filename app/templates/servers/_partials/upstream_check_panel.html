@@ -1,7 +1,8 @@
 {# Single-Source-Panel der agentischen Upstream-Update-Suche (Block AI-2, ADR-0063, P2).
 
    EIN Partial fuer drei Render-Pfade (HTMX-OOB-Single-Source-Pattern, CLAUDE.md):
-     (a) Initial-Render in der `escalate-upstream`-Card (_action_needed_section.html),
+     (a) Initial-Render in der `escalate-mitigate`-Card (_action_needed_section.html;
+         ADR-0064: die upstream-Lane ist in mitigate kollabiert),
      (b) POST-`enqueue`-Response (app/api/upstream_check.py::enqueue),
      (c) GET-`poll`-Response (app/api/upstream_check.py::poll).
 

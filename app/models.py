@@ -448,9 +448,11 @@ class Finding(Base):
     # Block AH (ADR-0062): Host-Update-Flag. Der Agent loest pro Binary-Pfad
     # das besitzende OS-Paket auf und meldet, ob mit den aktuell konfigurierten
     # Repos ein host-applizierbares Update bereitsteht. Ein lang-pkgs-Finding
-    # mit `host_update_available=True` wird in `fix_lane_for` von `upstream`
-    # nach `patch` promotet (präzise statt pauschal). `NULL` = Agent zu alt /
-    # Paket nicht aufgeloest -> konservativ `upstream` (ADR-0061-Default).
+    # mit `host_update_available=True` wird in `fix_lane_for` nach `patch`
+    # promotet (präzise statt pauschal). `false`/`NULL` (Agent zu alt / Paket
+    # nicht aufgeloest) -> `mitigate` (nicht host-applizierbar; ADR-0064: die
+    # „Fix existiert upstream"-Info wird dann Finding-Level gezeigt, nicht als
+    # eigene Lane).
     # `owning_package`/`available_version` sind reine UI-Anzeige ("host update
     # ready: <pkg> <version>"). Werden bei jedem Re-Ingest aus dem aktuellen
     # Scan ueberschrieben (auch auf NULL, falls ein Update eingespielt wurde).
@@ -1037,7 +1039,7 @@ class ApplicationGroupEvaluation(Base):
             name="ck_app_group_evals_action_type",
         ),
         CheckConstraint(
-            "fix_lane IN ('patch','mitigate','upstream')",
+            "fix_lane IN ('patch','mitigate')",
             name="ck_app_group_evals_fix_lane",
         ),
         Index(

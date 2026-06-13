@@ -416,34 +416,34 @@ def test_lane_without_evaluation_skipped() -> None:
 
 
 # ---------------------------------------------------------------------------
-# ADR-0061: dritte Lane ``upstream`` — escalate-upstream-Card-Diskriminierung
+# ADR-0064: upstream-Lane in mitigate kollabiert — nur noch escalate-mitigate
 # ---------------------------------------------------------------------------
 
 
-def test_escalate_upstream_lane_routes_to_upstream_card_not_mitigate() -> None:
-    """ADR-0061: ein ``fix_lane="upstream"``-Eintrag mit risk_band=escalate
-    (action_type=mitigate, abgeleitet) landet in der ``escalate-upstream``-Card,
-    NICHT in ``escalate-mitigate`` — obwohl beide den action_type ``mitigate``
-    teilen, diskriminiert die Spec ueber ``fix_lane``."""
+def test_escalate_mitigate_card_has_no_upstream_sibling() -> None:
+    """ADR-0064: die ``upstream``-Lane ist in ``mitigate`` kollabiert; es gibt
+    nur noch die ``escalate-mitigate``-Card (keine ``escalate-upstream``).
+    Ein has-fix-lang-pkgs-Finding (frueher upstream-Lane) liegt jetzt in der
+    ``mitigate``-Lane und landet in ``escalate-mitigate``."""
     groups = [
         _group_entry(
             10,
             "go-toolchain",
             "os_package",
-            [_lane("upstream", "escalate", "mitigate")],
+            [_lane("mitigate", "escalate", "mitigate")],
         )
     ]
     cards = _cards_by_id(groups)
-    assert "escalate-upstream" in cards
-    assert "escalate-mitigate" not in cards
-    upstream_entries = cards["escalate-upstream"]["groups"]
-    assert [e["group"].label for e in upstream_entries] == ["go-toolchain"]
-    assert [e["fix_lane"] for e in upstream_entries] == ["upstream"]
+    assert "escalate-mitigate" in cards
+    assert "escalate-upstream" not in cards
+    mitigate_entries = cards["escalate-mitigate"]["groups"]
+    assert [e["group"].label for e in mitigate_entries] == ["go-toolchain"]
+    assert [e["fix_lane"] for e in mitigate_entries] == ["mitigate"]
 
 
-def test_escalate_mitigate_lane_does_not_leak_into_upstream_card() -> None:
-    """Umkehrung: ein echter ``fix_lane="mitigate"``-Eintrag (escalate+mitigate)
-    landet in ``escalate-mitigate``, NICHT in ``escalate-upstream``."""
+def test_escalate_mitigate_label_says_no_host_patch() -> None:
+    """ADR-0064: Card-Label ist ``No host patch — mitigate`` (praeziser als
+    ``No patch``, weil ein Upstream-Fix pro Row existieren kann)."""
     groups = [
         _group_entry(
             10,
@@ -454,15 +454,13 @@ def test_escalate_mitigate_lane_does_not_leak_into_upstream_card() -> None:
     ]
     cards = _cards_by_id(groups)
     assert "escalate-mitigate" in cards
-    assert "escalate-upstream" not in cards
-    mitigate_entries = cards["escalate-mitigate"]["groups"]
-    assert [e["fix_lane"] for e in mitigate_entries] == ["mitigate"]
+    assert cards["escalate-mitigate"]["label"] == "ESCALATE · No host patch — mitigate"
 
 
-def test_group_with_patch_and_upstream_lanes_appears_in_two_cards() -> None:
-    """Eine Group mit BEIDEN Lanes (escalate-patch + escalate-upstream)
-    erscheint in zwei Cards: distro-patch UND upstream — je mit dem passenden
-    Lane-Eintrag."""
+def test_group_with_patch_and_mitigate_lanes_appears_in_two_cards() -> None:
+    """Eine Group mit BEIDEN Lanes (escalate-patch + escalate-mitigate)
+    erscheint in zwei Cards: distro-patch UND mitigate — je mit dem passenden
+    Lane-Eintrag (ADR-0064: kein eigener upstream-Eimer mehr)."""
     groups = [
         _group_entry(
             10,
@@ -470,36 +468,37 @@ def test_group_with_patch_and_upstream_lanes_appears_in_two_cards() -> None:
             "os_package",
             [
                 _lane("patch", "escalate", "patch"),
-                _lane("upstream", "escalate", "mitigate"),
+                _lane("mitigate", "escalate", "mitigate"),
             ],
         )
     ]
     cards = _cards_by_id(groups)
     assert "escalate-distro-patch" in cards
-    assert "escalate-upstream" in cards
-    assert "escalate-mitigate" not in cards
+    assert "escalate-mitigate" in cards
+    assert "escalate-upstream" not in cards
     assert [e["fix_lane"] for e in cards["escalate-distro-patch"]["groups"]] == ["patch"]
-    assert [e["fix_lane"] for e in cards["escalate-upstream"]["groups"]] == ["upstream"]
+    assert [e["fix_lane"] for e in cards["escalate-mitigate"]["groups"]] == ["mitigate"]
 
 
-def test_cve_2026_42504_upstream_escalate_does_not_emit_app_update_card() -> None:
-    """CVE-2026-42504-Regression auf Card-Ebene: ein upstream+escalate-Eintrag
+def test_cve_2026_42504_lang_pkgs_fix_does_not_emit_app_update_card() -> None:
+    """CVE-2026-42504-Regression auf Card-Ebene: ein has-fix-lang-pkgs-Eintrag
     (gobinary/stdlib-Fix, nicht host-applizierbar) erzeugt KEINE
-    ``act-app-update``/``escalate-app-update``-Card — er gehoert ausschliesslich
-    in die ``escalate-upstream``-Card. Vor ADR-0061 waere ein solcher Fix
-    faelschlich als host-applizierbarer Patch (app-update/distro-patch)
-    gerendert worden."""
+    ``act-app-update``/``escalate-app-update``-Card — er gehoert in die
+    ``escalate-mitigate``-Card (ADR-0064: Upstream-Fix ist Finding-Level, der
+    Fix landet in der mitigate-Lane). Vor ADR-0061 waere ein solcher Fix
+    faelschlich als host-applizierbarer Patch gerendert worden."""
     groups = [
         _group_entry(
             10,
             "tailscaled",
             "application_bundle",
-            [_lane("upstream", "escalate", "mitigate")],
+            [_lane("mitigate", "escalate", "mitigate")],
         )
     ]
     cards = _cards_by_id(groups)
-    assert "escalate-upstream" in cards
+    assert "escalate-mitigate" in cards
+    assert "escalate-upstream" not in cards
     assert "escalate-app-update" not in cards
     assert "act-app-update" not in cards
     assert "escalate-distro-patch" not in cards
-    assert [e["fix_lane"] for e in cards["escalate-upstream"]["groups"]] == ["upstream"]
+    assert [e["fix_lane"] for e in cards["escalate-mitigate"]["groups"]] == ["mitigate"]

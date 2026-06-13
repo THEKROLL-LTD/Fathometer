@@ -62,7 +62,7 @@ upstream_check_bp = Blueprint(
 )
 
 #: Template-Name, den P2 (frontend-implementer) anlegt + fuellt. Single-Source-
-#: Partial fuer Initial-Render (escalate-upstream-Card) UND Poll-/POST-Response.
+#: Partial fuer Initial-Render (escalate-mitigate-Card, ADR-0064) UND Poll-/POST-Response.
 UPSTREAM_CHECK_PANEL_TEMPLATE = "servers/_partials/upstream_check_panel.html"
 
 
@@ -112,9 +112,10 @@ def _render_panel(state: UpstreamCheckState, sid: int, gid: int) -> str:
 @login_required
 @limiter.limit("10/minute")
 def enqueue(sid: int, gid: int) -> Any:
-    """POST — stoesst den Upstream-Check fuer die ``upstream``-Lane an.
+    """POST — stoesst den Upstream-Check fuer das researchbare Finding der Group an.
 
-    Gate -> Worst-Upstream-Finding (server-seitig) -> Enqueue -> Status-Partial.
+    Gate -> schlimmstes researchbares (has-fix lang-pkgs, mitigate-Lane) Finding
+    (server-seitig, ADR-0064) -> Enqueue -> Status-Partial.
     """
     _guard_or_404(sid, gid)
     sess = get_session()
@@ -127,7 +128,7 @@ def enqueue(sid: int, gid: int) -> Any:
 
     finding = worst_upstream_finding(sess, sid, gid)
     if finding is None:
-        # Keine upstream-Lane-Findings (mehr) -> leerer State, kein Enqueue.
+        # Kein researchbares (has-fix lang-pkgs) Finding -> leerer State, kein Enqueue.
         state = derive_state(None, None, configured=True)
         return _render_panel(state, sid, gid), 404
 
@@ -145,7 +146,7 @@ def enqueue(sid: int, gid: int) -> Any:
 
     if row is None:
         # build_research_seed lieferte None (Finding doch nicht researchbar) ->
-        # idle. Sollte nach dem upstream-Lane-Filter praktisch nicht passieren.
+        # idle. Sollte nach dem researchbar-Filter praktisch nicht passieren.
         state = derive_state(None, None, configured=True)
         return _render_panel(state, sid, gid)
 

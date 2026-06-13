@@ -11,7 +11,7 @@ sie `None` wenn kein Eintrag matcht.
 Kein DB-Roundtrip — die Funktion liest nur das parsed Pydantic-Envelope plus
 die in-memory `path -> HostUpdateEntry`-Map und gibt ein dict zurueck. Ein
 Mini-End-to-End ueber `fix_lane_for(...)` zeigt dass der promotete Eintrag
-`patch` ergibt und der nicht-gematchte `upstream` (Single-Source der Lane).
+`patch` ergibt und der nicht-gematchte `mitigate` (ADR-0064; war `upstream`).
 
 Vorlage: `tests/services/test_findings_ingest_cause_mapping.py`
 (`_build_rows_from_envelope`-Pattern).
@@ -248,7 +248,8 @@ def test_match_uses_pkg_path_over_result_target_as_join_key() -> None:
 def test_promoted_langpkgs_row_yields_patch_via_fix_lane_for() -> None:
     """CVE-2026-42504-Fortsetzung: tailscaled lang-pkgs+fix wird via
     host_update_available=True (Tailscale liefert ein gepatchtes rpm) nach
-    `patch` promotet — Kontrast zum AG-Verhalten (ohne Flag -> upstream)."""
+    `patch` promotet — Kontrast zum Default-Verhalten (ohne Flag -> mitigate,
+    ADR-0064)."""
     target = "/usr/bin/tailscaled"
     env = _envelope(results=[_langpkgs_gobinary_result(target=target)])
     host_updates_map = {
@@ -269,19 +270,19 @@ def test_promoted_langpkgs_row_yields_patch_via_fix_lane_for() -> None:
     lane = fix_lane_for(row["finding_class"], has_fix, row["host_update_available"])
     assert lane == "patch"
 
-    # Kontrast: AG-Verhalten ohne Flag-Argument -> upstream.
+    # Kontrast: Default-Verhalten ohne Flag-Argument -> mitigate (ADR-0064).
     lane_ag = fix_lane_for(row["finding_class"], has_fix)
-    assert lane_ag == "upstream"
+    assert lane_ag == "mitigate"
     assert row["finding_class"] == FindingClass.LANG_PKGS.value
 
 
-def test_unmatched_langpkgs_row_yields_upstream_via_fix_lane_for() -> None:
+def test_unmatched_langpkgs_row_yields_mitigate_via_fix_lane_for() -> None:
     """Nicht-gematchtes lang-pkgs+fix-Finding: host_update_available=None ->
-    upstream-Fallback (ADR-0061-Default)."""
+    mitigate-Fallback (ADR-0064-Default; war upstream in ADR-0061)."""
     env = _envelope(results=[_langpkgs_gobinary_result(target="/usr/bin/tailscaled")])
     row = _build_rows(env, host_updates_map={})[0]
 
     has_fix = bool(row["fixed_version"])
     lane = fix_lane_for(row["finding_class"], has_fix, row["host_update_available"])
     assert row["host_update_available"] is None
-    assert lane == "upstream"
+    assert lane == "mitigate"

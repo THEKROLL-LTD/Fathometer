@@ -36,7 +36,12 @@ from __future__ import annotations
 #: ADR-0061: 3 -> 4 — dritte Lane ``upstream`` (lang-pkgs-Fix, nicht
 #: host-applizierbar) mit eigener Prompt-Variante (kein ``act``). Cache-
 #: Invalidation, da sich Lane-Zuordnung und Prompt-Semantik aendern.
-PASS2_PROMPT_VERSION = 4
+#: ADR-0064: 4 -> 5 — die ``upstream``-Lane wird zurueckgenommen und kollabiert
+#: in ``mitigate``; der mitigate-Prompt aendert die Semantik (nicht mehr
+#: "fixed_version is null", sondern "kein host-applizierbarer Patch — manche
+#: Findings haben evtl. einen Upstream-Fix"). Cache-Invalidation noetig, sonst
+#: blieben Reasons aus der alten upstream-Semantik stehen.
+PASS2_PROMPT_VERSION = 5
 
 PASS1_SYSTEM_PROMPT: str = """\
 You group Linux-host vulnerability findings by owner-application.

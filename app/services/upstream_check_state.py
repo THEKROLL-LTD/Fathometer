@@ -8,13 +8,14 @@ Bruecke zwischen dem `(server, group)`-Worst-Upstream-Finding, dem
 (``idle``/``running``/``done``/``cached``/``disabled``). Zwei Aufrufer:
 
 * die Browser-Routen in :mod:`app.api.upstream_check` (POST-Enqueue + GET-Poll),
-* der Initial-Render-Pfad der ``escalate-upstream``-Card in
+* der Initial-Render-Pfad der ``escalate-mitigate``-Card in
   :mod:`app.views.server_detail` (Batch-Lookup ohne Extra-Roundtrip).
 
 **Server-seitige Identitaet (IDOR-/Tampering-Schutz, ADR-0063 §Gating).** Das
 zu pruefende Finding wird NIE per Client-``finding_id`` uebernommen, sondern
-server-seitig als Worst-Finding der ``upstream``-Lane einer konkreten
-``(server, group)`` ermittelt (:func:`worst_upstream_finding`). Daraus baut
+server-seitig als schlimmstes researchbares (has-fix lang-pkgs) Finding einer
+konkreten ``(server, group)`` ermittelt (:func:`worst_upstream_finding`; seit
+ADR-0064 liegen diese in der ``mitigate``-Lane). Daraus baut
 ``build_research_seed`` den Cache-Key ``(artifact_module, installed_version)``,
 ueber den der ``upstream_check_results``-Eintrag geladen wird.
 
@@ -32,9 +33,8 @@ from typing import Any
 from sqlalchemy import nulls_last, select
 from sqlalchemy.orm import Session
 
-from app.models import Finding, FindingStatus, UpstreamCheckResult
+from app.models import Finding, FindingClass, FindingStatus, UpstreamCheckResult
 from app.services.findings_query import _severity_rank_expr
-from app.services.risk_engine import fix_lane_sql_case
 from app.services.upstream_check_enqueue import UPSTREAM_CHECK_TTL_DAYS
 from app.services.upstream_seed import ResearchSeed, build_research_seed
 
@@ -79,31 +79,39 @@ class UpstreamCheckState:
 
 
 def worst_upstream_finding(session: Session, server_id: int, group_id: int) -> Finding | None:
-    """Server-seitiges Worst-Finding der ``upstream``-Lane einer ``(server, group)``.
+    """Schlimmstes researchbares (has-fix lang-pkgs) Finding der Group.
 
-    Identisch zur Lane-Diskriminierung in
-    :func:`app.views.server_detail._load_application_groups_for_server` — die
-    Lane folgt deterministisch aus ``finding_class``/``has_fix``/
-    ``host_update_available`` ueber den Single-Source-SQL-Spiegel
-    :func:`fix_lane_sql_case`. Gefiltert auf ``status == OPEN`` UND
-    Lane ``== 'upstream'``; sortiert nach der §15-Triage-Order (KEV desc, EPSS
-    desc nulls last, CVSS desc nulls last, Severity-Rank desc, ``first_seen_at``
-    asc). Liefert das Top-Finding als volles ORM-Objekt (``build_research_seed``
-    liest mehrere Spalten) oder ``None`` (keine upstream-Findings).
+    Anker fuer den on-demand Upstream-Check (ADR-0064: Upstream-Fix ist
+    Finding-Level-Enrichment, NICHT mehr eine eigene Lane). Diese Findings
+    liegen jetzt in der ``mitigate``-Lane (die ``upstream``-Lane wurde mit
+    ADR-0064/Block-AK-P1 kollabiert). Gefiltert auf das, was
+    :func:`app.services.upstream_seed.build_research_seed` akzeptiert:
+    ``status == OPEN`` UND ``finding_class == 'lang-pkgs'`` UND ``has_fix``
+    (≙ ``fixed_version IS NOT NULL AND <> ''``, generierte Spalte
+    :attr:`Finding.has_fix`) UND ``host_update_available IS NOT TRUE``. Letzteres
+    haelt die Anker-Auswahl deckungsgleich mit der ``mitigate``-Lane: ein
+    lang-pkgs-Finding mit ``host_update_available=true`` ist per ADR-0062 in der
+    ``patch``-Lane (Host kann es selbst updaten) — fuer das ist ein Upstream-
+    Rebuild-Check sinnlos, daher kein Anker. Sortiert nach der §15-Triage-Order (KEV desc,
+    EPSS desc nulls last, CVSS desc nulls last, Severity-Rank desc,
+    ``first_seen_at`` asc). Liefert das Top-Finding als volles ORM-Objekt
+    (``build_research_seed`` liest mehrere Spalten) oder ``None`` (kein
+    researchbares Finding).
 
     KEINE Client-``finding_id``: das Finding wird ausschliesslich server-seitig
     bestimmt (IDOR-/Tampering-Schutz, ADR-0063 §Gating).
     """
-    lane_case = fix_lane_sql_case(
-        Finding.finding_class, Finding.has_fix, Finding.host_update_available
-    )
     stmt = (
         select(Finding)
         .where(
             Finding.server_id == server_id,
             Finding.application_group_id == group_id,
             Finding.status == FindingStatus.OPEN,
-            lane_case == "upstream",
+            Finding.finding_class == FindingClass.LANG_PKGS,
+            Finding.has_fix,
+            # ADR-0064: nur mitigate-Lane-Anker — host-updatebare lang-pkgs
+            # (ADR-0062) liegen in der patch-Lane, kein Upstream-Check noetig.
+            Finding.host_update_available.isnot(True),
         )
         .order_by(
             Finding.is_kev.desc(),
@@ -211,7 +219,7 @@ def lookup_state_for_group(
 ) -> UpstreamCheckState:
     """Voller State-Lookup fuer eine ``(server, group)`` (DB + Ableitung).
 
-    1. Worst-Upstream-Finding server-seitig (:func:`worst_upstream_finding`).
+    1. Worst researchbares Finding server-seitig (:func:`worst_upstream_finding`).
     2. :class:`ResearchSeed` daraus (``None`` = nicht researchbar -> idle).
     3. Cache-Zeile per Seed-Key.
     4. :func:`derive_state`.
@@ -244,7 +252,7 @@ def lookup_state_for_seeds(
     ``seeds`` ist eine Liste ``(key, seed)`` — ``key`` ist ein vom Aufrufer
     gewaehlter Identifikator (z.B. die Group-ID bzw. Card-Entry-Identitaet),
     unter dem das Ergebnis-Dict indiziert wird. Verhindert N+1 ueber die
-    ``escalate-upstream``-Card (P1.3). Researchbare Seeds ohne Cache-Zeile
+    ``escalate-mitigate``-Card (P1.3). Researchbare Seeds ohne Cache-Zeile
     werden als ``idle`` abgeleitet.
 
     Bei nicht-konfiguriertem Feature liefert jede Group ``disabled`` ohne

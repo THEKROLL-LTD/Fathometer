@@ -482,6 +482,19 @@
 .workflow-table__host-update { margin-left: 8px; }
 .sd-app-group__host-update { margin-top: 4px; }
 
+/* ADR-0064: "Fix existiert upstream" ist Finding-Level. Die Fix-Version aus dem
+   Research-Seed steht unter dem Worst-Finding in der mitigate-Card. Neutraler
+   Hinweis (kein positives Grün wie host-update — der Host braucht einen Rebuild,
+   die Fix-Version ist nicht direkt applizierbar). */
+.workflow-table__upstream-fix {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
 /* Info-Tooltip neben dem "Reason"-Spaltenkopf (Operator-Workflows): erklaert,
    dass die Reason ein KI-Assessment des Lane-Worst-Findings ist (was, worauf
    bezogen, wie erzeugt). Icon erbt die Spaltenkopf-Farbe via `currentColor`
@@ -1679,9 +1692,8 @@
   color: var(--text-tertiary);
 }
 .sd-app-group__lane-tag--patch { color: var(--text-secondary); }
-/* ADR-0061: upstream-Lane (lang-pkgs-Fix, nur per Rebuild applizierbar) —
-   visuell wie patch hervorgehoben, semantisch eigenstaendig (eigenes Label). */
-.sd-app-group__lane-tag--upstream { color: var(--text-secondary); }
+/* ADR-0064: die upstream-Lane ist in mitigate kollabiert -> nur noch 2 Tags
+   (patch / no patch). Das mitigate-Tag erbt die neutrale Basis-Farbe. */
 .sd-app-group__worst {
   margin-top: 12px;
   padding-top: 12px;
@@ -1892,7 +1904,8 @@
 /* ════════════════════════════════════════════════════════════════════════
    Upstream update check panel (Block AI-2, ADR-0063, P2.4)
    Single-Source-Panel-Markup (servers/_partials/upstream_check_panel.html).
-   Eigene Sub-Zeile unter der Group-Row der escalate-upstream-Card. Token-only;
+   Eigene Sub-Zeile unter der Group-Row der escalate-mitigate-Card (ADR-0064:
+   die upstream-Lane ist in mitigate kollabiert). Token-only;
    Spinner via CSS-Animation (kein JS). Das Accent-Alpha-Overlay spiegelt den
    bestehenden sd-ask-btn-Stand (kein exakter Token).
    ════════════════════════════════════════════════════════════════════════ */

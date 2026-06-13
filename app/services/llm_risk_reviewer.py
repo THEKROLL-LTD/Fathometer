@@ -942,35 +942,28 @@ class LLMRiskReviewer:
             selections = self._select_for_groups(groups_with_findings)
         lines: list[str] = self._render_host_context(server)
 
-        # ADR-0053: Lane-Scope. Im mitigate-Call hat ``act`` keine Bedeutung
-        # (patch-only) und wird gar nicht erst als Option genannt; im patch-Call
-        # sind alle vier Bands waehlbar. ``fix_lane is None`` ist der Uebergangs-
-        # Zustand (Caller reichen die Lane erst in Etappe 4/5 durch): Verhalten
-        # wie bisher (alle Bands), nur ohne action_type.
+        # ADR-0053/0064: Lane-Scope. Im mitigate-Call hat ``act`` keine
+        # Bedeutung (patch-only) und wird gar nicht erst als Option genannt; im
+        # patch-Call sind alle vier Bands waehlbar. ``fix_lane is None`` ist der
+        # Uebergangs-Zustand: Verhalten wie bisher (alle Bands), nur ohne
+        # action_type. ADR-0064: die ``upstream``-Lane ist entfallen und in
+        # ``mitigate`` kollabiert — der mitigate-Prompt deckt jetzt sowohl
+        # no-fix als auch lang-pkgs-mit-Upstream-Fix ab (daher KEINE
+        # "fixed_version is null"-Behauptung mehr).
         if fix_lane == "mitigate":
             allowed_bands = "{escalate, monitor, noise}"
             lines.append("")
             lines.append(
-                "fix_lane: mitigate — ALL findings in this call have NO patch "
-                "available (fixed_version is null). The remediation axis is "
-                "already fixed to mitigation; do NOT use risk_band 'act' "
-                "(act is patch-only). Choose only from escalate/monitor/noise."
-            )
-        elif fix_lane == "upstream":
-            allowed_bands = "{escalate, monitor, noise}"
-            lines.append("")
-            lines.append(
-                "fix_lane: upstream — ALL findings in this call DO have a fixed "
-                "version listed (fixed_version is set), but it is NOT a "
-                "host-applicable patch: these are language/toolchain dependency "
-                "versions (gobinary/jar/node-pkg) compiled into a binary, so the "
-                "operator CANNOT apply them via the OS package manager — the "
-                "owning package must be rebuilt upstream against the fixed "
-                "dependency. Do NOT assume a package-manager upgrade closes this. "
-                "Therefore do NOT use risk_band 'act' (act is patch-only); an "
-                "upstream-only fix is either urgent enough to escalate (mitigate "
-                "another way until the rebuild ships) or it is monitor/noise. "
-                "Choose only from escalate/monitor/noise."
+                "fix_lane: mitigate — ALL findings in this call have NO "
+                "host-applicable patch (they cannot be fixed via the host "
+                "package manager, e.g. dnf/apt upgrade). Some may have an "
+                "upstream fix — a fixed dependency/toolchain version exists "
+                "(language/toolchain packages such as gobinary/jar/node-pkg "
+                "compiled into a binary) that requires an upstream rebuild — "
+                "but none is host-applicable. Do NOT assume a package-manager "
+                "upgrade closes any of these. The remediation axis is already "
+                "fixed to mitigation; do NOT use risk_band 'act' (act is "
+                "patch-only). Choose only from escalate/monitor/noise."
             )
         elif fix_lane == "patch":
             allowed_bands = "{escalate, act, monitor, noise}"
@@ -1112,17 +1105,18 @@ class LLMRiskReviewer:
                 )
                 band = "escalate"
 
-            # ADR-0053/0061: Band-Whitelist pro Lane statt (band, action_type)-
-            # Combo. ``act`` ist patch-only — in den no-host-patch-Lanes
-            # (``mitigate`` = kein Fix, ``upstream`` = Fix nur upstream/nicht
-            # host-applizierbar) ist ein Finding entweder escalate oder
+            # ADR-0053/0064: Band-Whitelist pro Lane statt (band, action_type)-
+            # Combo. ``act`` ist patch-only — in der no-host-patch-Lane
+            # ``mitigate`` (kein Fix ODER nur upstream-Fix, nicht
+            # host-applizierbar — ADR-0064 hat die fruehere ``upstream``-Lane
+            # hierher kollabiert) ist ein Finding entweder escalate oder
             # monitor/noise, nie act. Bei ``fix_lane is None`` (Uebergangs-
             # Zustand) gilt keine Lane-Restriktion.
-            if fix_lane in ("mitigate", "upstream") and band == "act":
+            if fix_lane == "mitigate" and band == "act":
                 raise LLMInvalidResponseError(
                     f"Pass2: Group {label!r} hat risk_band 'act' im "
-                    f"{fix_lane}-Call (act ist patch-only, ADR-0053/0061; "
-                    f"erlaubt fuer fix_lane {fix_lane!r}: escalate, monitor, "
+                    f"mitigate-Call (act ist patch-only, ADR-0053/0064; "
+                    f"erlaubt fuer fix_lane 'mitigate': escalate, monitor, "
                     f"noise)"
                 )
 

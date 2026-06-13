@@ -99,15 +99,16 @@ def test_lane_case_join_restricts_inheritance_to_own_lane() -> None:
 
 
 def test_lane_case_separates_patchable_and_nofix_findings() -> None:
-    """Konzeptioneller Kern-Gewinn (ADR-0053, erweitert ADR-0061): die
-    Lane-Bedingung stellt sicher, dass os-pkgs-Fix (→ 'patch'),
-    lang-pkgs/other-Fix (→ 'upstream') und no-fix (→ 'mitigate') Findings
-    derselben Group aus **verschiedenen** Junction-Rows erben — und damit
-    unterschiedliche Bands tragen koennen.
+    """Konzeptioneller Kern-Gewinn (ADR-0053; ADR-0064): die Lane-Bedingung
+    stellt sicher, dass os-pkgs-Fix (→ 'patch') und alles ohne
+    host-applizierbaren Patch (no-fix UND lang-pkgs/other-Fix → 'mitigate')
+    Findings derselben Group aus **verschiedenen** Junction-Rows erben — und
+    damit unterschiedliche Bands tragen koennen.
 
     Geprueft an der kompilierten CASE-Form (Single-Source
     ``risk_engine.fix_lane_sql_case``): no-fix wird zuerst geprueft
-    (→ mitigate), dann os-pkgs (→ patch), sonst upstream."""
+    (→ mitigate), dann os-pkgs (→ patch), sonst mitigate (ADR-0064; war
+    upstream)."""
     session = _session_with_rowcount()
 
     inherit_group_risk_to_findings(session)
@@ -118,8 +119,8 @@ def test_lane_case_separates_patchable_and_nofix_findings() -> None:
     # os-pkgs + Fix → 'patch'.
     assert "findings.finding_class = 'os-pkgs'" in sql
     assert "THEN 'patch'" in sql
-    # sonst (lang-pkgs/other + Fix) → 'upstream' (ELSE).
-    assert "ELSE 'upstream'" in sql
+    # sonst (lang-pkgs/other + Fix) → 'mitigate' (ELSE, ADR-0064).
+    assert "ELSE 'mitigate'" in sql
     # Die Lane-Bindung haengt an der Junction-fix_lane (Equality-Join), nicht
     # an einer freien Group-Row.
     assert "application_group_evaluations.fix_lane = CASE WHEN" in sql

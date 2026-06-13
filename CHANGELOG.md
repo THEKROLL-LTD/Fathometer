@@ -4,6 +4,41 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block AK (ADR-0064): Upstream-Fix als Finding-Level-Enrichment statt eigener Lane
+
+Nimmt die separate `upstream`-Fix-Lane aus Block AG zurück: für den Operator sind
+„kein Host-Patch" und „Upstream-Fix existiert, braucht Rebuild" **dieselbe
+Aktion** (mitigieren) — zwei Lanes/Cards verwirrten nur (k3s erschien in beiden).
+`fix_lane ∈ {patch, mitigate}` wieder; die „Fix existiert upstream"-Info wird
+**Finding-Level** (Fix-Version-Anzeige + „Check for upstream fix"-Button pro Row
+in der `No host patch — mitigate`-Card). **AGs Korrektheits-Kern bleibt** (lang-pkgs-Fix
+nie host-applizierbar → keine falsche „Apply app update"); AH/AI/AJ bleiben.
+Quality-Gates grün. Alembic-Roundtrip `0028` + Operator-Browser-Smoke beim User.
+
+### Changed
+
+- **`fix_lane_for`/SQL-Spiegel** (`risk_engine.py`): `upstream`-Zweig entfernt —
+  `lang-pkgs+has_fix` (ohne `host_update_available`) → `mitigate` (war `upstream`).
+  `FixLane`/`FIX_LANES` wieder 2-wertig.
+- **Card** (`_build_action_sections`): `escalate-upstream`-Card + `fix_lane`-
+  Diskriminator entfernt; verbleibende Card relabelt **„ESCALATE · No host patch —
+  mitigate"**. 2-Wege-Lane-Label (`patch`/`no patch`).
+- **LLM-Layer:** `upstream`-Prompt-Variante entfernt; `mitigate`-Prompt umformuliert
+  (kein „fixed_version is null" mehr); `_ACTION_TYPE_BY_LANE_BAND` ohne upstream-Zeilen;
+  Validator-`act`-Reject nur noch `mitigate`. `PASS2_PROMPT_VERSION` 4 → 5.
+- **`worst_upstream_finding`** (`upstream_check_state.py`): re-scoped auf das
+  schlimmste **researchbare** (lang-pkgs + `has_fix`) Finding innerhalb mitigate
+  (kein `upstream`-Lane-Filter mehr); Upstream-Check-Button/Panel hängen jetzt an
+  den `escalate-mitigate`-Card-Rows. Routen/`derive_state`/Cache unverändert.
+
+### Added
+
+- **Finding-Level-Fix-Version** in der `No host patch — mitigate`-Card: „fixed
+  upstream: `<component> <version>` — needs rebuild" (aus
+  `entry.upstream_check.seed.fixing_component_version`, escaped, kein `|safe`).
+- **Migration `0028`** (`down_revision=0027`): CHECK `ck_app_group_evals_fix_lane`
+  → `IN ('patch','mitigate')`, Eval-Rebuild (Pass-2 refüllt; Prompt-Version-Bump).
+
 ## [Unreleased] — Block AJ (ADR-0063 §Integration): Upstream-Verdikt im Group-Chat-Snapshot
 
 Schliesst die ADR-0055-Snapshot-Erweiterung aus ADR-0063 §Integration: liegt für

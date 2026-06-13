@@ -5,12 +5,13 @@
    Render-Vertrag (ADR-0053 — Pass-2 pro Fix-Lane):
      - `group`  : ApplicationGroup (id, label, explanation, group_kind)
      - `count`  : int — gesamte OPEN-Findings der Group (Summe ueber Lanes).
-     - `lanes`  : list[dict] — bis zu drei Eintraege (Reihenfolge patch,
-                  upstream, mitigate — FIX_LANES), nur Lanes mit count > 0.
+     - `lanes`  : list[dict] — bis zu zwei Eintraege (Reihenfolge patch,
+                  mitigate — FIX_LANES), nur Lanes mit count > 0.
                   Pro Lane:
-                    - `fix_lane`            : "patch" | "upstream" | "mitigate"
-                                              (ADR-0061: upstream = lang-pkgs-Fix,
-                                              nicht host-applizierbar)
+                    - `fix_lane`            : 2-wertig "patch" | "mitigate"
+                                              (ADR-0064: die upstream-Lane ist in
+                                              mitigate kollabiert; "Fix existiert
+                                              upstream" ist Finding-Level)
                     - `evaluation`          : ApplicationGroupEvaluation | None
                                               (Lane-Junction-Row; risk_band,
                                               risk_band_reason).
@@ -74,7 +75,7 @@
 
   {%- for lane in lanes -%}
     {%- set _lane_band = lane.evaluation.risk_band if lane.evaluation and lane.evaluation.risk_band else 'pending' -%}
-    {%- set _lane_label = 'Patch' if lane.fix_lane == 'patch' else ('Upstream' if lane.fix_lane == 'upstream' else 'No patch') -%}
+    {%- set _lane_label = 'Patch' if lane.fix_lane == 'patch' else 'No patch' -%}
     <div class="sd-app-group__lane"
          data-test="group-lane-{{ group.id }}-{{ lane.fix_lane }}">
       <div class="sd-app-group__lane-head">

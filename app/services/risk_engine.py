@@ -42,21 +42,27 @@ from app.models import Finding, FindingClass, Server, Severity
 from app.services.severity_resolver import _SEVERITY_RANK, max_severity_across_providers
 
 # ---------------------------------------------------------------------------
-# Fix-Lane — Single-Source-Ableitung (ADR-0061, erweitert ADR-0053)
+# Fix-Lane — Single-Source-Ableitung (ADR-0053, ADR-0062; ADR-0064)
 # ---------------------------------------------------------------------------
 
-#: Die drei Fix-Lanes (ADR-0061; war zwei in ADR-0053). Die Lane ist die
-#: deterministische Remediation-Achse einer ``(Group, Server)``-Eval:
+#: Die zwei Fix-Lanes. ADR-0061 hatte eine dritte Lane ``upstream`` eingefuehrt;
+#: ADR-0064 nimmt das zurueck — sie kollabiert in ``mitigate``. Die Information
+#: "ein Fix existiert upstream" ist seither **Finding-Level-Enrichment**
+#: (``Finding.fixed_version`` an der einzelnen Row), KEINE eigene Lane: die
+#: Operator-Aktion ist in beiden Faellen identisch ("auf dem Host gibt es jetzt
+#: keinen Patch, mitigieren"). Die Lane ist die deterministische
+#: Remediation-Achse einer ``(Group, Server)``-Eval:
 #:
-#: * ``patch``    — host-applizierbarer Fix (``has_fix`` AND ``os-pkgs``):
-#:                  ``dnf/apt upgrade`` schliesst die Luecke.
-#: * ``upstream`` — Fix existiert, ist aber NICHT host-applizierbar
-#:                  (``has_fix`` AND ``lang-pkgs``/``other``): die fixierte
-#:                  Version ist ein Dependency-/Toolchain-Stand, der einen
-#:                  Upstream-Rebuild braucht, kein Paketmanager-Update.
-#: * ``mitigate`` — kein Fix verfuegbar (``not has_fix``).
-FixLane = Literal["patch", "upstream", "mitigate"]
-FIX_LANES: tuple[FixLane, ...] = ("patch", "upstream", "mitigate")
+#: * ``patch``    — host-applizierbarer Fix (``has_fix`` AND ``os-pkgs``, ODER
+#:                  ``host_update_available`` truthy): ``dnf/apt upgrade``
+#:                  schliesst die Luecke.
+#: * ``mitigate`` — kein host-applizierbarer Patch. Deckt sowohl "kein Fix"
+#:                  (``not has_fix``) als auch "Fix existiert nur upstream"
+#:                  (``has_fix`` AND ``lang-pkgs``/``other`` ohne Host-Update)
+#:                  ab — beide warten auf einen Upstream-Rebuild bzw. eine
+#:                  Mitigation, der Host kann nichts patchen.
+FixLane = Literal["patch", "mitigate"]
+FIX_LANES: tuple[FixLane, ...] = ("patch", "mitigate")
 
 
 def fix_lane_for(
@@ -64,23 +70,26 @@ def fix_lane_for(
     has_fix: object,
     host_update_available: object = None,
 ) -> FixLane:
-    """Single-Source-Ableitung der Fix-Lane (ADR-0061, verfeinert ADR-0062).
+    """Single-Source-Ableitung der Fix-Lane (ADR-0053, ADR-0062; ADR-0064).
 
-    Wahrheitstabelle (ADR-0062 §Datenfluss):
+    Wahrheitstabelle:
 
     * ``not has_fix`` -> ``mitigate`` (unabhaengig von der Finding-Klasse).
     * ``has_fix`` AND ``os-pkgs`` -> ``patch`` (host-applizierbar; ``flag`` egal).
     * ``has_fix`` AND ``lang-pkgs``/``other`` AND ``host_update_available``
       truthy -> ``patch`` (der Host kann das besitzende OS-Paket wirklich
-      updaten — präzise Promotion statt pauschalem ``upstream``).
+      updaten — präzise Promotion, ADR-0062).
     * ``has_fix`` AND ``lang-pkgs``/``other`` AND ``flag`` ``False``/``None``
-      -> ``upstream`` (Fix existiert, ist aber nicht per Host-Paketmanager
-      applizierbar; ``other`` faellt konservativ nach ``upstream``).
+      -> ``mitigate`` (ADR-0064: war ``upstream``). Ein Fix existiert evtl.
+      upstream (``fixed_version`` ist gesetzt), ist aber NICHT per
+      Host-Paketmanager applizierbar — daher dieselbe Operator-Lane wie
+      "kein Fix". Die Existenz des Upstream-Fixes ist Finding-Level-Info
+      (``Finding.fixed_version``), keine eigene Lane.
 
     ``host_update_available`` ist das autoritative Host-Flag (ADR-0062). ``None``
-    = Agent zu alt / Paket nicht aufgeloest -> konservativ ``upstream``
-    (ADR-0061-Default, kein Hard-Break). ``False`` und ``None`` sind beide falsy
-    und fallen damit nach ``upstream``.
+    = Agent zu alt / Paket nicht aufgeloest -> konservativ ``mitigate``
+    (kein Hard-Break, kein falsches "Apply update"). ``False`` und ``None``
+    sind beide falsy und fallen damit nach ``mitigate``.
 
     ``finding_class`` kann ein :class:`~app.models.FindingClass`-StrEnum ODER
     ein roher ``str`` sein — der Vergleich gegen den String-Wert ``"os-pkgs"``
@@ -89,7 +98,7 @@ def fix_lane_for(
 
     Spiegelt :func:`fix_lane_sql_case` exakt — die Python- und die SQL-
     Ableitung MUESSEN dieselbe Wahrheitstabelle liefern (Drift-Vermeidung,
-    ADR-0061 §"Zentrale Ableitung statt verstreuter CASE").
+    ADR-0061 §"Zentrale Ableitung statt verstreuter CASE", weiterhin gueltig).
     """
     if not bool(has_fix):
         return "mitigate"
@@ -97,7 +106,7 @@ def fix_lane_for(
         return "patch"
     if host_update_available:
         return "patch"
-    return "upstream"
+    return "mitigate"
 
 
 def fix_lane_sql_case(
@@ -105,7 +114,7 @@ def fix_lane_sql_case(
     has_fix_col: Any,
     host_update_col: Any = None,
 ) -> Any:
-    """SQL-Spiegel von :func:`fix_lane_for` als SQLAlchemy-``case``.
+    """SQL-Spiegel von :func:`fix_lane_for` als SQLAlchemy-``case`` (ADR-0064).
 
     Reihenfolge spiegelt die Python-Wahrheitstabelle exakt:
 
@@ -114,17 +123,16 @@ def fix_lane_sql_case(
     3. ``host_update_available IS TRUE`` -> ``patch`` (ADR-0062-Promotion;
        nur wenn ``host_update_col`` uebergeben wurde).
     4. sonst (``lang-pkgs``/``other`` mit Fix, Flag ``False``/``NULL``) ->
-       ``upstream``.
+       ``mitigate`` (ADR-0064: war ``upstream``).
 
     ``host_update_col`` ist optional fuer Call-Sites die das Flag (noch) nicht
     projizieren. ``.is_(True)`` ist NULL-sicher: ``NULL IS TRUE`` -> ``false``,
-    die Zeile faellt also nach ``upstream`` (= ADR-0061-Default fuer alte
-    Agenten / nicht aufgeloeste Pakete).
+    die Zeile faellt also nach ``mitigate``.
 
     Wird in der Inheritance (Lane-Join), im Server-Detail-Aggregat
     (``GROUP BY``/``DISTINCT ON``) und ueberall verwendet, wo die Lane in SQL
     abgeleitet werden muss — KEINE Re-Implementierung der Klassen-Logik pro
-    Call-Site (ADR-0061 §"Zentrale Ableitung").
+    Call-Site (ADR-0061 §"Zentrale Ableitung", weiterhin gueltig).
 
     Mypy-Hinweis: Spalten-Argumente sind ``InstrumentedAttribute[...]``, der
     Rueckgabewert ein ``Case``; beide teilen den ``ColumnElement``-Bound, mypy
@@ -137,7 +145,7 @@ def fix_lane_sql_case(
     ]
     if host_update_col is not None:
         conds.append((host_update_col.is_(True), "patch"))
-    return case(*conds, else_="upstream")
+    return case(*conds, else_="mitigate")
 
 
 class RiskBand(enum.StrEnum):

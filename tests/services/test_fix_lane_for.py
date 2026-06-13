@@ -2,7 +2,7 @@
 # Copyright 2026 THEKROLL LTD
 
 """Pure-Unit-Tests fuer `risk_engine.fix_lane_for` + `fix_lane_sql_case`
-(Block AG, ADR-0061 — dritte Lane ``upstream``).
+(ADR-0064 — die ``upstream``-Lane aus ADR-0061 kollabiert in ``mitigate``).
 
 Deckt:
 
@@ -10,7 +10,8 @@ Deckt:
   mit ``FindingClass``-Enum-Input und einmal mit rohem ``str``-Input.
 * ``has_fix``-Falsy-Werte (leerer String, ``None``, ``0``) -> ``mitigate``.
 * CVE-2026-42504-Regression (tailscaled / gobinary stdlib): ``lang-pkgs`` mit
-  gesetztem ``fixed_version`` -> ``upstream`` (NICHT ``patch``).
+  gesetztem ``fixed_version`` -> ``mitigate`` (NICHT ``patch`` — der AG-
+  Korrektheits-Kern bleibt, nur ohne eigene ``upstream``-Lane).
 * Struktur des SQL-Spiegels (kompilierte CASE-Form, kein DB-Execute).
 
 Kein DB-Roundtrip — reine Funktions-Aufrufe und ein Compile.
@@ -27,13 +28,13 @@ from app.services.risk_engine import FIX_LANES, fix_lane_for, fix_lane_sql_case
 # Vollmatrix: {os-pkgs, lang-pkgs, other} x {has_fix} — Enum- und str-Input
 # ---------------------------------------------------------------------------
 
-# (finding_class_value, has_fix, expected_lane) — Wahrheitstabelle ADR-0061.
+# (finding_class_value, has_fix, expected_lane) — Wahrheitstabelle ADR-0064.
 _MATRIX = [
     pytest.param("os-pkgs", True, "patch", id="os-pkgs+fix=patch"),
     pytest.param("os-pkgs", False, "mitigate", id="os-pkgs+nofix=mitigate"),
-    pytest.param("lang-pkgs", True, "upstream", id="lang-pkgs+fix=upstream"),
+    pytest.param("lang-pkgs", True, "mitigate", id="lang-pkgs+fix=mitigate"),
     pytest.param("lang-pkgs", False, "mitigate", id="lang-pkgs+nofix=mitigate"),
-    pytest.param("other", True, "upstream", id="other+fix=upstream"),
+    pytest.param("other", True, "mitigate", id="other+fix=mitigate"),
     pytest.param("other", False, "mitigate", id="other+nofix=mitigate"),
 ]
 
@@ -93,8 +94,8 @@ def test_fix_lane_for_truthy_has_fix_os_pkgs_is_patch(truthy: object) -> None:
     assert fix_lane_for("os-pkgs", truthy) == "patch"
 
 
-def test_fix_lanes_constant_is_three_lanes() -> None:
-    assert FIX_LANES == ("patch", "upstream", "mitigate")
+def test_fix_lanes_constant_is_two_lanes() -> None:
+    assert FIX_LANES == ("patch", "mitigate")
 
 
 # ---------------------------------------------------------------------------
@@ -102,17 +103,19 @@ def test_fix_lanes_constant_is_three_lanes() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cve_2026_42504_langpkgs_with_fix_is_upstream_not_patch() -> None:
+def test_cve_2026_42504_langpkgs_with_fix_is_mitigate_not_patch() -> None:
     """Regression: ein gobinary/stdlib-Finding (``lang-pkgs``) mit gesetztem
     ``fixed_version`` darf NICHT als ``patch`` klassifiziert werden — der Fix
     ist eine in das Binary kompilierte Go-Toolchain-Version, kein per
-    dnf/apt applizierbares OS-Paket-Update. Erwartung: ``upstream``.
+    dnf/apt applizierbares OS-Paket-Update. Erwartung: ``mitigate``.
 
-    Das ist genau der tailscaled/CVE-2026-42504-Bug, den ADR-0061 schliesst:
-    vorher landete der Fix faelschlich in der patch-Lane und versprach dem
-    Operator ein Host-Patch, das die Luecke nicht schliesst."""
-    assert fix_lane_for("lang-pkgs", "go1.23.4") == "upstream"
-    assert fix_lane_for(FindingClass.LANG_PKGS, "go1.23.4") == "upstream"
+    Das ist genau der tailscaled/CVE-2026-42504-Bug, den ADR-0061 schloss und
+    ADR-0064 erhaelt: der Fix landet NICHT in der patch-Lane (keine falsche
+    "Apply update"-Empfehlung). ADR-0064 hat nur die eigene ``upstream``-Lane
+    zurueckgenommen — host-seitig "nicht patchbar" liegt jetzt in ``mitigate``;
+    die Existenz des Upstream-Fixes ist Finding-Level-Info (``fixed_version``)."""
+    assert fix_lane_for("lang-pkgs", "go1.23.4") == "mitigate"
+    assert fix_lane_for(FindingClass.LANG_PKGS, "go1.23.4") == "mitigate"
 
 
 def test_cve_2026_42504_langpkgs_without_fix_is_mitigate() -> None:
@@ -129,7 +132,7 @@ def test_cve_2026_42504_langpkgs_without_fix_is_mitigate() -> None:
 
 def test_fix_lane_sql_case_compiles_to_mirrored_truth_table() -> None:
     """Der SQLAlchemy-``case`` spiegelt :func:`fix_lane_for` Branch-fuer-Branch:
-    NOT has_fix -> mitigate; finding_class == 'os-pkgs' -> patch; else upstream.
+    NOT has_fix -> mitigate; finding_class == 'os-pkgs' -> patch; else mitigate.
     Reine Compile-Pruefung (literal_binds), kein DB-Execute."""
     compiled = str(
         fix_lane_sql_case(Finding.finding_class, Finding.has_fix).compile(
@@ -138,10 +141,10 @@ def test_fix_lane_sql_case_compiles_to_mirrored_truth_table() -> None:
     )
     assert "WHEN NOT findings.has_fix THEN 'mitigate'" in compiled
     assert "WHEN (findings.finding_class = 'os-pkgs') THEN 'patch'" in compiled
-    assert "ELSE 'upstream'" in compiled
+    assert "ELSE 'mitigate'" in compiled
     # Branch-Reihenfolge muss exakt der Python-Logik entsprechen: no-fix-Veto
-    # zuerst, dann os-pkgs, sonst upstream.
-    assert compiled.index("'mitigate'") < compiled.index("'patch'") < compiled.index("'upstream'")
+    # zuerst, dann os-pkgs, sonst mitigate (ADR-0064).
+    assert compiled.index("'mitigate'") < compiled.index("'patch'")
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +153,7 @@ def test_fix_lane_sql_case_compiles_to_mirrored_truth_table() -> None:
 
 # (finding_class, host_update_available, expected_lane) — alle mit has_fix=True.
 # os-pkgs ist Flag-agnostisch (immer patch); lang-pkgs/other promoten nur bei
-# truthy Flag, sonst upstream (ADR-0061-Default fuer False/None).
+# truthy Flag, sonst mitigate (ADR-0064-Default fuer False/None — war upstream).
 _FLAG_MATRIX = [
     # os-pkgs: Flag wird ignoriert -> immer patch.
     pytest.param("os-pkgs", True, "patch", id="os-pkgs+flag-true=patch"),
@@ -158,12 +161,12 @@ _FLAG_MATRIX = [
     pytest.param("os-pkgs", None, "patch", id="os-pkgs+flag-none=patch"),
     # lang-pkgs: nur truthy Flag promotet nach patch.
     pytest.param("lang-pkgs", True, "patch", id="lang-pkgs+flag-true=patch"),
-    pytest.param("lang-pkgs", False, "upstream", id="lang-pkgs+flag-false=upstream"),
-    pytest.param("lang-pkgs", None, "upstream", id="lang-pkgs+flag-none=upstream"),
+    pytest.param("lang-pkgs", False, "mitigate", id="lang-pkgs+flag-false=mitigate"),
+    pytest.param("lang-pkgs", None, "mitigate", id="lang-pkgs+flag-none=mitigate"),
     # other: analog lang-pkgs.
     pytest.param("other", True, "patch", id="other+flag-true=patch"),
-    pytest.param("other", False, "upstream", id="other+flag-false=upstream"),
-    pytest.param("other", None, "upstream", id="other+flag-none=upstream"),
+    pytest.param("other", False, "mitigate", id="other+flag-false=mitigate"),
+    pytest.param("other", None, "mitigate", id="other+flag-none=mitigate"),
 ]
 
 
@@ -187,7 +190,7 @@ def test_fix_lane_for_no_fix_is_mitigate_regardless_of_flag(flag: object) -> Non
     """``not has_fix`` -> ``mitigate`` ueberschreibt jede Klassen-/Flag-Kombination.
 
     Selbst ein ``host_update_available=True`` darf einen no-fix-Befund nicht
-    in eine patch-/upstream-Lane heben — ohne Fix gibt es nichts zu applizieren."""
+    in die patch-Lane heben — ohne Fix gibt es nichts zu applizieren."""
     for klass in ("os-pkgs", "lang-pkgs", "other"):
         assert fix_lane_for(klass, False, flag) == "mitigate", (klass, flag)
         assert fix_lane_for(klass, None, flag) == "mitigate", (klass, flag)
@@ -195,11 +198,11 @@ def test_fix_lane_for_no_fix_is_mitigate_regardless_of_flag(flag: object) -> Non
 
 def test_fix_lane_for_default_flag_arg_behaves_like_none() -> None:
     """Der Default-Wert von ``host_update_available`` (weggelassen) ist ``None``
-    und reproduziert exakt das AG-Verhalten (ADR-0061): lang-pkgs/other mit Fix
-    fallen nach ``upstream``, os-pkgs nach ``patch``."""
+    und reproduziert exakt das Verhalten mit explizitem None (ADR-0064):
+    lang-pkgs/other mit Fix fallen nach ``mitigate``, os-pkgs nach ``patch``."""
     # lang-pkgs/other ohne Flag-Argument == mit explizitem None.
-    assert fix_lane_for("lang-pkgs", True) == fix_lane_for("lang-pkgs", True, None) == "upstream"
-    assert fix_lane_for("other", True) == fix_lane_for("other", True, None) == "upstream"
+    assert fix_lane_for("lang-pkgs", True) == fix_lane_for("lang-pkgs", True, None) == "mitigate"
+    assert fix_lane_for("other", True) == fix_lane_for("other", True, None) == "mitigate"
     assert fix_lane_for("os-pkgs", True) == fix_lane_for("os-pkgs", True, None) == "patch"
 
 
@@ -225,7 +228,7 @@ def test_fix_lane_for_truthy_flag_promotes_langpkgs(truthy: object) -> None:
 def test_fix_lane_sql_case_with_host_update_col_adds_promotion_branch() -> None:
     """Mit ``host_update_col`` enthaelt der CASE einen zusaetzlichen
     ``host_update_available IS true -> 'patch'``-Zweig — und zwar NACH dem
-    os-pkgs-Zweig und VOR dem ``ELSE 'upstream'`` (spiegelt die Python-Reihenfolge)."""
+    os-pkgs-Zweig und VOR dem ``ELSE 'mitigate'`` (spiegelt die Python-Reihenfolge)."""
     compiled = str(
         fix_lane_sql_case(
             Finding.finding_class,
@@ -237,34 +240,34 @@ def test_fix_lane_sql_case_with_host_update_col_adds_promotion_branch() -> None:
     assert "WHEN NOT findings.has_fix THEN 'mitigate'" in compiled
     assert "WHEN (findings.finding_class = 'os-pkgs') THEN 'patch'" in compiled
     assert "findings.host_update_available IS true" in compiled
-    assert "ELSE 'upstream'" in compiled
+    assert "ELSE 'mitigate'" in compiled
     # Reihenfolge: mitigate (no-fix) -> os-pkgs-patch -> host_update-patch -> else.
     idx_mitigate = compiled.index("THEN 'mitigate'")
     idx_os_pkgs = compiled.index("findings.finding_class = 'os-pkgs'")
     idx_flag = compiled.index("findings.host_update_available IS true")
-    idx_else = compiled.index("ELSE 'upstream'")
+    idx_else = compiled.index("ELSE 'mitigate'")
     assert idx_mitigate < idx_os_pkgs < idx_flag < idx_else
 
 
 def test_fix_lane_sql_case_without_host_update_col_omits_branch() -> None:
     """Rueckwaertskompatibel: ohne ``host_update_col`` (Default None) fehlt der
     Promotion-Zweig komplett — Call-Sites die das Flag nicht projizieren
-    bekommen exakt die AG-CASE-Form (kein Verweis auf die Flag-Spalte)."""
+    bekommen exakt die 2-Lane-CASE-Form (kein Verweis auf die Flag-Spalte)."""
     compiled = str(
         fix_lane_sql_case(Finding.finding_class, Finding.has_fix).compile(
             compile_kwargs={"literal_binds": True}
         )
     )
     assert "host_update_available" not in compiled
-    # Genau drei Lane-Literale, kein zusaetzlicher patch-Zweig.
+    # Genau ein patch-Literal (os-pkgs-Zweig), kein zusaetzlicher patch-Zweig.
     assert compiled.count("'patch'") == 1
-    assert "ELSE 'upstream'" in compiled
+    assert "ELSE 'mitigate'" in compiled
 
 
-def test_fix_lane_sql_case_none_flag_falls_to_upstream_via_is_true() -> None:
+def test_fix_lane_sql_case_none_flag_falls_to_mitigate_via_is_true() -> None:
     """Der Promotion-Zweig nutzt ``.is_(True)`` (kompiliert zu ``IS true``), nicht
     ``= true`` — das ist NULL-sicher: ``NULL IS true`` -> false, die Zeile faellt
-    nach ``upstream`` (= ADR-0061-Default fuer alte Agenten)."""
+    nach ``mitigate`` (= ADR-0064-Default fuer alte Agenten)."""
     compiled = str(
         fix_lane_sql_case(
             Finding.finding_class,

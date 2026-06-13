@@ -281,6 +281,22 @@ def test_pure_patch_group_renders_single_lane_block(app: Flask) -> None:
     assert f'data-test="group-lane-{_GROUP_ID}-mitigate"' not in html
 
 
+def test_mitigate_lane_label_is_no_patch_never_upstream(app: Flask) -> None:
+    """ADR-0064: das Lane-Label ist 2-wertig (``Patch``/``No patch``). Die
+    fruehere ``upstream``-Lane (ADR-0061) ist in ``mitigate`` kollabiert — das
+    Lane-Label darf NIE "upstream" sein (es ist keine eigene Lane mehr)."""
+    ctx = _make_context(lanes=[_lane(fix_lane="mitigate", drift=False)])
+    html = _render_card(app, ctx)
+    label_text = re.search(
+        rf'data-test="group-lane-label-{_GROUP_ID}-mitigate"[^>]*>([^<]*)<', html
+    )
+    assert label_text is not None, f"Mitigate-Lane-Label-Span fehlt:\n{html}"
+    assert label_text.group(1).strip() == "No patch", (
+        f"mitigate-Lane-Label muss 'No patch' sein, war: {label_text.group(1)!r}"
+    )
+    assert "upstream" not in label_text.group(1).lower()
+
+
 # ---------------------------------------------------------------------------
 # XSS — kein |safe auf LLM-/Scanner-Daten
 # ---------------------------------------------------------------------------

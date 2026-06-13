@@ -1,6 +1,6 @@
 # ADR-0061 — Fix-Ownership: lang-pkgs-Fixes sind nicht host-applizierbar (`upstream`-Lane)
 
-**Status:** Akzeptiert · **Datum:** 2026-06-12
+**Status:** Akzeptiert · **Datum:** 2026-06-12 · **Teil-amendiert durch [ADR-0064](0064-upstream-fix-finding-level-not-lane.md) (2026-06-13, Block AK):** Der **Korrektheits-Kern bleibt** (lang-pkgs-Fix ist nicht host-applizierbar, landet nie in `patch`/`act`). Die **separate `upstream`-Lane + Card wird zurückgenommen** — sie kollabiert in `mitigate`, die „Fix existiert upstream"-Info wird Finding-Level-Enrichment (Fix-Version-Anzeige + Upstream-Check-Button pro Row). `fix_lane ∈ {patch, mitigate}` wieder. Begründung: identische Operator-Aktion, keine actionable Foresight für upstream-vs-mitigate, nicht-autoritatives Trivy-Signal (siehe ADR-0064).
 
 Bezug: [ADR-0053](0053-fix-lane-evaluation.md) (Fix-Lane-Evaluation — diese ADR erweitert die Lane-Partition um eine dritte Lane, nutzt deren §Re-Open-Trigger „fix_lane-Enum erweitern statt neuer Tabelle"), [ADR-0043](0043-llm-risk-band-exploitability-model.md) (Risk-Band als Exploitability-Urteil, `action_type` Backend-abgeleitet, Fix-Verfügbarkeit aus dem Band entkoppelt), [ADR-0023](0023-llm-risk-reviewer-and-application-grouping.md) (Two-Pass-Reviewer), [ADR-0021](0021-agent-bootstrap-installer.md) (Trivy-Ursachen-Felder: `finding_class`, `result_type`), [ADR-0011](0011-lang-pkgs-target-disambiguation.md) (lang-pkgs `@target`-Disambiguation).
 

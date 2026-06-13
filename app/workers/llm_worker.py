@@ -1828,15 +1828,14 @@ def _pick_evaluation(result: Pass2Result, group_label: str) -> Pass2Evaluation |
     return None
 
 
-#: Ableitungstabelle ``(fix_lane, risk_band) -> action_type`` (ADR-0053,
-#: erweitert ADR-0061). Die Action-Achse folgt deterministisch aus der Lane,
-#: das Risiko-Band bleibt LLM-Urteil. ``act`` existiert nur in der patch-Lane
-#: (act ist patch-only, vom Validator durchgesetzt) — ``(mitigate, act)`` und
-#: ``(upstream, act)`` sind daher bewusst NICHT eingetragen. Die upstream-Lane
-#: (lang-pkgs-Fix, nicht host-applizierbar — ADR-0061) bekommt dieselbe
-#: action_type-Ableitung wie mitigate: escalate->mitigate, monitor->watch,
-#: noise->none. Es gibt KEIN eigenes ``action_type=upstream`` — die Lane traegt
-#: die Upstream-Semantik, nicht der action_type.
+#: Ableitungstabelle ``(fix_lane, risk_band) -> action_type`` (ADR-0053;
+#: ADR-0064). Die Action-Achse folgt deterministisch aus der Lane, das
+#: Risiko-Band bleibt LLM-Urteil. ``act`` existiert nur in der patch-Lane
+#: (act ist patch-only, vom Validator durchgesetzt) — ``(mitigate, act)`` ist
+#: daher bewusst NICHT eingetragen. ADR-0064: die fruehere ``upstream``-Lane
+#: (lang-pkgs-Fix, nicht host-applizierbar) ist in ``mitigate`` kollabiert —
+#: deren action_type-Ableitung (escalate->mitigate, monitor->watch,
+#: noise->none) deckt jetzt auch lang-pkgs-mit-Fix ab. Es gibt nur zwei Lanes.
 _ACTION_TYPE_BY_LANE_BAND: dict[tuple[str, str], str] = {
     ("patch", "escalate"): "patch",
     ("patch", "act"): "patch",
@@ -1845,21 +1844,17 @@ _ACTION_TYPE_BY_LANE_BAND: dict[tuple[str, str], str] = {
     ("mitigate", "escalate"): "mitigate",
     ("mitigate", "monitor"): "watch",
     ("mitigate", "noise"): "none",
-    ("upstream", "escalate"): "mitigate",
-    ("upstream", "monitor"): "watch",
-    ("upstream", "noise"): "none",
 }
 
 
 def _derive_action_type(fix_lane: str, risk_band: str) -> str:
     """Leitet den ``action_type`` deterministisch aus ``(fix_lane, risk_band)`` ab.
 
-    ADR-0053/0061: ``action_type`` ist kein LLM-Output mehr — die Action-Achse
-    folgt aus der Lane, das Band aus dem LLM-Urteil. ``(mitigate, act)`` und
-    ``(upstream, act)`` kommen nicht vor (der Validator lehnt ``act`` in beiden
-    no-host-patch-Lanes ab); defensiv loggen wir den Fall und behandeln ihn wie
-    ``(mitigate, escalate)`` (-> ``mitigate``), damit ein Validator-Leck nicht
-    die ganze Eval killt.
+    ADR-0053/0064: ``action_type`` ist kein LLM-Output mehr — die Action-Achse
+    folgt aus der Lane, das Band aus dem LLM-Urteil. ``(mitigate, act)`` kommt
+    nicht vor (der Validator lehnt ``act`` in der mitigate-Lane ab); defensiv
+    loggen wir den Fall und behandeln ihn wie ``(mitigate, escalate)``
+    (-> ``mitigate``), damit ein Validator-Leck nicht die ganze Eval killt.
     """
     derived = _ACTION_TYPE_BY_LANE_BAND.get((fix_lane, risk_band))
     if derived is None:

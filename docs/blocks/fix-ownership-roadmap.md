@@ -1,5 +1,7 @@
 # Fix-Ownership — Umsetzungs-Roadmap (ADR-0061 / 0062 / 0063)
 
+> **Nachtrag 2026-06-13 (Block AK, ADR-0064):** AG→AH→AI sind umgesetzt (AI gesplittet in AI-1 Backend + AI-2 UI; AJ = Upstream-Verdikt im Chat-Snapshot). **Block AK** nimmt die *separate* `upstream`-**Lane** aus AG zurück: sie kollabiert in `mitigate` (`fix_lane ∈ {patch, mitigate}`), die „Fix existiert upstream"-Info + der „Check for upstream fix"-Button werden **Finding-Level** (pro Row in der `No host patch — mitigate`-Card). AGs Korrektheits-Kern (lang-pkgs-Fix nie host-applizierbar) sowie AH/AI/AJ bleiben. Die unten beschriebene `upstream`-Lane-Struktur ist damit historischer Planungsstand — maßgeblich ist ADR-0064.
+
 Drei aufeinander aufbauende Blöcke. Jeder ist eigenständig mergebar und liefert für sich Wert; spätere verfeinern frühere, brauchen sie aber als Fundament.
 
 **Reihenfolge & Abhängigkeit:** AG (Tier 0) → AH (Tier 1) → AI (Tier 2). AH setzt AGs `fix_lane_for`-Single-Source und die `upstream`-Lane voraus. AI setzt die `upstream`-/`host_update_available=false`-Markierung aus AG/AH als Trigger-Fläche voraus.

@@ -243,7 +243,7 @@ def _literal_sql(sess: _SpySession) -> str:
     return str(compiled).lower()
 
 
-def test_worst_upstream_finding_filters_status_open_and_lane() -> None:
+def test_worst_upstream_finding_filters_status_open_and_research_class() -> None:
     sentinel = SimpleNamespace(id=42)
     sess = _SpySession(row=sentinel)
     out = worst_upstream_finding(sess, server_id=7, group_id=3)  # type: ignore[arg-type]
@@ -256,13 +256,19 @@ def test_worst_upstream_finding_filters_status_open_and_lane() -> None:
     # Status-OPEN-Filter ist Teil der WHERE-Klausel.
     assert "status" in sql, f"Status-Filter fehlt:\n{sql}"
 
-    # Lane-Filter + Status-Wert mit inline-Literalen pruefen: der
-    # fix_lane_sql_case-Vergleich gegen das Literal 'upstream', Status == 'open'.
+    # ADR-0064: kein 'upstream'-Lane-Filter mehr; gefiltert auf das
+    # researchbare Finding (has-fix lang-pkgs in der mitigate-Lane).
     literal = _literal_sql(sess)
-    assert "'upstream'" in literal, f"Lane-Filter-Literal 'upstream' fehlt:\n{literal}"
+    assert "'upstream'" not in literal, f"Upstream-Lane-Filter darf weg sein:\n{literal}"
     assert "'open'" in literal, f"Status-OPEN-Literal fehlt:\n{literal}"
-    # Lane-CASE diskriminiert ueber finding_class/has_fix/host_update_available.
+    assert "'lang-pkgs'" in literal, f"lang-pkgs-Filter fehlt:\n{literal}"
+    # Has-fix-Filter ueber die generierte Spalte.
     assert "has_fix" in literal and "finding_class" in literal, literal
+    # ADR-0064 + Security-Re-Audit: host-updatebare lang-pkgs (ADR-0062, patch-
+    # Lane) sind KEIN Anker -> WHERE schliesst host_update_available IS TRUE aus,
+    # damit die Anker-Auswahl deckungsgleich mit der mitigate-Lane bleibt.
+    assert "host_update_available" in literal, f"host_update-Filter fehlt:\n{literal}"
+    assert "is not true" in literal, f"host_update_available IS NOT TRUE fehlt:\n{literal}"
 
 
 def test_worst_upstream_finding_has_triage_order_and_limit() -> None:
