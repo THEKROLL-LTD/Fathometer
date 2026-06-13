@@ -46,6 +46,9 @@ services:
       FM_LOG_LEVEL: ${FM_LOG_LEVEL:-INFO}
       # Block R (ADR-0026) — Async-Ingest Per-Server-Soft-Cap.
       FM_MAX_QUEUED_INGEST_JOBS: ${FM_MAX_QUEUED_INGEST_JOBS:-50}
+      # Block AI (ADR-0063) — Upstream-Check-Cache-TTL (vom Enqueue im
+      # web-Container gelesen; Feature default-off via Setting).
+      FM_UPSTREAM_CHECK_TTL_DAYS: ${FM_UPSTREAM_CHECK_TTL_DAYS:-14}
     ports:
       - "8000:8000"
     healthcheck:
@@ -105,6 +108,45 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+
+  # Block AI (ADR-0063): optionaler, operator-gated Research-Worker fuer die
+  # agentische Upstream-Update-Suche. Gleiches Image wie app/llm-worker,
+  # eigener Entrypoint, KEINE eingehenden Ports. Pollt ausschliesslich
+  # `upstream_check_results` (Queue+Cache in einer Tabelle) — fasst `llm_jobs`
+  # NICHT an (saubere Trennung vom Risk-Reviewer). Macht **Outbound** (Such-
+  # Backend + agent-gefetchte Release-/Repo-URLs) — daher die Air-Gap-Regel:
+  # **diesen Service in air-gap-Deployments einfach weglassen** (das Feature ist
+  # ohnehin default-off via `Setting.upstream_check_enabled`). Laeuft das Feature
+  # off, claimt der Worker nichts bzw. markiert `not_configured` und idlet.
+  # Healthcheck ist ein interner Python-Aufruf (Heartbeat), kein HTTP.
+  fathometer-research-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Wartet wie der llm-worker auf `app: service_healthy` — die App fuehrt
+    # `alembic upgrade head` im Entrypoint aus; ohne diese Reihenfolge saehe der
+    # Worker beim Cold-Start `relation "upstream_check_results" does not exist`.
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    entrypoint: ["python", "-m", "app.workers.research_worker"]
+    environment:
+      FM_ENCRYPTION_KEY: ${FM_ENCRYPTION_KEY}
+      FM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-fathometer}:${POSTGRES_PASSWORD:-fathometer}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-fathometer}
+      FM_RESEARCH_WORKER_POLL_INTERVAL_SEC: ${FM_RESEARCH_WORKER_POLL_INTERVAL_SEC:-5.0}
+      FM_RESEARCH_WORKER_MAX_ATTEMPTS: ${FM_RESEARCH_WORKER_MAX_ATTEMPTS:-3}
+      FM_RESEARCH_WORKER_STALE_TIMEOUT_MIN: ${FM_RESEARCH_WORKER_STALE_TIMEOUT_MIN:-10}
+      FM_UPSTREAM_CHECK_TTL_DAYS: ${FM_UPSTREAM_CHECK_TTL_DAYS:-14}
+      FM_LOG_LEVEL: ${FM_LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.workers.research_healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   fathometer-db:

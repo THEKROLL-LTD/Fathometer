@@ -4,6 +4,40 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block AI-1 (ADR-0063): Agentische Upstream-Update-Suche — Backend
+
+**Optionale, operator-gated, beratende** agentische Suche, ob es für ein
+`upstream`-Lane-Finding (lang-pkgs, nicht host-patchbar — ADR-0061/0062) schon
+ein gefixtes Upstream-Release gibt. **Default off**, Air-Gap-sicher (Container
+weglassen = null Outbound). **Backend-only** (AI-1): Runtime, Worker, Cache,
+Config — die Operator-UI (Button + advisory-Panel) folgt in **Block AI-2**, die
+Chat-Snapshot-Integration in einem Folge-Block. Quality-Gates grün:
+`ruff`/`ruff format`/`mypy app/`, Pure-Unit (`pytest`). Alembic-Roundtrip `0027`
+und der Live-Agent-Smoke (echtes Such-Backend + LLM) stehen beim User an.
+
+### Added
+
+- **Dependencies** `pydantic-ai-slim[openai]` + `trafilatura` (nur vom
+  `research-worker` importiert; geteiltes Image, in app/llm-worker inert).
+- **`fathometer-research-worker`** — neuer optionaler Compose-Service (gleiches
+  Image, `python -m app.workers.research_worker`, kein Inbound-Port); pollt
+  ausschließlich `upstream_check_results`, fasst `llm_jobs` nicht an.
+- **`app/services/upstream_research.py`** — getypte `pydantic-ai`-Agenten-Schleife
+  mit eigenen Tools (`web_search` über `httpx` für SearXNG/Tavily/Firecrawl/Serper,
+  `fetch_url` über `trafilatura` mit Raw-Datei-Fallback), getyptes `Verdict`,
+  deterministischer Konsistenz-Pass, Budget→Finalize-Fallback. **Nie** Auto-Band-Flip.
+- **`app/services/upstream_seed.py`** — Seed-Extraktion aus dem Finding
+  (Cache-Key = Binary-Basename + installed-component-version; PURL ist die
+  Komponente, nicht das Artefakt).
+- **`app/services/upstream_check_enqueue.py`** — idempotenter Enqueue (Cache-Hit/
+  In-Flight-Dedup, TTL).
+- **Migration `0027`** — `upstream_check_results` (Queue+Request+Cache in einer
+  Tabelle, `UNIQUE(artifact_module, installed_version)` + `status`) + 7
+  `Setting`-Spalten (`upstream_check_enabled` default-off, Such-Backend-Block mit
+  Fernet-Secrets, `llm_research_model`) + Research-Worker-Heartbeat.
+- **Docs** `docs/operations.md` (neu) — Outbound/Allowlist/Air-Gap; ARCHITECTURE
+  §5/§11/§17 + CLAUDE.md §17 opt-in-Ausnahme zu ADR-0050.
+
 ## [Unreleased] — Block AH (ADR-0062): Host-Update-Flag — präzise statt pauschal
 
 Verfeinert ADR-0061: ein lang-pkgs-Finding wird nur dann als `upstream`

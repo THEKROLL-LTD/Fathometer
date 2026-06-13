@@ -714,6 +714,11 @@ class Setting(Base):
     llm_worker_heartbeat_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Block AI (ADR-0063, P5): eigener Heartbeat des separaten
+    # Research-Worker-Containers (analog ``llm_worker_heartbeat_at``).
+    research_worker_heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     llm_token_budget_used_today: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     # Naechster Token-Budget-Reset (00:00 UTC). Worker setzt das Feld in
     # `maybe_reset_budget`. Default per server_default `now()` damit
@@ -737,6 +742,47 @@ class Setting(Base):
     llm_debug_log_success_sample_rate: Mapped[int] = mapped_column(
         Integer, nullable=False, default=10, server_default="10"
     )
+
+    # ------------------------------------------------------------------
+    # Block AI (ADR-0063): optionale agentische Upstream-Update-Suche.
+    #
+    # Komplett operator-gated und **default OFF** (Air-Gap-first): Outbound-
+    # Browsing widerspricht dem air-gap-first-Default, also bleibt das Feature
+    # aus, bis der Operator es bewusst aktiviert + Such-Backend und Modell
+    # konfiguriert. Das Feature ist beratend — es flippt nie einen
+    # ``risk_band``/``fix_lane`` (ADR-0063 §Leitplanken).
+    #
+    # Geteilter LLM-Provider wie Reviewer/Chat (ein ``llm_base_url``/Key,
+    # ADR-0002/0057), aber **eigenes Modell** (``llm_research_model``) — der
+    # Operator waehlt; Tipp: grosses Reasoning-Modell fuer hoehere
+    # Treffsicherheit (ADR-0063 §Modell).
+    # ------------------------------------------------------------------
+
+    # Master-Schalter. ``False`` = Feature komplett aus (Air-Gap-Default).
+    # ``server_default`` false backfillt bestehende Zeilen und schuetzt frische
+    # ``ensure_settings_row``-Inserts vor NOT-NULL-Verletzung.
+    upstream_check_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # Such-Backend-Wahl: ``searxng``/``tavily``/``firecrawl``/``serper``. Die
+    # Whitelist wird im AI-2-Form durchgesetzt; die DB haelt einen freien
+    # String (nullable, weil opt-in / unkonfiguriert).
+    upstream_search_backend: Mapped[str | None] = mapped_column(String(16))
+    upstream_search_base_url: Mapped[str | None] = mapped_column(String(512))
+    # Fernet-verschluesselter API-Key fuer Tavily/Serper/Firecrawl. SearXNG
+    # braucht keinen Key (nur optionale Basic-Auth, s.u.). Gleiche Krypto-
+    # Pipeline wie ``llm_api_key_encrypted`` (``encrypt_api_key``/
+    # ``decrypt_api_key`` in ``app/services/llm_client.py``).
+    upstream_search_api_key_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # Optionale SearXNG-Basic-Auth-Credentials. User im Klartext, Passwort
+    # Fernet-verschluesselt (gleiche Pipeline wie oben).
+    upstream_search_username: Mapped[str | None] = mapped_column(String(128))
+    upstream_search_password_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # Modell fuer den Research-Agenten (geteilter Provider, eigenes Modell).
+    # Nullable, weil opt-in — App-Default ``deepseek-ai/DeepSeek-V4-Flash`` als
+    # View-Konstante (``DEFAULT_RESEARCH_MODEL``), NICHT als ``server_default``
+    # (ein unkonfiguriertes System haelt hier ``NULL``).
+    llm_research_model: Mapped[str | None] = mapped_column(String(128))
 
     __table_args__ = (
         CheckConstraint("id = 1", name="ck_settings_singleton"),
@@ -1453,6 +1499,109 @@ class GroupChatMessage(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# upstream_check_results — Cache fuer die agentische Upstream-Suche
+# (Block AI, ADR-0063).
+# ---------------------------------------------------------------------------
+
+
+class UpstreamCheckResult(Base):
+    """Gecachtes Verdikt der agentischen Upstream-Update-Suche (ADR-0063).
+
+    **Cache-Semantik:** ein Eintrag pro ``(artifact_module, installed_version)``
+    (UNIQUE) — der Agent laeuft nicht pro Scan, sondern on-demand und sein
+    Ergebnis wird hier zwischengespeichert (ADR-0063 §Cache "pro (Modul,
+    installierte Version)"). ``checked_at`` traegt das Verdikt-Alter fuer die
+    TTL; die TTL-/Re-Check-Logik selbst kommt in P5 — diese Tabelle haelt nur
+    die Spalte.
+
+    **Beratend, nie Band-flippend:** das Verdikt ist advisory Metadaten und
+    aendert *nie* automatisch ``risk_band``/``fix_lane`` eines Findings oder
+    einer Group (ADR-0063 §Leitplanken). Web-/LLM-Output ist non-deterministisch
+    und spoofbar — der Operator entscheidet. Die Verdikt-Felder spiegeln den
+    Output-Vertrag (ADR-0063 §Output-Vertrag) bzw. die Spike-``Verdict``-Klasse
+    (``scripts/spikes/test_agent_pydantic.py``).
+
+    ``error`` traegt den abstain-/Fehler-Fall ("couldn't determine" — keine
+    Quellen / Budget erschoepft), ``model`` das verwendete LLM-Modell zum
+    Verdikt-Zeitpunkt (Audit, analog ``GroupChatConversation.model``).
+    """
+
+    __tablename__ = "upstream_check_results"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Seed-Identitaet: Go-Main-Module-Pfad / PURL aus der Trivy-Buildinfo.
+    artifact_module: Mapped[str] = mapped_column(String(512), nullable=False)
+    installed_version: Mapped[str] = mapped_column(String(256), nullable=False)
+
+    # --- P5: Queue-State (eine Zeile = Job-Queue + Request + Cache) -------
+    # Lebenszyklus ``queued`` -> ``running`` -> ``done``/``error``. Der
+    # Research-Worker claimt 'queued'-Zeilen via FOR UPDATE SKIP LOCKED.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'queued'"))
+    # Anzahl Worker-Versuche (Backoff/Max-Attempts).
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    # Pickup-Zeitpunkt + Worker-ID (Stale-Reaper-Anker).
+    picked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Fruehester naechster Claim-Zeitpunkt (Backoff nach Fehler/Reap).
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    picked_up_by: Mapped[str | None] = mapped_column(String(128))
+
+    # --- P5: Request/Seed-Snapshot (beim Enqueue gefuellt) ----------------
+    # Erlaubt dem Worker, den ResearchSeed ohne das (evtl. geloeschte) Finding
+    # zu rekonstruieren. ``fixing_component_version`` ist weiter unten als
+    # Verdict-Spalte definiert und wird beim Enqueue mit dem Seed-Wert
+    # vorbelegt (nicht doppelt angelegt).
+    cve: Mapped[str | None] = mapped_column(String(128))
+    vulnerable_component: Mapped[str | None] = mapped_column(String(256))
+    ecosystem: Mapped[str | None] = mapped_column(String(64))
+    binary_path: Mapped[str | None] = mapped_column(String(512))
+    search_hint: Mapped[str | None] = mapped_column(String(256))
+    description: Mapped[str | None] = mapped_column(Text)
+    # Enqueue-Zeitpunkt — Claim-Order (FIFO ORDER BY requested_at).
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    # --- Verdikt-Felder (ADR-0063 §Output-Vertrag) -----------------------
+    # ``fixed_release_exists`` / ``none_yet`` (NULL bei abstain/Fehler).
+    delivery: Mapped[str | None] = mapped_column(String(32))
+    fixing_component_version: Mapped[str | None] = mapped_column(String(256))
+    latest_release_component_version: Mapped[str | None] = mapped_column(String(256))
+    fixed_build_release: Mapped[str | None] = mapped_column(String(256))
+    fixed_build_release_date: Mapped[str | None] = mapped_column(String(64))
+    operator_action: Mapped[str | None] = mapped_column(Text)
+    # ``low`` / ``medium`` / ``high``.
+    confidence: Mapped[str | None] = mapped_column(String(16))
+    # Liste der tatsaechlich genutzten Quellen-URLs.
+    sources_used: Mapped[list[str] | None] = mapped_column(JSONB)
+    reasoning: Mapped[str | None] = mapped_column(Text)
+    # Abstain-/Fehler-Fall ("couldn't determine").
+    error: Mapped[str | None] = mapped_column(Text)
+
+    # Verwendetes LLM-Modell zum Verdikt-Zeitpunkt (Audit).
+    model: Mapped[str | None] = mapped_column(String(128))
+
+    # TTL-Anker (TTL-Logik in P5) + Audit-Zeitstempel.
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        # Cache-Key: ein Verdikt pro (Modul, installierte Version). Der
+        # zugehoerige Index deckt den Lookup ab — kein separater Index noetig.
+        UniqueConstraint(
+            "artifact_module",
+            "installed_version",
+            name="uq_upstream_check_results_module_version",
+        ),
+        # P5: Claim-Index — der Research-Worker scannt nach status='queued'.
+        Index("ix_upstream_check_results_status", "status"),
+    )
+
+
 __all__ = [
     "ATTACK_VECTOR_ENUM_NAME",
     "CHAT_MESSAGE_ROLE_ENUM_NAME",
@@ -1492,5 +1641,6 @@ __all__ = [
     "Setting",
     "Severity",
     "Tag",
+    "UpstreamCheckResult",
     "User",
 ]

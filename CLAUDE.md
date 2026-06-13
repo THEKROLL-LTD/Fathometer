@@ -19,6 +19,7 @@ Subagent-Aufrufe nennen die zu lesenden Sektions-Nummern explizit (nicht "lies d
 - **PostgreSQL 17** in eigenem Container (nicht all-in-one).
 - **Jinja2** + **HTMX** + **Alpine.js** + **Plain CSS** mit eigenem Design-Token-Set (kein Tailwind, kein DaisyUI — entfernt mit ADR-0032). **Frontend-Build via esbuild + lightningcss** in einer Build-only Docker-Stage; Production-Image hat keine Node-Runtime (siehe ADR-0032, löst ADR-0001 ab).
 - **`openai`-Python-SDK** für LLM (OpenAI-kompatibles Protokoll, Default-Provider DeepInfra mit `deepseek-ai/DeepSeek-V3`).
+- **`pydantic-ai-slim[openai]` + `trafilatura`** (ab Block AI, ADR-0063) ausschließlich für die **optionale, operator-gated** agentische Upstream-Update-Suche: getypte Agenten-Schleife mit eigenen Tools (Web-Search via vorhandenem `httpx`, lokale HTML-/Datei-Extraktion via `trafilatura`). Nur im `research-worker`-Pfad importiert, Feature **default-off**; **kein** Ersatz für den `openai`-SDK der übrigen LLM-Konsumenten (Reviewer/Chat).
 - **`structlog`** für Logging mit Redaction-Filter.
 - **`flask-limiter`** für Rate-Limits.
 - **`nh3`** für Markdown/HTML-Sanitization (nicht `bleach`, nicht `markdown` direkt).
@@ -135,6 +136,7 @@ Erlaubte Form:
 - Verteiltes Rate-Limit-Backend (Redis), Multi-Instance-Deploy
 - SBOM-Erfassung, License-Findings
 - **Server-weiter LLM-Chat** (unfokussiertes „Request AI assessment" über alle Findings eines Servers) — bleibt verworfen (ADR-0050). **Ausnahme ab Block AE (ADR-0055):** der **fokussierte Per-Group-Chat** pro `(Server, Application-Group)` ist **in-scope** (Help-Button pro Group-Row, Snapshot-Kontext, SSE). Nur dieser Group-Chat, kein server-weiter.
+- **Outbound-Web-Recherche / agentische Lookups** — grundsätzlich out-of-scope (Air-Gap-first). **Ausnahme ab Block AI (ADR-0063):** eine **optionale, operator-gated, beratende** agentische Upstream-Update-Suche (Default **off**, eigener `research-worker`-Container, eigene Outbound-Allowlist, eigener Pfad — nicht Reviewer/Chat) ist in-scope. Sie **flippt nie** automatisch `risk_band`/`fix_lane` (nur advisory); Air-Gap-Deployments lassen den Container weg.
 
 Wenn ein Agent Scope erweitern will: ablehnen und neue ADR erfordern.
 

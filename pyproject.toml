@@ -30,6 +30,12 @@ dependencies = [
     "httpx>=0.27",
     "gunicorn>=22.0",
     "packaging>=24.0",
+    # Block AI (ADR-0063): agentische Upstream-Update-Suche — getypte
+    # Agenten-Schleife (eigene Tools) + lokale HTML/Datei-Extraktion. Nur vom
+    # research-worker importiert (opt-in, Feature default-off); in app/llm-worker
+    # inert. Such-Backend via vorhandenem httpx, keine weitere Dep.
+    "pydantic-ai-slim[openai]>=1.0,<2",
+    "trafilatura>=2.0,<3",
 ]
 
 [project.optional-dependencies]

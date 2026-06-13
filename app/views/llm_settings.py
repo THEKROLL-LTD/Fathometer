@@ -61,6 +61,11 @@ llm_settings_bp = Blueprint("llm_settings", __name__, url_prefix="/settings/llm"
 # Default-Modelle (ADR-0057 §Entscheidung 2). Geteilter Provider, zwei Modelle.
 DEFAULT_REVIEWER_MODEL = "openai/gpt-oss-120b"
 DEFAULT_CHAT_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
+# Default-Modell der agentischen Upstream-Suche (Block AI, ADR-0063 §Modell).
+# Geteilter Provider, eigenes Modell. Opt-in -> kein DB-``server_default``, der
+# Wert wird nur als App-Default fuers AI-2-Form genutzt. Tipp: grosses
+# Reasoning-Modell fuer hoehere Treffsicherheit.
+DEFAULT_RESEARCH_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 
 
 # Preset-Liste fuer den Dropdown im Template — siehe ARCHITECTURE §12.

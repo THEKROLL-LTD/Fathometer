@@ -775,6 +775,32 @@ Redaction-Filter.
 
 ---
 
+## TD-019 — DNS-Rebinding/TOCTOU-Restrisiko in der `fetch_url`-SSRF-Allowlist
+
+**Was:** Die SSRF-Allowlist `_is_fetch_url_allowed` in
+`app/services/upstream_research.py` (Block AI-1, ADR-0063) löst den Ziel-Host per
+`socket.getaddrinfo` auf und lehnt private/loopback/link-local/reservierte IPs
+ab — danach macht `httpx` einen **eigenen** Connect, der theoretisch eine andere
+(inzwischen umgehängte) IP treffen könnte (DNS-Rebinding zwischen Auflösung und
+Connect). `follow_redirects=False` schliesst den Redirect-Bypass; das reine
+Rebinding-Fenster bleibt.
+
+**Warum:** Vom Security-Auditor bei Block AI-1 (2026-06-13) als akzeptiertes
+Restrisiko vermerkt. Praktisch vernachlässigbar: der Lookup ist niederfrequent +
+on-demand (kein Massenlauf), nur escalate-Upstream-Findings triggern ihn, und das
+Feature ist default-off + operator-gated.
+
+**Lösung:** Pin-to-resolved-IP — die in `_is_fetch_url_allowed` validierte IP an
+den `httpx`-Connect binden (z. B. via Transport/`Host`-Header-Pinning oder eine
+eigene Resolver-Hook), statt den Host ein zweites Mal auflösen zu lassen.
+
+**Aufwand:** ~1–2 h (httpx-Transport-Pinning + Pure-Unit-Test mit gemocktem
+Resolver). **Wann:** bei Block AI-2 (Outbound-Härtung) oder wenn das Feature in
+einer Umgebung mit erreichbaren internen Diensten produktiv geht. Querverweis:
+ADR-0063 §Leitplanken, `docs/operations.md` §SSRF-Schutz.
+
+---
+
 ## Konventionen fuer neue Eintraege
 
 - ID: `TD-NNN`, fortlaufend.
