@@ -123,13 +123,18 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
          -exec rm -rf {} + \
     && find /usr/local/lib -depth -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null \
     && find /usr/local/lib -name '*.pyc' -delete 2>/dev/null \
+    # ACHTUNG: `unittest` NICHT strippen. Block AI (ADR-0063) zieht
+    # `pydantic-ai` -> `logfire-api`, dessen `__init__.py` zur Laufzeit
+    # `from unittest.mock import MagicMock` macht (No-Op-Shim). Der
+    # research-worker crashte sonst mit `No module named 'unittest'`, sobald
+    # er einen echten Agent-Lauf startet (Prod-Befund 2026-06-13). `unittest`
+    # ist damit eine Runtime-Dep, kein reines Test-Modul.
     && rm -rf \
         /usr/local/lib/python3.13/idlelib \
         /usr/local/lib/python3.13/tkinter \
         /usr/local/lib/python3.13/turtledemo \
         /usr/local/lib/python3.13/ensurepip \
         /usr/local/lib/python3.13/pydoc_data \
-        /usr/local/lib/python3.13/unittest \
         /usr/local/lib/python3.13/test \
         /usr/local/lib/python3.13/lib2to3 \
         /usr/local/lib/python3.13/distutils \
