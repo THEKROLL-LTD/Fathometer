@@ -163,3 +163,125 @@
     </div>
   </form>
 </section>
+
+{# ── Upstream update check (Block AI-2, ADR-0063) ──────────────────────────
+   Zweites, eigenstaendiges Form im selben Tab. Postet auf einen eigenen
+   Endpoint (`llm_settings.update_upstream`) — die Provider-`update()` bleibt
+   unangetastet (kein Submit-Discriminator). Opt-in, Air-Gap-Default OFF.
+
+   Variablen (siehe app/views/llm_settings.py::show):
+     - `upstream_form` (UpstreamCheckSettingsForm)
+     - `upstream_has_search_key` (bool) — "set / not set"-Indikator
+     - `upstream_has_search_password` (bool)
+     - `upstream_default_research_model` (str) — App-Default als Placeholder
+
+   Sicherheit: kein `|safe`, alles unter Jinja-Autoescape. Secrets werden NIE
+   vorgefuellt (nur der gesetzt/nicht-gesetzt-Indikator).
+   Alpine: `enabled` blendet die Detail-Felder rein visuell ein/aus — die
+   Server-Validierung bleibt Hoheit. Kein Test-Probe-Button (bewusst). #}
+{% if upstream_form %}
+<section class="s-section">
+  <div class="s-section__head">
+    <h2 class="s-section__label">Upstream update check (optional)</h2>
+  </div>
+
+  <form method="post"
+        action="{{ url_for('llm_settings.update_upstream') }}"
+        x-data="{ enabled: {{ ('true' if upstream_form.upstream_check_enabled.data else 'false') }} }">
+    {{ upstream_form.csrf_token }}
+
+    <div class="s-card">
+      <p class="s-section__hint" style="margin-top: 0;">
+        Outbound, opt-in. When enabled, an agent searches the web for the
+        upstream component release that ships the fix. Keep this off in
+        air-gapped deployments — it is off by default.
+      </p>
+
+      <div class="s-fields-grid">
+        <div class="s-field s-field--span sd-upstream-toggle">
+          <label class="s-field__label" for="{{ upstream_form.upstream_check_enabled.id }}">
+            {{ upstream_form.upstream_check_enabled(**{"x-model": "enabled"}) }}
+            Enable upstream update search
+          </label>
+          <span class="s-field__hint">Master switch. Off keeps the feature fully dormant (no outbound calls).</span>
+          {% for err in upstream_form.upstream_check_enabled.errors %}
+            <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="sd-upstream-detail" x-show="enabled" x-cloak>
+        <hr class="s-card__divider" />
+        <div class="s-fields-grid">
+          <div class="s-field">
+            <label class="s-field__label" for="{{ upstream_form.upstream_search_backend.id }}">Search backend</label>
+            {{ upstream_form.upstream_search_backend(class="s-select") }}
+            <span class="s-field__hint">SearXNG is self-hosted; Tavily/Firecrawl/Serper are paid web-search APIs.</span>
+            {% for err in upstream_form.upstream_search_backend.errors %}
+              <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
+            {% endfor %}
+          </div>
+
+          <div class="s-field s-field--span">
+            <label class="s-field__label" for="{{ upstream_form.upstream_search_base_url.id }}">Search base URL</label>
+            {{ upstream_form.upstream_search_base_url(class="s-input s-input--mono", placeholder="https://searxng.internal") }}
+            <span class="s-field__hint">HTTPS or http://localhost / http://127.0.0.1. Required for SearXNG.</span>
+            {% for err in upstream_form.upstream_search_base_url.errors %}
+              <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
+            {% endfor %}
+          </div>
+
+          <div class="s-field">
+            <label class="s-field__label" for="{{ upstream_form.upstream_search_api_key.id }}">Search API key</label>
+            {{ upstream_form.upstream_search_api_key(class="s-input s-input--mono",
+                autocomplete="off",
+                placeholder="•••• set — leave empty to keep" if upstream_has_search_key else "API key (cleartext)") }}
+            <span class="s-field__hint">
+              {% if upstream_has_search_key %}Already set. Leave empty to keep the existing key.{% else %}Not set. Required for paid search APIs.{% endif %}
+            </span>
+            {% for err in upstream_form.upstream_search_api_key.errors %}
+              <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
+            {% endfor %}
+          </div>
+
+          <div class="s-field">
+            <label class="s-field__label" for="{{ upstream_form.upstream_search_username.id }}">Search username</label>
+            {{ upstream_form.upstream_search_username(class="s-input", autocomplete="off", placeholder="basic-auth user (optional)") }}
+            <span class="s-field__hint">Optional SearXNG basic-auth username.</span>
+            {% for err in upstream_form.upstream_search_username.errors %}
+              <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
+            {% endfor %}
+          </div>
+
+          <div class="s-field">
+            <label class="s-field__label" for="{{ upstream_form.upstream_search_password.id }}">Search password</label>
+            {{ upstream_form.upstream_search_password(class="s-input s-input--mono",
+                autocomplete="off",
+                placeholder="•••• set — leave empty to keep" if upstream_has_search_password else "basic-auth password (optional)") }}
+            <span class="s-field__hint">
+              {% if upstream_has_search_password %}Already set. Leave empty to keep the existing password.{% else %}Optional SearXNG basic-auth password.{% endif %}
+            </span>
+            {% for err in upstream_form.upstream_search_password.errors %}
+              <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
+            {% endfor %}
+          </div>
+
+          <div class="s-field s-field--span">
+            <label class="s-field__label" for="{{ upstream_form.llm_research_model.id }}">Research model</label>
+            {{ upstream_form.llm_research_model(**{"class": "s-input s-input--mono", "placeholder": upstream_default_research_model}) }}
+            <span class="s-field__hint">Model used by the research agent. Leave empty to use the built-in default ({{ upstream_default_research_model }}). A larger reasoning model improves hit rate.</span>
+            {% for err in upstream_form.llm_research_model.errors %}
+              <span class="s-field__hint" style="color: var(--status-restricted);">{{ err }}</span>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="s-actions">
+        <div class="s-actions__spacer"></div>
+        <button type="submit" class="s-btn s-btn--primary">Save</button>
+      </div>
+    </div>
+  </form>
+</section>
+{% endif %}

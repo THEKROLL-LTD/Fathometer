@@ -1,0 +1,143 @@
+{# Single-Source-Panel der agentischen Upstream-Update-Suche (Block AI-2, ADR-0063, P2).
+
+   EIN Partial fuer drei Render-Pfade (HTMX-OOB-Single-Source-Pattern, CLAUDE.md):
+     (a) Initial-Render in der `escalate-upstream`-Card (_action_needed_section.html),
+     (b) POST-`enqueue`-Response (app/api/upstream_check.py::enqueue),
+     (c) GET-`poll`-Response (app/api/upstream_check.py::poll).
+
+   Das aeussere Element traegt eine feste ID
+   `upstream-check-<sid>-<gid>-panel`; alle drei Pfade rendern dieses Markup.
+   Der Swap erfolgt via `hx-swap="outerHTML"` auf das Panel selbst — KEIN
+   `hx-swap-oob` noetig (das Panel ersetzt sich an der eigenen Position).
+
+   Poll-Selbst-Stopp: NUR der `running`-State traegt das HTMX-Poll-Attribut
+   (`hx-get` + `hx-trigger="load delay:3s"`). Sobald der Poll-Response `done`/
+   `cached`/`idle` rendert, fehlt das Attribut -> der Poll stoppt von selbst.
+
+   Variablen-Vertrag (app/api/upstream_check.py::_render_panel):
+     - `state` : str — disabled | idle | running | done | cached
+     - `row`   : UpstreamCheckResult | None — Verdikt-Felder (UNTRUSTED Web-/
+                 LLM-Output: delivery, fixed_build_release,
+                 fixed_build_release_date, latest_release_component_version,
+                 operator_action, confidence, reasoning, error, sources_used).
+     - `seed`  : ResearchSeed | None — Anzeige-Kontext (artifact_module,
+                 vulnerable_component, fixing_component_version, cve).
+     - `checked_age` : timedelta | None
+     - `is_fresh`    : bool
+     - `sid` / `gid` : ints fuer url_for
+     - `csrf_form`   : CSRFOnlyForm (CSRF-Token fuer den POST-(Re-)Check-Button)
+
+   Sicherheit (Pflicht): row.operator_action / .reasoning / .fixed_build_release
+   / Versionen sind LLM-/Web-Output -> Jinja-Autoescape, NIEMALS `|safe`.
+   row.sources_used wird nur als Link gerendert, wenn die URL mit https:// oder
+   http:// beginnt (sonst als Text); href ist autoescaped, rel="noopener
+   noreferrer", target="_blank". Keine rohe HTML-Einbettung.
+#}
+{%- set panel_id = "upstream-check-%d-%d-panel" % (sid, gid) -%}
+<div id="{{ panel_id }}"
+     class="sd-upstream"
+     data-test="upstream-check-panel"
+     data-state="{{ state }}"
+     {% if state == 'running' %}hx-get="{{ url_for('upstream_check.poll', sid=sid, gid=gid) }}"
+     hx-trigger="load delay:3s"
+     hx-swap="outerHTML"{% endif %}>
+
+  {% if state == 'disabled' %}
+    {# Feature nicht konfiguriert -> dezenter Hinweis, kein Action, kein Poll. #}
+    <span class="sd-upstream__hint" data-test="upstream-check-disabled">
+      Upstream update search is off.
+      <a class="sd-upstream__link" href="{{ url_for('llm_settings.show') }}">Configure in Settings</a>
+    </span>
+
+  {% elif state == 'idle' %}
+    {# Researchbares Finding, noch kein Verdikt -> Check anstossen. Kein Poll. #}
+    <button type="button"
+            class="sd-upstream__btn"
+            data-test="upstream-check-start"
+            hx-post="{{ url_for('upstream_check.enqueue', sid=sid, gid=gid) }}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'
+            hx-target="#{{ panel_id }}"
+            hx-swap="outerHTML">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+           stroke-width="1.6" stroke-linecap="square" aria-hidden="true">
+        <circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" />
+      </svg>
+      <span>Check for upstream fix</span>
+    </button>
+
+  {% elif state == 'running' %}
+    {# Job queued/running. NUR hier traegt das aeussere Element das Poll-
+       Attribut (siehe oben). Button disabled. #}
+    <span class="sd-upstream__status" data-test="upstream-check-running" role="status">
+      <span class="sd-upstream__spinner" aria-hidden="true"></span>
+      <span>Checking upstream releases…</span>
+    </span>
+
+  {% else %}
+    {# done | cached -> Verdikt aus row. row kann (defensiv) None sein. #}
+    {%- set verdict = "fixed_release_exists" if (row and row.delivery == "fixed_release_exists") else ("none_yet" if (row and row.delivery == "none_yet") else "error") -%}
+    <div class="sd-upstream__verdict"
+         data-test="upstream-check-verdict"
+         data-verdict="{{ verdict }}">
+
+      {% if row and row.error and verdict == 'error' %}
+        <div class="sd-upstream__line sd-upstream__line--muted">
+          Couldn't determine ({{ row.error }})
+        </div>
+      {% elif verdict == 'fixed_release_exists' %}
+        <div class="sd-upstream__line sd-upstream__line--ok">
+          Fixed release:
+          <span class="sd-upstream__release">{{ row.fixed_build_release or '—' }}</span>
+          {% if row.fixed_build_release_date %}
+            <span class="sd-upstream__date">({{ row.fixed_build_release_date }})</span>
+          {% endif %}
+        </div>
+        {% if row.operator_action %}
+          <div class="sd-upstream__line">{{ row.operator_action }}</div>
+        {% endif %}
+      {% elif verdict == 'none_yet' %}
+        <div class="sd-upstream__line sd-upstream__line--muted">
+          No fixed release yet
+          {% if row.latest_release_component_version %}
+            <span class="sd-upstream__release">(latest: {{ row.latest_release_component_version }})</span>
+          {% endif %}
+        </div>
+        {% if row.operator_action %}
+          <div class="sd-upstream__line">{{ row.operator_action }}</div>
+        {% endif %}
+      {% endif %}
+
+      {# Quellen-Links: nur http(s)-Schemes als Link, sonst als Text. #}
+      {% if row and row.sources_used %}
+        <div class="sd-upstream__sources" data-test="upstream-check-sources">
+          <span class="sd-upstream__sources-label">Sources:</span>
+          {% for src in row.sources_used %}
+            {%- set s = (src | string) | trim -%}
+            {% if s.startswith('https://') or s.startswith('http://') %}
+              <a class="sd-upstream__source-link"
+                 href="{{ s }}"
+                 target="_blank"
+                 rel="noopener noreferrer">{{ s }}</a>
+            {% else %}
+              <span class="sd-upstream__source-text">{{ s }}</span>
+            {% endif %}
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <div class="sd-upstream__meta">
+        <span class="sd-upstream__candidate" title="LLM/web candidate — verify before acting">candidate · verify</span>
+        {% if state == 'cached' and row and row.checked_at %}
+          <span class="sd-upstream__checked" data-test="upstream-check-age">checked {{ row.checked_at | relative_time }}</span>
+        {% endif %}
+        <button type="button"
+                class="sd-upstream__recheck"
+                data-test="upstream-check-recheck"
+                hx-post="{{ url_for('upstream_check.enqueue', sid=sid, gid=gid) }}?force=true"
+                hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'
+                hx-target="#{{ panel_id }}"
+                hx-swap="outerHTML">Re-check</button>
+      </div>
+    </div>
+  {% endif %}
+</div>

@@ -112,6 +112,26 @@
                     </a>
                   </td>
                 </tr>
+                {# Upstream-Update-Check-Panel — NUR in der escalate-upstream-Card
+                   und nur wenn das Feature konfiguriert ist (ADR-0063, P2.3).
+                   Eigene volle Sub-Zeile unter der Group-Row; das Panel-Partial
+                   ist Single-Source (Initial-Render == Poll/POST-Response). Andere
+                   Cards (patch/mitigate/act) bekommen keinen Button. #}
+                {% if card.id == 'escalate-upstream' and upstream_check_configured and entry.upstream_check %}
+                  <tr class="workflow-table__upstream-row" data-test="action-card-{{ card.id }}-upstream-row">
+                    <td class="workflow-table__upstream-cell" colspan="4">
+                      {% with state = entry.upstream_check.state,
+                              row = entry.upstream_check.row,
+                              seed = entry.upstream_check.seed,
+                              checked_age = entry.upstream_check.checked_age,
+                              is_fresh = entry.upstream_check.is_fresh,
+                              sid = server.id,
+                              gid = entry.group.id %}
+                        {% include "servers/_partials/upstream_check_panel.html" %}
+                      {% endwith %}
+                    </td>
+                  </tr>
+                {% endif %}
               {% endfor %}
             </tbody>
           </table>

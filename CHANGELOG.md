@@ -4,6 +4,40 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block AI-2 (ADR-0063): Agentische Upstream-Update-Suche — Operator-UI
+
+Macht das in AI-1 gebaute Backend operator-nutzbar: Konfiguration im
+Provider-Tab (kein psql mehr nötig) + „Check for upstream fix"-Button mit
+advisory-Panel auf der `ESCALATE · Upstream fix`-Card. Feature bleibt
+**default-off**, beratend, nie band-flippend. Quality-Gates grün:
+`ruff`/`ruff format`/`mypy app/`, Pure-Unit (`pytest`). reviewer + security-auditor
+(XSS-Fläche) grün. Live-Operator-Browser-Smoke steht beim User an.
+
+### Added
+
+- **Provider-Tab-Config** (`settings/llm_provider.html` + `UpstreamCheckSettingsForm`
+  + `update_upstream`-View): Enable-Toggle, Such-Backend (searxng/tavily/firecrawl/
+  serper), Base-URL, Fernet-verschlüsselter API-Key + optionale Basic-Auth,
+  `llm_research_model`. Secrets via bestehenden `encrypt_api_key`-Helper; Audit
+  `upstream_check.configured` (Secrets nur als Feldname). **Kein** Test-Probe.
+- **Upstream-Check-Routen** (`app/api/upstream_check.py`, neues Blueprint):
+  `POST /servers/<sid>/groups/<gid>/upstream-check` (enqueue, `@login_required`,
+  CSRF, `10/min`, `IntegrityError`→409) + `GET …` (Poll-Partial, `120/min`).
+  Worst-Upstream-Finding wird **server-seitig** aus `(sid,gid)` abgeleitet (kein
+  Client-`finding_id` — IDOR-Schutz), gemeinsamer Group-Guard.
+- **Single-Source-Panel** `servers/_partials/upstream_check_panel.html` (Initial-
+  Render + Poll + POST-Response, ID `upstream-check-<sid>-<gid>-panel`): States
+  idle/running/done/cached/disabled; HTMX-Poll-Attribut **nur** im `running`-State
+  (stoppt sich selbst). Verdict + Quellen escaped (kein `|safe`; non-`http(s)`-URLs
+  als Text statt `href`). „candidate · verify".
+- **Card-State-Lookup** (`upstream_check_state.derive_state`/`worst_upstream_finding`):
+  Initial-State pro escalate-upstream-Row ohne Sofort-Poll.
+
+### Changed
+
+- README: der „Agentic upstream check"-Bullet ist jetzt operator-wahr (UI vorhanden)
+  und wird mit AI-2 committet.
+
 ## [Unreleased] — Block AI-1 (ADR-0063): Agentische Upstream-Update-Suche — Backend
 
 **Optionale, operator-gated, beratende** agentische Suche, ob es für ein

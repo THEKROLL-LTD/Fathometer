@@ -399,6 +399,107 @@ class LlmSettingsForm(FlaskForm):
         self._validate_model_value(field, label="Chat model")
 
 
+# Such-Backend-Whitelist (ADR-0063 §Such-/Fetch-Backend). Single Source of Truth
+# fuer das ``upstream_search_backend``-SelectField — gespiegelt von
+# ``app.services.upstream_research.SEARCH_BACKENDS`` (dort als Tuple definiert;
+# hier als Form-Choices). Der leere Wert ist erlaubt, solange das Feature
+# disabled ist; das View setzt zusaetzlich eine Defense-in-Depth-Whitelist.
+UPSTREAM_SEARCH_BACKENDS: tuple[str, ...] = ("searxng", "tavily", "firecrawl", "serper")
+
+
+class UpstreamCheckSettingsForm(FlaskForm):
+    """Config-Form fuer die agentische Upstream-Update-Suche (Block AI-2, ADR-0063).
+
+    Eigenstaendige Form (kein Reuse von :class:`LlmSettingsForm`), weil sie ein
+    eigener Settings-Tab ist; das Provider-View-``update()`` instanziiert/
+    validiert sie getrennt. Felder spiegeln die ``Setting``-Spalten
+    (``upstream_*`` + ``llm_research_model``).
+
+    - ``upstream_check_enabled``: Master-Schalter (opt-in, Air-Gap-Default OFF).
+    - ``upstream_search_backend``: Whitelist ``searxng``/``tavily``/``firecrawl``/
+      ``serper``; leer erlaubt solange disabled (das View gated den scharfen
+      Konfig-Check via :func:`is_upstream_check_configured`).
+    - ``upstream_search_base_url``: gleiche Whitelist wie ``llm_base_url``
+      (``validate_base_url``); optional (SearXNG braucht sie, paid-APIs haben
+      Defaults — aber wir verlangen den expliziten Backend-Pick).
+    - ``upstream_search_api_key``: Klartext-Eingabe, wird Fernet-verschluesselt
+      persistiert; leer = bestehenden Wert behalten (Muster wie ``llm_api_key``).
+    - ``upstream_search_username``: optionale SearXNG-Basic-Auth-User (Klartext).
+    - ``upstream_search_password``: optional, Fernet-verschluesselt; leer =
+      bestehenden Wert behalten.
+    - ``llm_research_model``: optionales Modell (leer -> NULL ->
+      ``DEFAULT_RESEARCH_MODEL`` greift im Worker).
+    """
+
+    upstream_check_enabled = BooleanField(
+        "Enable upstream update search",
+        validators=[OptionalValidator()],
+    )
+    upstream_search_backend = SelectField(
+        "Search backend",
+        choices=[
+            ("", "— none —"),
+            ("searxng", "SearXNG (self-hosted)"),
+            ("tavily", "Tavily"),
+            ("firecrawl", "Firecrawl"),
+            ("serper", "Serper"),
+        ],
+        validators=[OptionalValidator()],
+    )
+    upstream_search_base_url = StringField(
+        "Search base URL",
+        validators=[OptionalValidator(), Length(max=512)],
+    )
+    upstream_search_api_key = PasswordField(
+        "Search API key (leave empty to keep the existing one)",
+        validators=[OptionalValidator(), Length(max=512)],
+    )
+    upstream_search_username = StringField(
+        "Search username (SearXNG basic-auth, optional)",
+        validators=[OptionalValidator(), Length(max=128)],
+    )
+    upstream_search_password = PasswordField(
+        "Search password (leave empty to keep the existing one)",
+        validators=[OptionalValidator(), Length(max=512)],
+    )
+    llm_research_model = StringField(
+        "Research model (leave empty for the built-in default)",
+        validators=[OptionalValidator(), Length(max=128)],
+    )
+
+    def validate_upstream_search_backend(self, field: SelectField) -> None:
+        """Whitelist-Check (Defense-in-Depth zusaetzlich zum SelectField).
+
+        Leer ist erlaubt (Feature disabled / unkonfiguriert). Ein nicht-leerer
+        Wert muss in der :data:`UPSTREAM_SEARCH_BACKENDS`-Whitelist liegen.
+        """
+        value = (field.data or "").strip()
+        if not value:
+            return
+        if value not in UPSTREAM_SEARCH_BACKENDS:
+            raise ValidationError("Unknown search backend.")
+
+    def validate_upstream_search_base_url(self, field: StringField) -> None:
+        """Gleiche Whitelist wie ``llm_base_url`` — aber leer ist erlaubt."""
+        from app.services.llm_client import validate_base_url as _vbu
+
+        value = (field.data or "").strip()
+        if not value:
+            return
+        try:
+            _vbu(value)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
+    def validate_llm_research_model(self, field: StringField) -> None:
+        """Druckbares ASCII (analog Reviewer-/Chat-Modell); leer ist erlaubt."""
+        value = (field.data or "").strip()
+        if not value:
+            return
+        if any(ord(ch) < 0x20 or ord(ch) > 0x7E for ch in value):
+            raise ValidationError("Only printable ASCII allowed.")
+
+
 class BulkActionForm(FlaskForm):
     """Container fuer die Checkbox-basierte Bulk-Auswahl im Server-Detail.
 
@@ -610,6 +711,7 @@ __all__ = [
     "SERVER_GROUP_NAME_REGEX",
     "TAG_COLOR_REGEX",
     "TAG_NAME_REGEX",
+    "UPSTREAM_SEARCH_BACKENDS",
     "AcknowledgeForm",
     "BulkActionForm",
     "CSRFOnlyForm",
@@ -633,4 +735,5 @@ __all__ = [
     "TagColorForm",
     "TagForm",
     "TagRenameForm",
+    "UpstreamCheckSettingsForm",
 ]

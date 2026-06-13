@@ -80,6 +80,13 @@ from app.services.severity_history import (
     severity_snapshots_for_server,
 )
 from app.services.trend import Tendency, tendency_from_counts
+from app.services.upstream_check_state import (
+    derive_state,
+    lookup_state_for_seeds,
+    worst_upstream_finding,
+)
+from app.services.upstream_research import is_upstream_check_configured
+from app.services.upstream_seed import build_research_seed
 from app.settings_service import get_settings_row
 
 log = structlog.get_logger(__name__)
@@ -654,6 +661,62 @@ def _build_action_sections(
     return result
 
 
+def _attach_upstream_check_states(
+    sess: Any, server_id: int, action_sections: list[dict[str, Any]]
+) -> bool:
+    """Haengt den initialen Upstream-Check-State an die ``escalate-upstream``-Card.
+
+    Block AI-2, ADR-0063 §UI/UX: damit P2 den Initial-State (idle/running/done/
+    cached/disabled) ohne sofortigen Poll rendern kann, wird pro Lane-Eintrag
+    der ``escalate-upstream``-Card die zugehoerige ``upstream_check_results``-
+    Zeile **batch-geladen** und als ``entry["upstream_check"]``
+    (:class:`UpstreamCheckState`) angehaengt.
+
+    Server-seitige Identitaet (kein Client-Input): das zu pruefende Finding ist
+    das Worst-Finding der ``upstream``-Lane der jeweiligen Group
+    (:func:`worst_upstream_finding` -> :func:`build_research_seed`). Der Card-
+    ``worst_finding`` ist nur eine Projektion und nicht ausreichend fuer den
+    Seed — daher ein eigener (gebuendelter) Lookup, NUR fuer diese eine Card
+    (kein N+1 ueber alle Cards).
+
+    Liefert das ``configured``-Flag (``is_upstream_check_configured``) zurueck —
+    P2 zeigt den Button nur, wenn konfiguriert. Mutiert ``action_sections``
+    in-place (haengt ``upstream_check`` an jeden Group-Eintrag der Card).
+    """
+    upstream_card = next((s for s in action_sections if s.get("id") == "escalate-upstream"), None)
+    configured = is_upstream_check_configured(get_settings_row(sess))
+    if upstream_card is None:
+        return configured
+
+    # Pro Group-Eintrag der Card: Worst-Upstream-Finding -> Seed (server-seitig).
+    # ``key`` ist die Group-ID — eine Group erscheint in dieser Card hoechstens
+    # einmal (die upstream-Lane ist je Group eindeutig).
+    seeds: list[tuple[int, Any]] = []
+    seed_by_gid: dict[int, Any] = {}
+    for entry in upstream_card["groups"]:
+        gid = int(entry["group"].id)
+        if gid in seed_by_gid:
+            continue
+        finding = worst_upstream_finding(sess, server_id, gid)
+        seed = build_research_seed(finding) if finding is not None else None
+        seed_by_gid[gid] = seed
+        if seed is not None:
+            seeds.append((gid, seed))
+
+    states = lookup_state_for_seeds(sess, seeds, configured=configured)
+    for entry in upstream_card["groups"]:
+        gid = int(entry["group"].id)
+        seed = seed_by_gid.get(gid)
+        if seed is None:
+            # Kein researchbares Finding -> idle (bzw. disabled wenn unkonfig.).
+            entry["upstream_check"] = derive_state(None, None, configured=configured)
+        else:
+            entry["upstream_check"] = states.get(
+                gid, derive_state(None, seed, configured=configured)
+            )
+    return configured
+
+
 # Sechs Top-Level-Slots fuer den Risk-Band-Accordion in der Triage-Queue
 # (ADR-0038 §6). Reihenfolge per Operator-Dringlichkeit; Pending-Grouping-
 # Block haengt unter PENDING. Spec verlangt sechs Slots ohne "unknown" —
@@ -961,6 +1024,9 @@ def show(server_id: int) -> Any:
     # Host-Snapshot. Wenn die View nicht im `list`-Mode laeuft, sind die
     # `application_groups` leer und die Sektion bleibt unsichtbar.
     action_sections = _build_action_sections(application_groups)
+    # Block AI-2 (ADR-0063): Initial-State der escalate-upstream-Card ohne
+    # Extra-Roundtrip an die Card-Eintraege haengen (P2 rendert ihn direkt).
+    upstream_check_configured = _attach_upstream_check_states(sess, server.id, action_sections)
 
     quick_counts = _quick_counts_for_server(sess, server.id)
     action_required = {
@@ -988,6 +1054,7 @@ def show(server_id: int) -> Any:
         total_findings_count=quick_counts["total_all"],
         action_required=action_required,
         action_sections=action_sections,
+        upstream_check_configured=upstream_check_configured,
         **section_ctx,
     )
 

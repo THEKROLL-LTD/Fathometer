@@ -1889,6 +1889,156 @@
 }
 .sd-ask-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; opacity: 1; }
 
+/* ════════════════════════════════════════════════════════════════════════
+   Upstream update check panel (Block AI-2, ADR-0063, P2.4)
+   Single-Source-Panel-Markup (servers/_partials/upstream_check_panel.html).
+   Eigene Sub-Zeile unter der Group-Row der escalate-upstream-Card. Token-only;
+   Spinner via CSS-Animation (kein JS). Das Accent-Alpha-Overlay spiegelt den
+   bestehenden sd-ask-btn-Stand (kein exakter Token).
+   ════════════════════════════════════════════════════════════════════════ */
+.workflow-table__upstream-row td { background: var(--surface-raised); }
+.workflow-table tr.workflow-table__upstream-row:hover td { background: var(--surface-raised); }
+.workflow-table__upstream-cell {
+  padding-top: 8px;
+  padding-bottom: 12px;
+}
+
+.sd-upstream {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.sd-upstream__hint { color: var(--text-tertiary); }
+.sd-upstream__link { color: var(--accent); text-decoration: none; }
+.sd-upstream__link:hover { text-decoration: underline; }
+
+/* Idle: "Check for upstream fix"-Button. */
+.sd-upstream__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  padding: 5px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-drift),
+              border-color var(--dur-hover) var(--ease-drift),
+              background var(--dur-hover) var(--ease-drift);
+}
+.sd-upstream__btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  /* TODO(token): Accent-Alpha-Overlay ohne exakten Token (vgl. sd-ask-btn). */
+  background: rgba(0, 229, 255, 0.06);
+}
+.sd-upstream__btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/* Running: Status-Zeile + Spinner. */
+.sd-upstream__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+.sd-upstream__spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--border-visible);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: sd-upstream-spin 700ms linear infinite;
+}
+@keyframes sd-upstream-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Done / cached: Verdikt. */
+.sd-upstream__verdict { display: flex; flex-direction: column; gap: 5px; }
+.sd-upstream__line { color: var(--text-secondary); }
+.sd-upstream__line--ok { color: var(--text-primary); }
+.sd-upstream__line--muted { color: var(--text-tertiary); }
+.sd-upstream__release {
+  color: var(--status-operational);
+  font-weight: 400;
+}
+.sd-upstream__date { color: var(--text-tertiary); }
+
+.sd-upstream__sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.sd-upstream__sources-label {
+  color: var(--text-tertiary);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.sd-upstream__source-link {
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+.sd-upstream__source-link:hover { text-decoration: underline; }
+.sd-upstream__source-text { color: var(--text-tertiary); word-break: break-all; }
+
+.sd-upstream__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+/* "candidate · verify"-Label — signalisiert advisory/unverified Web-/LLM-Output. */
+.sd-upstream__candidate {
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--status-degraded);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+.sd-upstream__checked { color: var(--text-tertiary); font-size: 10px; }
+.sd-upstream__recheck {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-drift),
+              border-color var(--dur-hover) var(--ease-drift);
+}
+.sd-upstream__recheck:hover { color: var(--accent); border-color: var(--accent); }
+.sd-upstream__recheck:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/* Settings-Detail-Block der Upstream-Config — wiederverwendete s-*-Klassen; nur
+   das Show/Hide-Container braucht einen Hook. */
+.sd-upstream-detail { margin-top: 4px; }
+.sd-upstream-toggle .s-field__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
 /* ── Full-page chat sub-view (mirrors the Settings sub-view) ───────────── */
 /* Composer-Dock an den Viewport-Boden pinnen: `.main` (#detail-pane) ist ein
    Grid-Item mit definiter Hoehe und `overflow:auto`. Im HX-Pfad liegt der

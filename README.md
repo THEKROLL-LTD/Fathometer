@@ -27,6 +27,19 @@
   to wade through by hand.
 - **Explained downgrades** — every "not exploitable here" verdict states which
   condition is missing, so you can check the call.
+- **Real patches, not phantom ones** — Fathometer tells apart a fix you can
+  *actually apply* (`dnf`/`apt upgrade` will pull it) from one that only exists
+  upstream inside a statically-linked binary (Go, Rust, Java) and needs a vendor
+  rebuild. It resolves each binary to its owning package and checks your host's
+  repos, so it never tells you to "apply the update" for a patch your package
+  manager doesn't have.
+- **Agentic upstream check (opt-in)** — for the upstream-only and hand-rolled
+  (Ansible, GitHub-release) cases, press one button and an agent goes and checks
+  the project itself: it searches the latest releases, reads the build manifest
+  (e.g. the `go.mod` toolchain), and tells you in one clear answer whether a fixed
+  build exists yet — and if so, which version. The manual changelog-and-`go.mod`
+  digging, done for you. Bring your own LLM and search backend (self-hosted
+  SearXNG, Tavily, Firecrawl, …); runs only when you ask, never in the scan path.
 - **Ask the AI in context** — a per-group assistant (the *Help* button on any
   Server-detail group) answers questions about that exact host and package
   group: risk, patch order, exploit status, whether a defer is worth it. It's
