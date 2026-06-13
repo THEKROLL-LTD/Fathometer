@@ -13,7 +13,9 @@
                                        Pass-2 pro Fix-Lane — eine Group kann
                                        mit beiden Lanes erscheinen, jeweils
                                        eigenes Lane-Verdikt + Lane-Worst).
-                                       `fix_lane` ist "patch" | "mitigate".
+                                       `fix_lane` ist "patch" | "upstream" |
+                                       "mitigate" (ADR-0061: lang-pkgs-Fix
+                                       nicht host-applizierbar).
                                        `worst_finding` ist das LIVE-Worst aus
                                        den OFFENEN Findings der Lane
                                        (TICKET-010 / ADR-0052) — `evaluation.
@@ -73,7 +75,7 @@
                   <td class="workflow-table__group">
                     <a href="#group-{{ entry.group.id }}">{{ entry.group.label }}</a>
                     {%- if entry.fix_lane %} <span class="workflow-table__lane-tag"
-                          data-test="action-card-{{ card.id }}-lane">{% if entry.fix_lane == 'patch' %}patch{% else %}no patch{% endif %}</span>{% endif -%}
+                          data-test="action-card-{{ card.id }}-lane">{% if entry.fix_lane == 'patch' %}patch{% elif entry.fix_lane == 'upstream' %}upstream{% else %}no patch{% endif %}</span>{% endif -%}
                   </td>
                   <td class="workflow-table__cve">
                     {% if entry.worst_finding %}<a class="workflow-table__cve-link"

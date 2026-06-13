@@ -34,9 +34,82 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any, Literal
 
-from app.models import Finding, Server, Severity
+from sqlalchemy import case
+
+from app.models import Finding, FindingClass, Server, Severity
 from app.services.severity_resolver import _SEVERITY_RANK, max_severity_across_providers
+
+# ---------------------------------------------------------------------------
+# Fix-Lane — Single-Source-Ableitung (ADR-0061, erweitert ADR-0053)
+# ---------------------------------------------------------------------------
+
+#: Die drei Fix-Lanes (ADR-0061; war zwei in ADR-0053). Die Lane ist die
+#: deterministische Remediation-Achse einer ``(Group, Server)``-Eval:
+#:
+#: * ``patch``    — host-applizierbarer Fix (``has_fix`` AND ``os-pkgs``):
+#:                  ``dnf/apt upgrade`` schliesst die Luecke.
+#: * ``upstream`` — Fix existiert, ist aber NICHT host-applizierbar
+#:                  (``has_fix`` AND ``lang-pkgs``/``other``): die fixierte
+#:                  Version ist ein Dependency-/Toolchain-Stand, der einen
+#:                  Upstream-Rebuild braucht, kein Paketmanager-Update.
+#: * ``mitigate`` — kein Fix verfuegbar (``not has_fix``).
+FixLane = Literal["patch", "upstream", "mitigate"]
+FIX_LANES: tuple[FixLane, ...] = ("patch", "upstream", "mitigate")
+
+
+def fix_lane_for(finding_class: FindingClass | str, has_fix: object) -> FixLane:
+    """Single-Source-Ableitung der Fix-Lane (ADR-0061 §Entscheidung).
+
+    Wahrheitstabelle:
+
+    * ``not has_fix`` -> ``mitigate`` (unabhaengig von der Finding-Klasse).
+    * ``has_fix`` AND ``os-pkgs`` -> ``patch`` (host-applizierbar).
+    * ``has_fix`` AND ``lang-pkgs``/``other`` -> ``upstream`` (Fix existiert,
+      aber nicht per Host-Paketmanager applizierbar; ``other`` faellt
+      konservativ nach ``upstream``).
+
+    ``finding_class`` kann ein :class:`~app.models.FindingClass`-StrEnum ODER
+    ein roher ``str`` sein — der Vergleich gegen den String-Wert ``"os-pkgs"``
+    deckt beide ab (StrEnum vergleicht gleich mit seinem Wert). ``has_fix``
+    wird als ``bool(...)`` behandelt (leerer String / ``None`` -> ``False``).
+
+    Spiegelt :func:`fix_lane_sql_case` exakt — die Python- und die SQL-
+    Ableitung MUESSEN dieselbe Wahrheitstabelle liefern (Drift-Vermeidung,
+    ADR-0061 §"Zentrale Ableitung statt verstreuter CASE").
+    """
+    if not bool(has_fix):
+        return "mitigate"
+    if str(finding_class) == "os-pkgs":
+        return "patch"
+    return "upstream"
+
+
+def fix_lane_sql_case(finding_class_col: Any, has_fix_col: Any) -> Any:
+    """SQL-Spiegel von :func:`fix_lane_for` als SQLAlchemy-``case``.
+
+    Reihenfolge spiegelt die Python-Wahrheitstabelle exakt:
+
+    1. ``NOT has_fix`` -> ``mitigate``.
+    2. ``finding_class == 'os-pkgs'`` -> ``patch``.
+    3. sonst (``lang-pkgs``/``other`` mit Fix) -> ``upstream``.
+
+    Wird in der Inheritance (Lane-Join), im Server-Detail-Aggregat
+    (``GROUP BY``/``DISTINCT ON``) und ueberall verwendet, wo die Lane in SQL
+    abgeleitet werden muss — KEINE Re-Implementierung der Klassen-Logik pro
+    Call-Site (ADR-0061 §"Zentrale Ableitung").
+
+    Mypy-Hinweis: Spalten-Argumente sind ``InstrumentedAttribute[...]``, der
+    Rueckgabewert ein ``Case``; beide teilen den ``ColumnElement``-Bound, mypy
+    inferiert die Co-Variance hier aber nicht — daher bewusst ``Any``
+    (gleiche Konvention wie ``findings_query._severity_rank_expr``).
+    """
+    return case(
+        (~has_fix_col, "mitigate"),
+        (finding_class_col == "os-pkgs", "patch"),
+        else_="upstream",
+    )
 
 
 class RiskBand(enum.StrEnum):
@@ -303,11 +376,15 @@ def _truncate(reason: str) -> str:
 __all__ = [
     "ACTION_REQUIRED_MAP",
     "EPSS_PENDING_THRESHOLD",
+    "FIX_LANES",
     "RISK_BAND_SORT_RANK",
     "VENDOR_SEVERITY_INT_MAP",
     "ActionRequired",
+    "FixLane",
     "RiskBand",
     "RiskEvaluation",
+    "fix_lane_for",
+    "fix_lane_sql_case",
     "no_band_values",
     "normalize_vendor_status",
     "pretriage",

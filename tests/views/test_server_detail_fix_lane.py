@@ -75,10 +75,11 @@ def _eval_row(
     )
 
 
-def _worst_row(group_id: int, has_fix: bool, finding_id: int) -> SimpleNamespace:
+def _worst_row(group_id: int, fix_lane: str, finding_id: int) -> SimpleNamespace:
+    # ADR-0061: Query (4) projiziert fix_lane direkt (Lane-CASE), nicht has_fix.
     return _row(
         application_group_id=group_id,
-        has_fix=has_fix,
+        fix_lane=fix_lane,
         id=finding_id,
         identifier_key=f"CVE-2026-{finding_id}",
         package_name="pkg",
@@ -86,11 +87,11 @@ def _worst_row(group_id: int, has_fix: bool, finding_id: int) -> SimpleNamespace
     )
 
 
-def _open_row(group_id: int, has_fix: bool, finding_id: int) -> SimpleNamespace:
-    """Query-(5)-Row (Lane-OPEN-Set-Projektion, TICKET-014)."""
+def _open_row(group_id: int, fix_lane: str, finding_id: int) -> SimpleNamespace:
+    """Query-(5)-Row (Lane-OPEN-Set-Projektion, TICKET-014; ADR-0061: fix_lane)."""
     return _row(
         application_group_id=group_id,
-        has_fix=has_fix,
+        fix_lane=fix_lane,
         id=finding_id,
         identifier_key=f"CVE-2026-{finding_id}",
         package_purl="",
@@ -109,10 +110,10 @@ def _fp(open_rows: list[Any]) -> str:
 def test_mixed_group_yields_two_lanes_patch_first() -> None:
     """Eine Group mit patch- und mitigate-Findings liefert zwei Lane-
     Eintraege, patch zuerst; Lane-Counts korrekt, Group-Total = Summe."""
-    counts_rows: list[Any] = [(10, True, 4), (10, False, 3)]
+    counts_rows: list[Any] = [(10, "patch", 4), (10, "mitigate", 3)]
     group_rows = [_group_row(10, "kernel")]
-    patch_open = [_open_row(10, True, 100)]
-    mitigate_open = [_open_row(10, False, 200)]
+    patch_open = [_open_row(10, "patch", 100)]
+    mitigate_open = [_open_row(10, "mitigate", 200)]
     eval_rows = [
         _eval_row(
             10, "patch", "escalate", "patch", worst_finding_id=100, fingerprint=_fp(patch_open)
@@ -122,8 +123,8 @@ def test_mixed_group_yields_two_lanes_patch_first() -> None:
         ),
     ]
     worst_rows = [
-        _worst_row(10, has_fix=True, finding_id=100),
-        _worst_row(10, has_fix=False, finding_id=200),
+        _worst_row(10, "patch", 100),
+        _worst_row(10, "mitigate", 200),
     ]
     open_rows = patch_open + mitigate_open
     sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows, open_rows])
@@ -150,11 +151,11 @@ def test_mixed_group_yields_two_lanes_patch_first() -> None:
 
 def test_pure_patch_group_has_single_patch_lane() -> None:
     """Reine patch-Group (nur has_fix=True) hat genau eine patch-Lane."""
-    counts_rows: list[Any] = [(10, True, 2)]
+    counts_rows: list[Any] = [(10, "patch", 2)]
     group_rows = [_group_row(10, "openssl")]
-    open_rows = [_open_row(10, True, 100)]
+    open_rows = [_open_row(10, "patch", 100)]
     eval_rows = [_eval_row(10, "patch", "act", "patch", fingerprint=_fp(open_rows))]
-    worst_rows = [_worst_row(10, has_fix=True, finding_id=100)]
+    worst_rows = [_worst_row(10, "patch", 100)]
     sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows, open_rows])
     result = _load_application_groups_for_server(sess, 1)
 
@@ -168,10 +169,10 @@ def test_lane_worst_and_drift_are_per_lane() -> None:
     auf ein nicht mehr offenes Finding (999 ∉ {100}) -> Drift; die
     mitigate-Lane ist in-sync (Fingerprint stimmt, worst offen) -> kein Drift.
     Die Anzeige-Spalte zeigt unabhaengig davon den Triage-Live-Worst."""
-    counts_rows: list[Any] = [(10, True, 2), (10, False, 1)]
+    counts_rows: list[Any] = [(10, "patch", 2), (10, "mitigate", 1)]
     group_rows = [_group_row(10, "mixed")]
-    patch_open = [_open_row(10, True, 100)]
-    mitigate_open = [_open_row(10, False, 200)]
+    patch_open = [_open_row(10, "patch", 100)]
+    mitigate_open = [_open_row(10, "mitigate", 200)]
     eval_rows = [
         _eval_row(
             10, "patch", "escalate", "patch", worst_finding_id=999, fingerprint=_fp(patch_open)
@@ -186,8 +187,8 @@ def test_lane_worst_and_drift_are_per_lane() -> None:
         ),
     ]
     worst_rows = [
-        _worst_row(10, has_fix=True, finding_id=100),
-        _worst_row(10, has_fix=False, finding_id=200),
+        _worst_row(10, "patch", 100),
+        _worst_row(10, "mitigate", 200),
     ]
     open_rows = patch_open + mitigate_open
     sess = _FakeSession([counts_rows, group_rows, eval_rows, worst_rows, open_rows])
@@ -203,9 +204,9 @@ def test_group_sort_uses_max_band_over_lanes() -> None:
     deren mitigate-Lane escalate ist steht ueber einer reinen act-Group,
     auch wenn ihre patch-Lane nur monitor ist."""
     counts_rows: list[Any] = [
-        (10, True, 1),
-        (10, False, 1),
-        (20, True, 1),
+        (10, "patch", 1),
+        (10, "mitigate", 1),
+        (20, "patch", 1),
     ]
     group_rows = [_group_row(10, "mixed-escalate"), _group_row(20, "pure-act")]
     eval_rows = [
@@ -225,7 +226,7 @@ def test_lane_without_eval_counts_as_pending_for_sort() -> None:
     eine Group mit unbewerteter Lane steht ueber einer reinen act-Group
     (PENDING-Rank 40 < act-Rank 60? — PENDING ist niedriger, also act zuerst).
     """
-    counts_rows: list[Any] = [(10, True, 1), (20, True, 1)]
+    counts_rows: list[Any] = [(10, "patch", 1), (20, "patch", 1)]
     group_rows = [_group_row(10, "pending-lane"), _group_row(20, "act-lane")]
     eval_rows = [_eval_row(20, "patch", "act", "patch")]
     worst_rows: list[Any] = []
@@ -270,7 +271,7 @@ def _lane(
         "fix_lane": fix_lane,
         "evaluation": _eval_row(0, fix_lane, risk_band, action_type),
         "count": count,
-        "worst_finding": _worst_row(0, fix_lane == "patch", worst_id),
+        "worst_finding": _worst_row(0, fix_lane, worst_id),
         "worst_finding_drift": False,
     }
 
@@ -412,3 +413,93 @@ def test_lane_without_evaluation_skipped() -> None:
         }
     ]
     assert _build_action_sections(groups) == []
+
+
+# ---------------------------------------------------------------------------
+# ADR-0061: dritte Lane ``upstream`` — escalate-upstream-Card-Diskriminierung
+# ---------------------------------------------------------------------------
+
+
+def test_escalate_upstream_lane_routes_to_upstream_card_not_mitigate() -> None:
+    """ADR-0061: ein ``fix_lane="upstream"``-Eintrag mit risk_band=escalate
+    (action_type=mitigate, abgeleitet) landet in der ``escalate-upstream``-Card,
+    NICHT in ``escalate-mitigate`` — obwohl beide den action_type ``mitigate``
+    teilen, diskriminiert die Spec ueber ``fix_lane``."""
+    groups = [
+        _group_entry(
+            10,
+            "go-toolchain",
+            "os_package",
+            [_lane("upstream", "escalate", "mitigate")],
+        )
+    ]
+    cards = _cards_by_id(groups)
+    assert "escalate-upstream" in cards
+    assert "escalate-mitigate" not in cards
+    upstream_entries = cards["escalate-upstream"]["groups"]
+    assert [e["group"].label for e in upstream_entries] == ["go-toolchain"]
+    assert [e["fix_lane"] for e in upstream_entries] == ["upstream"]
+
+
+def test_escalate_mitigate_lane_does_not_leak_into_upstream_card() -> None:
+    """Umkehrung: ein echter ``fix_lane="mitigate"``-Eintrag (escalate+mitigate)
+    landet in ``escalate-mitigate``, NICHT in ``escalate-upstream``."""
+    groups = [
+        _group_entry(
+            10,
+            "no-fix-lib",
+            "os_package",
+            [_lane("mitigate", "escalate", "mitigate")],
+        )
+    ]
+    cards = _cards_by_id(groups)
+    assert "escalate-mitigate" in cards
+    assert "escalate-upstream" not in cards
+    mitigate_entries = cards["escalate-mitigate"]["groups"]
+    assert [e["fix_lane"] for e in mitigate_entries] == ["mitigate"]
+
+
+def test_group_with_patch_and_upstream_lanes_appears_in_two_cards() -> None:
+    """Eine Group mit BEIDEN Lanes (escalate-patch + escalate-upstream)
+    erscheint in zwei Cards: distro-patch UND upstream — je mit dem passenden
+    Lane-Eintrag."""
+    groups = [
+        _group_entry(
+            10,
+            "mixed-stack",
+            "os_package",
+            [
+                _lane("patch", "escalate", "patch"),
+                _lane("upstream", "escalate", "mitigate"),
+            ],
+        )
+    ]
+    cards = _cards_by_id(groups)
+    assert "escalate-distro-patch" in cards
+    assert "escalate-upstream" in cards
+    assert "escalate-mitigate" not in cards
+    assert [e["fix_lane"] for e in cards["escalate-distro-patch"]["groups"]] == ["patch"]
+    assert [e["fix_lane"] for e in cards["escalate-upstream"]["groups"]] == ["upstream"]
+
+
+def test_cve_2026_42504_upstream_escalate_does_not_emit_app_update_card() -> None:
+    """CVE-2026-42504-Regression auf Card-Ebene: ein upstream+escalate-Eintrag
+    (gobinary/stdlib-Fix, nicht host-applizierbar) erzeugt KEINE
+    ``act-app-update``/``escalate-app-update``-Card — er gehoert ausschliesslich
+    in die ``escalate-upstream``-Card. Vor ADR-0061 waere ein solcher Fix
+    faelschlich als host-applizierbarer Patch (app-update/distro-patch)
+    gerendert worden."""
+    groups = [
+        _group_entry(
+            10,
+            "tailscaled",
+            "application_bundle",
+            [_lane("upstream", "escalate", "mitigate")],
+        )
+    ]
+    cards = _cards_by_id(groups)
+    assert "escalate-upstream" in cards
+    assert "escalate-app-update" not in cards
+    assert "act-app-update" not in cards
+    assert "escalate-distro-patch" not in cards
+    assert [e["fix_lane"] for e in cards["escalate-upstream"]["groups"]] == ["upstream"]

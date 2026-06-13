@@ -4,6 +4,46 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block AG (ADR-0061): Fix-Ownership — `upstream`-Lane für lang-pkgs-Fixes
+
+lang-pkgs-Fixes (gobinary/jar/node — z. B. die in `tailscaled` einkompilierte
+Go-stdlib, CVE-2026-42504) werden nicht mehr fälschlich als host-applizierbarer
+Patch behauptet. Eine dritte Fix-Lane **`upstream`** trennt **Fakt** (ein Fix
+existiert) von **Applizierbarkeit** (der Operator kann ihn per Paketmanager
+einspielen) — deterministisch aus `finding_class`, kein LLM-Urteil, kein
+Agent-/Outbound-Change. Quality-Gates grün: `ruff`/`ruff format`/`mypy app/`,
+Pure-Unit (`pytest`). Alembic-Roundtrip `0025` und Operator-Browser-Smoke
+stehen beim User an.
+
+### Changed
+
+- **Fix-Lane-Partition dreiteilig** (ADR-0061): `fix_lane ∈ {patch, upstream,
+  mitigate}`. Neue Single-Source `risk_engine.fix_lane_for(finding_class,
+  has_fix)` + spiegelnder SQL-`case` (`fix_lane_sql_case`) lösen die bisher
+  verstreuten `fixed_version`/`has_fix`-Ableitungen ab (`pass2_input_selection`,
+  `finding_group_inheritance`, `server_detail`). `has_fix & os-pkgs → patch`,
+  `has_fix & lang-pkgs/other → upstream`, `not has_fix → mitigate`.
+- **`action_type`-Ableitung** um die `upstream`-Zeilen ergänzt (escalate →
+  `mitigate`, monitor → `watch`, noise → `none`); kein eigener `action_type`,
+  die Lane trägt die Upstream-Semantik. **`act` ist jetzt auch in der
+  `upstream`-Lane verboten** (Validator + Lane-Prompt).
+- **Pass-2-Cache invalidiert** (`PASS2_PROMPT_VERSION` 3 → 4) wegen der neuen
+  Lane-Prompt-Semantik.
+- **Server-Detail-Loader** bucketet Lanes jetzt über den abgeleiteten
+  `fix_lane`-Ausdruck (nicht mehr nur `has_fix`) — eine Group kann
+  os-pkgs-Patch- **und** lang-pkgs-Upstream-Findings tragen (beide `has_fix`).
+
+### Added
+
+- **Migration `0025_upstream_fix_lane`** (`down_revision=0024`): CHECK
+  `ck_app_group_evals_fix_lane` → `IN ('patch','mitigate','upstream')`,
+  Drop-&-Rebuild der Eval-Rows (organischer Refill beim nächsten Scan).
+- **Card „ESCALATE · Upstream fix — mitigate until rebuild"** in den
+  Operator-Workflows; die zwei escalate-Cards mit abgeleitetem
+  `action_type=mitigate` werden über `fix_lane` diskriminiert. Drei-Wege-Lane-
+  Label (patch / upstream / no patch) in Workflow-Tabelle und Group-Card; die
+  Fix-Version bleibt sichtbar.
+
 ## [Unreleased] — Block AF (ADR-0057): Getrennte Modelle für Reviewer und Chat
 
 Das bisher geteilte `Setting.llm_model` wird in **zwei** Felder getrennt:

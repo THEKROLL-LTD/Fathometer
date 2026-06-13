@@ -184,3 +184,45 @@ def test_validate_pass2_accepts_non_act_bands_in_mitigate_lane(band: str) -> Non
     }
     result = reviewer._validate_pass2_response(payload, [(_g(), [_f(1)])], fix_lane="mitigate")
     assert result.evaluations[0].risk_band == band
+
+
+# ---------------------------------------------------------------------------
+# ADR-0061: ``upstream`` ist (wie ``mitigate``) eine no-host-patch-Lane —
+# ``act`` (patch-only) muss auch hier abgelehnt werden.
+# ---------------------------------------------------------------------------
+
+
+def test_validate_pass2_rejects_act_in_upstream_lane() -> None:
+    """ADR-0061: ``act`` ist patch-only — im upstream-Call (Fix existiert, ist
+    aber nicht host-applizierbar) → Reject, analog zur mitigate-Lane."""
+    reviewer = LLMRiskReviewer(client=_StubClient())  # type: ignore[arg-type]
+    payload = {
+        "evaluations": [
+            {
+                "group_label": "openssl",
+                "risk_band": "act",
+                "worst_finding_id": None,
+                "reason": "x",
+            }
+        ]
+    }
+    with pytest.raises(LLMInvalidResponseError, match="act"):
+        reviewer._validate_pass2_response(payload, [(_g(), [_f(1)])], fix_lane="upstream")
+
+
+@pytest.mark.parametrize("band", ["escalate", "monitor", "noise"])
+def test_validate_pass2_accepts_non_act_bands_in_upstream_lane(band: str) -> None:
+    """ADR-0061: upstream-Lane erlaubt escalate/monitor/noise (alles ausser act)."""
+    reviewer = LLMRiskReviewer(client=_StubClient())  # type: ignore[arg-type]
+    payload = {
+        "evaluations": [
+            {
+                "group_label": "openssl",
+                "risk_band": band,
+                "worst_finding_id": None,
+                "reason": "x",
+            }
+        ]
+    }
+    result = reviewer._validate_pass2_response(payload, [(_g(), [_f(1)])], fix_lane="upstream")
+    assert result.evaluations[0].risk_band == band

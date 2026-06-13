@@ -68,7 +68,13 @@ from app.services.heartbeat_aggregation import heartbeats_for_servers
 from app.services.listener_exposure import classify_exposure
 from app.services.llm_fingerprints import group_findings_fingerprint
 from app.services.pass2_input_selection import FIX_LANES
-from app.services.risk_engine import RISK_BAND_SORT_RANK, RiskBand, no_band_values, yes_band_values
+from app.services.risk_engine import (
+    RISK_BAND_SORT_RANK,
+    RiskBand,
+    fix_lane_sql_case,
+    no_band_values,
+    yes_band_values,
+)
 from app.services.severity_history import (
     daily_severity_counts_for_server,
     severity_snapshots_for_server,
@@ -197,16 +203,6 @@ def _render_tag_editor(server: Server) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _lane_of_has_fix(has_fix: Any) -> str:
-    """Bildet den `Finding.has_fix`-Boolean auf die Fix-Lane ab.
-
-    Single-Source fuer die View-Schicht — verwendet exakt denselben Begriff
-    wie der Selektor-Helper (`pass2_input_selection.fix_lane_of`): ein Finding
-    mit verfuegbarem Fix gehoert in die `patch`-Lane, sonst in `mitigate`.
-    """
-    return "patch" if has_fix else "mitigate"
-
-
 def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[str, Any]]:
     """Liefert die Application-Groups fuer den Server, gruppiert nach Fix-Lane.
 
@@ -221,16 +217,22 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     `Row`-Objekte) statt voller ORM-Objekte — die Templates und
     `_build_action_sections` greifen nur auf eine Handvoll Spalten zu.
 
-    TICKET-013 / ADR-0053 (Fix-Lane-Evaluation): Pass 2 bewertet pro
+    ADR-0053 (Fix-Lane-Evaluation), erweitert ADR-0061: Pass 2 bewertet pro
     Fix-Lane statt pro Gruppe. Die Junction-Tabelle traegt jetzt bis zu
-    zwei Rows pro `(group, server)` — eine `patch`-, eine `mitigate`-Lane.
-    Die Lane-Zugehoerigkeit eines Findings folgt deterministisch aus
-    `Finding.has_fix` (`fixed_version IS NOT NULL AND <> ''`; True -> patch,
-    False -> mitigate) — kein LLM-Output, kein eigener Query.
+    drei Rows pro `(group, server)` — `patch`-, `upstream`- und
+    `mitigate`-Lane. Die Lane-Zugehoerigkeit eines Findings folgt
+    deterministisch aus `Finding.finding_class` UND `Finding.has_fix` ueber
+    den Single-Source-SQL-Spiegel `risk_engine.fix_lane_sql_case`
+    (`not has_fix` -> mitigate, `has_fix & os-pkgs` -> patch, `has_fix &
+    lang-pkgs/other` -> upstream) — kein LLM-Output, kein eigener Query.
+    Da `has_fix` allein die Lane NICHT mehr bestimmt (eine Group kann
+    os-pkgs+fix -> patch UND lang-pkgs+fix -> upstream haben, beide
+    `has_fix=True`), gruppieren/distinct'en die Queries auf den
+    Lane-CASE-Ausdruck statt auf `has_fix`.
 
     Vier aggregierte Queries:
 
-      1. Count-Aggregat: `GROUP BY application_group_id, has_fix` — pro
+      1. Count-Aggregat: `GROUP BY application_group_id, <lane_case>` — pro
          `(group, lane)` die Anzahl OPEN-Findings. Liefert gleichzeitig die
          Liste relevanter Group-IDs (mindestens 1 OPEN-Finding) und das
          Lane-Inventar pro Group. Nur Lanes mit count > 0 erscheinen.
@@ -241,19 +243,20 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
          risk_band_computed_at. Indiziert nach `(group_id, fix_lane)`.
          Fehlende Rows bedeuten "Lane nicht bewertet".
       4. Live-Worst-Finding-Batch (TICKET-010 / ADR-0052, Bug C):
-         `DISTINCT ON (application_group_id, has_fix)` ueber die OPEN-Findings
-         aller `group_ids`, Order beginnt mit `(application_group_id,
-         has_fix)` und folgt dann der §15-Triage-Order — so bekommt jede
-         Lane ihren EIGENEN Live-Worst. Projektion: application_group_id,
-         has_fix, id, identifier_key, package_name, title.
+         `DISTINCT ON (application_group_id, <lane_case>)` ueber die
+         OPEN-Findings aller `group_ids`, Order beginnt mit
+         `(application_group_id, <lane_case>)` und folgt dann der
+         §15-Triage-Order — so bekommt jede Lane ihren EIGENEN Live-Worst.
+         Projektion: application_group_id, fix_lane, id, identifier_key,
+         package_name, title.
 
     Rueckgabe-Format: list[dict], EINE dict pro Group, mit Keys:
 
       - `group`: Row (id, label, group_kind, explanation).
       - `count`: int — Summe der OPEN-Findings ueber alle Lanes der Group.
       - `lanes`: list[dict] — nur Lanes mit >= 1 OPEN-Finding, Reihenfolge
-        `patch` zuerst, dann `mitigate`. Pro Lane-Eintrag:
-          - `fix_lane`: "patch" | "mitigate".
+        `patch`, `upstream`, `mitigate` (FIX_LANES-Order). Pro Lane-Eintrag:
+          - `fix_lane`: "patch" | "upstream" | "mitigate".
           - `evaluation`: Row | None — die `(group, server, lane)`-Eval.
           - `count`: int — OPEN-Findings dieser Lane.
           - `worst_finding`: Row | None — Live-Worst INNERHALB der Lane.
@@ -270,12 +273,16 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     escalate-Lane oben, egal in welcher Lane.
     """
     # (1) Count-Aggregat pro (group, lane): `GROUP BY application_group_id,
-    # has_fix`. Liefert die Group-IDs (>= 1 OPEN-Finding) und das Lane-
-    # Inventar. has_fix=True -> patch, False -> mitigate.
+    # <lane_case>`. Liefert die Group-IDs (>= 1 OPEN-Finding) und das Lane-
+    # Inventar. Lane folgt aus dem Single-Source-SQL-Spiegel
+    # `fix_lane_sql_case` (finding_class + has_fix), NICHT mehr aus has_fix
+    # allein — sonst kollabierten os-pkgs+fix (patch) und lang-pkgs+fix
+    # (upstream) faelschlich in einen Bucket.
+    count_lane_case = fix_lane_sql_case(Finding.finding_class, Finding.has_fix)
     count_stmt = (
         select(
             Finding.application_group_id,
-            Finding.has_fix,
+            count_lane_case.label("fix_lane"),
             func.count(Finding.id),
         )
         .where(
@@ -283,16 +290,16 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
             Finding.status == FindingStatus.OPEN,
             Finding.application_group_id.is_not(None),
         )
-        .group_by(Finding.application_group_id, Finding.has_fix)
+        .group_by(Finding.application_group_id, count_lane_case)
     )
     # lane_counts_by_group[group_id][lane] = count (nur Lanes mit count > 0).
     lane_counts_by_group: dict[int, dict[str, int]] = {}
     total_count_by_group: dict[int, int] = {}
-    for group_id, has_fix, n in sess.execute(count_stmt).all():
+    for group_id, lane, n in sess.execute(count_stmt).all():
         if group_id is None:
             continue
         gid = int(group_id)
-        lane = _lane_of_has_fix(has_fix)
+        lane = str(lane)
         count = int(n)
         if count <= 0:
             continue
@@ -333,15 +340,19 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
         evaluations_by_lane[(int(row.group_id), str(row.fix_lane))] = row
 
     # (4) Live-Worst-Finding-Batch pro Lane (TICKET-010 / ADR-0052, Bug C):
-    # `DISTINCT ON (application_group_id, has_fix)` — pro `(group, lane)` das
-    # Top-Finding nach §15-Triage-Order, ausschliesslich OPEN-Findings.
-    # `DISTINCT ON` verlangt dass die ORDER BY mit den Distinct-Spalten
+    # `DISTINCT ON (application_group_id, <lane_case>)` — pro `(group, lane)`
+    # das Top-Finding nach §15-Triage-Order, ausschliesslich OPEN-Findings.
+    # `DISTINCT ON` verlangt dass die ORDER BY mit denselben Ausdruecken
     # beginnt; danach folgt die Triage-Order (Single-Source fuer den
-    # Severity-Rank: `findings_query._severity_rank_expr`).
+    # Severity-Rank: `findings_query._severity_rank_expr`). Postgres verlangt
+    # dass die DISTINCT-ON-Ausdruecke die fuehrenden ORDER-BY-Ausdruecke sind
+    # — derselbe `case`-Objekt-Identitaet (`worst_lane_case`) wird in
+    # distinct() UND order_by() verwendet.
+    worst_lane_case = fix_lane_sql_case(Finding.finding_class, Finding.has_fix)
     worst_stmt = (
         select(
             Finding.application_group_id,
-            Finding.has_fix,
+            worst_lane_case.label("fix_lane"),
             Finding.id,
             Finding.identifier_key,
             Finding.package_name,
@@ -352,10 +363,10 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
             Finding.status == FindingStatus.OPEN,
             Finding.application_group_id.in_(group_ids),
         )
-        .distinct(Finding.application_group_id, Finding.has_fix)
+        .distinct(Finding.application_group_id, worst_lane_case)
         .order_by(
             Finding.application_group_id,
-            Finding.has_fix,
+            worst_lane_case,
             Finding.is_kev.desc(),
             nulls_last(Finding.epss_score.desc()),
             nulls_last(Finding.cvss_v3_score.desc()),
@@ -365,7 +376,7 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     )
     worst_by_lane: dict[tuple[int, str], Any] = {}
     for row in sess.execute(worst_stmt).all():
-        worst_by_lane[(int(row.application_group_id), _lane_of_has_fix(row.has_fix))] = row
+        worst_by_lane[(int(row.application_group_id), str(row.fix_lane))] = row
 
     # (5) Lane-OPEN-Set-Projektion (TICKET-014): die `(identifier_key,
     # package_purl, id)` ALLER OPEN-Findings pro `(group, lane)` — Basis fuer
@@ -374,9 +385,10 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     # nur `.identifier_key`/`.package_purl`) als auch das `id`-Set gebildet.
     # Bewusst getrennt von Query (4): Query (4) liefert per `DISTINCT ON` nur
     # das Top-Finding pro Lane, hier brauchen wir das gesamte Lane-OPEN-Set.
+    open_lane_case = fix_lane_sql_case(Finding.finding_class, Finding.has_fix)
     lane_open_stmt = select(
         Finding.application_group_id,
-        Finding.has_fix,
+        open_lane_case.label("fix_lane"),
         Finding.id,
         Finding.identifier_key,
         Finding.package_purl,
@@ -387,7 +399,7 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     )
     lane_rows_by_lane: dict[tuple[int, str], list[Any]] = {}
     for row in sess.execute(lane_open_stmt).all():
-        key = (int(row.application_group_id), _lane_of_has_fix(row.has_fix))
+        key = (int(row.application_group_id), str(row.fix_lane))
         lane_rows_by_lane.setdefault(key, []).append(row)
 
     result: list[dict[str, Any]] = []
@@ -395,7 +407,7 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
         gid = int(grp.id)
         lane_counts = lane_counts_by_group.get(gid, {})
         lanes: list[dict[str, Any]] = []
-        # Reihenfolge: patch zuerst, dann mitigate (FIX_LANES-Order). Nur
+        # Reihenfolge: patch, upstream, mitigate (FIX_LANES-Order). Nur
         # Lanes mit >= 1 OPEN-Finding erscheinen.
         for lane in FIX_LANES:
             count = lane_counts.get(lane, 0)
@@ -479,7 +491,7 @@ def _build_action_sections(
     Block P / v0.9.3 (ADR-0023 §"Update v0.9.3 (c)"): die 4-Band-Reduktion
     deckt die operative Frage "patchen vs. mitigieren vs. App-Vendor-Update"
     nicht ab. Diese strukturierte Aktions-Sektion teilt die
-    Operator-Workflows visuell in bis zu fuenf Cards auf — in der Reihenfolge
+    Operator-Workflows visuell in bis zu sechs Cards auf — in der Reihenfolge
     operativer Dringlichkeit. Leere Cards werden geskippt; die ganze Sektion
     blendet sich im Template aus wenn das Ergebnis leer ist.
 
@@ -495,9 +507,12 @@ def _build_action_sections(
     flacher Eintrag, der wie bisher auf ``risk_band``, ``action_type`` und
     ``group_kind`` gematcht wird. Eine Group kann so in **zwei** Cards
     erscheinen (patch-Lane -> Patch-Card, mitigate-Lane -> mitigate-Card) —
-    je mit ihrem Lane-Worst (live, ADR-0052). Die fuenf Card-Specs bleiben
-    unveraendert; es gibt **kein** ``act + mitigate`` (``act`` ist per
-    Band-Whitelist patch-only).
+    je mit ihrem Lane-Worst (live, ADR-0052). Es gibt **kein** ``act +
+    mitigate``/``act + upstream`` (``act`` ist per Band-Whitelist patch-only).
+    ADR-0061: die ``upstream``-Lane (lang-pkgs-Fix, nicht host-applizierbar)
+    teilt sich den abgeleiteten ``action_type == "mitigate"`` mit der echten
+    no-patch-Lane; die zwei escalate-Cards werden daher zusaetzlich ueber
+    ``fix_lane`` diskriminiert (``escalate-mitigate`` vs. ``escalate-upstream``).
 
     Eintrags-Format (flach, pro `(group, lane)`):
     ``{"group", "fix_lane", "evaluation", "count", "worst_finding",
@@ -530,6 +545,23 @@ def _build_action_sections(
             "variant": "escalate-mitigate",
             "risk_band": "escalate",
             "action_type": "mitigate",
+            "fix_lane": "mitigate",
+            "group_kind": None,
+            "show_labels": True,
+        },
+        {
+            # ADR-0061: lang-pkgs-Fixes sind nicht host-applizierbar. Die
+            # upstream-Lane teilt sich den abgeleiteten action_type "mitigate"
+            # mit der echten no-patch-mitigate-Lane (escalate->mitigate), daher
+            # diskriminiert hier zusaetzlich ``fix_lane``. Card-Copy macht
+            # klar: ein Fix existiert upstream, ist aber nur per Rebuild des
+            # besitzenden Pakets applizierbar (kein dnf/apt-Patch).
+            "id": "escalate-upstream",
+            "label": "ESCALATE · Upstream fix — mitigate until rebuild",
+            "variant": "escalate-upstream",
+            "risk_band": "escalate",
+            "action_type": "mitigate",
+            "fix_lane": "upstream",
             "group_kind": None,
             "show_labels": True,
         },
@@ -583,6 +615,10 @@ def _build_action_sections(
             if ev.risk_band != spec["risk_band"]:
                 continue
             if ev.action_type != spec["action_type"]:
+                continue
+            # ADR-0061: ``fix_lane``-Diskriminator nur wo gesetzt (escalate-
+            # mitigate vs. escalate-upstream teilen action_type "mitigate").
+            if spec.get("fix_lane") is not None and entry["fix_lane"] != spec["fix_lane"]:
                 continue
             if spec["group_kind"] is not None and grp.group_kind != spec["group_kind"]:
                 continue

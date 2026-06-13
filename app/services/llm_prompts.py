@@ -33,7 +33,10 @@ from __future__ import annotations
 #: Lane-Scope (action_type raus, Bewertung pro fix_lane). Der Bump invalidiert
 #: den Bestands-Cache einmalig, sonst blieben Group-Level-Reasons aus der alten
 #: Semantik bis zur naechsten OPEN-Set-Aenderung stehen.
-PASS2_PROMPT_VERSION = 3
+#: ADR-0061: 3 -> 4 — dritte Lane ``upstream`` (lang-pkgs-Fix, nicht
+#: host-applizierbar) mit eigener Prompt-Variante (kein ``act``). Cache-
+#: Invalidation, da sich Lane-Zuordnung und Prompt-Semantik aendern.
+PASS2_PROMPT_VERSION = 4
 
 PASS1_SYSTEM_PROMPT: str = """\
 You group Linux-host vulnerability findings by owner-application.

@@ -54,10 +54,26 @@ from .test_llm_worker_pass2_open_only import (
         ("mitigate", "escalate", "mitigate"),
         ("mitigate", "monitor", "watch"),
         ("mitigate", "noise", "none"),
+        # ADR-0061: upstream-Lane — Fix existiert, ist aber nicht
+        # host-applizierbar; teilt die Bands der mitigate-Lane (kein act).
+        ("upstream", "escalate", "mitigate"),
+        ("upstream", "monitor", "watch"),
+        ("upstream", "noise", "none"),
     ],
 )
 def test_derive_action_type_table(fix_lane: str, risk_band: str, expected: str) -> None:
     assert llm_worker._derive_action_type(fix_lane, risk_band) == expected
+
+
+def test_derive_action_type_upstream_act_falls_back_without_crash(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``(upstream, act)`` kommt nicht vor (Validator lehnt act im upstream-Call
+    ab, ADR-0061). Defensiv: kein Crash, Fallback auf ``mitigate``, Log-Warnung."""
+    with caplog.at_level("WARNING"):
+        result = llm_worker._derive_action_type("upstream", "act")
+    assert result == "mitigate"
+    assert any("unexpected_lane_band_combo" in r.message for r in caplog.records)
 
 
 def test_derive_action_type_mitigate_act_falls_back_without_crash(

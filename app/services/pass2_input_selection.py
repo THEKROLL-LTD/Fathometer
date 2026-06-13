@@ -39,42 +39,42 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Literal
 
 from app.models import Finding, Severity
+from app.services.risk_engine import FIX_LANES, FixLane, fix_lane_for
 
 #: Default-Budget — bewusst identisch zum historischen ``fs[:32]``-Cap.
 #: Budget-Tuning ist explizit nicht Teil von TICKET-011.
 PASS2_FINDINGS_BUDGET = 32
 
-#: Die zwei Fix-Lanes (ADR-0053 / TICKET-013). ``patch`` = Finding hat einen
-#: Fix verfuegbar, ``mitigate`` = kein Fix verfuegbar.
-FixLane = Literal["patch", "mitigate"]
-FIX_LANES: tuple[FixLane, ...] = ("patch", "mitigate")
+#: ``FixLane``/``FIX_LANES`` leben seit ADR-0061 in :mod:`app.services.risk_engine`
+#: (Single-Source ueber drei Lanes: ``patch``/``upstream``/``mitigate``). Hier
+#: re-exportiert fuer Back-Compat der Bestands-Importeure (``server_detail``,
+#: ``pass2_enqueue``), die ``FixLane``/``FIX_LANES`` aus diesem Modul beziehen.
 
 
 def fix_lane_of(finding: Finding) -> FixLane:
-    """Deterministische Fix-Lane eines Findings (ADR-0053 / TICKET-013).
+    """Deterministische Fix-Lane eines Findings (ADR-0061, war ADR-0053).
 
-    ``patch`` wenn ein Fix verfuegbar ist, sonst ``mitigate``. Die
-    Diskriminante ist ``bool(finding.fixed_version)`` — das ist exakt das
-    Praedikat der generierten DB-Spalte ``Finding.has_fix``
-    (``fixed_version IS NOT NULL AND fixed_version <> ''``), damit
-    Enqueue (Etappe 4), Worker-Persist (Etappe 5) und der SQL-Lane-CASE
-    der Inheritance (Etappe 6) **dieselbe** Partition sehen. Ein leerer
-    ``fixed_version``-String zaehlt damit als ``mitigate``, nicht als
-    ``patch``.
+    Delegiert an die Single-Source :func:`risk_engine.fix_lane_for` mit
+    ``finding.finding_class`` und ``bool(finding.fixed_version)``. Letzteres
+    ist exakt das Praedikat der generierten DB-Spalte ``Finding.has_fix``
+    (``fixed_version IS NOT NULL AND fixed_version <> ''``), damit Enqueue,
+    Worker-Persist und der SQL-Lane-CASE der Inheritance **dieselbe**
+    Partition sehen. Ein leerer ``fixed_version``-String zaehlt damit als
+    ``mitigate``.
     """
-    return "patch" if finding.fixed_version else "mitigate"
+    return fix_lane_for(finding.finding_class, bool(finding.fixed_version))
 
 
 def partition_by_lane(findings: Iterable[Finding]) -> dict[FixLane, list[Finding]]:
-    """Partitioniert Findings in die zwei Fix-Lanes.
+    """Partitioniert Findings in die drei Fix-Lanes (ADR-0061).
 
-    Liefert immer beide Keys; leere Lanes haben eine leere Liste. Caller
-    ueberspringen leere Lanes (kein Job, keine Eval-Row — ADR-0053).
+    Liefert immer alle drei Keys (``patch``/``upstream``/``mitigate``); leere
+    Lanes haben eine leere Liste. Caller ueberspringen leere Lanes (kein Job,
+    keine Eval-Row — ADR-0053/0061).
     """
-    buckets: dict[FixLane, list[Finding]] = {"patch": [], "mitigate": []}
+    buckets: dict[FixLane, list[Finding]] = {lane: [] for lane in FIX_LANES}
     for f in findings:
         buckets[fix_lane_of(f)].append(f)
     return buckets
@@ -237,6 +237,7 @@ __all__ = [
     "PASS2_FINDINGS_BUDGET",
     "FixLane",
     "SelectionResult",
+    "fix_lane_for",
     "fix_lane_of",
     "partition_by_lane",
     "select_pass2_findings",

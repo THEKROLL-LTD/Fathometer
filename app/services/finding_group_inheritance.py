@@ -17,14 +17,15 @@ Seit TICKET-012 (ADR-0054) wird ``risk_band_reason`` NICHT mehr auf Findings
 vererbt — das AI-Assessment ist ausschliesslich Group-Level
 (``ApplicationGroupEvaluation.risk_band_reason``).
 
-**Lane-Match (TICKET-013, ADR-0053):** Pass 2 bewertet pro Fix-Lane — die
-Junction haelt bis zu zwei Rows pro ``(group, server)`` (``fix_lane`` in
-{``patch``, ``mitigate``}). Der Join joint deshalb zusaetzlich auf die Lane:
-ein Finding erbt aus der Junction-Row **seiner eigenen** Lane. Die Lane folgt
-deterministisch aus ``Finding.has_fix`` (die generierte Spalte
-``fixed_version IS NOT NULL AND fixed_version <> ''`` — identische Semantik wie
-``bool(fixed_version)`` in der Enqueue-/Worker-Partitionierung; leerer String →
-``mitigate``). Kern-Gewinn: ein patchbares und ein nicht-patchbares Finding
+**Lane-Match (ADR-0053, erweitert ADR-0061):** Pass 2 bewertet pro Fix-Lane —
+die Junction haelt bis zu drei Rows pro ``(group, server)`` (``fix_lane`` in
+{``patch``, ``upstream``, ``mitigate``}). Der Join joint deshalb zusaetzlich
+auf die Lane: ein Finding erbt aus der Junction-Row **seiner eigenen** Lane.
+Die Lane folgt deterministisch aus ``Finding.finding_class`` UND
+``Finding.has_fix`` ueber den Single-Source-SQL-Spiegel
+:func:`risk_engine.fix_lane_sql_case`: ``not has_fix`` → ``mitigate``,
+``has_fix`` AND ``os-pkgs`` → ``patch``, ``has_fix`` AND ``lang-pkgs``/``other``
+→ ``upstream``. Kern-Gewinn: patchbare, upstream-only und nicht-fixbare Findings
 **derselben** Group koennen jetzt **unterschiedliche** Bands tragen.
 """
 
@@ -33,9 +34,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from sqlalchemy import case, func, update
+from sqlalchemy import func, update
 
 from app.models import ApplicationGroupEvaluation, Finding
+from app.services.risk_engine import fix_lane_sql_case
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -53,11 +55,12 @@ def inherit_group_risk_to_findings(
     AND Finding.server_id == Junction.server_id)`` — Server-A's Findings
     erben aus ``(group, A)``-Junction, B's Findings aus ``(group, B)``.
 
-    Lane-Match (TICKET-013, ADR-0053): zusaetzlich ``Junction.fix_lane ==
-    CASE WHEN Finding.has_fix THEN 'patch' ELSE 'mitigate' END`` — ein
-    patchbares Finding erbt aus der ``patch``-Row, ein no-fix Finding aus der
-    ``mitigate``-Row **derselben** Group; beide koennen unterschiedliche Bands
-    tragen. ``has_fix`` ist die generierte Spalte (``bool(fixed_version)``),
+    Lane-Match (ADR-0053, erweitert ADR-0061): zusaetzlich
+    ``Junction.fix_lane == fix_lane_sql_case(finding_class, has_fix)`` —
+    ein os-pkgs-Fix-Finding erbt aus der ``patch``-Row, ein
+    lang-pkgs/other-Fix-Finding aus der ``upstream``-Row, ein no-fix Finding
+    aus der ``mitigate``-Row **derselben** Group; alle koennen unterschiedliche
+    Bands tragen. Der CASE ist die Single-Source aus :mod:`risk_engine`,
     identisch zur Enqueue-/Worker-Partitionierung — kein Lane-Drift.
 
     Der Service ist idempotent und transaktionsneutral: er fuehrt keinen
@@ -70,7 +73,7 @@ def inherit_group_risk_to_findings(
         .where(Finding.server_id == ApplicationGroupEvaluation.server_id)
         .where(
             ApplicationGroupEvaluation.fix_lane
-            == case((Finding.has_fix, "patch"), else_="mitigate")
+            == fix_lane_sql_case(Finding.finding_class, Finding.has_fix)
         )
         .where(
             (Finding.risk_band.is_distinct_from(ApplicationGroupEvaluation.risk_band))

@@ -38,9 +38,23 @@ def _eval(group_id: int, fix_lane: str, fp: str | None) -> SimpleNamespace:
     return SimpleNamespace(group_id=group_id, fix_lane=fix_lane, group_findings_fingerprint=fp)
 
 
-def _finding(group_id: int, *, fixed_version: str | None = "1.2.3") -> SimpleNamespace:
-    """Default ``fixed_version`` gesetzt -> Lane ``patch``. ``None`` -> ``mitigate``."""
-    return SimpleNamespace(application_group_id=group_id, fixed_version=fixed_version)
+def _finding(
+    group_id: int,
+    *,
+    fixed_version: str | None = "1.2.3",
+    finding_class: str = "os-pkgs",
+) -> SimpleNamespace:
+    """Default ``fixed_version`` gesetzt + ``os-pkgs`` -> Lane ``patch``.
+
+    ADR-0061: die Lane folgt aus ``(finding_class, has_fix)``. ``os-pkgs`` +
+    Fix -> ``patch``; ``fixed_version=None`` -> ``mitigate``; ``lang-pkgs`` +
+    Fix -> ``upstream`` (per ``finding_class``-Override in den Tests).
+    """
+    return SimpleNamespace(
+        application_group_id=group_id,
+        fixed_version=fixed_version,
+        finding_class=finding_class,
+    )
 
 
 def _job(group_id: int, *, fix_lane: str | None) -> dict[str, Any]:

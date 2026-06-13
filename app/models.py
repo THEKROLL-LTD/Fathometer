@@ -978,7 +978,7 @@ class ApplicationGroupEvaluation(Base):
             name="ck_app_group_evals_action_type",
         ),
         CheckConstraint(
-            "fix_lane IN ('patch','mitigate')",
+            "fix_lane IN ('patch','mitigate','upstream')",
             name="ck_app_group_evals_fix_lane",
         ),
         Index(

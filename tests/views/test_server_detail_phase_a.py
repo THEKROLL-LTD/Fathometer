@@ -175,8 +175,9 @@ def test_load_application_groups_projection_shape() -> None:
     """Projektion liefert Row-Objekte mit den erwarteten Spalten — die
     Rueckgabe-Dicts tragen jetzt eine `lanes`-Liste (TICKET-013).
     """
-    # (group_id, has_fix, count) — has_fix=True -> patch-Lane.
-    counts_rows: list[Any] = [(10, True, 3), (20, True, 5)]
+    # (group_id, fix_lane, count) — Query (1) projiziert jetzt den Lane-CASE
+    # direkt (ADR-0061), nicht mehr has_fix.
+    counts_rows: list[Any] = [(10, "patch", 3), (20, "patch", 5)]
     group_rows = [
         _row(id=10, label="openssh", group_kind="os_package", explanation="x"),
         _row(id=20, label="bundle-x", group_kind="application_bundle", explanation=None),
@@ -203,12 +204,13 @@ def test_load_application_groups_projection_shape() -> None:
             group_findings_fingerprint=None,
         ),
     ]
-    # TICKET-013: Query (4) ist der Live-Worst-Finding-Batch pro Lane
-    # (DISTINCT ON application_group_id, has_fix) — Rows tragen has_fix mit.
+    # ADR-0061: Query (4) ist der Live-Worst-Finding-Batch pro Lane
+    # (DISTINCT ON application_group_id, <lane_case>) — Rows projizieren jetzt
+    # fix_lane direkt (Lane-CASE), nicht mehr has_fix.
     finding_rows = [
         _row(
             application_group_id=10,
-            has_fix=True,
+            fix_lane="patch",
             id=100,
             identifier_key="CVE-2026-1",
             package_name="openssh",
@@ -245,7 +247,7 @@ def test_load_application_groups_projection_shape() -> None:
 
 def test_load_application_groups_missing_evaluation_ranks_as_pending() -> None:
     """Group ohne Junction-Row landet in PENDING-Rank — sortiert ueber act."""
-    counts_rows: list[Any] = [(10, True, 1), (20, True, 1)]
+    counts_rows: list[Any] = [(10, "patch", 1), (20, "patch", 1)]
     group_rows = [
         _row(id=10, label="grp-act", group_kind="os_package", explanation=None),
         _row(id=20, label="grp-pending", group_kind="os_package", explanation=None),

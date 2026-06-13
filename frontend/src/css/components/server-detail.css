@@ -1666,6 +1666,9 @@
   color: var(--text-tertiary);
 }
 .sd-app-group__lane-tag--patch { color: var(--text-secondary); }
+/* ADR-0061: upstream-Lane (lang-pkgs-Fix, nur per Rebuild applizierbar) —
+   visuell wie patch hervorgehoben, semantisch eigenstaendig (eigenes Label). */
+.sd-app-group__lane-tag--upstream { color: var(--text-secondary); }
 .sd-app-group__worst {
   margin-top: 12px;
   padding-top: 12px;

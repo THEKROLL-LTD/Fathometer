@@ -4,8 +4,9 @@ Loader `_load_application_groups_for_server`.
 Historie:
   * TICKET-010 / ADR-0052 (Bug C): Live-Worst ersetzt den Eval-Snapshot in der
     Anzeige-Spalte.
-  * TICKET-013 / ADR-0053: Loader gruppiert pro Fix-Lane; jeder Entry traegt
-    eine `lanes`-Liste. Die Single-Lane-Helper hier setzen has_fix=True (patch).
+  * ADR-0053 / ADR-0061: Loader gruppiert pro Fix-Lane (CASE ueber
+    finding_class/has_fix); jeder Entry traegt eine `lanes`-Liste. Die
+    Single-Lane-Helper hier projizieren fix_lane="patch".
   * TICKET-014: der Drift-Hint ("re-evaluation pending") ist vom
     LLM-Worst-vs-Triage-Worst-Vergleich ENTKOPPELT und haengt jetzt am selben
     Kriterium wie das Enqueue-Gate — die gespeicherte Lane-Eval ist veraltet
@@ -17,7 +18,7 @@ Historie:
     Die Anzeige-Spalte (Query 4, Triage-Live-Worst) bleibt unveraendert; sie
     treibt den Hint nicht mehr.
 
-Loader-Query-Reihenfolge: (1) OPEN-Counts (GROUP BY group_id, has_fix),
+Loader-Query-Reihenfolge: (1) OPEN-Counts (GROUP BY group_id, <lane-CASE>),
 (2) Group-Metadaten, (3) Eval-Junction (inkl. group_findings_fingerprint),
 (4) Live-Worst-Batch (DISTINCT ON), (5) Lane-OPEN-Set-Projektion.
 
@@ -94,10 +95,14 @@ def _group_row(group_id: int, label: str = "openssh") -> SimpleNamespace:
 
 
 def _worst_row(group_id: int, finding_id: int) -> SimpleNamespace:
-    """Query-(4)-Row: Triage-Live-Worst (DISTINCT ON), Anzeige-Spalte."""
+    """Query-(4)-Row: Triage-Live-Worst (DISTINCT ON), Anzeige-Spalte.
+
+    ADR-0061: projiziert ``fix_lane`` direkt (Lane-CASE) statt ``has_fix``;
+    die Single-Lane-Tests hier sind ausschliesslich ``patch``.
+    """
     return _row(
         application_group_id=group_id,
-        has_fix=True,
+        fix_lane="patch",
         id=finding_id,
         identifier_key=f"CVE-2026-{finding_id}",
         package_name="openssh-server",
@@ -111,12 +116,15 @@ def _open_row(
     *,
     identifier_key: str | None = None,
     package_purl: str = "",
-    has_fix: bool = True,
+    fix_lane: str = "patch",
 ) -> SimpleNamespace:
-    """Query-(5)-Row: Lane-OPEN-Set-Projektion fuer Fingerprint + ID-Set."""
+    """Query-(5)-Row: Lane-OPEN-Set-Projektion fuer Fingerprint + ID-Set.
+
+    ADR-0061: projiziert ``fix_lane`` direkt (Lane-CASE) statt ``has_fix``.
+    """
     return _row(
         application_group_id=group_id,
-        has_fix=has_fix,
+        fix_lane=fix_lane,
         id=finding_id,
         identifier_key=identifier_key or f"CVE-2026-{finding_id}",
         package_purl=package_purl,
@@ -149,7 +157,7 @@ def _run_loader(
     Query-Reihenfolge: (1) OPEN-Counts, (2) Group-Metadaten, (3) Eval-Junction,
     (4) Live-Worst-Batch, (5) Lane-OPEN-Set-Projektion.
     """
-    counts_rows: list[Any] = [(group_id, True, 3)]
+    counts_rows: list[Any] = [(group_id, "patch", 3)]
     group_rows = [_group_row(group_id)]
     sess = _RecordingSession([counts_rows, group_rows, eval_rows, worst_rows, open_rows])
     result = _load_application_groups_for_server(sess, 1)
@@ -291,7 +299,7 @@ def test_drift_per_group_independent() -> None:
     andere nicht an."""
     open_10 = [_open_row(10, 200)]
     open_20 = [_open_row(20, 300)]
-    counts_rows: list[Any] = [(10, True, 2), (20, True, 1)]
+    counts_rows: list[Any] = [(10, "patch", 2), (20, "patch", 1)]
     group_rows = [_group_row(10, "drifting"), _group_row(20, "in-sync")]
     eval_rows = [
         _eval_row(10, worst_finding_id=200, fingerprint="stalefp000000000"),  # FP-Mismatch
@@ -345,13 +353,14 @@ def _compiled_worst_stmt(group_id: int = 10) -> Any:
     return sess.statements[3].compile(dialect=postgresql.dialect())
 
 
-def test_worst_stmt_uses_distinct_on_group_and_has_fix() -> None:
-    """Query (4) ist ein Postgres `DISTINCT ON (application_group_id, has_fix)`
-    — pro `(group, lane)` ein eigener Live-Worst (TICKET-013)."""
+def test_worst_stmt_uses_distinct_on_group_and_lane_case() -> None:
+    """Query (4) ist ein Postgres
+    `DISTINCT ON (application_group_id, <fix_lane_sql_case>)` — pro
+    `(group, lane)` ein eigener Live-Worst (ADR-0061: Lane folgt aus dem
+    CASE ueber finding_class/has_fix, nicht aus has_fix allein)."""
     sql = str(_compiled_worst_stmt())
-    assert "DISTINCT ON (findings.application_group_id, findings.has_fix)" in sql, (
-        f"DISTINCT ON (findings.application_group_id, findings.has_fix) fehlt im "
-        f"kompilierten SQL:\n{sql}"
+    assert "DISTINCT ON (findings.application_group_id, CASE WHEN NOT findings.has_fix" in sql, (
+        f"DISTINCT ON (application_group_id, <lane-CASE>) fehlt im kompilierten SQL:\n{sql}"
     )
 
 
@@ -379,9 +388,9 @@ def test_worst_stmt_scopes_to_server_and_group_ids() -> None:
 
 
 def test_worst_stmt_order_starts_with_group_then_triage_order() -> None:
-    """ORDER BY beginnt mit (application_group_id, has_fix) (DISTINCT-ON-
-    Pflicht), danach §15-Triage: is_kev DESC, epss DESC NULLS LAST, cvss
-    DESC NULLS LAST, severity_rank (CASE) DESC, first_seen_at ASC."""
+    """ORDER BY beginnt mit (application_group_id, <lane-CASE>) (DISTINCT-ON-
+    Pflicht, ADR-0061), danach §15-Triage: is_kev DESC, epss DESC NULLS LAST,
+    cvss DESC NULLS LAST, severity_rank (CASE) DESC, first_seen_at ASC."""
     sql = str(_compiled_worst_stmt())
     match = re.search(r"ORDER BY (.+)$", sql, flags=re.DOTALL)
     assert match is not None, f"ORDER BY fehlt im kompilierten SQL:\n{sql}"
@@ -389,11 +398,11 @@ def test_worst_stmt_order_starts_with_group_then_triage_order() -> None:
 
     expected_sequence = [
         "findings.application_group_id",
-        "findings.has_fix",
+        "CASE WHEN NOT findings.has_fix",  # Lane-CASE (DISTINCT-ON-Ausdruck)
         "findings.is_kev DESC",
         "findings.epss_score DESC NULLS LAST",
         "findings.cvss_v3_score DESC NULLS LAST",
-        "CASE",  # severity_rank via findings_query._severity_rank_expr
+        "CASE WHEN (findings.severity =",  # severity_rank via _severity_rank_expr
         "findings.first_seen_at ASC",
     ]
     positions: list[int] = []
@@ -405,9 +414,11 @@ def test_worst_stmt_order_starts_with_group_then_triage_order() -> None:
         f"ORDER-BY-Reihenfolge falsch. Erwartet {expected_sequence} in dieser "
         f"Reihenfolge, kompiliert:\n{order_by}"
     )
-    # Severity-Rank kommt nach dem CASE-Ende als DESC.
-    case_idx = order_by.find("CASE")
-    assert "END DESC" in order_by[case_idx:], f"Severity-Rank-CASE muss DESC sortieren:\n{order_by}"
+    # Severity-Rank-CASE kommt nach seinem CASE-Ende als DESC.
+    sev_case_idx = order_by.find("CASE WHEN (findings.severity =")
+    assert "END DESC" in order_by[sev_case_idx:], (
+        f"Severity-Rank-CASE muss DESC sortieren:\n{order_by}"
+    )
 
 
 def test_worst_stmt_severity_case_uses_enum_comparison() -> None:
@@ -420,19 +431,23 @@ def test_worst_stmt_severity_case_uses_enum_comparison() -> None:
 
 
 def test_worst_stmt_projects_template_contract_columns() -> None:
-    """Projektion enthaelt genau die Spalten die Templates + Anzeige brauchen:
-    application_group_id, has_fix, id, identifier_key, package_name, title."""
+    """Projektion enthaelt die Spalten die Templates + Anzeige brauchen:
+    application_group_id, der Lane-CASE als `fix_lane` (ADR-0061; war has_fix),
+    id, identifier_key, package_name, title."""
     sql = str(_compiled_worst_stmt())
     select_clause = sql.split("FROM")[0]
     for col in (
         "findings.application_group_id",
-        "findings.has_fix",
         "findings.id",
         "findings.identifier_key",
         "findings.package_name",
         "findings.title",
     ):
         assert col in select_clause, f"Spalte {col} fehlt in der Projektion:\n{select_clause}"
+    # Lane-CASE wird als `fix_lane` projiziert (ersetzt die has_fix-Projektion).
+    assert "AS fix_lane" in select_clause, (
+        f"Lane-CASE muss als `fix_lane` projiziert werden:\n{select_clause}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -454,18 +469,22 @@ def _compiled_open_stmt(group_id: int = 10) -> Any:
 
 
 def test_open_stmt_projects_fingerprint_and_id_columns() -> None:
-    """Query (5) projiziert genau die Spalten fuer Fingerprint + ID-Set:
-    application_group_id, has_fix, id, identifier_key, package_purl."""
+    """Query (5) projiziert die Spalten fuer Fingerprint + ID-Set:
+    application_group_id, der Lane-CASE als `fix_lane` (ADR-0061; war has_fix),
+    id, identifier_key, package_purl."""
     sql = str(_compiled_open_stmt())
     select_clause = sql.split("FROM")[0]
     for col in (
         "findings.application_group_id",
-        "findings.has_fix",
         "findings.id",
         "findings.identifier_key",
         "findings.package_purl",
     ):
         assert col in select_clause, f"Spalte {col} fehlt in der Projektion:\n{select_clause}"
+    # Lane-CASE wird als `fix_lane` projiziert (ersetzt die has_fix-Projektion).
+    assert "AS fix_lane" in select_clause, (
+        f"Lane-CASE muss als `fix_lane` projiziert werden:\n{select_clause}"
+    )
 
 
 def test_open_stmt_filters_open_and_scopes_to_server_and_groups() -> None:
@@ -495,7 +514,7 @@ def test_group_without_open_findings_never_rendered() -> None:
     damit in group_ids — sie erscheint nicht im Ergebnis, selbst wenn eine
     (stale) Eval-Junction-Row existiert."""
     open_rows = [_open_row(10, 200)]
-    counts_rows: list[Any] = [(10, True, 1)]  # nur Group 10 hat offene Findings
+    counts_rows: list[Any] = [(10, "patch", 1)]  # nur Group 10 hat offene Findings
     group_rows = [_group_row(10, "alive")]
     # Stale Eval-Row fuer Group 20 — darf nichts bewirken, weil Group 20
     # nie in group_ids gelandet ist.
@@ -510,7 +529,7 @@ def test_group_without_open_findings_never_rendered() -> None:
     assert [entry["group"].label for entry in result] == ["alive"]
 
 
-@pytest.mark.parametrize("counts_rows", [[], [(None, True, 5)]])
+@pytest.mark.parametrize("counts_rows", [[], [(None, "patch", 5)]])
 def test_no_groups_short_circuits_before_later_queries(counts_rows: list[Any]) -> None:
     """Ohne Groups mit OPEN-Findings bricht der Loader nach Query (1) ab —
     weder Live-Worst (4) noch Lane-OPEN (5) werden abgesetzt."""

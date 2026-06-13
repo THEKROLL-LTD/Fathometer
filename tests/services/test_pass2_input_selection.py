@@ -283,7 +283,8 @@ def test_rest_fixable_count() -> None:
 
 
 def test_fix_lanes_constant() -> None:
-    assert FIX_LANES == ("patch", "mitigate")
+    # ADR-0061: dritte Lane ``upstream`` (lang-pkgs-Fix, nicht host-applizierbar).
+    assert FIX_LANES == ("patch", "upstream", "mitigate")
 
 
 def test_fix_lane_of_with_fixed_version_is_patch() -> None:
@@ -327,8 +328,9 @@ def test_partition_by_lane_pure_list_leaves_other_lane_empty() -> None:
 
 
 def test_partition_by_lane_always_returns_both_keys_for_empty_input() -> None:
+    # ADR-0061: drei Lane-Keys (patch/upstream/mitigate), alle leer.
     buckets = partition_by_lane([])
-    assert buckets == {"patch": [], "mitigate": []}
+    assert buckets == {"patch": [], "upstream": [], "mitigate": []}
 
 
 def test_fix_becomes_available_invalidates_both_lane_fingerprints() -> None:
