@@ -111,6 +111,15 @@
             </a>
             <span class="sd-app-group__worst-pkg">{{ lane.worst_finding.package_name }}</span>
           </div>
+          {# ADR-0062: lang-pkgs-Finding, das der Host-Agent als host-applizierbar
+             gemeldet hat (owning OS-Paket hat ein Repo-Update) -> aus upstream
+             nach patch promotet. Macht die Promotion sichtbar. #}
+          {% if lane.worst_finding.host_update_available and lane.worst_finding.owning_package %}
+            <p class="sd-app-group__host-update"
+               data-test="group-lane-host-update-{{ group.id }}-{{ lane.fix_lane }}">
+              host update ready: {{ lane.worst_finding.owning_package }}{% if lane.worst_finding.available_version %} {{ lane.worst_finding.available_version }}{% endif %}
+            </p>
+          {% endif %}
         </div>
       {% endif %}
     </div>

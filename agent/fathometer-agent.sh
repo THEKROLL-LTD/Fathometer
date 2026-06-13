@@ -85,8 +85,8 @@
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.6.0"
-readonly REQUIRED_LIB_HOST_STATE_VERSION="0.3.1"
+readonly AGENT_VERSION="0.7.0"
+readonly REQUIRED_LIB_HOST_STATE_VERSION="0.4.0"
 readonly TRIVY_BIN="${FM_TRIVY_PATH:-trivy}"
 readonly SCAN_PATH="${FM_SCAN_PATH:-/}"
 readonly TIMEOUT_SEC="${FM_TIMEOUT_SEC:-60}"
@@ -562,6 +562,25 @@ if [[ "$_has_host_state_lib" -eq 1 ]]; then
   fi
 fi
 
+# ----- Host-Update-Resolver (Block AH, ADR-0062) -------------------------
+# Loest pro lang-pkgs-Binary das besitzende OS-Paket auf und prueft read-only
+# (`dnf|yum check-update` / `apt-get -s upgrade`), ob ein host-applizierbares
+# Update bereitsteht. Fail-soft: bei Fehler/fehlendem Paketmanager bleibt
+# host_updates weg -> Backend faellt auf NULL -> upstream zurueck
+# (ADR-0061-Default). Braucht die Trivy-Targets, laeuft daher nach dem Scan.
+host_updates_json="null"
+if [[ "$_has_host_state_lib" -eq 1 ]]; then
+  if hu_tmp="$(collect_host_updates "$trivy_out" "$SCAN_PATH" 2>/dev/null)" \
+       && [[ -n "$hu_tmp" ]] \
+       && printf '%s' "$hu_tmp" | jq -e 'type == "array"' >/dev/null 2>&1 \
+       && [[ "$(printf '%s' "$hu_tmp" | jq 'length')" -gt 0 ]]; then
+    host_updates_json="$hu_tmp"
+    log "Host-updates resolved ($(printf '%s' "$hu_tmp" | jq 'length') lang-pkgs binaries, $(printf '%s' "$hu_tmp" | jq '[.[] | select(.update_available)] | length') with host update)"
+  else
+    log "Host-updates: none resolvable (no owning package / no pkg-manager / none)"
+  fi
+fi
+
 # ----- Build envelope ----------------------------------------------------
 payload="$(jq -n \
   --arg agent_version "$AGENT_VERSION" \
@@ -573,6 +592,7 @@ payload="$(jq -n \
   --arg trivy_ver     "$trivy_version" \
   --slurpfile scan    "$trivy_out" \
   --argjson host_state "$host_state_json" \
+  --argjson host_updates "$host_updates_json" \
   --argjson trivy_db "$trivy_db_block" \
   '{
     agent_version: $agent_version,
@@ -587,7 +607,8 @@ payload="$(jq -n \
     scan: $scan[0],
     trivy_db: $trivy_db
   }
-  + (if $host_state == null then {} else {host_state: $host_state} end)')"
+  + (if $host_state == null then {} else {host_state: $host_state} end)
+  + (if $host_updates == null then {} else {host_updates: $host_updates} end)')"
 
 # ----- Upload (gzipped) --------------------------------------------------
 # Compresses typically 8-10x. Backend accepts Content-Encoding: gzip and

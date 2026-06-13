@@ -445,6 +445,19 @@ class Finding(Base):
     severity_source: Mapped[str | None] = mapped_column(String(64))
     vendor_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String(128)))
 
+    # Block AH (ADR-0062): Host-Update-Flag. Der Agent loest pro Binary-Pfad
+    # das besitzende OS-Paket auf und meldet, ob mit den aktuell konfigurierten
+    # Repos ein host-applizierbares Update bereitsteht. Ein lang-pkgs-Finding
+    # mit `host_update_available=True` wird in `fix_lane_for` von `upstream`
+    # nach `patch` promotet (präzise statt pauschal). `NULL` = Agent zu alt /
+    # Paket nicht aufgeloest -> konservativ `upstream` (ADR-0061-Default).
+    # `owning_package`/`available_version` sind reine UI-Anzeige ("host update
+    # ready: <pkg> <version>"). Werden bei jedem Re-Ingest aus dem aktuellen
+    # Scan ueberschrieben (auch auf NULL, falls ein Update eingespielt wurde).
+    host_update_available: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    owning_package: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    available_version: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
     # Block O (ADR-0022): Risk-Band-Klassifikation der Pre-Triage-Engine
     # (`engine`) oder des LLM-Passes in Block P (`llm`/`manual`).
     # `risk_band` ist nullable bis zur ersten Auswertung; die UI rendert in

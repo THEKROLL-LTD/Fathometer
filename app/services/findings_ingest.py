@@ -47,6 +47,7 @@ from app.models import (
 )
 from app.schemas.scan_envelope import (
     Envelope,
+    HostUpdateEntry,
     TrivyResult,
     TrivyVulnerability,
 )
@@ -247,8 +248,19 @@ def _build_finding_row(
     target: str | None,
     result: TrivyResult,
     now: datetime,
+    host_updates_map: dict[str, HostUpdateEntry] | None = None,
 ) -> dict[str, Any]:
-    """Erzeugt das dict fuer den Bulk-Insert einer Finding-Zeile."""
+    """Erzeugt das dict fuer den Bulk-Insert einer Finding-Zeile.
+
+    ``host_updates_map`` (Block AH, ADR-0062) ist die einmal pro Scan gebaute
+    ``path -> HostUpdateEntry``-Map aus ``envelope.host_updates`` (leer/``None``
+    wenn der Agent zu alt ist). Der Join-Key ist der effektive ``target_path``
+    (= der Trivy-``Result.Target``-Wert bzw. ``PkgPath``-Fallback). Fehlt ein
+    Eintrag, bleiben alle drei Host-Update-Spalten ``None`` -> ``upstream`` in
+    der Lane-Ableitung (ADR-0061-Default).
+    """
+    if host_updates_map is None:
+        host_updates_map = {}
     cvss_score, cvss_vector = vuln.best_cvss_v3()
     attack_vector_str = vuln.attack_vector_from_cvss()
     severity = _SEVERITY_MAP[vuln.severity]
@@ -260,6 +272,10 @@ def _build_finding_row(
     effective_target = _effective_target_path(vuln, result) or target
     pkg_disamb = _disambiguated_package_name(vuln.pkg_name, effective_target, finding_class)
     cause = _extract_cause_fields(vuln, result)
+
+    # Block AH (ADR-0062): Host-Update-Flag ueber `target_path` joinen.
+    target_path = cause["target_path"]
+    host_update = host_updates_map.get(target_path) if target_path is not None else None
 
     return {
         "server_id": server_id,
@@ -292,6 +308,12 @@ def _build_finding_row(
         # Block O (ADR-0022) — Vendor-Status + Provider-Severity-Map.
         "vendor_status": cause["vendor_status"],
         "severity_by_provider": cause["severity_by_provider"],
+        # Block AH (ADR-0062) — Host-Update-Flag (join ueber `target_path`).
+        # `None` wenn kein Host-Update-Eintrag fuer diesen Pfad vorliegt
+        # (alter Agent / nicht aufgeloest) -> upstream in der Lane-Ableitung.
+        "host_update_available": host_update.update_available if host_update else None,
+        "owning_package": host_update.owning_package if host_update else None,
+        "available_version": host_update.available_version if host_update else None,
         "status": FindingStatus.OPEN.value,
         "first_seen_at": now,
         "last_seen_at": now,
@@ -373,6 +395,13 @@ def ingest_scan(
     now = now or datetime.now(tz=UTC)
     server_id = server.id
 
+    # Block AH (ADR-0062): einmal pro Scan die `path -> HostUpdateEntry`-Map
+    # aus `envelope.host_updates` bauen (leer wenn der Agent zu alt ist und das
+    # Feld nicht sendet). Join-Key ist der `target_path` jedes Findings.
+    host_updates_map: dict[str, HostUpdateEntry] = {
+        entry.path: entry for entry in (envelope.host_updates or [])
+    }
+
     # ---- 1. Findings-Zeilen aus dem Envelope bauen --------------------
     rows: list[dict[str, Any]] = []
     current_keys: set[tuple[str, str]] = set()
@@ -407,6 +436,7 @@ def ingest_scan(
                     target=target,
                     result=trivy_result,
                     now=now,
+                    host_updates_map=host_updates_map,
                 )
             )
             class_counter[finding_class] += 1
@@ -505,6 +535,13 @@ def ingest_scan(
                 # ueberschreiben mit NULL.
                 "vendor_status": stmt.excluded.vendor_status,
                 "severity_by_provider": stmt.excluded.severity_by_provider,
+                # Block AH (ADR-0062): Host-Update-Flag. Re-Scan aktualisiert
+                # alle drei Spalten (auch true->false/NULL, falls inzwischen ein
+                # Update eingespielt wurde) — aktueller Scan ist Quelle der
+                # Wahrheit.
+                "host_update_available": stmt.excluded.host_update_available,
+                "owning_package": stmt.excluded.owning_package,
+                "available_version": stmt.excluded.available_version,
             }
             upsert = stmt.on_conflict_do_update(
                 constraint="uq_findings_natural_key",

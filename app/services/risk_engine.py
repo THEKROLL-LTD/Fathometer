@@ -59,16 +59,28 @@ FixLane = Literal["patch", "upstream", "mitigate"]
 FIX_LANES: tuple[FixLane, ...] = ("patch", "upstream", "mitigate")
 
 
-def fix_lane_for(finding_class: FindingClass | str, has_fix: object) -> FixLane:
-    """Single-Source-Ableitung der Fix-Lane (ADR-0061 §Entscheidung).
+def fix_lane_for(
+    finding_class: FindingClass | str,
+    has_fix: object,
+    host_update_available: object = None,
+) -> FixLane:
+    """Single-Source-Ableitung der Fix-Lane (ADR-0061, verfeinert ADR-0062).
 
-    Wahrheitstabelle:
+    Wahrheitstabelle (ADR-0062 §Datenfluss):
 
     * ``not has_fix`` -> ``mitigate`` (unabhaengig von der Finding-Klasse).
-    * ``has_fix`` AND ``os-pkgs`` -> ``patch`` (host-applizierbar).
-    * ``has_fix`` AND ``lang-pkgs``/``other`` -> ``upstream`` (Fix existiert,
-      aber nicht per Host-Paketmanager applizierbar; ``other`` faellt
-      konservativ nach ``upstream``).
+    * ``has_fix`` AND ``os-pkgs`` -> ``patch`` (host-applizierbar; ``flag`` egal).
+    * ``has_fix`` AND ``lang-pkgs``/``other`` AND ``host_update_available``
+      truthy -> ``patch`` (der Host kann das besitzende OS-Paket wirklich
+      updaten — präzise Promotion statt pauschalem ``upstream``).
+    * ``has_fix`` AND ``lang-pkgs``/``other`` AND ``flag`` ``False``/``None``
+      -> ``upstream`` (Fix existiert, ist aber nicht per Host-Paketmanager
+      applizierbar; ``other`` faellt konservativ nach ``upstream``).
+
+    ``host_update_available`` ist das autoritative Host-Flag (ADR-0062). ``None``
+    = Agent zu alt / Paket nicht aufgeloest -> konservativ ``upstream``
+    (ADR-0061-Default, kein Hard-Break). ``False`` und ``None`` sind beide falsy
+    und fallen damit nach ``upstream``.
 
     ``finding_class`` kann ein :class:`~app.models.FindingClass`-StrEnum ODER
     ein roher ``str`` sein — der Vergleich gegen den String-Wert ``"os-pkgs"``
@@ -83,17 +95,31 @@ def fix_lane_for(finding_class: FindingClass | str, has_fix: object) -> FixLane:
         return "mitigate"
     if str(finding_class) == "os-pkgs":
         return "patch"
+    if host_update_available:
+        return "patch"
     return "upstream"
 
 
-def fix_lane_sql_case(finding_class_col: Any, has_fix_col: Any) -> Any:
+def fix_lane_sql_case(
+    finding_class_col: Any,
+    has_fix_col: Any,
+    host_update_col: Any = None,
+) -> Any:
     """SQL-Spiegel von :func:`fix_lane_for` als SQLAlchemy-``case``.
 
     Reihenfolge spiegelt die Python-Wahrheitstabelle exakt:
 
     1. ``NOT has_fix`` -> ``mitigate``.
     2. ``finding_class == 'os-pkgs'`` -> ``patch``.
-    3. sonst (``lang-pkgs``/``other`` mit Fix) -> ``upstream``.
+    3. ``host_update_available IS TRUE`` -> ``patch`` (ADR-0062-Promotion;
+       nur wenn ``host_update_col`` uebergeben wurde).
+    4. sonst (``lang-pkgs``/``other`` mit Fix, Flag ``False``/``NULL``) ->
+       ``upstream``.
+
+    ``host_update_col`` ist optional fuer Call-Sites die das Flag (noch) nicht
+    projizieren. ``.is_(True)`` ist NULL-sicher: ``NULL IS TRUE`` -> ``false``,
+    die Zeile faellt also nach ``upstream`` (= ADR-0061-Default fuer alte
+    Agenten / nicht aufgeloeste Pakete).
 
     Wird in der Inheritance (Lane-Join), im Server-Detail-Aggregat
     (``GROUP BY``/``DISTINCT ON``) und ueberall verwendet, wo die Lane in SQL
@@ -105,11 +131,13 @@ def fix_lane_sql_case(finding_class_col: Any, has_fix_col: Any) -> Any:
     inferiert die Co-Variance hier aber nicht — daher bewusst ``Any``
     (gleiche Konvention wie ``findings_query._severity_rank_expr``).
     """
-    return case(
+    conds: list[tuple[Any, str]] = [
         (~has_fix_col, "mitigate"),
         (finding_class_col == "os-pkgs", "patch"),
-        else_="upstream",
-    )
+    ]
+    if host_update_col is not None:
+        conds.append((host_update_col.is_(True), "patch"))
+    return case(*conds, else_="upstream")
 
 
 class RiskBand(enum.StrEnum):

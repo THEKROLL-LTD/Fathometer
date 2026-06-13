@@ -278,7 +278,9 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     # `fix_lane_sql_case` (finding_class + has_fix), NICHT mehr aus has_fix
     # allein — sonst kollabierten os-pkgs+fix (patch) und lang-pkgs+fix
     # (upstream) faelschlich in einen Bucket.
-    count_lane_case = fix_lane_sql_case(Finding.finding_class, Finding.has_fix)
+    count_lane_case = fix_lane_sql_case(
+        Finding.finding_class, Finding.has_fix, Finding.host_update_available
+    )
     count_stmt = (
         select(
             Finding.application_group_id,
@@ -348,7 +350,9 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     # dass die DISTINCT-ON-Ausdruecke die fuehrenden ORDER-BY-Ausdruecke sind
     # — derselbe `case`-Objekt-Identitaet (`worst_lane_case`) wird in
     # distinct() UND order_by() verwendet.
-    worst_lane_case = fix_lane_sql_case(Finding.finding_class, Finding.has_fix)
+    worst_lane_case = fix_lane_sql_case(
+        Finding.finding_class, Finding.has_fix, Finding.host_update_available
+    )
     worst_stmt = (
         select(
             Finding.application_group_id,
@@ -357,6 +361,12 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
             Finding.identifier_key,
             Finding.package_name,
             Finding.title,
+            # Block AH (ADR-0062): Host-Update-Felder fuer den
+            # "host update ready: <pkg> <version>"-Hinweis auf der patch-Card
+            # bei aus lang-pkgs promoteten Findings (Phase 5, Template).
+            Finding.host_update_available,
+            Finding.owning_package,
+            Finding.available_version,
         )
         .where(
             Finding.server_id == server_id,
@@ -385,7 +395,9 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     # nur `.identifier_key`/`.package_purl`) als auch das `id`-Set gebildet.
     # Bewusst getrennt von Query (4): Query (4) liefert per `DISTINCT ON` nur
     # das Top-Finding pro Lane, hier brauchen wir das gesamte Lane-OPEN-Set.
-    open_lane_case = fix_lane_sql_case(Finding.finding_class, Finding.has_fix)
+    open_lane_case = fix_lane_sql_case(
+        Finding.finding_class, Finding.has_fix, Finding.host_update_available
+    )
     lane_open_stmt = select(
         Finding.application_group_id,
         open_lane_case.label("fix_lane"),

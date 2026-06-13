@@ -26,7 +26,7 @@ def test_agent_version_returns_json_shape(db_app: Flask) -> None:
         "min_trivy_version",
         "trivy_release_url_template",
     }
-    assert data["current_agent_version"] == "0.6.0"
+    assert data["current_agent_version"] == "0.7.0"
     assert data["min_agent_version"] == "0.1.0"
     assert data["recommended_trivy_version"] == "0.71.0"
     assert data["min_trivy_version"] == "0.70.0"
@@ -81,6 +81,6 @@ def test_install_sh_renders_with_backend_url(db_app: Flask) -> None:
     assert "}}" not in body
     # Eingebackene Konstanten.
     assert "0.71.0" in body  # RECOMMENDED_TRIVY_VERSION
-    assert "0.6.0" in body  # CURRENT_AGENT_VERSION
+    assert "0.7.0" in body  # CURRENT_AGENT_VERSION
     # Backend-URL ist gesetzt (Fallback auf request.host_url im Test-Setup).
     assert "http://" in body or "https://" in body

@@ -142,3 +142,136 @@ def test_fix_lane_sql_case_compiles_to_mirrored_truth_table() -> None:
     # Branch-Reihenfolge muss exakt der Python-Logik entsprechen: no-fix-Veto
     # zuerst, dann os-pkgs, sonst upstream.
     assert compiled.index("'mitigate'") < compiled.index("'patch'") < compiled.index("'upstream'")
+
+
+# ---------------------------------------------------------------------------
+# ADR-0062: Host-Update-Flag-Matrix fuer fix_lane_for (drittes Argument).
+# ---------------------------------------------------------------------------
+
+# (finding_class, host_update_available, expected_lane) — alle mit has_fix=True.
+# os-pkgs ist Flag-agnostisch (immer patch); lang-pkgs/other promoten nur bei
+# truthy Flag, sonst upstream (ADR-0061-Default fuer False/None).
+_FLAG_MATRIX = [
+    # os-pkgs: Flag wird ignoriert -> immer patch.
+    pytest.param("os-pkgs", True, "patch", id="os-pkgs+flag-true=patch"),
+    pytest.param("os-pkgs", False, "patch", id="os-pkgs+flag-false=patch"),
+    pytest.param("os-pkgs", None, "patch", id="os-pkgs+flag-none=patch"),
+    # lang-pkgs: nur truthy Flag promotet nach patch.
+    pytest.param("lang-pkgs", True, "patch", id="lang-pkgs+flag-true=patch"),
+    pytest.param("lang-pkgs", False, "upstream", id="lang-pkgs+flag-false=upstream"),
+    pytest.param("lang-pkgs", None, "upstream", id="lang-pkgs+flag-none=upstream"),
+    # other: analog lang-pkgs.
+    pytest.param("other", True, "patch", id="other+flag-true=patch"),
+    pytest.param("other", False, "upstream", id="other+flag-false=upstream"),
+    pytest.param("other", None, "upstream", id="other+flag-none=upstream"),
+]
+
+
+@pytest.mark.parametrize(("klass", "flag", "expected"), _FLAG_MATRIX)
+def test_fix_lane_for_flag_matrix_has_fix_true(klass: str, flag: object, expected: str) -> None:
+    """ADR-0062-Wahrheitstabelle (has_fix=True) mit explizitem Flag-Argument."""
+    assert fix_lane_for(klass, True, flag) == expected
+    # Enum-Input liefert dieselbe Lane.
+    assert fix_lane_for(FindingClass(klass), True, flag) == expected
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        pytest.param(True, id="flag-true"),
+        pytest.param(False, id="flag-false"),
+        pytest.param(None, id="flag-none"),
+    ],
+)
+def test_fix_lane_for_no_fix_is_mitigate_regardless_of_flag(flag: object) -> None:
+    """``not has_fix`` -> ``mitigate`` ueberschreibt jede Klassen-/Flag-Kombination.
+
+    Selbst ein ``host_update_available=True`` darf einen no-fix-Befund nicht
+    in eine patch-/upstream-Lane heben — ohne Fix gibt es nichts zu applizieren."""
+    for klass in ("os-pkgs", "lang-pkgs", "other"):
+        assert fix_lane_for(klass, False, flag) == "mitigate", (klass, flag)
+        assert fix_lane_for(klass, None, flag) == "mitigate", (klass, flag)
+
+
+def test_fix_lane_for_default_flag_arg_behaves_like_none() -> None:
+    """Der Default-Wert von ``host_update_available`` (weggelassen) ist ``None``
+    und reproduziert exakt das AG-Verhalten (ADR-0061): lang-pkgs/other mit Fix
+    fallen nach ``upstream``, os-pkgs nach ``patch``."""
+    # lang-pkgs/other ohne Flag-Argument == mit explizitem None.
+    assert fix_lane_for("lang-pkgs", True) == fix_lane_for("lang-pkgs", True, None) == "upstream"
+    assert fix_lane_for("other", True) == fix_lane_for("other", True, None) == "upstream"
+    assert fix_lane_for("os-pkgs", True) == fix_lane_for("os-pkgs", True, None) == "patch"
+
+
+@pytest.mark.parametrize(
+    "truthy",
+    [
+        pytest.param(1, id="int-one"),
+        pytest.param("yes", id="nonempty-string"),
+        pytest.param("true", id="string-true"),
+    ],
+)
+def test_fix_lane_for_truthy_flag_promotes_langpkgs(truthy: object) -> None:
+    """Jeder truthy Flag-Wert (nicht nur ``True``) promotet lang-pkgs nach patch —
+    die Implementierung prueft ``if host_update_available:`` (Truthiness)."""
+    assert fix_lane_for("lang-pkgs", True, truthy) == "patch"
+
+
+# ---------------------------------------------------------------------------
+# ADR-0062: fix_lane_sql_case mit host_update_col-Argument.
+# ---------------------------------------------------------------------------
+
+
+def test_fix_lane_sql_case_with_host_update_col_adds_promotion_branch() -> None:
+    """Mit ``host_update_col`` enthaelt der CASE einen zusaetzlichen
+    ``host_update_available IS true -> 'patch'``-Zweig — und zwar NACH dem
+    os-pkgs-Zweig und VOR dem ``ELSE 'upstream'`` (spiegelt die Python-Reihenfolge)."""
+    compiled = str(
+        fix_lane_sql_case(
+            Finding.finding_class,
+            Finding.has_fix,
+            Finding.host_update_available,
+        ).compile(compile_kwargs={"literal_binds": True})
+    )
+    # Alle vier Branches in korrekter Reihenfolge.
+    assert "WHEN NOT findings.has_fix THEN 'mitigate'" in compiled
+    assert "WHEN (findings.finding_class = 'os-pkgs') THEN 'patch'" in compiled
+    assert "findings.host_update_available IS true" in compiled
+    assert "ELSE 'upstream'" in compiled
+    # Reihenfolge: mitigate (no-fix) -> os-pkgs-patch -> host_update-patch -> else.
+    idx_mitigate = compiled.index("THEN 'mitigate'")
+    idx_os_pkgs = compiled.index("findings.finding_class = 'os-pkgs'")
+    idx_flag = compiled.index("findings.host_update_available IS true")
+    idx_else = compiled.index("ELSE 'upstream'")
+    assert idx_mitigate < idx_os_pkgs < idx_flag < idx_else
+
+
+def test_fix_lane_sql_case_without_host_update_col_omits_branch() -> None:
+    """Rueckwaertskompatibel: ohne ``host_update_col`` (Default None) fehlt der
+    Promotion-Zweig komplett — Call-Sites die das Flag nicht projizieren
+    bekommen exakt die AG-CASE-Form (kein Verweis auf die Flag-Spalte)."""
+    compiled = str(
+        fix_lane_sql_case(Finding.finding_class, Finding.has_fix).compile(
+            compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "host_update_available" not in compiled
+    # Genau drei Lane-Literale, kein zusaetzlicher patch-Zweig.
+    assert compiled.count("'patch'") == 1
+    assert "ELSE 'upstream'" in compiled
+
+
+def test_fix_lane_sql_case_none_flag_falls_to_upstream_via_is_true() -> None:
+    """Der Promotion-Zweig nutzt ``.is_(True)`` (kompiliert zu ``IS true``), nicht
+    ``= true`` — das ist NULL-sicher: ``NULL IS true`` -> false, die Zeile faellt
+    nach ``upstream`` (= ADR-0061-Default fuer alte Agenten)."""
+    compiled = str(
+        fix_lane_sql_case(
+            Finding.finding_class,
+            Finding.has_fix,
+            Finding.host_update_available,
+        ).compile(compile_kwargs={"literal_binds": True})
+    )
+    # `.is_(True)` rendert als `IS true`, NICHT als `= true` (das waere NULL-unsicher).
+    assert "findings.host_update_available IS true" in compiled
+    assert "findings.host_update_available = true" not in compiled

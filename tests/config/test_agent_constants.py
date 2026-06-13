@@ -29,11 +29,14 @@ def test_min_trivy_le_recommended_trivy() -> None:
 
 
 def test_ticket015_version_bump_values() -> None:
-    """TICKET-015: RECOMMENDED-Trivy auf 0.71.0, Agent auf 0.6.0 gebumpt;
-    MIN-Trivy bleibt bewusst 0.70.0 (kein Hart-Ausmustern von 0.70.0-Hosts)."""
+    """RECOMMENDED-Trivy auf 0.71.0; Agent auf 0.7.0 (Block AH / ADR-0062 —
+    Host-Update-Resolver); MIN-Trivy bleibt bewusst 0.70.0 (kein Hart-Ausmustern
+    von 0.70.0-Hosts). MIN_AGENT_VERSION bleibt 0.1.0 — alte Agenten senden kein
+    host_updates -> NULL -> upstream, kein Hard-Reject."""
     assert Settings.RECOMMENDED_TRIVY_VERSION == "0.71.0"
-    assert Settings.CURRENT_AGENT_VERSION == "0.6.0"
+    assert Settings.CURRENT_AGENT_VERSION == "0.7.0"
     assert Settings.MIN_TRIVY_VERSION == "0.70.0"
+    assert Settings.MIN_AGENT_VERSION == "0.1.0"
 
 
 def test_trivy_db_stale_threshold_positive_int() -> None:

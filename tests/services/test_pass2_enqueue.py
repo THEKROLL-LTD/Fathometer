@@ -43,17 +43,20 @@ def _finding(
     *,
     fixed_version: str | None = "1.2.3",
     finding_class: str = "os-pkgs",
+    host_update_available: bool | None = None,
 ) -> SimpleNamespace:
     """Default ``fixed_version`` gesetzt + ``os-pkgs`` -> Lane ``patch``.
 
-    ADR-0061: die Lane folgt aus ``(finding_class, has_fix)``. ``os-pkgs`` +
-    Fix -> ``patch``; ``fixed_version=None`` -> ``mitigate``; ``lang-pkgs`` +
-    Fix -> ``upstream`` (per ``finding_class``-Override in den Tests).
+    ADR-0061/0062: die Lane folgt aus ``(finding_class, has_fix,
+    host_update_available)``. ``os-pkgs`` + Fix -> ``patch``;
+    ``fixed_version=None`` -> ``mitigate``; ``lang-pkgs`` + Fix +
+    ``host_update_available`` falsy -> ``upstream``, ``True`` -> ``patch``.
     """
     return SimpleNamespace(
         application_group_id=group_id,
         fixed_version=fixed_version,
         finding_class=finding_class,
+        host_update_available=host_update_available,
     )
 
 

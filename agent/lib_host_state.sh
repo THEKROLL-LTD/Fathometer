@@ -57,7 +57,7 @@
 # der Collector-Signaturen mit ``REQUIRED_LIB_HOST_STATE_VERSION`` in
 # ``fathometer-agent.sh`` gemeinsam bumpen.
 # shellcheck disable=SC2034
-readonly LIB_HOST_STATE_VERSION="0.3.1"
+readonly LIB_HOST_STATE_VERSION="0.4.0"
 
 # Konstanten (read-only). Nur deklarieren wenn noch nicht gesetzt — damit
 # die Library mehrfach sourcebar bleibt (z.B. in pytest-Subshells).
@@ -419,6 +419,207 @@ collect_services() {
       ' \
     | jq -Rsc 'split("\n") | map(select(length > 0))' 2>/dev/null)" || result="[]"
   [[ -n "$result" ]] && COLLECTED_SERVICES="$result"
+}
+
+# ---------------------------------------------------------------------------
+# Host-Update-Resolver (Block AH, ADR-0062)
+#
+# Loest pro lang-pkgs-Finding-Binary das besitzende OS-Paket auf und prueft
+# read-only, ob das aktuell konfigurierte Repo eine neuere Version bereithaelt
+# -> Boolean `host_update_available`. Anders als die vier host_state-Collectors
+# braucht dieser die Trivy-`Result.Target`-Pfade als Eingabe und laeuft daher
+# separat (NICHT in `build_host_state_json`). Gibt das JSON-Array auf stdout
+# aus (subshell-sicher, kein globales Tracking-Array).
+#
+# Sicherheit/ADR-0062: ausschliesslich read-only Kommandos (`rpm -qf`/`dpkg -S`,
+# `dnf|yum check-update`, `apt-get -s upgrade` = Simulation), kein State-Change,
+# Timeout-gekapselt. Ein einziger `check-update`-Aufruf, dessen Ergebnis im
+# Agent gegen die aufgeloesten Pakete gejoint wird (ADR-0062 §Re-Open-Perf).
+# ---------------------------------------------------------------------------
+
+# Fuehrt das Kommando mit 120s-Cap aus, falls `timeout` (GNU-coreutils) da ist;
+# sonst ohne Cap (sehr alte BusyBox). Kein State-Change — alle Caller sind
+# read-only Query-Kommandos.
+_run_capped() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 120 "$@"
+  else
+    "$@"
+  fi
+}
+
+# Pure parser (stdin -> stdout): `rpm -qf --qf '%{NAME}\n' <path>`-Output ->
+# erster gueltiger Paketname. Error-Zeilen ("is not owned by any package")
+# werden uebersprungen; leer wenn nicht aufloesbar.
+_parse_rpm_qf() {
+  _strip_non_ascii \
+    | awk '
+        /is not owned by any package/ { next }
+        /No such file or directory/   { next }
+        {
+          gsub(/^[ \t]+|[ \t]+$/, "", $0)
+          if ($0 ~ /^[A-Za-z0-9][A-Za-z0-9._+-]*$/) { print $0; exit }
+        }
+      '
+}
+
+# Pure parser (stdin -> stdout): `dpkg -S <path>`-Output ("pkg: /path", evtl.
+# "p1, p2: /path" bei Diversions) -> erster Paketname. Leer bei "no path found".
+_parse_dpkg_search() {
+  _strip_non_ascii \
+    | awk -F: '
+        /no path found matching/ { next }
+        NF >= 2 {
+          split($1, a, ",")
+          name = a[1]
+          gsub(/^[ \t]+|[ \t]+$/, "", name)
+          if (name ~ /^[A-Za-z0-9][A-Za-z0-9._+-]*$/) { print name; exit }
+        }
+      '
+}
+
+# Pure parser (stdin -> stdout): `dnf|yum check-update`-Output ->
+# "pkgname<TAB>version"-Zeilen (nur aktualisierbare Pakete). Format der
+# Paketzeilen: "name.arch   version-release   repo". Der "Obsoleting
+# Packages"-Block am Ende wird ignoriert, Header/Leerzeilen fallen durch.
+_parse_dnf_check_update() {
+  _strip_non_ascii \
+    | awk '
+        BEGIN { obsoleting = 0 }
+        /^Obsoleting Packages/ { obsoleting = 1; next }
+        obsoleting { next }
+        NF >= 3 && $1 ~ /\.[A-Za-z0-9_]+$/ {
+          name = $1
+          sub(/\.[A-Za-z0-9_]+$/, "", name)   # .arch-Suffix entfernen
+          if (name ~ /^[A-Za-z0-9][A-Za-z0-9._+-]*$/ && $2 ~ /^[A-Za-z0-9]/) {
+            printf "%s\t%s\n", name, $2
+          }
+        }
+      '
+}
+
+# Pure parser (stdin -> stdout): `apt-get -s upgrade`-Output ->
+# "pkgname<TAB>version"-Zeilen. Format: "Inst pkgname [oldver] (newver repo
+# arch ...)" bzw. "Inst pkgname (newver ...)".
+_parse_apt_upgrade_sim() {
+  _strip_non_ascii \
+    | awk '
+        $1 == "Inst" && NF >= 3 {
+          name = $2
+          ver = ""
+          for (i = 3; i <= NF; i++) {
+            if (substr($i, 1, 1) == "(") { ver = substr($i, 2); break }
+          }
+          gsub(/[(),]/, "", ver)
+          if (name ~ /^[A-Za-z0-9][A-Za-z0-9._+-]*$/ && ver != "") {
+            printf "%s\t%s\n", name, ver
+          }
+        }
+      '
+}
+
+# ---------------------------------------------------------------------------
+# collect_host_updates <trivy_json_file> <scan_root>
+#
+# Gibt das `host_updates`-JSON-Array auf stdout aus:
+#   [{path, owning_package, available_version, update_available}]
+# `path` ist der unveraenderte Trivy-`Result.Target` (= Join-Key gegen
+# `Finding.target_path` im Ingest). Nur aufgeloeste Binaries erzeugen einen
+# Eintrag — nicht aufloesbare (hand-installierte/EOL) fehlen bewusst, sodass
+# der Ingest dort `NULL` -> `upstream` sieht (ADR-0062 §Datenfluss).
+# ---------------------------------------------------------------------------
+collect_host_updates() {
+  local trivy_json="$1"
+  local scan_root="$2"
+  local pkg_family=""
+
+  # Paketmanager-Familie bestimmen (rpm deckt dnf/yum/zypper, dpkg deckt apt).
+  if command -v rpm >/dev/null 2>&1; then
+    pkg_family="rpm"
+  elif command -v dpkg >/dev/null 2>&1; then
+    pkg_family="deb"
+  fi
+  if [[ -z "$pkg_family" ]]; then
+    printf '[]'
+    return 0
+  fi
+
+  # Distinct lang-pkgs-Targets aus dem (bereits Packages-gestrippten) Trivy-JSON.
+  local targets
+  targets="$(jq -r '[.Results[]? | select(.Class == "lang-pkgs") | .Target // empty] | unique[]' "$trivy_json" 2>/dev/null || true)"
+  if [[ -z "$targets" ]]; then
+    printf '[]'
+    return 0
+  fi
+
+  # Upgradable-Set EINMAL ermitteln (ADR-0062 §Perf), read-only.
+  local upgradable_tsv=""
+  if [[ "$pkg_family" == "rpm" ]]; then
+    if command -v dnf >/dev/null 2>&1; then
+      upgradable_tsv="$(_run_capped dnf check-update 2>/dev/null | _parse_dnf_check_update || true)"
+    elif command -v yum >/dev/null 2>&1; then
+      upgradable_tsv="$(_run_capped yum check-update 2>/dev/null | _parse_dnf_check_update || true)"
+    fi
+  else
+    if command -v apt-get >/dev/null 2>&1; then
+      upgradable_tsv="$(_run_capped apt-get -s upgrade 2>/dev/null | _parse_apt_upgrade_sim || true)"
+    fi
+  fi
+
+  # Upgradable in eine assoziative Map (pkg -> version) laden.
+  declare -A _upgradable=()
+  if [[ -n "$upgradable_tsv" ]]; then
+    local _p _v
+    while IFS=$'\t' read -r _p _v; do
+      [[ -n "$_p" ]] && _upgradable["$_p"]="$_v"
+    done <<< "$upgradable_tsv"
+  fi
+
+  # Pro Target das besitzende Paket aufloesen und TSV bauen.
+  local tsv="" target abspath pkg avail upd tsv_line
+  local count=0
+  while IFS= read -r target; do
+    [[ -z "$target" ]] && continue
+    (( count >= 4096 )) && break
+    abspath="${scan_root%/}/${target#/}"
+    pkg=""
+    if [[ "$pkg_family" == "rpm" ]]; then
+      pkg="$(_run_capped rpm -qf --qf '%{NAME}\n' "$abspath" 2>/dev/null | _parse_rpm_qf || true)"
+    else
+      pkg="$(_run_capped dpkg -S "$abspath" 2>/dev/null | _parse_dpkg_search || true)"
+    fi
+    # Nicht aufloesbar -> kein Eintrag (Ingest -> NULL -> upstream).
+    [[ -z "$pkg" ]] && continue
+    if [[ -n "${_upgradable[$pkg]+x}" ]]; then
+      upd="true"
+      avail="${_upgradable[$pkg]}"
+    else
+      upd="false"
+      avail=""
+    fi
+    printf -v tsv_line '%s\t%s\t%s\t%s' "$target" "$pkg" "$avail" "$upd"
+    tsv+="${tsv_line}"$'\n'
+    count=$((count + 1))
+  done <<< "$targets"
+
+  if [[ -z "$tsv" ]]; then
+    printf '[]'
+    return 0
+  fi
+
+  local result
+  result="$(printf '%s' "$tsv" | jq -Rsc '
+    split("\n")
+    | map(select(length > 0))
+    | map(split("\t"))
+    | map({
+        path: .[0],
+        owning_package: (if (.[1] // "") == "" then null else .[1] end),
+        available_version: (if (.[2] // "") == "" then null else .[2] end),
+        update_available: (.[3] == "true")
+      })
+  ' 2>/dev/null)" || result="[]"
+  printf '%s' "$result"
 }
 
 # ---------------------------------------------------------------------------

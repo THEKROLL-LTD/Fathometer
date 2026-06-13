@@ -171,13 +171,15 @@ def _mk_finding(
     *,
     fixed_version: str | None = "1.0.0",
     finding_class: str = "os-pkgs",
+    host_update_available: bool | None = None,
 ) -> SimpleNamespace:
-    # ADR-0053/0061: die fix_lane folgt aus ``(finding_class, has_fix)``.
-    # Default ``os-pkgs`` + gesetztes ``fixed_version`` -> alle Findings dieser
-    # Group fallen in die ``patch``-Lane (host-applizierbar), der Enqueue
-    # erzeugt damit genau einen Job (Single-Lane-Group), passend zu den
-    # ``count == 1``-Konvergenz-Asserts dieser Suite. ``lang-pkgs`` + Fix
-    # routet stattdessen nach ``upstream``, no-fix nach ``mitigate``.
+    # ADR-0053/0061/0062: die fix_lane folgt aus ``(finding_class, has_fix,
+    # host_update_available)``. Default ``os-pkgs`` + gesetztes
+    # ``fixed_version`` -> alle Findings dieser Group fallen in die
+    # ``patch``-Lane (host-applizierbar), der Enqueue erzeugt damit genau einen
+    # Job (Single-Lane-Group), passend zu den ``count == 1``-Konvergenz-Asserts
+    # dieser Suite. ``lang-pkgs`` + Fix + Flag falsy routet nach ``upstream``,
+    # Flag ``True`` promotet nach ``patch``, no-fix nach ``mitigate``.
     return SimpleNamespace(
         id=fid,
         identifier_key=key,
@@ -188,6 +190,7 @@ def _mk_finding(
         server_id=SERVER_ID,
         fixed_version=fixed_version,
         finding_class=finding_class,
+        host_update_available=host_update_available,
     )
 
 

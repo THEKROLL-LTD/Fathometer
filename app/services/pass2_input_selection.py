@@ -54,17 +54,24 @@ PASS2_FINDINGS_BUDGET = 32
 
 
 def fix_lane_of(finding: Finding) -> FixLane:
-    """Deterministische Fix-Lane eines Findings (ADR-0061, war ADR-0053).
+    """Deterministische Fix-Lane eines Findings (ADR-0061, verfeinert ADR-0062).
 
     Delegiert an die Single-Source :func:`risk_engine.fix_lane_for` mit
-    ``finding.finding_class`` und ``bool(finding.fixed_version)``. Letzteres
+    ``finding.finding_class``, ``bool(finding.fixed_version)`` und dem
+    Host-Update-Flag ``finding.host_update_available``. ``bool(fixed_version)``
     ist exakt das Praedikat der generierten DB-Spalte ``Finding.has_fix``
     (``fixed_version IS NOT NULL AND fixed_version <> ''``), damit Enqueue,
     Worker-Persist und der SQL-Lane-CASE der Inheritance **dieselbe**
     Partition sehen. Ein leerer ``fixed_version``-String zaehlt damit als
-    ``mitigate``.
+    ``mitigate``. ``host_update_available=True`` promotet ein lang-pkgs-Finding
+    von ``upstream`` nach ``patch`` (ADR-0062); ``False``/``NULL`` bleibt
+    ``upstream``.
     """
-    return fix_lane_for(finding.finding_class, bool(finding.fixed_version))
+    return fix_lane_for(
+        finding.finding_class,
+        bool(finding.fixed_version),
+        finding.host_update_available,
+    )
 
 
 def partition_by_lane(findings: Iterable[Finding]) -> dict[FixLane, list[Finding]]:

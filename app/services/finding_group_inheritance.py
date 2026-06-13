@@ -73,7 +73,11 @@ def inherit_group_risk_to_findings(
         .where(Finding.server_id == ApplicationGroupEvaluation.server_id)
         .where(
             ApplicationGroupEvaluation.fix_lane
-            == fix_lane_sql_case(Finding.finding_class, Finding.has_fix)
+            == fix_lane_sql_case(
+                Finding.finding_class,
+                Finding.has_fix,
+                Finding.host_update_available,
+            )
         )
         .where(
             (Finding.risk_band.is_distinct_from(ApplicationGroupEvaluation.risk_band))

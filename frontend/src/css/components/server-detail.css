@@ -468,6 +468,19 @@
   white-space: nowrap;
   margin-left: 8px;
 }
+/* ADR-0062: lang-pkgs-Finding, das der Host-Agent als host-applizierbar
+   gemeldet hat (owning OS-Paket updatebar) -> nach patch promotet. Positiver
+   Operational-Hinweis "host update ready: <pkg> <version>". */
+.workflow-table__host-update,
+.sd-app-group__host-update {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--status-operational);
+  white-space: nowrap;
+}
+.workflow-table__host-update { margin-left: 8px; }
+.sd-app-group__host-update { margin-top: 4px; }
 
 /* Info-Tooltip neben dem "Reason"-Spaltenkopf (Operator-Workflows): erklaert,
    dass die Reason ein KI-Assessment des Lane-Worst-Findings ist (was, worauf

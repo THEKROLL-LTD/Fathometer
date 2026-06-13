@@ -4,6 +4,43 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block AH (ADR-0062): Host-Update-Flag — präzise statt pauschal
+
+Verfeinert ADR-0061: ein lang-pkgs-Finding wird nur dann als `upstream`
+geführt, wenn der Host es **nicht** per Paketmanager patchen kann. Der
+Host-Agent löst pro Binary das besitzende OS-Paket auf und meldet read-only,
+ob dessen Repo ein Update hat — ist dem so, wird das Finding von `upstream`
+nach `patch` promotet (z. B. wenn Tailscale ein neues, mit gepatchtem Go
+gebautes `tailscale`-rpm liefert). Kein State-Change am Host, kein Outbound,
+kein LLM. Quality-Gates grün: `ruff`/`ruff format`/`mypy app/`, Pure-Unit
+(`pytest`), `shellcheck`. Alembic-Roundtrip `0026`, der `.bats`-Resolver-Lauf
+und der Live-Host-Smoke (echter Paketmanager) stehen beim User an.
+
+### Added
+
+- **`host_update_available` (+ `owning_package`/`available_version`)** als
+  nullable Finding-Spalten (Migration `0026`, `down_revision=0025`, reiner
+  nullable-Add ohne Eval-Rebuild — `NULL` = AG-Verhalten `upstream`).
+- **Agent-Resolver** (`collect_host_updates` in `agent/lib_host_state.sh`,
+  Agent v0.7.0 / Lib v0.4.0): `rpm -qf`/`dpkg -S` + ein read-only
+  `dnf|yum check-update` / `apt-get -s upgrade`, gebündelt pro Paket,
+  Timeout-gekapselt; neuer Envelope-Block `host_updates` (Join über
+  `target_path`). `MIN_AGENT_VERSION` bleibt `0.1.0` (alte Agenten → `NULL`).
+- **„host update ready: `<pkg> <version>`"-Hinweis** auf der Patch-Card
+  (Workflow-Tabelle + Group-Card) für ein aus lang-pkgs promotetes Finding.
+- **`.bats`-Resolver-Tests** (`tests/agent/test_host_update_resolver.bats`,
+  On-Demand-Suite) für die rpm/dpkg/dnf/apt-Output-Parser.
+
+### Changed
+
+- **`fix_lane_for(finding_class, has_fix, host_update_available=None)`** +
+  SQL-Spiegel um den Flag erweitert: `lang-pkgs/other & has_fix &
+  host_update_available IS TRUE → patch`, sonst `upstream` (NULL-sicher).
+- **Envelope** (`scan_envelope.py`): neues `HostUpdateEntry`-Modell +
+  optionales `Envelope.host_updates` (`MAX_HOST_UPDATES`=4096, `extra="ignore"`);
+  Ingest joint es pro Finding über `target_path`.
+- **Agent v0.7.0** (`CURRENT_AGENT_VERSION`), Lib `0.4.0`.
+
 ## [Unreleased] — Block AG (ADR-0061): Fix-Ownership — `upstream`-Lane für lang-pkgs-Fixes
 
 lang-pkgs-Fixes (gobinary/jar/node — z. B. die in `tailscaled` einkompilierte

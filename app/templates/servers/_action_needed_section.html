@@ -81,6 +81,9 @@
                     {% if entry.worst_finding %}<a class="workflow-table__cve-link"
                           href="{{ url_for('findings.index', q=entry.worst_finding.identifier_key) }}"
                           data-test="action-card-{{ card.id }}-worst-link">{{ entry.worst_finding.identifier_key }}</a>{% else %}—{% endif %}
+                    {%- if entry.worst_finding and entry.worst_finding.host_update_available and entry.worst_finding.owning_package %}
+                      <span class="workflow-table__host-update"
+                            data-test="action-card-{{ card.id }}-host-update">host update ready: {{ entry.worst_finding.owning_package }}{% if entry.worst_finding.available_version %} {{ entry.worst_finding.available_version }}{% endif %}</span>{% endif -%}
                   </td>
                   <td class="workflow-table__reason">
                     {% if entry.evaluation and entry.evaluation.risk_band_reason %}
