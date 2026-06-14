@@ -7,6 +7,7 @@ Mock-Session (kein DB-Roundtrip). ``get_session`` und
 from __future__ import annotations
 
 import inspect
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -256,6 +257,16 @@ def test_drift_reconcile_sweep_swallows_db_exception(monkeypatch: pytest.MonkeyP
 def test_subtick_runs_sweep_on_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
     """_run_subticks triggert den Sweep einmal, dann erst wieder nach 300s."""
     llm_worker.reset_shutdown_for_tests()  # setzt _last_pass2_backstop_sweep_at = 0.0
+    # Cadence relativ zur ECHTEN monotonic-Clock faellig machen. `reset_…`
+    # setzt _last=0.0 und verlaesst sich darauf, dass time.monotonic() > 300s
+    # ist — auf einem frisch gebooteten CI-Runner ist monotonic() aber < 300s,
+    # dann triggert der Sweep nie (assert 0 == 1). Offset macht den Test
+    # uptime-unabhaengig.
+    monkeypatch.setattr(
+        llm_worker,
+        "_last_pass2_backstop_sweep_at",
+        time.monotonic() - llm_worker.PASS2_BACKSTOP_SWEEP_INTERVAL_SEC - 1.0,
+    )
     # Alle anderen Sub-Ticks neutralisieren.
     for name in (
         "_run_stale_reaper",
@@ -283,6 +294,14 @@ def test_subtick_runs_drift_reconcile_on_cadence(monkeypatch: pytest.MonkeyPatch
     wieder nach dem 900s-Fenster. Regression-Guard, damit ein zukuenftiger
     Cadence-Edit die Drift-Heilung nicht still deaktiviert."""
     llm_worker.reset_shutdown_for_tests()  # setzt _last_pass2_drift_reconcile_at = 0.0
+    # Cadence relativ zur ECHTEN monotonic-Clock faellig machen (siehe
+    # test_subtick_runs_sweep_on_cadence): sonst schlaegt der Test auf einem
+    # frisch gebooteten CI-Runner fehl, wo monotonic() < 900s ist.
+    monkeypatch.setattr(
+        llm_worker,
+        "_last_pass2_drift_reconcile_at",
+        time.monotonic() - llm_worker.PASS2_DRIFT_RECONCILE_SWEEP_INTERVAL_SEC - 1.0,
+    )
     for name in (
         "_run_stale_reaper",
         "_run_debug_log_eviction",
