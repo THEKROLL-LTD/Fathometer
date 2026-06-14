@@ -801,6 +801,54 @@ ADR-0063 §Leitplanken, `docs/operations.md` §SSRF-Schutz.
 
 ---
 
+## TD-020 — Risk-Band-Reason für `monitor`/`noise` im UI nicht sichtbar
+
+**Was:** Die LLM-`risk_band_reason` (`application_group_evaluations`) wird **nur**
+in den Operator-Workflows (escalate/act-Cards, `_action_needed_section.html`)
+angezeigt. Findings in `monitor`/`noise` haben eine Reason in der DB, die im UI
+**nirgends** sichtbar ist — der Operator kann nicht nachvollziehen, *warum* etwas
+de-priorisiert wurde, ohne DB-Zugriff. Befund 2026-06-13 (k3s-sv-*): tailscale/
+tailscaled `CVE-2026-42504` → `monitor` mit korrekter Begründung („MIME-decode
+flaw unlikely to be triggered by WireGuard…"), aber für den Operator unsichtbar.
+
+**Warum:** Untergräbt das Vertrauen in die Monitor/Noise-Einstufung — der Operator
+muss „blind" glauben, dass die De-Priorisierung stimmt. Gerade bei Exploitability-
+Downgrades (HIGH/CRITICAL-CVE → monitor) ist die Begründung die wichtigste
+Information.
+
+**Lösung:** Band-Reason auch für `monitor`/`noise` anzeigen — z. B. im
+Finding-Detail (`finding_inline_body`) oder im Band-Section-Header der
+Group-View, pro `(group, server, fix_lane)`. Daten liegen vor; kein neuer Query
+nötig (Eval-Row wird ohnehin geladen).
+
+**Aufwand:** ~halber Tag (View reicht Eval-Reason an Band-Section/Detail durch;
+Template-Render + Drift-/XSS-Test, kein `|safe`). **Wann:** Observability-Bündel
+mit TD-021. Querverweis: ADR-0043 (Band = Exploitability), ADR-0052.
+
+---
+
+## TD-021 — `risk_band_reason` bei 256 Zeichen abgeschnitten
+
+**Was:** `ApplicationGroupEvaluation.risk_band_reason` ist `String(256)`; der
+Pass-2-Worker cappt die LLM-Reason auf 256 (`risk_engine._truncate`). Reasons
+brechen mitten im Satz ab (Befund 2026-06-13: „…unlikely to be triggered by
+WireGuard or", „Multiple CRITICAL gRPC authz", „No attack path" wäre noch gekommen).
+Die volle Begründung — inkl. der entscheidenden „welche Exposure-Schicht fehlt"-
+Aussage am Satzende — geht verloren (vollständig allenfalls in `llm_debug_log`).
+
+**Warum:** Abgeschnittene Reasons sind im UI und via DB unvollständig/unleserlich;
+die Downgrade-Disziplin (ADR-0043: LLM nennt die fehlende Schicht) steht oft am
+Ende und wird gerade abgeschnitten.
+
+**Lösung:** Reason-Spalte auf `String(1024)` oder `Text` erweitern + den
+Worker-Cap anheben (Migration + Cap-Konstante). Alternativ die volle Reason aus
+`llm_debug_log` im UI verlinken.
+
+**Aufwand:** ~1–2 h (Migration + Cap-Konstante + Test). **Wann:** zusammen mit
+TD-020 (Observability-Bündel). Querverweis: ADR-0043, `risk_engine._truncate`.
+
+---
+
 ## Konventionen fuer neue Eintraege
 
 - ID: `TD-NNN`, fortlaufend.
