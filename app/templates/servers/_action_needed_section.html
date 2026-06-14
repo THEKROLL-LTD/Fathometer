@@ -73,7 +73,12 @@
             </thead>
             <tbody>
               {% for entry in card.groups %}
-                <tr data-test="action-card-{{ card.id }}-row">
+                {#- Bonding-Flag: traegt diese Group-Row ein angehaengtes Upstream-
+                    Panel? Steuert (a) ob die Panel-Sub-Zeile gerendert wird und
+                    (b) das optische Verbinden (kein Trenn-Hairline, gehobener
+                    Hintergrund) zwischen Group-Row und Panel (2026-06-14). -#}
+                {%- set has_upstream = card.id == 'escalate-mitigate' and upstream_check_configured and entry.upstream_check and entry.upstream_check.state != 'idle' -%}
+                <tr data-test="action-card-{{ card.id }}-row"{% if has_upstream %} class="workflow-table__row--has-upstream"{% endif %}>
                   <td class="workflow-table__group">
                     <a href="#group-{{ entry.group.id }}">{{ entry.group.label }}</a>
                     {%- if entry.fix_lane %} <span class="workflow-table__lane-tag"
@@ -129,9 +134,13 @@
                    Eigene volle Sub-Zeile unter der Group-Row; das Panel-Partial
                    ist Single-Source (Initial-Render == Poll/POST-Response). Andere
                    Cards (patch/act) und idle-Rows bekommen keinen Button. #}
-                {% if card.id == 'escalate-mitigate' and upstream_check_configured and entry.upstream_check and entry.upstream_check.state != 'idle' %}
+                {% if has_upstream %}
                   <tr class="workflow-table__upstream-row" data-test="action-card-{{ card.id }}-upstream-row">
-                    <td class="workflow-table__upstream-cell" colspan="4">
+                    {#- Leere Zelle unter der Group-Spalte: das Panel startet so
+                        automatisch buendig mit "Worst Finding", unabhaengig von
+                        der realen Group-Spaltenbreite (2026-06-14). -#}
+                    <td class="workflow-table__upstream-spacer" aria-hidden="true"></td>
+                    <td class="workflow-table__upstream-cell" colspan="3">
                       {% with state = entry.upstream_check.state,
                               row = entry.upstream_check.row,
                               seed = entry.upstream_check.seed,

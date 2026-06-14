@@ -426,10 +426,13 @@
 .workflow-table tr:last-child td { border-bottom: 0; }
 .workflow-table tr:hover td { background: var(--surface-hover); }
 .workflow-table .workflow-table__group { color: var(--accent); width: 280px; }
-.workflow-table .workflow-table__cve   { color: var(--text-primary); width: 160px; white-space: nowrap; }
+.workflow-table .workflow-table__cve   { color: var(--text-primary); width: 220px; }
 /* Worst-Finding-Link -> Findings-Suche (/findings?q=<cve>). Sichtbare
-   Link-Affordance wie die Group-Links: Accent + persistenter Unterstrich. */
+   Link-Affordance wie die Group-Links: Accent + persistenter Unterstrich.
+   nowrap nur auf der CVE-ID selbst — der "fixed upstream"-Hinweis darf
+   umbrechen, sonst blaeht die Spalte die Reason-Spalte zu (2026-06-14). */
 .workflow-table__cve-link {
+  white-space: nowrap;
   color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -441,7 +444,7 @@
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
-.workflow-table .workflow-table__reason { color: var(--text-secondary); }
+.workflow-table .workflow-table__reason { color: var(--text-secondary); width: 50%; }
 .workflow-table__reason b { color: var(--text-primary); font-weight: 400; }
 /* Lane-Tag in der Group-Spalte (ADR-0053): dezenter patch/no-patch-Hinweis
    neben dem Group-Link, da eine Group in patch- UND mitigate-Cards erscheinen
@@ -1911,9 +1914,35 @@
    ════════════════════════════════════════════════════════════════════════ */
 .workflow-table__upstream-row td { background: var(--surface-raised); }
 .workflow-table tr.workflow-table__upstream-row:hover td { background: var(--surface-raised); }
-.workflow-table__upstream-cell {
+
+/* Bonding (A+B, 2026-06-14): Die Group-Row mit angehaengtem Upstream-Panel
+   teilt sich den gehobenen Hintergrund mit dem Panel und unterdrueckt die
+   trennende Hairline -> Row + Panel lesen als EIN Block, der erkennbar zur
+   Group gehoert (nicht als eigenstaendige Card-Sektion). */
+.workflow-table tr.workflow-table__row--has-upstream td {
+  background: var(--surface-raised);
+  border-bottom: 0;
+}
+/* Hover hellt weiterhin auf (wie jede andere Row) — Bonding-Hintergrund darf
+   den Hover-Effekt nicht ueberschreiben (2026-06-14). */
+.workflow-table tr.workflow-table__row--has-upstream:hover td {
+  background: var(--surface-hover);
+}
+
+/* td.<class> noetig: `.workflow-table td`-Shorthand (padding) hat hoehere
+   Specificity als eine reine Klasse und wuerde padding sonst plaetten. */
+.workflow-table td.workflow-table__upstream-cell {
   padding-top: 8px;
   padding-bottom: 12px;
+}
+/* Spacer-Zelle unter der Group-Spalte traegt nur den Bonding-Hintergrund. */
+.workflow-table td.workflow-table__upstream-spacer {
+  padding: 0;
+}
+/* Vertikale Verbinder-Schiene am Panel-Anfang (an der Einrueck-Kante). */
+.workflow-table__upstream-cell .sd-upstream {
+  border-left: 2px solid var(--border-visible);
+  padding-left: 14px;
 }
 
 .sd-upstream {
