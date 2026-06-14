@@ -404,3 +404,121 @@ def test_bucket_header_is_frozen_dataclass_with_slots() -> None:
 # als versehentliches Public-API, aber referenzierbar fuer Test 11).
 def test_helper_is_module_attribute() -> None:
     assert callable(fbq._apply_bucket_filters)
+
+
+# ---------------------------------------------------------------------------
+# group_bucket_findings_by_lane — Lane-Gruppierung + Reason-Anbindung
+# (TICKET-016 / ADR-0065 Strategie a)
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+from app.services.findings_bucket_query import (  # noqa: E402
+    BucketLaneGroup,
+    group_bucket_findings_by_lane,
+)
+
+
+def _finding(fid: int, *, finding_class: str = "os-pkgs", has_fix: bool = True) -> SimpleNamespace:
+    """Minimal-Finding fuer die Lane-Ableitung (`fix_lane_for`):
+    os-pkgs + has_fix -> patch; not has_fix -> mitigate."""
+    return SimpleNamespace(
+        id=fid,
+        finding_class=finding_class,
+        has_fix=has_fix,
+        host_update_available=None,
+    )
+
+
+def _eval(fix_lane: str, *, risk_band: str, reason: str | None) -> SimpleNamespace:
+    return SimpleNamespace(fix_lane=fix_lane, risk_band=risk_band, risk_band_reason=reason)
+
+
+def _session_with_evals(evals: list[SimpleNamespace]) -> MagicMock:
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = evals
+    return session
+
+
+def test_group_by_lane_pending_bucket_returns_empty() -> None:
+    """group_id == 0 (Pending-Sammler) -> leere Liste, KEINE DB-Query, kein
+    Fake-Reason (ADR-0065 §2)."""
+    session = MagicMock()
+    result = group_bucket_findings_by_lane(session, server_id=0, group_id=0, findings=[_finding(1)])
+    assert result == []
+    session.execute.assert_not_called()
+
+
+def test_group_by_lane_empty_findings_returns_empty() -> None:
+    session = MagicMock()
+    result = group_bucket_findings_by_lane(session, server_id=42, group_id=7, findings=[])
+    assert result == []
+    session.execute.assert_not_called()
+
+
+def test_group_by_lane_splits_patch_and_mitigate_with_reason() -> None:
+    """Findings beider Lanes -> zwei BucketLaneGroups (patch zuerst), jede mit
+    Band + voller Reason aus der passenden Junction-Row."""
+    session = _session_with_evals(
+        [
+            _eval("patch", risk_band="act", reason="patch available, normal cycle"),
+            _eval("mitigate", risk_band="monitor", reason="no attack path, deprioritised"),
+        ]
+    )
+    findings = [
+        _finding(1, finding_class="os-pkgs", has_fix=True),  # patch
+        _finding(2, has_fix=False),  # mitigate
+        _finding(3, finding_class="os-pkgs", has_fix=True),  # patch
+    ]
+    result = group_bucket_findings_by_lane(session, server_id=42, group_id=7, findings=findings)
+
+    assert [g.fix_lane for g in result] == ["patch", "mitigate"]  # FIX_LANES-Reihenfolge
+    patch_g, mit_g = result
+    assert isinstance(patch_g, BucketLaneGroup)
+    assert [f.id for f in patch_g.findings] == [1, 3]  # Reihenfolge erhalten
+    assert patch_g.risk_band == "act"
+    assert patch_g.risk_band_reason == "patch available, normal cycle"
+    assert [f.id for f in mit_g.findings] == [2]
+    assert mit_g.risk_band == "monitor"
+    assert mit_g.risk_band_reason == "no attack path, deprioritised"
+
+
+def test_group_by_lane_missing_eval_is_pending_band_no_reason() -> None:
+    """Lane ohne Junction-Row -> Band 'pending', Reason None (kein Fake)."""
+    session = _session_with_evals([])  # keine Evals
+    result = group_bucket_findings_by_lane(
+        session, server_id=42, group_id=7, findings=[_finding(1)]
+    )
+    assert len(result) == 1
+    assert result[0].fix_lane == "patch"
+    assert result[0].risk_band == "pending"
+    assert result[0].risk_band_reason is None
+
+
+def test_group_by_lane_only_lanes_present_on_page_get_headers() -> None:
+    """Nur Lanes mit Findings auf der Seite erscheinen — eine vorhandene
+    mitigate-Eval ohne mitigate-Findings erzeugt KEINEN leeren Header."""
+    session = _session_with_evals(
+        [
+            _eval("patch", risk_band="act", reason="r-patch"),
+            _eval("mitigate", risk_band="escalate", reason="r-mit"),
+        ]
+    )
+    # nur patch-Findings auf dieser Seite
+    result = group_bucket_findings_by_lane(
+        session, server_id=42, group_id=7, findings=[_finding(1), _finding(2)]
+    )
+    assert [g.fix_lane for g in result] == ["patch"]
+
+
+def test_bucket_lane_group_is_frozen_slots() -> None:
+    g = BucketLaneGroup(fix_lane="patch", risk_band="act", risk_band_reason="x", findings=[])
+    import dataclasses
+
+    try:
+        g.risk_band = "noise"  # type: ignore[misc]
+    except dataclasses.FrozenInstanceError:
+        pass
+    else:
+        raise AssertionError("BucketLaneGroup muss frozen sein")
+    assert not hasattr(g, "__dict__")

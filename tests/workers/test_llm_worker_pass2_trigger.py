@@ -193,7 +193,7 @@ def test_backstop_sweep_swallows_db_exception(monkeypatch: pytest.MonkeyPatch) -
     llm_worker._run_pass2_backstop_sweep_safe()
 
 
-# --- _run_pass2_drift_reconcile_sweep_safe (TICKET-016) --------------------
+# --- _run_pass2_drift_reconcile_sweep_safe (TICKET-017) --------------------
 
 
 def test_drift_reconcile_sweep_enqueues_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -279,7 +279,7 @@ def test_subtick_runs_sweep_on_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_subtick_runs_drift_reconcile_on_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TICKET-016: _run_subticks triggert den Drift-Sweep einmal, dann erst
+    """TICKET-017: _run_subticks triggert den Drift-Sweep einmal, dann erst
     wieder nach dem 900s-Fenster. Regression-Guard, damit ein zukuenftiger
     Cadence-Edit die Drift-Heilung nicht still deaktiviert."""
     llm_worker.reset_shutdown_for_tests()  # setzt _last_pass2_drift_reconcile_at = 0.0

@@ -76,6 +76,7 @@ from app.services.csv_export import (
 )
 from app.services.findings_bucket_query import (
     BucketHeader,
+    group_bucket_findings_by_lane,
     list_bucket_findings,
     list_buckets,
     pending_bucket_header,
@@ -301,11 +302,21 @@ def bucket_fragment() -> str:
     if total == 0:
         abort(404)
 
+    # TICKET-016 / ADR-0065: Findings der Seite nach Fix-Lane gruppieren und je
+    # Lane das Band + die volle Reason (Junction) voranstellen (Strategie a).
+    lane_groups = group_bucket_findings_by_lane(
+        sess,
+        server_id=server_id,
+        group_id=group_id,
+        findings=findings,
+    )
+
     filter_qs = _filter_querystring_from_request(request.args)
 
     return render_template(
         "_partials/bucket_findings_table.html",
         findings=findings,
+        lane_groups=lane_groups,
         total=total,
         page=page,
         per_page=per_page,

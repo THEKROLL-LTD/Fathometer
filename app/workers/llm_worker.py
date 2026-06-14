@@ -96,6 +96,14 @@ log = logging.getLogger("fathometer.llm_worker")
 WORKER_ID: str = f"{socket.gethostname()}:{os.getpid()}"
 MAX_ATTEMPTS: int = 3
 HEARTBEAT_INTERVAL_SEC: float = 10.0
+
+# Defensiver DB-Safety-Cap fuer die persistierte ``risk_band_reason`` (ADR-0065
+# §6). KEIN fachliches Limit — die Spalte ist seit Migration 0029 ``TEXT``
+# (unbegrenzt). Der Cap ist ein reines Safety-Net gegen entartete Mega-Outputs
+# (Modell-Halluzination mit zehntausenden Zeichen), das die volle Reason im
+# Normalfall (Reviewer-Validierung ``MAX_REASON_LEN``) nie beruehrt. Wir
+# truncaten hier still, statt die Persistenz scheitern zu lassen.
+_REASON_DB_SAFETY_CAP: int = 8192
 STALE_REAPER_INTERVAL_SEC: float = 60.0
 # v0.9.3 (ADR-0023 §"(e) LLM-Debug-Log-Tabelle"): Eviction-Sub-Tick fuer
 # `llm_debug_log`. v0.11.0 (Block U Phase G, ADR-0029): Cadence von 600 s auf
@@ -167,7 +175,7 @@ SCAN_INGEST_RETENTION_SWEEP_INTERVAL_SEC: float = 3600.0
 # aus irgendeinem Grund nicht gefeuert hat (Worker-Crash, DB-Hickup).
 PASS2_BACKSTOP_SWEEP_INTERVAL_SEC: float = 300.0
 
-# TICKET-016: Drift-Reconciliation-Sweep-Cadence (15 min). Heilt den
+# TICKET-017: Drift-Reconciliation-Sweep-Cadence (15 min). Heilt den
 # „re-evaluation pending"-Drift-Hint (ADR-0052) selbst: der Backstop-Sweep oben
 # deckt nur Server mit kuerzlicher Pass-1-Aktivitaet ab — ein Server, dessen
 # OPEN-Set sich ohne neue Group-Detection aendert (Reopen/Resolve/EPSS-Feed),
@@ -197,7 +205,7 @@ _last_feed_pull_check_at: float = 0.0
 _last_retention_sweep_at: float = 0.0
 # TICKET-007: Letzter Lauf des Pass-2-Backstop-Sweeps.
 _last_pass2_backstop_sweep_at: float = 0.0
-# TICKET-016: Letzter Lauf des Pass-2-Drift-Reconciliation-Sweeps.
+# TICKET-017: Letzter Lauf des Pass-2-Drift-Reconciliation-Sweeps.
 _last_pass2_drift_reconcile_at: float = 0.0
 # ADR-0035-Addendum (TD-013): Letzter Lauf des daily_risk_state-Finalize-Checks.
 _last_daily_risk_state_at: float = 0.0
@@ -865,7 +873,7 @@ def _run_subticks() -> None:
         _run_pass2_backstop_sweep_safe()
         _last_pass2_backstop_sweep_at = now_mono
 
-    # TICKET-016: Pass-2-Drift-Reconciliation-Sweep alle 15 min. Heilt den
+    # TICKET-017: Pass-2-Drift-Reconciliation-Sweep alle 15 min. Heilt den
     # „re-evaluation pending"-Drift-Hint (ADR-0052) selbst — deckt den Fall ab,
     # den der Backstop-Sweep oben NICHT abdeckt (OPEN-Set-Aenderung ohne neue
     # Pass-1-Aktivitaet). Idempotent — bei nicht-driftenden Lanes no-op.
@@ -961,7 +969,7 @@ def _run_pass2_backstop_sweep_safe() -> None:
 
 
 def _run_pass2_drift_reconcile_sweep_safe() -> None:
-    """TICKET-016: heilt den „re-evaluation pending"-Drift-Hint selbst.
+    """TICKET-017: heilt den „re-evaluation pending"-Drift-Hint selbst.
 
     Der Backstop-Sweep (oben) fängt nur Server mit kürzlicher Pass-1-Aktivität.
     Ändert sich das OPEN-Set einer Group OHNE neue Group-Detection
@@ -1958,12 +1966,16 @@ def _upsert_evaluation(
     ``_build_action_sections`` weiterhin auf ``action_type`` filtern kann.
     """
     action_type = _derive_action_type(fix_lane, risk_band)
+    # ADR-0065 §6: defensiver Safety-Net-Cap gegen entartete Mega-Outputs.
+    # Truncaten statt scheitern — die Spalte ist TEXT, der Cap schuetzt nur vor
+    # DB-/Speicher-Anomalien. Im Normalfall (Reason <= MAX_REASON_LEN) No-Op.
+    safe_reason = reason[:_REASON_DB_SAFETY_CAP] if reason is not None else None
     stmt = pg_insert(ApplicationGroupEvaluation).values(
         group_id=group_id,
         server_id=server_id,
         fix_lane=fix_lane,
         risk_band=risk_band,
-        risk_band_reason=reason,
+        risk_band_reason=safe_reason,
         risk_band_source="llm",
         risk_band_computed_at=datetime.now(UTC),
         worst_finding_id=worst_finding_id,

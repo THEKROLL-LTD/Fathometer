@@ -1011,7 +1011,7 @@ class ApplicationGroupEvaluation(Base):
     # Bewertung. ``risk_band`` ist NOT NULL — "Nicht bewertet" wird durch
     # das Fehlen der Zeile ausgedrueckt, nicht durch NULL.
     risk_band: Mapped[str] = mapped_column(String(16), nullable=False)
-    risk_band_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    risk_band_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     risk_band_source: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'llm'")
     )

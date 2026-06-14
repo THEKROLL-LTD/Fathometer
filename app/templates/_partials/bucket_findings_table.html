@@ -29,9 +29,23 @@
    `toggleFinding(...)` im Alpine-Scope `bucketBulkSelection()`. `@click.stop`
    verhindert, dass der Checkbox-Klick das `<details>` toggelt.
 
+   Lane-Reason-Header (TICKET-016 / ADR-0065 Strategie a):
+     - `lane_groups` : list[BucketLaneGroup] — die Findings DIESER Seite nach
+                       Fix-Lane gruppiert (patch zuerst), pro Lane `fix_lane`,
+                       `risk_band`, `risk_band_reason`, `findings`. Pro nicht-
+                       leerer Lane wird ein Header (Band-Badge + Reason-Block)
+                       gerendert, gefolgt von den Finding-Zeilen der Lane. Der
+                       Header wiederholt sich ueber Seitengrenzen (Strategie a);
+                       die Pagination zaehlt weiter Findings, nicht Header.
+                       Pending-Bucket (`group_id=0`) -> leer, kein Reason
+                       (eigenes Template). Der Reason ist LLM-Output und wird
+                       ueber das Single-Source-Macro `reason_block` smart
+                       getrunkt — KEIN |safe.
+
    Sicherheit: LLM-/Trivy-/User-Daten NIE mit |safe — Jinja-Autoescape ist
    Pflicht (ADR-0038 §G4). KEIN DaisyUI.
 #}
+{% from "_macros.html" import reason_block %}
 {% if findings %}
 <div data-test="bucket-findings-table"
      data-server-id="{{ server_id }}"
@@ -39,17 +53,44 @@
      data-total="{{ total }}"
      data-page="{{ page }}"
      data-per-page="{{ per_page }}">
-  <div class="bucket-findings-head" aria-hidden="true">
-    <span></span>
-    <span>CVE / Title</span>
-    <span>Package</span>
-    <span class="bucket-findings-head__right">EPSS</span>
-    <span class="bucket-findings-head__right">CVSS</span>
-    <span class="bucket-findings-head__right">Severity</span>
-    <span class="bucket-findings-head__right">First seen</span>
-  </div>
+  {% for lane in lane_groups %}
+    {%- set _lane_label = 'Patch' if lane.fix_lane == 'patch' else 'No patch' -%}
+    <div class="bucket-lane" data-test="bucket-lane-{{ group_id }}-{{ lane.fix_lane }}">
+      {#- Lane-Kontext-Header ueber dem Spaltenkopf: Lane-Tag (patch/no patch),
+          AI-Assessment-Eyebrow und optionales Band-Badge in EINER Zeile. Das
+          Band-Badge wird NUR bei >1 Lane gezeigt — bei einer einzelnen Lane ist
+          es identisch mit dem Bucket-Band-Badge in der Card-Row (sonst doppelt). -#}
+      <div class="bucket-lane__head">
+        <span class="bucket-lane__tag bucket-lane__tag--{{ lane.fix_lane }}"
+              data-test="bucket-lane-label-{{ group_id }}-{{ lane.fix_lane }}">{{ _lane_label }}</span>
+        {% if lane.risk_band_reason %}
+        <span class="sd-ai-eyebrow bucket-lane__eyebrow">AI assessment</span>
+        {% endif %}
+        {% if lane_groups | length > 1 %}
+        <span class="sd-badge sd-badge--{{ lane.risk_band }}"
+              data-test="bucket-lane-band-{{ group_id }}-{{ lane.fix_lane }}">{{ lane.risk_band | upper }}</span>
+        {% endif %}
+      </div>
+      {% if lane.risk_band_reason %}
+        <div class="bucket-lane__reason"
+             data-test="bucket-lane-reason-{{ group_id }}-{{ lane.fix_lane }}">
+          {#- Findings-Page nutzt die volle Bucket-Breite -> grosszuegigeres
+              Truncation-Limit (~3-4 Zeilen) bevor "Show all" noetig wird. -#}
+          <p class="sd-ai-text">{{ reason_block(lane.risk_band_reason, limit=520) }}</p>
+        </div>
+      {% endif %}
 
-  {% for f in findings %}
+      <div class="bucket-findings-head" aria-hidden="true">
+        <span></span>
+        <span>CVE / Title</span>
+        <span>Package</span>
+        <span class="bucket-findings-head__right">EPSS</span>
+        <span class="bucket-findings-head__right">CVSS</span>
+        <span class="bucket-findings-head__right">Severity</span>
+        <span class="bucket-findings-head__right">First seen</span>
+      </div>
+
+  {% for f in lane.findings %}
     {%- set _sev = (f.severity.value if f.severity is not string else f.severity) | lower if f.severity else none -%}
     <details class="bucket-finding"
              id="finding-{{ f.id }}"
@@ -109,6 +150,8 @@
         {% include "_partials/finding_inline_body.html" %}
       {% endwith %}
     </details>
+  {% endfor %}
+    </div>
   {% endfor %}
 </div>
 

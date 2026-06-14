@@ -76,10 +76,28 @@ def _make_finding(
     )
 
 
+def _lane_group(
+    *,
+    fix_lane: str = "patch",
+    risk_band: str = "pending",
+    risk_band_reason: str | None = None,
+    findings: list[SimpleNamespace],
+) -> SimpleNamespace:
+    """Baut einen `BucketLaneGroup`-kompatiblen Lane-Eintrag (TICKET-016 /
+    ADR-0065). Jinja greift per Attribut zu — SimpleNamespace genuegt."""
+    return SimpleNamespace(
+        fix_lane=fix_lane,
+        risk_band=risk_band,
+        risk_band_reason=risk_band_reason,
+        findings=findings,
+    )
+
+
 def _render(
     app: Flask,
     *,
     findings: list[SimpleNamespace],
+    lane_groups: list[SimpleNamespace] | None = None,
     total: int | None = None,
     page: int = 1,
     per_page: int = 20,
@@ -89,10 +107,15 @@ def _render(
 ) -> str:
     if total is None:
         total = len(findings)
+    if lane_groups is None:
+        # Default: alle Findings in einer einzigen patch-Lane ohne Reason-Header
+        # (deckt die Zeilen-/Pager-/Bulk-Vertraege ab, ohne Lane-Logik zu testen).
+        lane_groups = [_lane_group(findings=findings)] if findings else []
     with app.test_request_context("/findings"):
         template = app.jinja_env.get_template("_partials/bucket_findings_table.html")
         return template.render(
             findings=findings,
+            lane_groups=lane_groups,
             total=total,
             page=page,
             per_page=per_page,
@@ -301,3 +324,132 @@ def test_no_quick_copy_clipboard_button(app: Flask) -> None:
     assert 'title="In Zwischenablage kopieren"' not in html, (
         f"quick_copy-Clipboard-Button darf nicht im Bucket-Body sein: {html}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Lane-Reason-Header (TICKET-016 / ADR-0065 Strategie a)
+# ---------------------------------------------------------------------------
+
+
+def test_single_lane_header_renders_tag_but_no_band_badge(app: Flask) -> None:
+    """Single-Lane-Bucket: Lane-Tag (Patch/No patch) rendert, aber KEIN
+    Band-Badge — das Band steht schon in der Bucket-Card-Row (sonst doppelt)."""
+    f = _make_finding(finding_id=1)
+    lanes = [_lane_group(fix_lane="patch", risk_band="act", findings=[f])]
+    html = _render(app, findings=[f], lane_groups=lanes, group_id=7)
+    assert 'data-test="bucket-lane-7-patch"' in html, html
+    assert 'data-test="bucket-lane-label-7-patch"' in html
+    assert "Patch" in html
+    # Band-Badge unterdrueckt bei einer einzigen Lane.
+    assert 'data-test="bucket-lane-band-7-patch"' not in html, (
+        f"Single-Lane darf kein doppeltes Band-Badge zeigen:\n{html}"
+    )
+
+
+def test_lane_header_renders_above_column_header(app: Flask) -> None:
+    """Der Lane-Kontext-Header (Tag + AI assessment) steht UEBER dem
+    Spaltenkopf (CVE/Title …), nicht zwischen Spaltenkopf und Zeile 1."""
+    f = _make_finding(finding_id=1)
+    lanes = [
+        _lane_group(fix_lane="patch", risk_band="act", risk_band_reason="why act", findings=[f])
+    ]
+    html = _render(app, findings=[f], lane_groups=lanes, group_id=7)
+    lane_idx = html.index('data-test="bucket-lane-label-7-patch"')
+    reason_idx = html.index('data-test="bucket-lane-reason-7-patch"')
+    head_idx = html.index('class="bucket-findings-head"')
+    assert lane_idx < reason_idx < head_idx, (
+        f"Lane-Tag + AI assessment muessen ueber dem Spaltenkopf stehen:\n{html}"
+    )
+
+
+def test_lane_header_reason_uses_truncation_macro_for_monitor(app: Flask) -> None:
+    """TD-020: monitor-Lane zeigt ihre Reason (vorher unsichtbar). Reason
+    rendert ueber das reason_block-Macro (AI-assessment-Eyebrow + Text)."""
+    f = _make_finding(finding_id=1)
+    reason = "tailscaled MIME-decode flaw unlikely to be triggered by WireGuard."
+    lanes = [
+        _lane_group(fix_lane="mitigate", risk_band="monitor", risk_band_reason=reason, findings=[f])
+    ]
+    html = _render(app, findings=[f], lane_groups=lanes, group_id=7)
+    assert 'data-test="bucket-lane-reason-7-mitigate"' in html, html
+    assert "AI assessment" in html
+    assert reason in html
+    assert "No patch" in html
+
+
+def test_lane_header_omitted_when_no_reason(app: Flask) -> None:
+    """Lane ohne Reason -> Lane-Tag rendert, aber kein Reason-Block."""
+    f = _make_finding(finding_id=1)
+    lanes = [
+        _lane_group(fix_lane="patch", risk_band="pending", risk_band_reason=None, findings=[f])
+    ]
+    html = _render(app, findings=[f], lane_groups=lanes, group_id=7)
+    assert 'data-test="bucket-lane-label-7-patch"' in html
+    assert 'data-test="bucket-lane-reason-7-patch"' not in html
+    assert "AI assessment" not in html
+
+
+def test_two_lanes_render_two_headers_with_band_badges(app: Flask) -> None:
+    """Bucket mit patch + mitigate -> zwei Lane-Header, je eigene Findings UND
+    je eigenes Band-Badge (bei >1 Lane stehen die Lane-Baender NICHT in der
+    Bucket-Row, sind also nicht doppelt)."""
+    fp = _make_finding(finding_id=1, identifier_key="CVE-PATCH")
+    fm = _make_finding(finding_id=2, identifier_key="CVE-MIT")
+    lanes = [
+        _lane_group(fix_lane="patch", risk_band="act", risk_band_reason="r-patch", findings=[fp]),
+        _lane_group(
+            fix_lane="mitigate", risk_band="escalate", risk_band_reason="r-mit", findings=[fm]
+        ),
+    ]
+    html = _render(app, findings=[fp, fm], lane_groups=lanes, group_id=7)
+    assert 'data-test="bucket-lane-7-patch"' in html
+    assert 'data-test="bucket-lane-7-mitigate"' in html
+    # Bei >1 Lane werden die Band-Badges gezeigt.
+    assert 'data-test="bucket-lane-band-7-patch"' in html
+    assert 'data-test="bucket-lane-band-7-mitigate"' in html
+    assert "ACT" in html
+    assert "ESCALATE" in html
+    assert "r-patch" in html
+    assert "r-mit" in html
+    assert "CVE-PATCH" in html
+    assert "CVE-MIT" in html
+
+
+def test_lane_reason_higher_truncation_limit_on_findings_page(app: Flask) -> None:
+    """Findings-Page nutzt die volle Bucket-Breite -> grosszuegigeres Limit
+    (~520 Zeichen): eine ~300-Zeichen-Reason rendert ganz OHNE 'Show all',
+    eine ~700-Zeichen-Reason bekommt den Toggle."""
+    f = _make_finding(finding_id=1)
+
+    mid = "word " * 60  # ~300 Zeichen -> unter dem 520-Limit
+    html_mid = _render(
+        app,
+        findings=[f],
+        lane_groups=[_lane_group(risk_band_reason=mid, findings=[f])],
+        group_id=7,
+    )
+    assert "reason-block__toggle" not in html_mid, (
+        f"~300-Zeichen-Reason darf auf der Findings-Page keinen Toggle haben:\n{html_mid}"
+    )
+
+    long = "word " * 160  # ~800 Zeichen -> ueber dem 520-Limit
+    html_long = _render(
+        app,
+        findings=[f],
+        lane_groups=[_lane_group(risk_band_reason=long, findings=[f])],
+        group_id=7,
+    )
+    assert "reason-block__toggle" in html_long, (
+        f"~800-Zeichen-Reason muss den 'Show all'-Toggle zeigen:\n{html_long[:400]}"
+    )
+    assert "Show all" in html_long
+
+
+def test_lane_reason_long_text_xss_escaped(app: Flask) -> None:
+    """Lane-Reason ist LLM-Output -> autoescaped, kein |safe-Leak."""
+    f = _make_finding(finding_id=1)
+    payload = "<script>alert(9)</script> " + "filler " * 30
+    lanes = [_lane_group(fix_lane="patch", risk_band="act", risk_band_reason=payload, findings=[f])]
+    html = _render(app, findings=[f], lane_groups=lanes, group_id=7)
+    assert "<script>alert(9)</script>" not in html, html
+    assert "&lt;script&gt;" in html

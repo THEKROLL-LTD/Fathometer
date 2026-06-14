@@ -39,8 +39,16 @@ def test_all_wrappers_include_single_source_partial() -> None:
         )
 
 
+# TICKET-016 / ADR-0065: der Bucket-Body traegt jetzt einen Lane-Reason-Header
+# (group-/lane-Level, NICHT per Finding). Die AI-assessment-Box ist dort daher
+# erlaubt — aber ausschliesslich an die Lane gebunden (`lane.risk_band_reason`),
+# nie an das Finding-Loop-Objekt `f`. Die uebrigen Wrapper bleiben streng ohne.
+_LANE_REASON_WRAPPERS = {"_partials/bucket_findings_table.html"}
+
+
 def test_no_wrapper_has_inline_reason_duplicate() -> None:
-    """Kein Wrapper darf den alten inline-kopierten Reason-Body fuehren."""
+    """Kein Wrapper darf den alten inline-kopierten Reason-Body (per Finding)
+    fuehren. Der Lane-Level-Reason-Header (ADR-0065) ist davon ausgenommen."""
     for rel in _WRAPPERS:
         src = (_TPL_DIR / rel).read_text(encoding="utf-8")
         assert "bucket-finding__body" not in src, f"{rel} hat altes bucket-finding__body-Markup"
@@ -48,8 +56,22 @@ def test_no_wrapper_has_inline_reason_duplicate() -> None:
         assert "{{ f.risk_band_reason }}" not in src, (
             f"{rel} rendert risk_band_reason noch inline statt via Partial"
         )
-        # TICKET-012: keine Per-Finding-AI-Box mehr (auch nicht inline kopiert).
-        assert "AI assessment" not in src, f"{rel} traegt noch eine Per-Finding-AI-assessment-Box"
+        # Per-Finding-Reason ist und bleibt verboten — die Reason wird nie an das
+        # Finding-Loop-Objekt `f` gebunden (ADR-0054-Falle: worst_finding_drift).
+        assert "f.risk_band_reason" not in src, (
+            f"{rel} bindet die Reason ans Finding-Objekt statt an die Lane"
+        )
+        if rel in _LANE_REASON_WRAPPERS:
+            # ADR-0065: Lane-Level-AI-Box erlaubt, aber an `lane.risk_band_reason`
+            # gebunden (group-/lane-Level), nicht per Finding.
+            assert "lane.risk_band_reason" in src, (
+                f"{rel} soll den Lane-Reason via lane.risk_band_reason rendern"
+            )
+        else:
+            # TICKET-012: keine Per-Finding-AI-Box mehr (auch nicht inline kopiert).
+            assert "AI assessment" not in src, (
+                f"{rel} traegt noch eine Per-Finding-AI-assessment-Box"
+            )
 
 
 def _finding() -> SimpleNamespace:

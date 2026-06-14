@@ -59,7 +59,14 @@ from app.services.findings_query import (
     _STATUS_VALUES_BY_FILTER,
     _apply_tag_filter_cross,
 )
-from app.services.risk_engine import RISK_BAND_SORT_RANK, RiskBand, no_band_values, yes_band_values
+from app.services.risk_engine import (
+    FIX_LANES,
+    RISK_BAND_SORT_RANK,
+    RiskBand,
+    fix_lane_for,
+    no_band_values,
+    yes_band_values,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -88,6 +95,26 @@ class BucketHeader:
     group_label: str
     risk_band: str
     finding_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class BucketLaneGroup:
+    """Eine Fix-Lane innerhalb eines aufgeklappten Bucket-Bodys (TICKET-016 /
+    ADR-0065 Strategie a). Traegt das Lane-Verdikt (Band + Reason aus der
+    ``(group, server, fix_lane)``-Junction) und die Findings DIESER Lane auf
+    der aktuellen Bucket-Seite (in der vom Service vorgegebenen Sortierung).
+
+    `fix_lane` ist 2-wertig (``"patch"`` | ``"mitigate"``, ADR-0064).
+    `risk_band` ist das Lane-Band oder ``"pending"`` wenn keine Junction-Row
+    existiert. `risk_band_reason` ist die volle LLM-Begruendung der Lane
+    (``None`` ohne Eval) — wird im Template per ``reason_block``-Macro
+    smart-truncated angezeigt.
+    """
+
+    fix_lane: str
+    risk_band: str
+    risk_band_reason: str | None
+    findings: list[Finding]
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +450,66 @@ def list_bucket_findings(
     return findings, total
 
 
+def group_bucket_findings_by_lane(
+    session: Session,
+    *,
+    server_id: int,
+    group_id: int,
+    findings: list[Finding],
+) -> list[BucketLaneGroup]:
+    """Gruppiert die Findings EINER Bucket-Seite nach Fix-Lane und haengt pro
+    Lane das ``ApplicationGroupEvaluation`` (Band + volle Reason) an.
+
+    TICKET-016 / ADR-0065 Strategie (a): der Lane-Reason-Header wird pro Lane
+    auf JEDER Seite gerendert; die Gruppierung passiert rein auf der bereits
+    paginierten Finding-Seite (kein Eingriff in COUNT/LIMIT/OFFSET — die
+    Pagination zaehlt weiter Findings, nicht Header).
+
+    Lane-Ableitung via :func:`risk_engine.fix_lane_for` (Single-Source,
+    spiegelt ``fix_lane_sql_case``). Die Ausgabe-Reihenfolge folgt ``FIX_LANES``
+    (patch zuerst); die Finding-Reihenfolge innerhalb einer Lane bleibt die
+    vom Caller uebergebene (Spec-Sort aus :func:`list_bucket_findings`).
+
+    Pending-Sammler (``group_id == 0``): leere Liste — Findings ohne Group
+    haben keine Lane-Eval, also KEIN Reason-Header (ADR-0065 §2, kein
+    Fake-Reason). Der Pending-Body nutzt ohnehin ein eigenes Template.
+    """
+    if group_id == 0 or not findings:
+        return []
+
+    # Lane-Evals der (group, server) einmalig laden (bis zu zwei Rows).
+    eval_stmt = select(ApplicationGroupEvaluation).where(
+        ApplicationGroupEvaluation.group_id == group_id,
+        ApplicationGroupEvaluation.server_id == server_id,
+    )
+    evals_by_lane: dict[str, ApplicationGroupEvaluation] = {
+        ev.fix_lane: ev for ev in session.execute(eval_stmt).scalars().all()
+    }
+
+    # Findings nach Lane einsortieren (Reihenfolge erhalten).
+    by_lane: dict[str, list[Finding]] = {}
+    for f in findings:
+        lane = fix_lane_for(f.finding_class, f.has_fix, f.host_update_available)
+        by_lane.setdefault(lane, []).append(f)
+
+    result: list[BucketLaneGroup] = []
+    for lane in FIX_LANES:
+        lane_findings = by_lane.get(lane)
+        if not lane_findings:
+            continue
+        ev = evals_by_lane.get(lane)
+        band = ev.risk_band if ev is not None and ev.risk_band else _PENDING_RISK_BAND
+        result.append(
+            BucketLaneGroup(
+                fix_lane=lane,
+                risk_band=band,
+                risk_band_reason=ev.risk_band_reason if ev is not None else None,
+                findings=lane_findings,
+            )
+        )
+    return result
+
+
 def resolve_bucket_to_finding_ids(
     session: Session,
     *,
@@ -461,6 +548,8 @@ def resolve_bucket_to_finding_ids(
 
 __all__ = [
     "BucketHeader",
+    "BucketLaneGroup",
+    "group_bucket_findings_by_lane",
     "list_bucket_findings",
     "list_buckets",
     "pending_bucket_header",

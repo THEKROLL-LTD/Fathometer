@@ -37,6 +37,7 @@
    Sicherheit: group.label, group.explanation und risk_band_reason sind
    LLM-Output — kein |safe, Jinja-Autoescape greift.
 #}
+{% from "_macros.html" import reason_block %}
 {#- Max-Band ueber die Lanes fuer das Header-Badge (urgentste Lane zuerst).
     _BAND_RANK spiegelt die Triage-Reihenfolge; je hoeher, desto urgenter. -#}
 {%- set _BAND_RANK = {'escalate': 4, 'act': 3, 'monitor': 2, 'noise': 1} -%}
@@ -90,7 +91,7 @@
              data-test="group-lane-reason-{{ group.id }}-{{ lane.fix_lane }}">
           <p class="sd-ai-eyebrow">AI assessment</p>
           <p class="sd-ai-text">
-            {%- if lane.evaluation.risk_band_reason %}{{ lane.evaluation.risk_band_reason }}{% endif %}
+            {%- if lane.evaluation.risk_band_reason %}{{ reason_block(lane.evaluation.risk_band_reason) }}{% endif %}
             {%- if lane.worst_finding_drift %} <span class="sd-app-group__reason-hint"
                   data-test="group-lane-drift-hint-{{ group.id }}-{{ lane.fix_lane }}">re-evaluation pending</span>{% endif -%}
           </p>

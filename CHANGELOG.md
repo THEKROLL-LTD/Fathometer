@@ -4,7 +4,41 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — TICKET-016: Drift-Reconciliation-Sweep (self-healing „re-evaluation pending")
+## [Unreleased] — TICKET-016: Risk-Band-Reason group-/lane-verschachtelt in den Findings-Listen (TD-020 + TD-021)
+
+Die LLM-`risk_band_reason` (Lane-Level-Assessment) war für `monitor`/`noise`
+in den Findings-Listen unsichtbar (TD-020) und bei 256 Zeichen mitten im Satz
+abgeschnitten (TD-021). Die Reason wird jetzt **group-/lane-verschachtelt** über
+den Findings gezeigt — korrekt als Lane-Level verortet, nicht als Per-Finding-Box
+(ADR-0054-Falle bleibt vermieden). Quality-Gates grün. Alembic: Migration `0029`.
+
+### Added
+
+- **`reason_block(reason, limit=160)`-Macro** (`_macros.html`): Single-Source-
+  Smart-Truncation (Wortgrenze) + Alpine-Toggle „Show all"/„Show less"
+  (`aria-expanded`, kein `|safe`, Design-Tokens `.reason-block*`). Eingebaut in
+  `application_group_card.html`, `_action_needed_section.html` und den neuen
+  Findings-Page-Lane-Header (dort `limit=520` für ~3–4 Zeilen).
+- **Findings-Page Lane-Reason-Header** (`bucket_findings_table.html`, ADR-0065
+  Strategie a): pro Fix-Lane ein Reason-Header über den Finding-Zeilen; Service
+  `findings_bucket_query.group_bucket_findings_by_lane` (Lane via Single-Source
+  `fix_lane_for`); Pager zählt weiter Findings, nicht Header. Pending-Buckets
+  ohne Group bekommen keinen Reason.
+
+### Changed
+
+- **`ApplicationGroupEvaluation.risk_band_reason`** `String(256)` → `Text`
+  (Migration `0029_widen_reason_text`, Downgrade `LEFT(…,256)`). Reviewer-
+  `MAX_REASON_LEN` 256 → 8192; defensiver 8-KiB-Safety-Net-Cap
+  (`_REASON_DB_SAFETY_CAP`) in `_upsert_evaluation` (truncate statt fail,
+  ADR-0065 §6). `risk_engine._truncate` nur noch für Pre-Triage-Reasons.
+
+### Docs
+
+- **ADR-0065** angelegt (amendet ADR-0054 für den Listen-Kontext). TD-020/TD-021
+  in `docs/techdebt.md` als erledigt + kreuzverlinkt.
+
+## [Unreleased] — TICKET-017: Drift-Reconciliation-Sweep (self-healing „re-evaluation pending")
 
 Der „re-evaluation pending"-Drift-Hint (ADR-0052) hing bisher, wenn sich das
 OPEN-Set einer Group **ohne** neue Pass-1-Aktivität änderte (Reopen/Resolve/

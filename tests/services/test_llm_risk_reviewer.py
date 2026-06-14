@@ -7,7 +7,7 @@ Output-Validation:
   Pattern-Sanitization (NUL/Non-ASCII/Wildcard-only).
 * Pass 2: Halluzinierte group_labels, ``risk_band="pending"``/``"unknown"`` → Reject,
   worst_finding_id ausserhalb der Group → Reject, NUL-Reason → Reject,
-  Reason > 256 chars → Reject.
+  Reason > MAX_REASON_LEN chars → Reject (defensiver Cap, 8 KiB, ADR-0065).
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from app.models import (
     Severity,
 )
 from app.services.llm_risk_reviewer import (
+    MAX_REASON_LEN,
     LLMInvalidResponseError,
     LLMRiskReviewer,
     _extract_json_from_response,
@@ -411,7 +412,7 @@ async def test_pass2_rejects_nul_byte_in_reason() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pass2_rejects_reason_over_256_chars() -> None:
+async def test_pass2_rejects_reason_over_max_len() -> None:
     server = _make_server()
     f1 = _make_finding(1)
     grp = _make_group("openssl", [1])
@@ -421,12 +422,12 @@ async def test_pass2_rejects_reason_over_256_chars() -> None:
                 "group_label": "openssl",
                 "risk_band": "act",
                 "worst_finding_id": None,
-                "reason": "x" * 300,
+                "reason": "x" * (MAX_REASON_LEN + 1),
             },
         ],
     }
     reviewer = LLMRiskReviewer(client=_MockClient(payload))
-    with pytest.raises(LLMInvalidResponseError, match="256"):
+    with pytest.raises(LLMInvalidResponseError, match=str(MAX_REASON_LEN)):
         await reviewer.pass2_evaluate_groups(server, [(grp, [f1])])
 
 

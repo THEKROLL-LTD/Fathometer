@@ -298,3 +298,47 @@
   {%- endif -%}
   <span class="badge badge-sm {{ cls }}">{{ s }}</span>
 {%- endmacro %}
+
+
+{# reason_block(reason, limit=160)
+   ──────────────────────────────────────────────────────────────────────
+   Single-Source-Anzeige eines LLM-Risk-Band-Reason-Strings mit Smart-
+   Truncation (TICKET-016 / ADR-0065). Wird an allen Render-Orten der Reason
+   inkludiert (Group-Card, Action-Needed-Tabelle, Findings-Page-Lane-Header) —
+   kein kopiertes Markup, kein Drift (CLAUDE.md §HTMX-OOB-Single-Source).
+
+   Verhalten:
+     - Kuerzt serverseitig an der Wortgrenze auf ~`limit` Zeichen (Jinja
+       `truncate`, killwords=False). Ist der Text kurz genug, rendert er ganz
+       ohne Toggle.
+     - Voller + gekuerzter Text liegen beide im DOM und werden clientseitig
+       per Alpine `x-show` ein-/ausgeblendet — kein zweiter Request, kein
+       neuer Endpoint.
+     - Toggle ist ein echter <button> mit `aria-expanded` (A11y); Default-
+       Label "Show all" / expandiert "Show less" (ADR-0045: UI englisch).
+
+   Sicherheit: `reason` ist LLM-Output -> KEIN |safe. Jinja-Autoescape greift
+   auf beiden Pfaden (kurz wie voll), `truncate` arbeitet auf dem Rohstring,
+   die Ausgabe via `{{ }}` ist autoescaped (ADR-0038 §G4). #}
+{% macro reason_block(reason, limit=160) -%}
+  {%- if reason -%}
+    {#- killwords=False -> Wortgrenze; leeway=8 verhindert Toggle bei nur
+        minimal laengeren Strings. Bei Truncation endet `_short` mit '…' und
+        unterscheidet sich vom Original -> Toggle. -#}
+    {%- set _short = reason | truncate(limit, False, '…', 8) -%}
+    {%- if _short != reason -%}
+      <span class="reason-block" x-data="{ expanded: false }" data-test="reason-block">
+        <span class="reason-block__text" x-show="!expanded">{{ _short }}</span>
+        <span class="reason-block__text" x-show="expanded" x-cloak>{{ reason }}</span>
+        <button type="button"
+                class="reason-block__toggle"
+                x-on:click="expanded = !expanded"
+                :aria-expanded="expanded ? 'true' : 'false'"
+                aria-expanded="false"
+                x-text="expanded ? 'Show less' : 'Show all'">Show all</button>
+      </span>
+    {%- else -%}
+      <span class="reason-block" data-test="reason-block"><span class="reason-block__text">{{ reason }}</span></span>
+    {%- endif -%}
+  {%- endif -%}
+{%- endmacro %}

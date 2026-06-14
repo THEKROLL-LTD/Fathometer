@@ -803,6 +803,14 @@ ADR-0063 §Leitplanken, `docs/operations.md` §SSRF-Schutz.
 
 ## TD-020 — Risk-Band-Reason für `monitor`/`noise` im UI nicht sichtbar
 
+**ERLEDIGT 2026-06-14 (TICKET-016 / ADR-0065):** Die Lane-Reason wird jetzt
+**group-/lane-verschachtelt** in der Findings-Page (`bucket_findings_table.html`)
+für **alle** Bänder inkl. `monitor`/`noise` über einen Lane-Reason-Header
+gerendert; die Server-Detail-Group-Card zeigte sie bereits. NICHT als
+Per-Finding-Box (ADR-0054-Falle bleibt vermieden — `finding_inline_body.html`
+unverändert). Anzeige via Single-Source-Macro `reason_block` (smart-truncated,
+kein `|safe`). Querverweis: ADR-0065, TD-021 (gemeinsames Observability-Bündel).
+
 **Was:** Die LLM-`risk_band_reason` (`application_group_evaluations`) wird **nur**
 in den Operator-Workflows (escalate/act-Cards, `_action_needed_section.html`)
 angezeigt. Findings in `monitor`/`noise` haben eine Reason in der DB, die im UI
@@ -828,6 +836,17 @@ mit TD-021. Querverweis: ADR-0043 (Band = Exploitability), ADR-0052.
 ---
 
 ## TD-021 — `risk_band_reason` bei 256 Zeichen abgeschnitten
+
+**ERLEDIGT 2026-06-14 (TICKET-016 / ADR-0065):** Spalte von `String(256)` auf
+`Text` (unbegrenzt) erweitert (Migration `0029_widen_reason_text`). Der
+Pass-2-Worker cappt nicht mehr auf 256 — die `risk_engine._truncate`-Konstante
+(`_REASON_MAX_LENGTH=256`) gilt nur noch für die kurzen Pre-Triage-Reasons.
+Defensiver DB-Safety-Net-Cap von 8 KiB in `_upsert_evaluation` (gegen entartete
+Mega-Outputs, ADR-0065 §6). UI zeigt die volle Reason smart-truncated
+(`reason_block`-Macro, „Show all"/„Show less"). Querverweis: ADR-0065, TD-020
+(gemeinsames Observability-Bündel). **Operator-Pflicht:** Alembic-Roundtrip
+`0029` (`upgrade head && downgrade -1 && upgrade head`) bei Gelegenheit
+gegenmessen (Heavy-Suite, db_integration).
 
 **Was:** `ApplicationGroupEvaluation.risk_band_reason` ist `String(256)`; der
 Pass-2-Worker cappt die LLM-Reason auf 256 (`risk_engine._truncate`). Reasons

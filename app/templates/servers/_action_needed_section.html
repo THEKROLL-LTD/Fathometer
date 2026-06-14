@@ -31,6 +31,7 @@
        Jinja-Autoescape laeuft trotzdem ueberall — kein `|safe`.
      - Default-collapsed: `<details>` ohne `open`-Attribut.
 #}
+{% from "_macros.html" import reason_block %}
 {% if action_sections %}
 {%- set reason_help = "Reason is a short risk assessment written by the AI reviewer (pass 2). It explains why this group's findings in this fix lane were placed in the shown risk band — derived from the host's exposure (open listeners, reachable services) and the worst open finding's severity, EPSS and KEV signals. It describes the lane's worst finding, not every finding in the group." -%}
 <section class="sd-section" data-test="action-needed-section">
@@ -102,7 +103,7 @@
                   </td>
                   <td class="workflow-table__reason">
                     {% if entry.evaluation and entry.evaluation.risk_band_reason %}
-                      {{ entry.evaluation.risk_band_reason }}
+                      {{ reason_block(entry.evaluation.risk_band_reason) }}
                     {% else %}—{% endif %}
                     {%- if entry.worst_finding_drift %} <span class="workflow-table__reason-hint"
                           data-test="action-card-{{ card.id }}-drift-hint">re-evaluation pending</span>{% endif %}

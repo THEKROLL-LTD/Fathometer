@@ -303,9 +303,10 @@ class RiskEvaluation:
     source: str = "engine"
 
 
-# Max-Laenge fuer den Reason-String (DB-Spalte `String(256)`). Wir cappen
-# defensiv am Ende der Format-Funktion damit die Persistenz nie an einem
-# zu langen Grund scheitert.
+# Max-Laenge fuer den **Pre-Triage**-Reason-String. Pre-Triage-Reasons sind
+# deterministisch generiert (kurz, typisch <80 Zeichen) — der Cap ist ein
+# reiner Safety-Net. Pass-2-LLM-Reasons werden NICHT mehr hier gecappt
+# (ADR-0065: `risk_band_reason` ist `TEXT`, volle Reason wird gespeichert).
 _REASON_MAX_LENGTH = 256
 
 
@@ -389,7 +390,7 @@ def _format_pending_reason(max_sev: Severity, epss: float, *, kev: bool) -> str:
 
     Reihenfolge der Parts: KEV first, dann Severity (wenn HIGH+), dann EPSS
     (wenn >= 0.1), immer `"pending LLM review"` als Schluss-Token.
-    Cap auf 256 Chars (DB-Spalte).
+    Cap auf 256 Chars (Pre-Triage-Safety-Net, nicht Pass-2).
     """
     parts: list[str] = []
     if kev:

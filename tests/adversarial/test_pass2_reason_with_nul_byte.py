@@ -1,11 +1,11 @@
-"""Adversarial: Pass-2 `reason` muss NUL-frei und <= 256 chars sein (ADR-0023).
+"""Adversarial: Pass-2 `reason` muss NUL-frei und <= MAX_REASON_LEN chars sein.
 
 NUL-Bytes wuerden in Templates und Audit-Logs Probleme machen
 (C-String-Truncation in Tools, Postgres-Text-Spalten erlauben sie zwar,
 aber das Audit-JSON serialisiert kaputt).
 
-Reason ueber 256 chars sprengt das ADR-0023-Hardlimit und wuerde die UI-
-Card unleserlich machen.
+MAX_REASON_LEN ist ein defensiver Schutz-Cap (8 KiB, ADR-0065) gegen
+entartete Mega-Outputs — nicht mehr das fruehere DB-Spalten-Limit 256.
 """
 
 from __future__ import annotations
@@ -104,7 +104,7 @@ def test_validate_pass2_rejects_nul_byte_in_reason(bad_reason: str) -> None:
     [
         pytest.param(MAX_REASON_LEN + 1, True, id="just-over-limit"),
         pytest.param(MAX_REASON_LEN + 100, True, id="100-over"),
-        pytest.param(1024 * 4, True, id="4kib"),
+        pytest.param(MAX_REASON_LEN + 1024, True, id="1k-over-limit"),
         pytest.param(MAX_REASON_LEN, False, id="exact-limit"),
         pytest.param(MAX_REASON_LEN - 1, False, id="one-under-limit"),
         pytest.param(1, False, id="single-char"),

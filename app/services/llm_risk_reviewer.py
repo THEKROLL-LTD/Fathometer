@@ -69,7 +69,7 @@ log = structlog.get_logger(__name__)
 LABEL_PATTERN: re.Pattern[str] = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 # Reason-Hardlimit pro ADR-0023 §"Backend-Validierung".
-MAX_REASON_LEN: int = 256
+MAX_REASON_LEN: int = 8192
 
 # TICKET-011: Laengen-Cap fuer den Finding-Title in der Pass-2-Prompt-Zeile.
 MAX_PROMPT_TITLE_LEN: int = 100
