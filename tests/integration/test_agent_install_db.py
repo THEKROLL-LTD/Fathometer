@@ -66,7 +66,7 @@ def test_agent_files_serves_fathometer_agent_sh(db_app: Flask) -> None:
     assert resp.status_code == 200
     assert resp.mimetype == "text/x-shellscript"
     body = resp.get_data(as_text=True)
-    assert 'AGENT_VERSION="0.7.0"' in body
+    assert 'AGENT_VERSION="0.8.0"' in body
 
 
 def test_agent_files_serves_fathometer_register_sh(db_app: Flask) -> None:
@@ -148,7 +148,7 @@ def test_install_sh_contains_recommended_trivy_version(db_app: Flask) -> None:
     body = client.get("/install.sh").get_data(as_text=True)
     assert 'RECOMMENDED_TRIVY_VERSION="0.71.0"' in body
     assert 'MIN_TRIVY_VERSION="0.70.0"' in body
-    assert 'CURRENT_AGENT_VERSION="0.7.0"' in body
+    assert 'CURRENT_AGENT_VERSION="0.8.0"' in body
 
 
 def test_install_sh_has_resolved_backend_url(db_app: Flask) -> None:

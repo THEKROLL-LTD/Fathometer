@@ -4,6 +4,51 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Block AL (ADR-0066): Pass-2 sortiert Trivy-Stale-Artifact-False-Positives aus (v0.27.0)
+
+Trivy meldet alte, **nicht gebootete** `installonly`-Kernel als verwundbar
+(`installed=<alt>`, `fixed=<neuer>`), obwohl der **laufende** Kernel den Fix
+übererfüllt → der Operator sieht `ACT`, `dnf update` sagt aber „Nothing to do"
+(Stale-Artifact-FP). Der Pass-2-Reviewer korrigiert das jetzt selbst auf `noise`
+— ihm fehlten nur die Felder im Prompt. **Lane unverändert** (os-pkgs bleibt
+`patch`), kein Auto-Band-Flip im Code, kein Outbound, **keine** Migration
+(reiner additiver Envelope-Feld-Zusatz). Quality-Gates grün; Agent 0.8.0 / Lib 0.5.0.
+
+### Changed
+
+- **Pass-2-Prompt** (`llm_risk_reviewer.py`): Per-Finding-Zeile trägt jetzt
+  `installed=<version>` (neben `fix=`) und `host_update=<available|none>`;
+  `_render_host_context` rendert `kernel (running): <version>` (NULL → weggelassen).
+- **Pass-2-System-Prompt** (`llm_prompts.py`): neuer **STALE-ARTIFACT**-Correction-Path
+  (`fixed_version` durch laufenden Kernel/Baseline erfüllt ⇒ `noise`;
+  `host_update=none` korroboriert; `fixed > running` ⇒ bleibt actionable).
+  `PASS2_PROMPT_VERSION` 5 → 6 (invalidiert den Pass-2-Cache einmalig).
+- **`collect_host_updates`** (`agent/lib_host_state.sh`): das Ergebnis des **einen**
+  `dnf check-update`-Laufs wird nicht mehr nur für lang-pkgs, sondern auch für
+  **os-pkgs** durchgereicht (Join per `PkgName`, **kein** `rpm -qf` — das besitzende
+  Paket ist der `PkgName`). Version-Bumps `AGENT_VERSION` 0.7.0 → 0.8.0,
+  `LIB_HOST_STATE_VERSION` 0.4.0 → 0.5.0, `CURRENT_AGENT_VERSION` 0.8.0
+  (`MIN_AGENT_VERSION` bleibt 0.1.0).
+- **Findings-Ingest** (`findings_ingest.py`): zweite Join-Map keyed by
+  `package_name` für os-pkgs; lang-pkgs/`other` weiter über `target_path`.
+
+### Added
+
+- **`HostUpdateEntry.pkg_name`** (`scan_envelope.py`): additives optionales
+  os-pkgs-Join-Key-Feld (ASCII/NUL-validiert); `path` ist additiv optional geworden
+  (ein Eintrag setzt genau einen Join-Key). `extra="ignore"` trägt Forward-Compat.
+- **Pure-Unit-Tests:** Prompt-Render (`installed=`/`kernel (running):`/`host_update=`-
+  Matrix), Reviewer-Verdikt (`noise` im patch-Call gültig, `running<fixed` bleibt
+  actionable), os-pkgs-Ingest-Join + Lane-Invarianz (os-pkgs bleibt `patch`
+  unabhängig vom Flag), Schema-`pkg_name`-Varianten, Forward-Compat. Agent-Parser-
+  Cases (os-pkgs-Pfad) in der bestehenden bats-Suite (on-demand, User-genehmigt).
+
+### Forward-Compat
+
+- Alte Agenten (kein os-pkgs-`host_updates`-Eintrag) → Kernel-Finding
+  `host_update_available=NULL`, Prompt rendert `host_update=none`, der Reviewer
+  fällt auf den reinen Versionsvergleich (`fixed` vs. laufender Kernel) zurück.
+
 ## [Unreleased] — TICKET-016: Risk-Band-Reason group-/lane-verschachtelt in den Findings-Listen (TD-020 + TD-021)
 
 Die LLM-`risk_band_reason` (Lane-Level-Assessment) war für `monitor`/`noise`

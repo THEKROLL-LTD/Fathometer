@@ -41,7 +41,13 @@ from __future__ import annotations
 #: "fixed_version is null", sondern "kein host-applizierbarer Patch — manche
 #: Findings haben evtl. einen Upstream-Fix"). Cache-Invalidation noetig, sonst
 #: blieben Reasons aus der alten upstream-Semantik stehen.
-PASS2_PROMPT_VERSION = 5
+#: ADR-0066: 5 -> 6 — Pass-2-Prompt bekommt drei neue Per-Finding-/Host-Felder
+#: (``installed=``, ``kernel (running):``, ``host_update=``) plus einen
+#: STALE-ARTIFACT-Correction-Path, mit dem der Reviewer Trivy-Stale-Artifact-
+#: False-Positives (``fixed_version`` bereits durch laufenden Kernel/installierte
+#: Baseline uebererfuellt) selbst auf ``noise`` korrigiert. Cache-Invalidation
+#: noetig, sonst blieben Bestands-Reasons ohne die FP-Korrektur stehen.
+PASS2_PROMPT_VERSION = 6
 
 PASS1_SYSTEM_PROMPT: str = """\
 You group Linux-host vulnerability findings by owner-application.
@@ -194,13 +200,18 @@ by the fix_lane of the call. You output ONLY risk_band, worst_finding_id
 and reason.
 
 You receive:
-1. Host context: OS, listeners (proto/addr:port -> process), active
-   services, kernel modules, unique process commands.
+1. Host context: OS, the running kernel (kernel (running): <version>,
+   shown only when known), listeners (proto/addr:port -> process),
+   active services, kernel modules, unique process commands.
 2. One or more application groups to evaluate. Each group contains:
    - label and explanation (what the application is)
    - findings: a compact list of CVEs in this group with severity,
      CVSS v3, EPSS (probability of exploitation in next 30 days),
-     KEV flag (CISA known-exploited list), has_fix indicator,
+     KEV flag (CISA known-exploited list), has_fix indicator
+     (fix=<version> or fix=none), the currently installed version
+     (installed=<version> or installed=n/a), a host-update anchor
+     (host_update=available when the host package manager offers an
+     update for the owning package, host_update=none otherwise),
      attack vector (av=, from CVSS v3), install path, a short
      finding title (distilled CVE summary; for kernel CVEs it names
      the affected subsystem), vendor severities.
@@ -243,7 +254,7 @@ two inputs:
 2. Attack-chain reasoning based on the finding title, the attack
    vector, and the host context. Even LOOPBACK-ONLY or NO-LISTENER findings may
    be reachable indirectly via other PUBLIC-EXPOSED components
-   on the same host. Two correction paths you may apply:
+   on the same host. Three correction paths you may apply:
 
    UPGRADE  A library/component classified as LOOPBACK-ONLY or
             NO-LISTENER may be reachable if it processes untrusted
@@ -260,6 +271,19 @@ two inputs:
               provably not reachable on this host. Example: an
               LDAP-parsing CVE in a daemon that has LDAP support
               compiled in but disabled in config → monitor.
+
+   STALE-ARTIFACT  Trivy scans every installed package on disk, not
+              only the running one. If fixed_version is already
+              satisfied by the running kernel / installed baseline
+              (e.g. an older, non-booted kernel is flagged while a
+              newer fixed kernel runs, compare fix= against
+              kernel (running): and installed=), treat it as a Trivy
+              stale-artifact false positive → noise. host_update=none
+              corroborates (the host package manager offers no
+              update for the owning package). If fixed_version is
+              NEWER than the running version (fix installed but not
+              yet booted, or not installed at all), it is NOT a false
+              positive — keep it actionable.
 
 3. Per-finding install path (the ``path=`` field on each finding
    line). This is the on-disk location Trivy recorded for the

@@ -249,18 +249,30 @@ def _build_finding_row(
     result: TrivyResult,
     now: datetime,
     host_updates_map: dict[str, HostUpdateEntry] | None = None,
+    host_updates_by_pkg: dict[str, HostUpdateEntry] | None = None,
 ) -> dict[str, Any]:
     """Erzeugt das dict fuer den Bulk-Insert einer Finding-Zeile.
 
-    ``host_updates_map`` (Block AH, ADR-0062) ist die einmal pro Scan gebaute
-    ``path -> HostUpdateEntry``-Map aus ``envelope.host_updates`` (leer/``None``
-    wenn der Agent zu alt ist). Der Join-Key ist der effektive ``target_path``
-    (= der Trivy-``Result.Target``-Wert bzw. ``PkgPath``-Fallback). Fehlt ein
-    Eintrag, bleiben alle drei Host-Update-Spalten ``None`` -> ``upstream`` in
-    der Lane-Ableitung (ADR-0061-Default).
+    Zwei einmal pro Scan gebaute Host-Update-Maps (Block AH/AL,
+    ADR-0062/0066) joinen den ``host_update_available``-Anker an die Findings:
+
+    * ``host_updates_map`` — ``path -> HostUpdateEntry`` fuer **lang-pkgs**/
+      ``other``-Findings (Join ueber den effektiven ``target_path`` = Trivy-
+      ``Result.Target`` bzw. ``PkgPath``-Fallback).
+    * ``host_updates_by_pkg`` — ``pkg_name -> HostUpdateEntry`` fuer
+      **os-pkgs**-Findings (Join ueber ``Finding.package_name`` = Trivy-
+      ``PkgName``; os-pkgs haben keinen Binary-``Target``, ADR-0066).
+
+    Fehlt ein Eintrag, bleiben alle drei Host-Update-Spalten ``None``. Fuer
+    os-pkgs ist das Flag reines Reviewer-Enrichment — die Lane bleibt
+    unabhaengig davon ``patch`` (``fix_lane_for`` short-circuit, ADR-0066).
+    Fuer lang-pkgs/other entscheidet das Flag ``patch`` vs. ``mitigate``
+    (ADR-0064-Default ``mitigate`` bei ``None``).
     """
     if host_updates_map is None:
         host_updates_map = {}
+    if host_updates_by_pkg is None:
+        host_updates_by_pkg = {}
     cvss_score, cvss_vector = vuln.best_cvss_v3()
     attack_vector_str = vuln.attack_vector_from_cvss()
     severity = _SEVERITY_MAP[vuln.severity]
@@ -273,9 +285,13 @@ def _build_finding_row(
     pkg_disamb = _disambiguated_package_name(vuln.pkg_name, effective_target, finding_class)
     cause = _extract_cause_fields(vuln, result)
 
-    # Block AH (ADR-0062): Host-Update-Flag ueber `target_path` joinen.
+    # Block AH/AL (ADR-0062/0066): Host-Update-Flag joinen. os-pkgs ueber den
+    # Paketnamen (kein Binary-Target), lang-pkgs/other ueber `target_path`.
     target_path = cause["target_path"]
-    host_update = host_updates_map.get(target_path) if target_path is not None else None
+    if finding_class == FindingClass.OS_PKGS:
+        host_update = host_updates_by_pkg.get(vuln.pkg_name)
+    else:
+        host_update = host_updates_map.get(target_path) if target_path is not None else None
 
     return {
         "server_id": server_id,
@@ -395,11 +411,18 @@ def ingest_scan(
     now = now or datetime.now(tz=UTC)
     server_id = server.id
 
-    # Block AH (ADR-0062): einmal pro Scan die `path -> HostUpdateEntry`-Map
-    # aus `envelope.host_updates` bauen (leer wenn der Agent zu alt ist und das
-    # Feld nicht sendet). Join-Key ist der `target_path` jedes Findings.
+    # Block AH/AL (ADR-0062/0066): einmal pro Scan zwei Host-Update-Maps aus
+    # `envelope.host_updates` bauen (leer wenn der Agent zu alt ist und das Feld
+    # nicht sendet). lang-pkgs/other joinen ueber `path` (= `target_path`),
+    # os-pkgs ueber `pkg_name` (= `package_name`). Ein Eintrag setzt genau einen
+    # der beiden Keys.
     host_updates_map: dict[str, HostUpdateEntry] = {
-        entry.path: entry for entry in (envelope.host_updates or [])
+        entry.path: entry for entry in (envelope.host_updates or []) if entry.path is not None
+    }
+    host_updates_by_pkg: dict[str, HostUpdateEntry] = {
+        entry.pkg_name: entry
+        for entry in (envelope.host_updates or [])
+        if entry.pkg_name is not None
     }
 
     # ---- 1. Findings-Zeilen aus dem Envelope bauen --------------------
@@ -437,6 +460,7 @@ def ingest_scan(
                     result=trivy_result,
                     now=now,
                     host_updates_map=host_updates_map,
+                    host_updates_by_pkg=host_updates_by_pkg,
                 )
             )
             class_counter[finding_class] += 1

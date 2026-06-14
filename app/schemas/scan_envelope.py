@@ -919,35 +919,58 @@ class HostStateBlock(BaseModel):
 
 
 class HostUpdateEntry(BaseModel):
-    """Ein Host-Update-Flag-Eintrag pro Binary-Pfad (Block AH, ADR-0062).
+    """Ein Host-Update-Flag-Eintrag (Block AH, ADR-0062; Block AL, ADR-0066).
 
     Der Agent ab der AH-Version loest pro Finding-Binary das besitzende
     OS-Paket auf (``rpm -qf`` / ``dpkg -S``) und probt read-only, ob mit den
     aktuell konfigurierten Repos ein neueres Paket bereitsteht
     (``dnf check-update`` / ``apt-get -s upgrade``). Das Ergebnis kommt als
     separater ``envelope.host_updates``-Block (NICHT als Per-Vuln-Feld im
-    Trivy-JSON — Roh-Trivy bleibt unberuehrt, ADR-0005). Der Ingest joint die
-    Eintraege ueber ``path`` an die Findings.
+    Trivy-JSON — Roh-Trivy bleibt unberuehrt, ADR-0005).
 
-    Join-Key ist ``path`` = der Trivy-``Result.Target``-Wert des Findings (der
-    Binary-/Datei-Pfad, auf den sich das Finding bezieht). Forward-Compat per
-    ``extra="ignore"``.
+    Zwei Join-Wege (genau einer pro Eintrag gesetzt):
+
+    * ``path`` (lang-pkgs) = der Trivy-``Result.Target``-Wert des Findings (der
+      Binary-/Datei-Pfad). Der Ingest joint ueber ``Finding.target_path``.
+    * ``pkg_name`` (os-pkgs, ADR-0066) = der Trivy-``PkgName``. os-pkgs-Findings
+      haben keinen Binary-``Target`` (``Result.Target`` ist der Distro-String),
+      daher KEIN ``rpm -qf`` — das besitzende Paket IST der ``PkgName``. Der
+      Ingest joint ueber ``Finding.package_name``.
+
+    Beide Felder sind optional (additiv); alte Agenten senden nur ``path``.
+    Forward-Compat per ``extra="ignore"``.
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    path: Annotated[str, Field(max_length=512)]
+    path: str | None = Field(default=None, max_length=512)
+    pkg_name: str | None = Field(default=None, max_length=MAX_PKG_NAME_LENGTH)
     owning_package: str | None = Field(default=None, max_length=256)
     available_version: str | None = Field(default=None, max_length=256)
     update_available: bool
 
     @field_validator("path")
     @classmethod
-    def _validate_path(cls, v: str) -> str:
+    def _validate_path(cls, v: str | None) -> str | None:
         # Wie `pkg_path`: Pfade duerfen breiteren Zeichensatz haben, aber NUL
         # und Control-Chars wuerden Display und Join-Logik brechen.
-        v = _no_nul_bytes(v) or v
+        v = _no_nul_bytes(v)
+        if v is None:
+            return None
         return _strip_control_chars(v) or v
+
+    @field_validator("pkg_name")
+    @classmethod
+    def _validate_pkg_name(cls, v: str | None) -> str | None:
+        # os-pkgs-Join-Key (ADR-0066). ASCII/NUL-Validierung analog
+        # ``owning_package``; keine Path-Traversal-Pruefung noetig (reiner
+        # Paketname, kein Pfad).
+        v = _no_nul_bytes(v)
+        if v is None or v == "":
+            return None
+        if not _PRINTABLE_ASCII_RE.match(v):
+            raise ValueError("Feld muss druckbares ASCII sein")
+        return v
 
     @field_validator("owning_package", "available_version")
     @classmethod

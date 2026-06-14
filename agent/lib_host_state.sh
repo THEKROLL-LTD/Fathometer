@@ -57,7 +57,7 @@
 # der Collector-Signaturen mit ``REQUIRED_LIB_HOST_STATE_VERSION`` in
 # ``fathometer-agent.sh`` gemeinsam bumpen.
 # shellcheck disable=SC2034
-readonly LIB_HOST_STATE_VERSION="0.4.0"
+readonly LIB_HOST_STATE_VERSION="0.5.0"
 
 # Konstanten (read-only). Nur deklarieren wenn noch nicht gesetzt — damit
 # die Library mehrfach sourcebar bleibt (z.B. in pytest-Subshells).
@@ -521,12 +521,17 @@ _parse_apt_upgrade_sim() {
 # ---------------------------------------------------------------------------
 # collect_host_updates <trivy_json_file> <scan_root>
 #
-# Gibt das `host_updates`-JSON-Array auf stdout aus:
-#   [{path, owning_package, available_version, update_available}]
+# Gibt das `host_updates`-JSON-Array auf stdout aus. Zwei Eintrags-Formen:
+#   lang-pkgs: {path, owning_package, available_version, update_available}
+#   os-pkgs:   {pkg_name, owning_package, available_version, update_available}
 # `path` ist der unveraenderte Trivy-`Result.Target` (= Join-Key gegen
-# `Finding.target_path` im Ingest). Nur aufgeloeste Binaries erzeugen einen
-# Eintrag — nicht aufloesbare (hand-installierte/EOL) fehlen bewusst, sodass
-# der Ingest dort `NULL` -> `upstream` sieht (ADR-0062 §Datenfluss).
+# `Finding.target_path`). `pkg_name` ist der Trivy-`PkgName` (= Join-Key gegen
+# `Finding.package_name`, ADR-0066) — os-pkgs haben keinen Binary-`Target`,
+# daher KEIN `rpm -qf`: das besitzende Paket IST der PkgName.
+# Nur aufgeloeste lang-pkgs-Binaries erzeugen einen Eintrag — nicht
+# aufloesbare (hand-installierte/EOL) fehlen bewusst, sodass der Ingest dort
+# `NULL` -> `mitigate` sieht (ADR-0062/0064 §Datenfluss). Fuer os-pkgs wird
+# jeder PkgName emittiert (Flag ist reines Reviewer-Enrichment, ADR-0066).
 # ---------------------------------------------------------------------------
 collect_host_updates() {
   local trivy_json="$1"
@@ -544,10 +549,12 @@ collect_host_updates() {
     return 0
   fi
 
-  # Distinct lang-pkgs-Targets aus dem (bereits Packages-gestrippten) Trivy-JSON.
-  local targets
+  # Distinct lang-pkgs-Targets (Pfad-Join) und os-pkgs-PkgNames (Paketnamen-
+  # Join, ADR-0066) aus dem (bereits Packages-gestrippten) Trivy-JSON.
+  local targets os_pkgs
   targets="$(jq -r '[.Results[]? | select(.Class == "lang-pkgs") | .Target // empty] | unique[]' "$trivy_json" 2>/dev/null || true)"
-  if [[ -z "$targets" ]]; then
+  os_pkgs="$(jq -r '[.Results[]? | select(.Class == "os-pkgs") | .Vulnerabilities[]? | .PkgName // empty] | unique[]' "$trivy_json" 2>/dev/null || true)"
+  if [[ -z "$targets" && -z "$os_pkgs" ]]; then
     printf '[]'
     return 0
   fi
@@ -575,9 +582,13 @@ collect_host_updates() {
     done <<< "$upgradable_tsv"
   fi
 
-  # Pro Target das besitzende Paket aufloesen und TSV bauen.
-  local tsv="" target abspath pkg avail upd tsv_line
+  # TSV-Format: kind<TAB>key<TAB>owning_package<TAB>available_version<TAB>upd
+  #   kind=path -> lang-pkgs (key = Trivy-Target)
+  #   kind=pkg  -> os-pkgs   (key = Trivy-PkgName)
+  local tsv="" target abspath pkg avail upd tsv_line pkgname
   local count=0
+
+  # lang-pkgs: pro Target das besitzende Paket via rpm -qf/dpkg -S aufloesen.
   while IFS= read -r target; do
     [[ -z "$target" ]] && continue
     (( count >= 4096 )) && break
@@ -588,7 +599,7 @@ collect_host_updates() {
     else
       pkg="$(_run_capped dpkg -S "$abspath" 2>/dev/null | _parse_dpkg_search || true)"
     fi
-    # Nicht aufloesbar -> kein Eintrag (Ingest -> NULL -> upstream).
+    # Nicht aufloesbar -> kein Eintrag (Ingest -> NULL -> mitigate).
     [[ -z "$pkg" ]] && continue
     if [[ -n "${_upgradable[$pkg]+x}" ]]; then
       upd="true"
@@ -597,10 +608,28 @@ collect_host_updates() {
       upd="false"
       avail=""
     fi
-    printf -v tsv_line '%s\t%s\t%s\t%s' "$target" "$pkg" "$avail" "$upd"
+    printf -v tsv_line 'path\t%s\t%s\t%s\t%s' "$target" "$pkg" "$avail" "$upd"
     tsv+="${tsv_line}"$'\n'
     count=$((count + 1))
   done <<< "$targets"
+
+  # os-pkgs: besitzendes Paket = PkgName selbst, KEIN rpm -qf (ADR-0066).
+  # Update-Status aus derselben `_upgradable`-Map. Jeder PkgName erzeugt einen
+  # Eintrag (Flag ist reines Reviewer-Enrichment, Lane bleibt patch).
+  while IFS= read -r pkgname; do
+    [[ -z "$pkgname" ]] && continue
+    (( count >= 4096 )) && break
+    if [[ -n "${_upgradable[$pkgname]+x}" ]]; then
+      upd="true"
+      avail="${_upgradable[$pkgname]}"
+    else
+      upd="false"
+      avail=""
+    fi
+    printf -v tsv_line 'pkg\t%s\t%s\t%s\t%s' "$pkgname" "$pkgname" "$avail" "$upd"
+    tsv+="${tsv_line}"$'\n'
+    count=$((count + 1))
+  done <<< "$os_pkgs"
 
   if [[ -z "$tsv" ]]; then
     printf '[]'
@@ -612,12 +641,14 @@ collect_host_updates() {
     split("\n")
     | map(select(length > 0))
     | map(split("\t"))
-    | map({
-        path: .[0],
-        owning_package: (if (.[1] // "") == "" then null else .[1] end),
-        available_version: (if (.[2] // "") == "" then null else .[2] end),
-        update_available: (.[3] == "true")
-      })
+    | map(
+        (if .[0] == "pkg" then {pkg_name: .[1]} else {path: .[1]} end)
+        + {
+            owning_package: (if (.[2] // "") == "" then null else .[2] end),
+            available_version: (if (.[3] // "") == "" then null else .[3] end),
+            update_available: (.[4] == "true")
+          }
+      )
   ' 2>/dev/null)" || result="[]"
   printf '%s' "$result"
 }

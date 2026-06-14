@@ -22,6 +22,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
+
 from app.models import FindingClass
 from app.schemas.scan_envelope import Envelope, HostUpdateEntry
 from app.services.findings_ingest import _CLASS_MAP, _build_finding_row
@@ -55,6 +57,7 @@ def _build_rows(
     env: Envelope,
     *,
     host_updates_map: dict[str, HostUpdateEntry] | None = None,
+    host_updates_by_pkg: dict[str, HostUpdateEntry] | None = None,
     server_id: int = 1,
 ) -> list[dict[str, Any]]:
     """Repliziert die per-Vuln-Schleife aus `ingest_scan`, ohne DB."""
@@ -71,6 +74,7 @@ def _build_rows(
                     result=result,
                     now=_NOW,
                     host_updates_map=host_updates_map,
+                    host_updates_by_pkg=host_updates_by_pkg,
                 )
             )
     return rows
@@ -124,9 +128,10 @@ def test_match_sets_all_three_host_update_columns() -> None:
 
 
 def test_match_with_update_available_false_sets_flag_false() -> None:
-    """Entry mit update_available=False -> Spalte False (nicht None) —
-    der Agent hat das Paket aufgeloest, aber kein Update steht bereit."""
-    target = "/usr/bin/curl"
+    """os-pkgs-Entry mit update_available=False -> Spalte False (nicht None).
+    ADR-0066: os-pkgs joinen ueber `pkg_name`, NICHT ueber den Pfad (der
+    Distro-`Result.Target` ist kein Binary-Pfad)."""
+    target = "rocky 9.3"  # os-pkgs-Result.Target ist der Distro-String.
     env = _envelope(
         results=[
             {
@@ -145,12 +150,12 @@ def test_match_with_update_available_false_sets_flag_false() -> None:
             }
         ]
     )
-    host_updates_map = {
-        target: HostUpdateEntry.model_validate(
-            {"path": target, "owning_package": "curl", "update_available": False}
+    host_updates_by_pkg = {
+        "curl": HostUpdateEntry.model_validate(
+            {"pkg_name": "curl", "owning_package": "curl", "update_available": False}
         )
     }
-    rows = _build_rows(env, host_updates_map=host_updates_map)
+    rows = _build_rows(env, host_updates_by_pkg=host_updates_by_pkg)
     assert rows[0]["host_update_available"] is False
     assert rows[0]["owning_package"] == "curl"
     assert rows[0]["available_version"] is None
@@ -286,3 +291,93 @@ def test_unmatched_langpkgs_row_yields_mitigate_via_fix_lane_for() -> None:
     lane = fix_lane_for(row["finding_class"], has_fix, row["host_update_available"])
     assert row["host_update_available"] is None
     assert lane == "mitigate"
+
+
+# ---------------------------------------------------------------------------
+# Block AL (ADR-0066): os-pkgs-Join ueber `package_name` (kein Pfad-Join)
+# ---------------------------------------------------------------------------
+
+
+def _ospkgs_kernel_result() -> dict[str, Any]:
+    """installonly-Kernel-Leftover: alter el9_7-Kernel als Trivy-Finding mit
+    FixedVersion el9_8 (der laufende Kernel uebererfuellt den Fix -> Stale-FP).
+    Result.Target ist der Distro-String, NICHT ein Binary-Pfad."""
+    return {
+        "Target": "almalinux 9.8",
+        "Class": "os-pkgs",
+        "Type": "almalinux",
+        "Vulnerabilities": [
+            {
+                "VulnerabilityID": "CVE-2025-12345",
+                "PkgName": "kernel",
+                "InstalledVersion": "5.14.0-611.54.6.el9_7",
+                "FixedVersion": "5.14.0-687.12.1.el9_8",
+                "Severity": "HIGH",
+            }
+        ],
+    }
+
+
+def test_ospkgs_joins_host_update_via_package_name() -> None:
+    """os-pkgs-Finding zieht `host_update_available` ueber `package_name` aus
+    der pkg-Map (NICHT ueber den Pfad). ADR-0066: `host_update=none` (kein
+    dnf-Update) korroboriert den Stale-Artifact-FP."""
+    env = _envelope(results=[_ospkgs_kernel_result()])
+    host_updates_by_pkg = {
+        "kernel": HostUpdateEntry.model_validate(
+            {"pkg_name": "kernel", "owning_package": "kernel", "update_available": False}
+        )
+    }
+    rows = _build_rows(env, host_updates_by_pkg=host_updates_by_pkg)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["package_name"] == "kernel"
+    assert row["host_update_available"] is False
+    assert row["owning_package"] == "kernel"
+
+
+def test_ospkgs_does_not_join_via_path_map() -> None:
+    """Ein Pfad-gekeyter Eintrag matcht ein os-pkgs-Finding NICHT — os-pkgs
+    geht ausschliesslich ueber den Paketnamen-Join (ADR-0066)."""
+    env = _envelope(results=[_ospkgs_kernel_result()])
+    rows = _build_rows(
+        env,
+        host_updates_map={
+            "almalinux 9.8": HostUpdateEntry.model_validate(
+                {"path": "almalinux 9.8", "update_available": True}
+            )
+        },
+    )
+    assert rows[0]["host_update_available"] is None
+    assert rows[0]["owning_package"] is None
+
+
+def test_ospkgs_no_entry_leaves_flag_none_forward_compat() -> None:
+    """Alter Agent (kein os-pkgs-Eintrag): Kernel-Finding -> host_update=None.
+    Der Reviewer faellt auf den reinen Versionsvergleich zurueck (Forward-
+    Compat, ADR-0066)."""
+    env = _envelope(results=[_ospkgs_kernel_result()])
+    rows = _build_rows(env, host_updates_by_pkg={})
+    assert rows[0]["host_update_available"] is None
+
+
+@pytest.mark.parametrize("flag", [True, False, None])
+def test_ospkgs_lane_stays_patch_regardless_of_flag(flag: bool | None) -> None:
+    """Lane-Invarianz (ADR-0066 DoD): ein os-pkgs+fix-Finding bleibt `patch`
+    unabhaengig vom Host-Update-Flag — der os-pkgs-Short-Circuit in
+    `fix_lane_for` liegt VOR der Flag-Auswertung. Das Flag ist fuer os-pkgs
+    reines Reviewer-Enrichment, kein Lane-Input."""
+    env = _envelope(results=[_ospkgs_kernel_result()])
+    by_pkg: dict[str, HostUpdateEntry] = {}
+    if flag is not None:
+        by_pkg = {
+            "kernel": HostUpdateEntry.model_validate(
+                {"pkg_name": "kernel", "update_available": flag}
+            )
+        }
+    row = _build_rows(env, host_updates_by_pkg=by_pkg)[0]
+    has_fix = bool(row["fixed_version"])
+    assert has_fix is True
+    lane = fix_lane_for(row["finding_class"], has_fix, row["host_update_available"])
+    assert lane == "patch"
+    assert row["finding_class"] == FindingClass.OS_PKGS.value

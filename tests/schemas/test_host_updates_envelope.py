@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 THEKROLL LTD
 
-"""Block AH (ADR-0062) — Envelope-Erweiterung um `host_updates` + `HostUpdateEntry`.
+"""Block AH/AL (ADR-0062/0066) — Envelope `host_updates` + `HostUpdateEntry`.
 
-Pure-Unit-Tests fuer das neue Pydantic-Modell und das optionale
+Pure-Unit-Tests fuer das Pydantic-Modell und das optionale
 `Envelope.host_updates`-Feld. Deckt:
 
 - Gueltiger Eintrag parst (alle Felder).
-- `path` ist Pflicht.
+- `path` UND `pkg_name` sind beide optional (ADR-0066: os-pkgs joinen ueber
+  `pkg_name`, lang-pkgs ueber `path`); ein Eintrag setzt genau einen Key.
 - `update_available` ist Pflicht-bool.
 - `owning_package`/`available_version` sind optional (None ok).
-- NUL-Byte in `path`/`owning_package` -> Reject.
-- non-ASCII in `owning_package` -> Reject.
+- NUL-Byte in `path`/`pkg_name`/`owning_package` -> Reject.
+- non-ASCII in `pkg_name`/`owning_package` -> Reject.
 - `> MAX_HOST_UPDATES` Eintraege -> Reject (Pydantic max_length).
 - Envelope ohne `host_updates` bleibt gueltig (Default None, alter Agent).
 - Unbekannte Extra-Keys im Entry werden ignoriert (extra="ignore").
@@ -73,10 +74,39 @@ def test_host_update_entry_full_parses() -> None:
     assert entry.update_available is True
 
 
-def test_host_update_entry_path_required() -> None:
-    with pytest.raises(ValidationError) as exc:
-        HostUpdateEntry.model_validate({"update_available": False})
-    assert "path" in str(exc.value), exc.value
+def test_host_update_entry_pkg_name_variant_parses() -> None:
+    """ADR-0066: os-pkgs-Eintrag mit `pkg_name`-Join-Key statt `path`."""
+    entry = HostUpdateEntry.model_validate(
+        {
+            "pkg_name": "kernel",
+            "owning_package": "kernel",
+            "available_version": "5.14.0-687.12.1.el9_8",
+            "update_available": False,
+        }
+    )
+    assert entry.pkg_name == "kernel"
+    assert entry.path is None
+    assert entry.owning_package == "kernel"
+    assert entry.update_available is False
+
+
+def test_host_update_entry_path_and_pkg_name_both_optional() -> None:
+    """ADR-0066: weder `path` noch `pkg_name` ist Pflicht — ein Eintrag ohne
+    beide parst (degeneriert, aber kein Hard-Reject); nur `update_available`
+    ist Pflicht. Der Ingest-Join ignoriert solche Eintraege schlicht."""
+    entry = HostUpdateEntry.model_validate({"update_available": False})
+    assert entry.path is None
+    assert entry.pkg_name is None
+
+
+def test_host_update_entry_nul_byte_in_pkg_name_rejected() -> None:
+    with pytest.raises(ValidationError):
+        HostUpdateEntry.model_validate({"pkg_name": "ker\x00nel", "update_available": True})
+
+
+def test_host_update_entry_non_ascii_pkg_name_rejected() -> None:
+    with pytest.raises(ValidationError):
+        HostUpdateEntry.model_validate({"pkg_name": "kärnel", "update_available": True})
 
 
 def test_host_update_entry_update_available_required() -> None:
@@ -195,6 +225,24 @@ def test_envelope_with_host_updates_list_parses() -> None:
     assert env.host_updates[0].update_available is True
     assert env.host_updates[1].update_available is False
     assert env.host_updates[1].owning_package is None
+
+
+def test_envelope_with_mixed_path_and_pkg_name_entries_parses() -> None:
+    """ADR-0066: ein Scan enthaelt beide Eintrags-Formen nebeneinander —
+    lang-pkgs ueber `path`, os-pkgs ueber `pkg_name`."""
+    env = Envelope.model_validate(
+        _minimal_envelope(
+            host_updates=[
+                {"path": "/usr/bin/tailscaled", "update_available": True},
+                {"pkg_name": "kernel", "update_available": False},
+            ]
+        )
+    )
+    assert env.host_updates is not None
+    assert env.host_updates[0].path == "/usr/bin/tailscaled"
+    assert env.host_updates[0].pkg_name is None
+    assert env.host_updates[1].pkg_name == "kernel"
+    assert env.host_updates[1].path is None
 
 
 def test_envelope_host_updates_empty_list_ok() -> None:

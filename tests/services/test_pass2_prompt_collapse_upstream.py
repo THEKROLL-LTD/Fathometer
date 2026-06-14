@@ -43,10 +43,11 @@ def _reviewer() -> LLMRiskReviewer:
 # ---------------------------------------------------------------------------
 
 
-def test_pass2_prompt_version_is_5() -> None:
-    """ADR-0064 zaehlt die Prompt-Version von 4 auf 5 hoch (invalidiert die
-    Eval-Rows mit alter upstream-Semantik beim naechsten Re-Eval)."""
-    assert PASS2_PROMPT_VERSION == 5
+def test_pass2_prompt_version_is_6() -> None:
+    """ADR-0066 zaehlt die Prompt-Version von 5 auf 6 hoch (neue Stale-Artifact-
+    Correction-Path-Semantik + drei neue Felder; invalidiert alte Eval-Rows
+    beim naechsten Re-Eval)."""
+    assert PASS2_PROMPT_VERSION == 6
 
 
 # ---------------------------------------------------------------------------

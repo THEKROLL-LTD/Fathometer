@@ -904,6 +904,12 @@ class LLMRiskReviewer:
             f"  os: {server.os_pretty_name or server.os_family or '-'}"
             f" {server.os_version or ''}".strip()
         )
+        # Block AL (ADR-0066): laufender Kernel als Komparator gegen
+        # ``fixed_version`` von ``installonly``-Kernel-Findings. NULL ->
+        # weglassen (kein leerer Marker), damit der Reviewer keinen
+        # Pseudo-Vergleich gegen "-" anstellt.
+        if server.kernel_version:
+            lines.append(f"  kernel (running): {server.kernel_version}")
         # v0.9.3 (ADR-0023 §"Tags-Exclusion"): Tags werden NICHT mehr an das
         # LLM weitergereicht — sie sind User-Freitext-Labels ohne garantierte
         # Semantik. Exposure-Bewertung erfolgt ausschliesslich ueber Listener-
@@ -1001,6 +1007,22 @@ class LLMRiskReviewer:
                 )
                 epss_str = f" epss={f.epss_score:.2f}" if f.epss_score is not None else " epss=n/a"
                 fix_str = f" fix={f.fixed_version}" if f.fixed_version else " fix=none"
+                # Block AL (ADR-0066): ``installed=`` direkt neben ``fix=`` —
+                # der Reviewer braucht beide Versionen, um einen Trivy-Stale-
+                # Artifact-FP (``fixed`` bereits durch ``installed``/laufenden
+                # Kernel uebererfuellt) zu erkennen. NULL -> ``installed=n/a``.
+                installed_str = (
+                    f" installed={f.installed_version}" if f.installed_version else " installed=n/a"
+                )
+                # Block AL (ADR-0066): deterministischer Host-Update-Anker.
+                # ``host_update=none`` korroboriert einen Stale-Artifact-FP
+                # (der Host-Paketmanager bietet kein Update an). ``True`` ->
+                # ``available``; ``False``/``None`` (alter Agent / kein
+                # Eintrag) -> ``none``, der Reviewer faellt dann auf den reinen
+                # Versionsvergleich zurueck.
+                host_update_str = (
+                    " host_update=available" if f.host_update_available else " host_update=none"
+                )
                 kev_str = " kev=yes" if f.is_kev else " kev=no"
                 # Bugfix 2026-05-24 (ADR-0023 Nachtrag): Per-Finding-Pfad mit
                 # in den Prompt — siehe PASS2_SYSTEM_PROMPT-Block "Path-based
@@ -1024,7 +1046,8 @@ class LLMRiskReviewer:
                 )
                 lines.append(
                     f"      {f.id} {f.identifier_key} {f.package_name} "
-                    f"sev={f.severity.value}{cvss_str}{epss_str}{fix_str}{kev_str}{av_str}"
+                    f"sev={f.severity.value}{cvss_str}{epss_str}{fix_str}{installed_str}"
+                    f"{host_update_str}{kev_str}{av_str}"
                     f"{path_str} "
                     f"{vendor_str}{title_str}"
                 )

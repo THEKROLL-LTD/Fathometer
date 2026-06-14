@@ -220,6 +220,15 @@ def test_fix_lane_for_truthy_flag_promotes_langpkgs(truthy: object) -> None:
     assert fix_lane_for("lang-pkgs", True, truthy) == "patch"
 
 
+@pytest.mark.parametrize("flag", [True, False, None])
+@pytest.mark.parametrize("fc", [FindingClass.OS_PKGS, "os-pkgs"])
+def test_fix_lane_for_ospkgs_invariant_to_host_update_flag(fc: object, flag: object) -> None:
+    """ADR-0066-Lane-Invarianz: os-pkgs+has_fix bleibt ``patch`` unabhaengig vom
+    Host-Update-Flag (Short-Circuit liegt VOR der Flag-Auswertung). Das Flag ist
+    fuer os-pkgs reines Reviewer-Enrichment, kein Lane-Input."""
+    assert fix_lane_for(fc, True, flag) == "patch"
+
+
 # ---------------------------------------------------------------------------
 # ADR-0062: fix_lane_sql_case mit host_update_col-Argument.
 # ---------------------------------------------------------------------------

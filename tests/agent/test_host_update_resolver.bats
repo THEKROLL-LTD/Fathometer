@@ -1,18 +1,18 @@
 #!/usr/bin/env bats
 #
-# test_host_update_resolver.bats — Block AH (ADR-0062)
-# ----------------------------------------------------
+# test_host_update_resolver.bats — Block AH (ADR-0062), Block AL (ADR-0066)
+# ------------------------------------------------------------------------
 # Unit-Tests fuer die reinen Resolver-Output-Parser in
-# `agent/lib_host_state.sh` (rpm/dpkg/dnf/apt) sowie den `collect_host_updates`-
-# Leerlauf. Die Parser sind stdin->stdout-Funktionen und werden mit
-# captured-output String-Fixtures geprueft — kein echter Paketmanager-Aufruf,
-# kein State-Change.
+# `agent/lib_host_state.sh` (rpm/dpkg/dnf/apt), den `collect_host_updates`-
+# Leerlauf sowie den os-pkgs-Paketnamen-Join (ADR-0066, via PATH-Stub-rpm/dnf).
+# Die Parser sind stdin->stdout-Funktionen und werden mit captured-output
+# String-Fixtures geprueft — kein echter Paketmanager-State-Change.
 #
 # On-Demand-Suite (NICHT im Default-pytest). Ausfuehren:
 #   bats tests/agent/test_host_update_resolver.bats
 # Benoetigt `bats` (bats-core) im Dev-/CI-Environment, nicht auf dem Host.
 #
-# Erlaubt per expliziter User-Genehmigung fuer Block AH (CLAUDE.md
+# Erlaubt per expliziter User-Genehmigung fuer Block AH/AL (CLAUDE.md
 # Test-Konvention — .bats normalerweise genehmigungspflichtig).
 
 setup() {
@@ -134,11 +134,50 @@ _pipe() {
   [ "$output" = "[]" ]
 }
 
-@test "collect_host_updates: no lang-pkgs class -> []" {
+@test "collect_host_updates: os-pkgs without vulnerabilities -> []" {
   tmp="$(mktemp)"
   printf '%s' '{"Results":[{"Class":"os-pkgs","Target":"debian","Vulnerabilities":[]}]}' > "$tmp"
   run bash -c "source '$LIB'; collect_host_updates '$tmp' /"
   rm -f "$tmp"
   [ "$status" -eq 0 ]
   [ "$output" = "[]" ]
+}
+
+# ---------------------------------------------------------------------------
+# collect_host_updates — os-pkgs-Pfad (Block AL, ADR-0066)
+#
+# os-pkgs joinen ueber den PkgName (kein `rpm -qf`); besitzendes Paket = PkgName.
+# Stub-rpm wird nur fuer die Paketmanager-Familien-Erkennung gebraucht (es wird
+# NICHT `rpm -qf` aufgerufen). Stub-dnf liefert das check-update-Ergebnis.
+# ---------------------------------------------------------------------------
+
+@test "collect_host_updates: os-pkgs emits pkg_name entry, empty dnf -> update_available false" {
+  stubdir="$(mktemp -d)"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$stubdir/rpm"; chmod +x "$stubdir/rpm"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$stubdir/dnf"; chmod +x "$stubdir/dnf"
+  tmp="$(mktemp)"
+  printf '%s' '{"Results":[{"Class":"os-pkgs","Target":"almalinux 9.8","Vulnerabilities":[{"PkgName":"kernel"}]}]}' > "$tmp"
+  run bash -c "export PATH='$stubdir:\$PATH'; source '$LIB'; collect_host_updates '$tmp' /"
+  rm -rf "$stubdir" "$tmp"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"pkg_name":"kernel"'* ]]
+  [[ "$output" == *'"owning_package":"kernel"'* ]]
+  [[ "$output" == *'"update_available":false'* ]]
+  # os-pkgs-Eintraege tragen KEINEN path-Key.
+  [[ "$output" != *'"path":'* ]]
+}
+
+@test "collect_host_updates: os-pkgs with available dnf update -> update_available true" {
+  stubdir="$(mktemp -d)"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$stubdir/rpm"; chmod +x "$stubdir/rpm"
+  printf '#!/usr/bin/env bash\nprintf "kernel.x86_64   5.14.0-687.12.1.el9_8   baseos\\n"\n' > "$stubdir/dnf"
+  chmod +x "$stubdir/dnf"
+  tmp="$(mktemp)"
+  printf '%s' '{"Results":[{"Class":"os-pkgs","Target":"almalinux 9.8","Vulnerabilities":[{"PkgName":"kernel"}]}]}' > "$tmp"
+  run bash -c "export PATH='$stubdir:\$PATH'; source '$LIB'; collect_host_updates '$tmp' /"
+  rm -rf "$stubdir" "$tmp"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"pkg_name":"kernel"'* ]]
+  [[ "$output" == *'"available_version":"5.14.0-687.12.1.el9_8"'* ]]
+  [[ "$output" == *'"update_available":true'* ]]
 }

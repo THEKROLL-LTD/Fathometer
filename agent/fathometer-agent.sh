@@ -85,8 +85,8 @@
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.7.0"
-readonly REQUIRED_LIB_HOST_STATE_VERSION="0.4.0"
+readonly AGENT_VERSION="0.8.0"
+readonly REQUIRED_LIB_HOST_STATE_VERSION="0.5.0"
 readonly TRIVY_BIN="${FM_TRIVY_PATH:-trivy}"
 readonly SCAN_PATH="${FM_SCAN_PATH:-/}"
 readonly TIMEOUT_SEC="${FM_TIMEOUT_SEC:-60}"
