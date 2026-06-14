@@ -1,0 +1,110 @@
+name: trivy
+
+# Security-Scans mit Trivy. Bewusst GETRENNT von ci.yml (reines, schnelles
+# Quality-Gate: ruff/mypy/pytest). Begruendung:
+#   - andere Kadenz: laeuft zusaetzlich per `schedule`, weil neue CVEs gegen
+#     unveraenderten Code auftauchen.
+#   - andere Permissions: braucht `security-events: write` fuer den SARIF-Upload
+#     ins GitHub-Code-Scanning (Security-Tab + PR-Annotationen am Diff).
+#
+# Gate-Verhalten: NON-BLOCKING. Alle Trivy-Schritte laufen mit `exit-code: 0`,
+# d. h. der Job wird durch Findings nie rot — die Ergebnisse landen rein
+# informativ im Security-Tab. Scharfschalten (Merge bei CRITICAL/HIGH blocken)
+# spaeter ueber einen zweiten Trivy-Aufruf mit `exit-code: 1` + passender
+# `severity` als eigener, required Check.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Montags 06:17 UTC — faengt neue CVEs gegen unveraenderten Code.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: trivy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write   # SARIF-Upload ins Code-Scanning
+
+jobs:
+  # --- Repo-Scan: Python-Deps (uv.lock/pyproject), Secrets, IaC-Misconfig ---
+  # (Dockerfile + docker-compose.yml). Billig, laeuft auf jedem PR.
+  filesystem:
+    name: fs (deps · secrets · misconfig)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trivy filesystem scan (SARIF)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: "0"          # NON-BLOCKING — nur Report
+          cache: true             # Vuln-DB cachen → keine GHCR-Rate-Limits
+          trivyignores: .trivyignore
+        env:
+          # Stabilitaet gegen GHCR-Hiccups beim DB-Pull.
+          TRIVY_TIMEOUT: 10m
+
+      - name: Upload fs SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()             # auch hochladen, wenn der Scan-Step strauchelt
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  # --- Image-Scan: OS-Pakete (bookworm-Userland) + venv im tatsaechlich
+  # ausgelieferten Prod-Image (finale `runtime`-Stage, scratch-flattened). ---
+  image:
+    name: image (os pkgs · app deps)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build runtime image (load into local daemon)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime        # finale Stage aus dem Dockerfile
+          load: true             # ins lokale Daemon laden statt pushen
+          tags: secscan:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy image scan (SARIF)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: secscan:ci
+          scanners: vuln,secret
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: "0"          # NON-BLOCKING — nur Report
+          cache: true
+          trivyignores: .trivyignore
+        env:
+          TRIVY_TIMEOUT: 10m
+
+      - name: Upload image SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image

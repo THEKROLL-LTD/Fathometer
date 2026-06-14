@@ -1,0 +1,8 @@
+# Bewusst akzeptierte Trivy-Findings. Eine ID (CVE-… / AVD-… / Secret-Rule-ID)
+# pro Zeile. PFLICHT: Begruendung + Ablaufdatum als Kommentar darueber, damit
+# Suppressions nicht ewig unbemerkt liegenbleiben.
+#
+# Beispiel:
+#   # Kein fixed-version-Upstream, nur via lokalem CLI-Pfad erreichbar (nicht
+#   # im Request-Pfad). Review faellig: 2026-09-01.
+#   CVE-2024-XXXXX
