@@ -1,0 +1,60 @@
+name: ci
+
+# Quality-Gates fuer jeden Push auf main und jeden Pull-Request.
+# Spiegelt exakt die in CLAUDE.md erlaubten Gates:
+#   1. Ruff (Lint + Format-Check)
+#   2. mypy --strict auf app/
+#   3. pytest Default-Selektion (Pure-Unit)
+# KEINE db_integration/acceptance/integration/bench-Tests — die Default-
+# Selektion schliesst sie ueber pytest.ini-`addopts` + den pfadbasierten
+# Auto-Marker in tests/conftest.py aus und laeuft damit ohne Postgres/Docker.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Laeuft ein neuer Commit auf denselben Ref ein, wird der vorige Lauf
+# abgebrochen statt CI-Minuten zu verbrennen.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: lint · types · tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: mypy (strict on app/)
+        run: mypy app/
+
+      - name: pytest (default pure-unit suite)
+        # Identisch zum kanonischen `make test`: Default-Selektion mit
+        # Coverage-Gate. Postgres-abhaengige Tests skippen sich selbst, wenn
+        # keine Test-DB erreichbar ist — in CI ist keine konfiguriert.
+        run: pytest -v --cov=app --cov-fail-under=85
