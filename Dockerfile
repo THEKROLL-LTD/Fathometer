@@ -12,7 +12,7 @@ ARG FM_BUILD_REVISION=dev
 # ---------------------------------------------------------------------------
 # Stage 1 — Builder
 # ---------------------------------------------------------------------------
-FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
+FROM python:${PYTHON_VERSION}-slim-trixie AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -79,17 +79,18 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # ---------------------------------------------------------------------------
 FROM node:20-alpine AS frontend-build
 
-WORKDIR /repo
+WORKDIR /repo/frontend
 
 # Dependency-Layer zuerst — wird nur bei package-lock.json-Aenderungen invalidiert.
-COPY frontend/package.json frontend/package-lock.json ./frontend/
-RUN cd frontend && npm ci
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 
 # Frontend-Quellcode kopieren und bauen.
-# npm run build schreibt nach /repo/app/static/dist/ — esbuild legt
-# das Verzeichnis automatisch an.
-COPY frontend ./frontend
-RUN cd frontend && npm run build
+# esbuild schreibt __dirname-relativ nach /repo/app/static/dist/ (siehe
+# esbuild.config.mjs: `resolve(__dirname, "../app/static/dist")`), also
+# unabhaengig vom WORKDIR. `WORKDIR` statt `cd frontend` vermeidet DS-0013.
+COPY frontend ./
+RUN npm run build
 
 # ---------------------------------------------------------------------------
 # Stage 3 — Runtime-Builder (wird im naechsten Stage flach kopiert)
@@ -100,7 +101,7 @@ RUN cd frontend && npm run build
 # 200 MB DoD-Cap (sonst landen die geloeschten Dateien aus dem base-Layer
 # noch im Image-Total).
 # ---------------------------------------------------------------------------
-FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime-builder
+FROM python:${PYTHON_VERSION}-slim-trixie AS runtime-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

@@ -114,7 +114,7 @@ jobs:
           # pyproject.toml-Layer + apt-Layer ueber Tag-Grenzen hinweg gehittet
           # werden. Cache wird automatisch nach 7 Tagen ohne Hit evictet
           # (GHA-LRU). System-Lib-Security-Updates kommen via Base-Image-Push
-          # (`python:3.13-slim-bookworm`-Digest aendert sich) → Layer-Hash
+          # (`python:3.13-slim-trixie`-Digest aendert sich) → Layer-Hash
           # invalidiert automatisch.
           cache-from: type=gha,scope=release
           cache-to: type=gha,scope=release,mode=max
