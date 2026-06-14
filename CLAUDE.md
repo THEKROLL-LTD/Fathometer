@@ -159,8 +159,8 @@ Wenn ein Agent Scope erweitern will: ablehnen und neue ADR erfordern.
 - **Migration-Konflikte** → in jeder Block-DoD muss `alembic downgrade -1 && upgrade head` grün sein.
 - **Drift zwischen ARCHITECTURE.md und Implementierung** → bei jeder Spec-Abweichung neue ADR oder Spec-Update bevor Code geschrieben wird.
 
-## Kommunikations-Sprache
+## Language policy
 
-Doc-Sprache und Code-Kommentare auf Deutsch (User-Präferenz). Code selbst (Bezeichner, Strings) auf Englisch wegen Library-/Framework-Konventionen.
+**English everywhere, effective 2026-06-14.** All project artifacts — docs (`ARCHITECTURE.md`, ADRs, block files, `STATE.md`, `README`), code comments, commit messages, and code itself (identifiers, strings) — are English. **No new German content anywhere.** Existing German docs/comments are legacy and removed incrementally (translate on touch: when you edit a German doc/comment, convert that section to English rather than extending the German).
 
-**UI-Sprache: ausschließlich Englisch (ADR-0045).** Alle Operator-sichtbaren Strings — Templates, Flash-Messages, Form-Validator-Messages, JS-Strings, Jinja-Filter-Output (Relative-Time), Chat-LLM-System-Prompt — sind englisch. Keine neuen deutschen UI-Strings; der Sprach-Sweep-Test (`tests/test_ui_language.py`) schlägt sonst fehl. Keine i18n-Infrastruktur (kein gettext/babel).
+**UI language: English only (ADR-0045).** All operator-visible strings — templates, flash messages, form-validator messages, JS strings, Jinja-filter output (relative time), the chat LLM system prompt — are English. No new German UI strings; the language-sweep test (`tests/test_ui_language.py`) fails otherwise. No i18n infrastructure (no gettext/babel).
