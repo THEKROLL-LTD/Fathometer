@@ -86,3 +86,59 @@ Modell erhoeht die Treffsicherheit deutlich (Spike-Befund ADR-0063 §Modell);
 schwache Instruction-Follower halluzinieren und sind ungeeignet. Such-/
 Fetch-Kosten sind $0 (SearXNG + lokales Fetch), nur LLM-Tokens fallen an
 (Cent-Bereich pro Lauf, gecached pro `(Artefakt, installierte Version)`).
+
+---
+
+## Why container vulnerabilities do not appear (ADR-0067)
+
+The agent scans the live root filesystem (`trivy rootfs /`) but, by design,
+**excludes the well-known container-runtime data-roots**:
+
+- `/var/lib/docker` (Docker overlay2 layers)
+- `/var/lib/containerd` (containerd snapshot store)
+- `/var/lib/rancher/k3s/agent/containerd` (k3s embedded containerd)
+- `/var/lib/containers` (podman / CRI-O storage)
+
+The contents of those directories are **unpacked container-image layers**, and
+container-image scanning is out of scope for Fathometer (ARCHITECTURE §17). So if
+an operator expects to see CVEs from a containerized application (e.g. a GitLab
+Omnibus image, a Postgres container) on the host's finding list — those are not
+collected, and that is intentional. Host OS package databases (`/var/lib/dpkg`,
+`/var/lib/rpm`, `/lib/apk/db`) and statically installed host binaries (k3s,
+tailscale, the etcd version compiled into the k3s binary) live **outside** these
+roots and remain fully covered.
+
+This also fixes a failure mode: before ADR-0067, `rootfs /` descended into the
+image layers, the file tree exploded, and the scan tripped Trivy's silent
+5-minute default timeout — the agent exited "scan failed" before sending anything,
+so the host ingested **no** data at all, and the systemd-timer retry hit the same
+cause every cycle.
+
+### Tuning
+
+| Variable | Default | Note |
+|---|---|---|
+| `FM_SCAN_SKIP_DIRS` | _(empty)_ | Comma-separated absolute paths appended to the built-in list. Use for a Docker `data-root` / podman `graphroot` relocated via `daemon.json` / `storage.conf` (not auto-discovered). |
+| `FM_SCAN_TIMEOUT` | `5m` | Explicit `--timeout` for the `rootfs` scan. |
+
+**Rule of thumb:** a scan that still exceeds 5 minutes after the built-in skips
+is a signal to **exclude more** (`FM_SCAN_SKIP_DIRS`), not to blindly raise
+`FM_SCAN_TIMEOUT`. Raising the timeout is the deliberate choice only for a host
+with a genuinely large *in-scope* tree.
+
+### Cleaning up stale container-layer findings
+
+Older successful Docker scans (image tree small enough to finish under the old
+default) may have ingested findings whose `target_path` is under a data-root.
+After upgrading the agent these stop appearing in the scan set; the ingest's
+resolve phase marks findings absent from the current scan as `RESOLVED`
+(ADR-0052) — they age out on the next successful scan, no manual cleanup needed.
+To check whether any such rows exist (advisory, not a migration):
+
+```sql
+SELECT count(*) FROM findings
+WHERE target_path LIKE '/var/lib/docker/%'
+   OR target_path LIKE '/var/lib/containerd/%'
+   OR target_path LIKE '/var/lib/containers/%'
+   OR target_path LIKE '/var/lib/rancher/k3s/agent/containerd/%';
+```

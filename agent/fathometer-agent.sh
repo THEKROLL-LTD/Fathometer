@@ -68,6 +68,22 @@
 #   FM_TRIVY_MANAGED_DIR   directory of the fathometer-managed trivy binary
 #                          (default: /opt/fathometer/bin). Advanced/testing
 #                          seam; trivy outside this dir is never replaced.
+#   FM_SCAN_SKIP_DIRS      comma-separated absolute paths appended to the
+#                          built-in --skip-dirs list (ADR-0067). The agent
+#                          always excludes the well-known container-runtime
+#                          data-roots (/var/lib/docker, /var/lib/containerd,
+#                          /var/lib/rancher/k3s/agent/containerd,
+#                          /var/lib/containers); their contents are unpacked
+#                          container-image layers and container-image
+#                          scanning is out of scope. Use this for a relocated
+#                          Docker `data-root` / podman `graphroot` not on a
+#                          default path. Host OS package DBs and host binaries
+#                          live outside these roots and remain scanned.
+#   FM_SCAN_TIMEOUT        --timeout passed to `trivy rootfs` (default: 5m,
+#                          Trivy's own default made explicit, ADR-0067). A
+#                          scan that still exceeds this after the built-in
+#                          skips is a signal to exclude more via
+#                          FM_SCAN_SKIP_DIRS, not to blindly raise the budget.
 #
 # Run as root, typically via cron or a systemd timer.
 #
@@ -85,11 +101,12 @@
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.8.0"
+readonly AGENT_VERSION="0.9.0"
 readonly REQUIRED_LIB_HOST_STATE_VERSION="0.5.0"
 readonly TRIVY_BIN="${FM_TRIVY_PATH:-trivy}"
 readonly SCAN_PATH="${FM_SCAN_PATH:-/}"
 readonly TIMEOUT_SEC="${FM_TIMEOUT_SEC:-60}"
+readonly SCAN_TIMEOUT="${FM_SCAN_TIMEOUT:-5m}"
 
 log() { printf '[fathometer-agent] %s\n' "$*" >&2; }
 
@@ -511,11 +528,43 @@ trivy_out="$(mktemp -t fathometer-trivy.XXXXXX.json)"
 response_body="$(mktemp -t fathometer-resp.XXXXXX)"
 trap 'rm -f "$trivy_raw" "$trivy_out" "$response_body"' EXIT
 
-log "Starting trivy scan on ${SCAN_PATH} ..."
+# ADR-0067: exclude container-runtime data-roots from the rootfs scan.
+# Their contents are unpacked container-image layers, and container-image
+# scanning is out of scope (ARCHITECTURE §17). Host OS package DBs
+# (/var/lib/dpkg, /var/lib/rpm, /lib/apk/db) and statically installed host
+# binaries (k3s, tailscale) live outside these roots and remain covered.
+# The k3s entry is the containerd sub-path only — the k3s host binary in
+# /usr/local/bin is never inside a data-root and stays fully scanned.
+skip_dirs=(
+  /var/lib/docker
+  /var/lib/containerd
+  /var/lib/rancher/k3s/agent/containerd
+  /var/lib/containers
+)
+# Operator escape hatch for relocated data-roots (Docker `data-root` /
+# podman `graphroot` set via daemon.json/storage.conf) that are not on a
+# default path. Comma-separated absolute paths, appended to the built-ins.
+if [[ -n "${FM_SCAN_SKIP_DIRS:-}" ]]; then
+  IFS=',' read -r -a _extra_skip_dirs <<< "$FM_SCAN_SKIP_DIRS"
+  for _dir in "${_extra_skip_dirs[@]}"; do
+    _dir="${_dir#"${_dir%%[![:space:]]*}"}"  # trim leading whitespace
+    _dir="${_dir%"${_dir##*[![:space:]]}"}"  # trim trailing whitespace
+    [[ -n "$_dir" ]] && skip_dirs+=("$_dir")
+  done
+fi
+
+skip_dirs_args=()
+for _dir in "${skip_dirs[@]}"; do
+  skip_dirs_args+=(--skip-dirs "$_dir")
+done
+
+log "Starting trivy scan on ${SCAN_PATH} (timeout=${SCAN_TIMEOUT}, skip-dirs=${skip_dirs[*]}) ..."
 if ! "$TRIVY_BIN" rootfs "$SCAN_PATH" \
        --format json \
        --quiet \
        --scanners vuln \
+       --timeout "$SCAN_TIMEOUT" \
+       "${skip_dirs_args[@]}" \
        --output "$trivy_raw"; then
   log "Error: trivy scan failed"
   exit 2

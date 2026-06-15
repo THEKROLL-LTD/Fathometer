@@ -297,6 +297,30 @@ Supported: Debian/Ubuntu, RHEL family (AlmaLinux, Rocky, Fedora, Amazon, Oracle)
 SUSE — on `x86_64` and `aarch64`. Alpine/OpenRC and container hosts are
 deliberately unsupported.
 
+### Tuning the host scan
+
+The agent scans the live root filesystem (`trivy rootfs /`) so statically built
+host binaries (k3s, tailscale, in-house Go/Java tools) are captured. On a host
+running a container runtime it **excludes the runtime's data-roots** by default —
+`/var/lib/docker`, `/var/lib/containerd`, `/var/lib/rancher/k3s/agent/containerd`,
+and `/var/lib/containers`. Their contents are unpacked container-image layers, and
+container-image scanning is out of scope for Fathometer. Host OS packages and host
+binaries live outside these roots and are still scanned in full.
+
+Two environment variables tune this (set them in the agent's systemd unit /
+environment):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `FM_SCAN_SKIP_DIRS` | _(empty)_ | Comma-separated absolute paths **appended** to the built-in skip list. Use it for a Docker `data-root` or podman `graphroot` relocated via `daemon.json` / `storage.conf` to a non-default path — those are not auto-discovered. |
+| `FM_SCAN_TIMEOUT` | `5m` | Explicit `--timeout` for the `rootfs` scan. |
+
+> If a scan still exceeds 5 minutes after the built-in skips, the fix is almost
+> always to **exclude more** (add the offending tree to `FM_SCAN_SKIP_DIRS`), not
+> to raise `FM_SCAN_TIMEOUT`. A blown-up tree is usually accidental image-layer
+> scanning leaking back in. Raise the timeout only for a host that genuinely has a
+> large *in-scope* tree.
+
 ## Remove a server
 
 To uninstall the agent from a host, run the uninstaller it dropped at install

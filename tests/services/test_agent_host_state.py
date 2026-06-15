@@ -358,16 +358,45 @@ def test_envelope_compat(stub_bin: Path) -> None:
 
 
 def test_agent_script_has_host_state_integration() -> None:
-    """Sanity-Check: das Haupt-Skript traegt den aktuellen Versions-Bump und
-    sourct die Lib (Block AL / ADR-0066 zieht Agent auf 0.8.0, Lib auf 0.5.0)."""
+    """Sanity check: the main script carries the current version bump and
+    sources the lib (ADR-0067 moves the agent to 0.9.0; lib stays 0.5.0)."""
     agent_sh = Path(__file__).parent.parent.parent / "agent" / "fathometer-agent.sh"
     body = agent_sh.read_text()
-    assert 'AGENT_VERSION="0.8.0"' in body, "Agent-Version-Bump auf 0.8.0 fehlt"
+    assert 'AGENT_VERSION="0.9.0"' in body, "Agent version bump to 0.9.0 missing"
     assert 'REQUIRED_LIB_HOST_STATE_VERSION="0.5.0"' in body
     assert "lib_host_state.sh" in body, "Agent sourct lib_host_state.sh nicht"
     assert "host_state" in body, "Agent baut host_state nicht in Envelope ein"
     assert "collect_host_updates" in body, "Agent ruft den Host-Update-Resolver nicht auf"
     assert "host_updates" in body, "Agent baut host_updates nicht in Envelope ein"
+
+
+def test_agent_script_skips_container_runtime_data_roots() -> None:
+    """ADR-0067: the rootfs scan excludes the four built-in container-runtime
+    data-roots, appends FM_SCAN_SKIP_DIRS, and passes an explicit --timeout
+    sourced from FM_SCAN_TIMEOUT (default 5m)."""
+    agent_sh = Path(__file__).parent.parent.parent / "agent" / "fathometer-agent.sh"
+    body = agent_sh.read_text()
+
+    # The four built-in runtime data-roots are present in the skip list.
+    for root in (
+        "/var/lib/docker",
+        "/var/lib/containerd",
+        "/var/lib/rancher/k3s/agent/containerd",
+        "/var/lib/containers",
+    ):
+        assert root in body, f"built-in skip-dir {root} missing"
+
+    # The list is assembled into repeated `--skip-dirs` args for trivy.
+    assert "--skip-dirs" in body, "trivy rootfs call lacks --skip-dirs"
+    assert "skip_dirs_args+=(--skip-dirs " in body, "skip-dirs not assembled as args array"
+
+    # Operator escape hatch is appended, not replacing the built-ins.
+    assert "FM_SCAN_SKIP_DIRS" in body, "FM_SCAN_SKIP_DIRS escape hatch missing"
+    assert "skip_dirs+=(" in body, "FM_SCAN_SKIP_DIRS is not appended to the built-in list"
+
+    # Explicit timeout sourced from FM_SCAN_TIMEOUT, default 5m.
+    assert 'SCAN_TIMEOUT="${FM_SCAN_TIMEOUT:-5m}"' in body, "FM_SCAN_TIMEOUT default 5m missing"
+    assert '--timeout "$SCAN_TIMEOUT"' in body, "trivy rootfs call lacks explicit --timeout"
 
 
 def test_empty_systemctl_output_not_a_gap(stub_bin: Path) -> None:
