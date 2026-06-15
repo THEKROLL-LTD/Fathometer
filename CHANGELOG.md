@@ -4,7 +4,7 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — ADR-0067: exclude container-runtime data-roots from the agent host scan
+## [Unreleased] — ADR-0067: exclude container-runtime data-roots from the agent host scan (v0.28.0)
 
 The reference agent's `trivy rootfs /` scan now excludes the well-known
 container-runtime data-roots, because their contents are unpacked
