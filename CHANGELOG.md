@@ -4,6 +4,42 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — ADR-0067: exclude container-runtime data-roots from the agent host scan
+
+The reference agent's `trivy rootfs /` scan now excludes the well-known
+container-runtime data-roots, because their contents are unpacked
+container-image layers and container-image scanning is out of scope
+(ARCHITECTURE §17). This also fixes a failure mode where, on a host running a
+container runtime, the file tree exploded through the image layers and the scan
+tripped Trivy's silent 5-minute default timeout — the agent exited "scan failed"
+before sending anything, so the host ingested no data at all and the timer retry
+hit the same cause every cycle. No backend, schema, migration, or envelope
+change. Quality gates green (shellcheck primary); agent 0.9.0.
+
+### Changed
+
+- **`agent/fathometer-agent.sh`**: the `trivy rootfs` call gains `--skip-dirs`
+  for the four built-in container-runtime data-roots (`/var/lib/docker`,
+  `/var/lib/containerd`, `/var/lib/rancher/k3s/agent/containerd`,
+  `/var/lib/containers`) and an explicit `--timeout` (default `5m`, Trivy's own
+  default made explicit). Host OS package DBs and host binaries live outside
+  these roots and stay covered. `AGENT_VERSION` 0.8.0 → 0.9.0,
+  `CURRENT_AGENT_VERSION` 0.8.0 → 0.9.0 (`MIN_AGENT_VERSION` stays 0.1.0 — old
+  agents that omit the skip are not broken, only less precise).
+
+### Added
+
+- **`FM_SCAN_SKIP_DIRS`** (agent env): comma-separated absolute paths appended
+  to the built-in skip list — operator escape hatch for a Docker `data-root` /
+  podman `graphroot` relocated to a non-default path.
+- **`FM_SCAN_TIMEOUT`** (agent env): explicit `rootfs` scan timeout, default
+  `5m`. Operator guidance: a scan that still exceeds 5 minutes after the
+  built-in skips is a signal to exclude more, not to blindly raise the timeout.
+- **Pure-unit test** (`tests/services/test_agent_host_state.py`): string-level
+  assertion that the assembled `--skip-dirs` contains the four built-in roots,
+  appends `FM_SCAN_SKIP_DIRS`, and that `--timeout` is sourced from
+  `FM_SCAN_TIMEOUT` (default `5m`).
+
 ## [Unreleased] — Block AL (ADR-0066): Pass-2 sortiert Trivy-Stale-Artifact-False-Positives aus (v0.27.0)
 
 Trivy meldet alte, **nicht gebootete** `installonly`-Kernel als verwundbar
