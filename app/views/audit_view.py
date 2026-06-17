@@ -148,6 +148,8 @@ KNOWN_ACTIONS: list[str] = [
     "master_key.rotated",
     "settings.updated",
     "scan.ingested",
+    "scan.ingest_failed",
+    "host_state.parse_failed",
     "auth.login",
     "auth.logout",
     "auth.failed",

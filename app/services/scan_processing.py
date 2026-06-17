@@ -204,6 +204,21 @@ def process_scan_envelope(
         try:
             persist_host_state(session, server, envelope.host_state)
             snapshot_available = True
+            # host_state is best-effort (TICKET-018): malformed listeners/
+            # processes are dropped item-by-item by the schema before-validators
+            # rather than failing the whole scan. Surface how many were dropped
+            # by comparing the validated counts against the raw input counts.
+            raw_host_state = raw_doc.get("host_state")
+            raw_listeners = (
+                raw_host_state.get("listeners") if isinstance(raw_host_state, dict) else None
+            )
+            raw_processes = (
+                raw_host_state.get("processes") if isinstance(raw_host_state, dict) else None
+            )
+            raw_listener_count = len(raw_listeners) if isinstance(raw_listeners, list) else 0
+            raw_process_count = len(raw_processes) if isinstance(raw_processes, list) else 0
+            listeners_dropped = max(0, raw_listener_count - len(envelope.host_state.listeners))
+            processes_dropped = max(0, raw_process_count - len(envelope.host_state.processes))
             log_event(
                 "host_state.snapshot_received",
                 target_type="server",
@@ -213,6 +228,8 @@ def process_scan_envelope(
                     "gaps": list(envelope.host_state.gaps),
                     "listener_count": len(envelope.host_state.listeners),
                     "process_count": len(envelope.host_state.processes),
+                    "listeners_dropped": listeners_dropped,
+                    "processes_dropped": processes_dropped,
                 },
                 actor=server.name,
                 session=session,

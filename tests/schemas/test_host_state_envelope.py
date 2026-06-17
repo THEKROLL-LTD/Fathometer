@@ -11,7 +11,7 @@ Erfuellt DoD Task #3 aus dem Block-O-Brief:
 - Listener mit `port=70000` → ValidationError.
 - Process mit `args` Laenge 5000 → ValidationError.
 - `tools_available` mit non-ASCII-Item → Item verworfen, andere bleiben.
-- 5000 Listener → ValidationError (Pydantic Max-Length-Reject).
+- 5000 Listener → truncated to MAX_LISTENERS (TICKET-018 slice-to-cap guard).
 - `VendorSeverity` mit 20 Providern → Reject.
 - Numerische `VendorSeverity`-Values `{"nvd": 3, "ubuntu": 2}` →
   `{"nvd":"high","ubuntu":"medium"}`.
@@ -26,6 +26,8 @@ import pytest
 from pydantic import ValidationError
 
 from app.schemas.scan_envelope import (
+    MAX_LISTENERS,
+    MAX_PROCESSES,
     Envelope,
     HostStateBlock,
     ListenerEntry,
@@ -281,24 +283,26 @@ def test_services_capped_at_1024() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Listeners/Processes — Max-Length-Reject (ganze Liste)
+# Listeners/Processes — slice-to-cap truncation (TICKET-018 DoS fast-fail guard).
+# An over-long list is silently truncated to the cap before per-item validation,
+# not rejected.
 # ---------------------------------------------------------------------------
 
 
-def test_5000_listeners_rejected() -> None:
-    """5000 Eintraege > MAX_LISTENERS=4096 → ValidationError (Pydantic-Default)."""
+def test_5000_listeners_truncated_to_cap() -> None:
+    """5000 entries > MAX_LISTENERS=4096 → truncated to the cap, no raise."""
     listeners = [
         {"proto": "tcp", "addr": "0.0.0.0", "port": 10000 + (i % 5000), "process": "x"}
         for i in range(5000)
     ]
-    with pytest.raises(ValidationError):
-        HostStateBlock.model_validate({"listeners": listeners})
+    block = HostStateBlock.model_validate({"listeners": listeners})
+    assert len(block.listeners) == MAX_LISTENERS, len(block.listeners)
 
 
-def test_5000_processes_rejected() -> None:
+def test_5000_processes_truncated_to_cap() -> None:
     processes = [{"pid": i + 1, "comm": "x"} for i in range(5000)]
-    with pytest.raises(ValidationError):
-        HostStateBlock.model_validate({"processes": processes})
+    block = HostStateBlock.model_validate({"processes": processes})
+    assert len(block.processes) == MAX_PROCESSES, len(block.processes)
 
 
 # ---------------------------------------------------------------------------

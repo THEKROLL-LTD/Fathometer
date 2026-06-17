@@ -61,6 +61,31 @@
        toggle(k) { this.open = (this.open === k ? null : k); }
      }">
 
+  {# TICKET-018 §3 (Visibility): the most recent scan upload for this host was
+     rejected during ingest (envelope failed validation) and is newer than the
+     last successful scan — the displayed host data may be stale. One concise
+     warning callout, no actions. Reuses the established `alert alert-warning`
+     callout (design-token `--status-degraded`). `last_failed_ingest` is None
+     when there is no still-unresolved failure, so the banner stays hidden. #}
+  {% if last_failed_ingest %}
+    {% set _err_class = last_failed_ingest.error_class %}
+    {% set _err_phrase =
+         "validation error" if _err_class == "validation_error"
+         else ("host-state parse error" if _err_class == "host_state_parse_failed"
+         else (_err_class | replace("_", " ") if _err_class else none)) %}
+    <div class="alert alert-warning" role="status" data-test="ingest-failed-banner">
+      <span>
+        The most recent scan upload was rejected
+        {% if last_failed_ingest.failed_at %}
+          <time datetime="{{ last_failed_ingest.failed_at.isoformat() }}"
+                title="{{ last_failed_ingest.failed_at.strftime('%Y-%m-%d %H:%M %Z') }}">{{ last_failed_ingest.failed_at | relative_time }}</time>
+        {% endif %}
+        {% if _err_phrase %}({{ _err_phrase }}){% endif %}.
+        The host data shown below may be stale.
+      </span>
+    </div>
+  {% endif %}
+
   {# ── 1) Header ── #}
   <header class="sd-header">
     <div class="sd-header__left">

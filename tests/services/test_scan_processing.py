@@ -1,3 +1,6 @@
+# ruff: noqa: S104
+# 0.0.0.0 listener-addr fixtures are realistic (sshd default), not actual bind
+# addresses. Bandit's S104 is a false positive here.
 """Pure-Unit-Tests fuer ``app.services.scan_processing``.
 
 Testet die Service-Boundary von ``process_scan_envelope`` mit gemockten
@@ -332,6 +335,131 @@ class TestPass2EnqueueDelegation:
         ]
         assert len(jobs_queued_calls) == 1
         assert jobs_queued_calls[0].kwargs["metadata"]["pass2_queued"] == 3
+
+
+class TestHostStateDroppedCountMetadata:
+    """TICKET-018: the ``host_state.snapshot_received`` audit event carries
+    ``listeners_dropped``/``processes_dropped`` — the count of malformed entries
+    the schema's per-item leniency dropped (raw input count minus validated
+    count). This is the operator-visible signal that host_state was partial.
+    """
+
+    def _drive_with_host_state(
+        self, monkeypatch: pytest.MonkeyPatch, host_state: dict[str, Any]
+    ) -> MagicMock:
+        """Run process_scan_envelope with a real (un-mocked) envelope validate so
+        the schema leniency actually drops entries, and capture log_event calls.
+        """
+        fake_result = _make_fake_ingest_result()
+        monkeypatch.setattr("app.services.scan_processing.run_ingest", lambda *a, **kw: fake_result)
+        # persist_host_state must succeed so the snapshot_received branch runs.
+        monkeypatch.setattr(
+            "app.services.scan_processing.persist_host_state", lambda *a, **kw: None
+        )
+        fake_settings_row = MagicMock()
+        fake_settings_row.block_p_llm_mode = "off"
+        monkeypatch.setattr(
+            "app.services.scan_processing.get_settings_row", lambda s: fake_settings_row
+        )
+        monkeypatch.setattr(
+            "app.services.scan_processing.pretriage",
+            lambda f, s, snap: MagicMock(
+                band=MagicMock(value="medium"), reason="r", computed_at=datetime.now(UTC)
+            ),
+        )
+        mock_log = MagicMock()
+        monkeypatch.setattr("app.services.scan_processing.log_event", mock_log)
+
+        envelope = {
+            "agent_version": "0.3.1",
+            "host": {
+                "hostname": "testserver",
+                "os_family": "linux",
+                "os_version": "22.04",
+                "os_pretty_name": "Ubuntu 22.04 LTS",
+                "kernel_version": "5.15.0-91-generic",
+                "architecture": "amd64",
+            },
+            "scan": {
+                "SchemaVersion": 2,
+                "ArtifactName": "testserver",
+                "ArtifactType": "filesystem",
+                "Results": [],
+                "Metadata": {"ImageConfig": {}, "DataSource": None, "UpdatedAt": None},
+            },
+            "host_state": host_state,
+        }
+        payload_gzip = gzip.compress(json.dumps(envelope).encode("utf-8"))
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = []
+
+        process_scan_envelope(session, _make_fake_server(), payload_gzip)
+        return mock_log
+
+    def _snapshot_metadata(self, mock_log: MagicMock) -> dict[str, Any]:
+        calls = [
+            c
+            for c in mock_log.call_args_list
+            if c.args and c.args[0] == "host_state.snapshot_received"
+        ]
+        assert len(calls) == 1, mock_log.call_args_list
+        meta: dict[str, Any] = calls[0].kwargs["metadata"]
+        return meta
+
+    def test_listeners_dropped_count_reflects_dropped_entries(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """3 raw listeners, 1 malformed -> listeners_dropped=1, count=2."""
+        host_state = {
+            "tools_available": [],
+            "gaps": [],
+            "listeners": [
+                {"proto": "tcp", "addr": "TOTAL-GARBAGE", "port": 22},  # dropped
+                {"proto": "tcp", "addr": "0.0.0.0", "port": 22},
+                {"proto": "tcp", "addr": "127.0.0.1", "port": 5432},
+            ],
+            "processes": [],
+            "kernel_modules": [],
+            "services": [],
+        }
+        meta = self._snapshot_metadata(self._drive_with_host_state(monkeypatch, host_state))
+        assert meta["listener_count"] == 2, meta
+        assert meta["listeners_dropped"] == 1, meta
+        assert meta["processes_dropped"] == 0, meta
+
+    def test_processes_dropped_count_reflects_dropped_entries(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """2 raw processes, 1 with invalid pid -> processes_dropped=1, count=1."""
+        host_state = {
+            "tools_available": [],
+            "gaps": [],
+            "listeners": [],
+            "processes": [
+                {"pid": -5, "comm": "broken"},  # invalid pid -> dropped
+                {"pid": 1, "comm": "systemd"},
+            ],
+            "kernel_modules": [],
+            "services": [],
+        }
+        meta = self._snapshot_metadata(self._drive_with_host_state(monkeypatch, host_state))
+        assert meta["process_count"] == 1, meta
+        assert meta["processes_dropped"] == 1, meta
+        assert meta["listeners_dropped"] == 0, meta
+
+    def test_no_drops_when_all_entries_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """All-valid host_state -> both dropped counts are 0."""
+        host_state = {
+            "tools_available": [],
+            "gaps": [],
+            "listeners": [{"proto": "tcp", "addr": "0.0.0.0", "port": 22}],
+            "processes": [{"pid": 1, "comm": "systemd"}],
+            "kernel_modules": [],
+            "services": [],
+        }
+        meta = self._snapshot_metadata(self._drive_with_host_state(monkeypatch, host_state))
+        assert meta["listeners_dropped"] == 0, meta
+        assert meta["processes_dropped"] == 0, meta
 
 
 class TestScanIngestedAuditMetadata:

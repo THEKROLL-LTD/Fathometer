@@ -48,8 +48,10 @@ from app.forms import (
 from app.models import (
     ApplicationGroup,
     ApplicationGroupEvaluation,
+    AuditEvent,
     Finding,
     FindingStatus,
+    ScanIngestJob,
     Server,
     ServerKernelModule,
     ServerListener,
@@ -192,6 +194,63 @@ def _load_host_snapshot(sess: Any, server_id: int) -> dict[str, Any]:
 def _all_tags() -> list[Tag]:
     sess = get_session()
     return list(sess.execute(select(Tag).order_by(Tag.name)).scalars().all())
+
+
+def _load_last_failed_ingest(sess: Any, server: Server) -> dict[str, Any] | None:
+    """Return banner data for the most recent failed scan ingest, if any.
+
+    TICKET-018 (d): a scan whose envelope failed to validate is marked
+    ``status='failed'`` and emits ``scan.ingest_failed`` audit, but the
+    server-detail page only ever showed the last *successful* snapshot, so the
+    failure was invisible. This surfaces the newest ``scan_ingest_jobs`` row for
+    the server with ``status='failed'`` that finished *after* the server's last
+    successful scan (``Server.last_scan_at``) — i.e. a still-unresolved failure.
+    The ``error_class`` is read from the matching ``scan.ingest_failed`` audit
+    event metadata (the job row itself does not persist the class).
+
+    Returns ``None`` when there is no such failure (the banner is hidden), else a
+    dict with ``job_id``, ``failed_at`` and ``error_class`` for the template.
+    """
+    stmt = (
+        select(ScanIngestJob.id, ScanIngestJob.finished_at)
+        .where(
+            ScanIngestJob.server_id == server.id,
+            ScanIngestJob.status == "failed",
+            ScanIngestJob.finished_at.is_not(None),
+        )
+        .order_by(ScanIngestJob.finished_at.desc())
+        .limit(1)
+    )
+    row = sess.execute(stmt).first()
+    if row is None:
+        return None
+    job_id, failed_at = int(row.id), row.finished_at
+    # A failure older than the last successful scan is already superseded.
+    if (
+        server.last_scan_at is not None
+        and failed_at is not None
+        and failed_at <= server.last_scan_at
+    ):
+        return None
+
+    error_class: str | None = None
+    audit_stmt = (
+        select(AuditEvent.event_metadata)
+        .where(
+            AuditEvent.action == "scan.ingest_failed",
+            AuditEvent.target_type == "scan_ingest_job",
+            AuditEvent.target_id == str(job_id),
+        )
+        .order_by(AuditEvent.ts.desc())
+        .limit(1)
+    )
+    audit_row = sess.execute(audit_stmt).first()
+    if audit_row is not None and isinstance(audit_row.event_metadata, dict):
+        raw_class = audit_row.event_metadata.get("error_class")
+        if isinstance(raw_class, str):
+            error_class = raw_class
+
+    return {"job_id": job_id, "failed_at": failed_at, "error_class": error_class}
 
 
 def _render_tag_editor(server: Server) -> str:
@@ -1032,6 +1091,10 @@ def show(server_id: int) -> Any:
     }
     tendency: Tendency = _tendency_quick(sess, server.id)
 
+    # TICKET-018 (d): surface a still-unresolved failed ingest so a silently
+    # lost scan is visible to the operator (frontend renders the banner).
+    last_failed_ingest = _load_last_failed_ingest(sess, server)
+
     # Block I: `active_server_id` markiert die Sidebar-Zeile, `hx_partial`
     # entscheidet zwischen Vollseite (`base_app.html`) und Fragment-Shell
     # (`_partial_shell.html`).
@@ -1049,6 +1112,7 @@ def show(server_id: int) -> Any:
         action_required=action_required,
         action_sections=action_sections,
         upstream_check_configured=upstream_check_configured,
+        last_failed_ingest=last_failed_ingest,
         **section_ctx,
     )
 

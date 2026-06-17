@@ -1,77 +1,60 @@
 """Adversarial: Pydantic-Bounds des `HostStateBlock` (Block O, ADR-0022).
 
-Verifiziert die Max-Length-Bounds aus `app/schemas/scan_envelope.py`:
+Verifies the max-length bounds in `app/schemas/scan_envelope.py`:
 
-  * Listeners:        `MAX_LISTENERS = 4096`        -> hard reject (Field max_length).
-  * Processes:        `MAX_PROCESSES = 4096`        -> hard reject (Field max_length).
-  * KernelModules:    `MAX_KERNEL_MODULES = 1024`   -> soft cap im `mode="before"`-Validator.
-  * Services:         `MAX_SERVICES = 1024`         -> soft cap im `mode="before"`-Validator.
-  * Tools/Gaps:       `MAX_TOOLS_GAPS_ITEMS = 32`   -> soft cap im `mode="before"`-Validator.
+  * Listeners:        `MAX_LISTENERS = 4096`        -> silent truncate (slice-to-cap before validate).
+  * Processes:        `MAX_PROCESSES = 4096`        -> silent truncate (slice-to-cap before validate).
+  * KernelModules:    `MAX_KERNEL_MODULES = 1024`   -> soft cap in the `mode="before"` validator.
+  * Services:         `MAX_SERVICES = 1024`         -> soft cap in the `mode="before"` validator.
+  * Tools/Gaps:       `MAX_TOOLS_GAPS_ITEMS = 32`   -> soft cap in the `mode="before"` validator.
 
-Hintergrund: `listeners` und `processes` sind typisierte Sub-Modelle
-(`ListenerEntry`, `ProcessEntry`) mit `Field(..., max_length=...)` am Field
--> Pydantic feuert einen harten `ValidationError` bei Ueberschreitung.
-Die String-Listen (`kernel_modules`, `services`, `tools_available`, `gaps`)
-laufen durch den `_filter_ascii_strings()`-Helper mit `mode="before"` und
-werden silent auf das Cap-Maximum getrimmt — das ist defensiver weil
-einzelne Junk-Items per-Item geworfen werden ohne den ganzen Snapshot
-zu killen.
-
-Sicherheits-Aspekt: ValidationError-Output darf keine sensiblen Infos
-leaken (z.B. den ganzen 10000-Eintrag-Listener-Block in der Message).
-Wir pruefen das defensiv als Hinweis.
+Background: `listeners` and `processes` are typed sub-models (`ListenerEntry`,
+`ProcessEntry`) carrying per-item leniency (TICKET-018). The security fix for
+TICKET-018 slices the raw list to the cap (`items[:cap]`) in the `mode="before"`
+`_filter_entries` validator BEFORE per-item validation — bounding the work to
+O(cap) regardless of attacker-supplied list size. Consequence: an over-long
+`listeners`/`processes` list is now SILENTLY TRUNCATED to the cap, not rejected
+with a `ValidationError`. The string lists (`kernel_modules`, `services`,
+`tools_available`, `gaps`) run through the `_filter_ascii_strings()` helper with
+`mode="before"` and are likewise silently trimmed to the cap maximum.
 """
 
 from __future__ import annotations
 
-import pytest
-from pydantic import ValidationError
-
 from app.schemas.scan_envelope import (
     MAX_KERNEL_MODULES,
     MAX_LISTENERS,
+    MAX_PROCESSES,
     MAX_SERVICES,
     MAX_TOOLS_GAPS_ITEMS,
     HostStateBlock,
 )
 
 # ---------------------------------------------------------------------------
-# Hard-Reject-Cases: typisierte Sub-Modell-Listen mit `Field(max_length=...)`
+# Silent-truncate cases: typed sub-model lists are sliced to the cap BEFORE
+# per-item validation (TICKET-018 DoS fast-fail guard) -> an over-long list is
+# truncated to the cap, not rejected.
 # ---------------------------------------------------------------------------
 
 
-def test_10000_listeners_rejected_with_validation_error() -> None:
-    """10000 Listener-Eintraege ueberschreiten `MAX_LISTENERS=4096` -> ValidationError.
+def test_10000_listeners_truncated_to_cap() -> None:
+    """10000 listener entries exceed `MAX_LISTENERS=4096` -> truncated to the cap.
 
-    Die Liste selbst (`list[ListenerEntry]`) hat ein hartes Field-`max_length`,
-    daher feuert Pydantic den Reject auf Container-Ebene VOR der Item-
-    Validation. Selbst syntaktisch valide Listener werden so nicht ingested
-    wenn das Volumen den Cap sprengt.
+    The `mode="before"` `_filter_entries` validator slices the raw list to
+    `MAX_LISTENERS` before validating any item, so even syntactically valid
+    listeners beyond the cap are silently dropped (best-effort), bounding the
+    validation work to O(cap).
     """
     many = [{"proto": "tcp", "addr": "127.0.0.1", "port": 22} for _ in range(10_000)]
-    with pytest.raises(ValidationError) as exc_info:
-        HostStateBlock(listeners=many)
-
-    err = exc_info.value
-    err_str = str(err)
-    # Feld `listeners` muss im Fehler genannt sein.
-    assert "listeners" in err_str
-    # Hinweis-Check (kein hartes Assert): Fehler-Output sollte nicht den ganzen
-    # 10000-Eintrag-Dump enthalten. Pydantic v2 ist typischerweise kompakt,
-    # wir bestaetigen das defensiv.
-    assert len(err_str) < 50_000, (
-        f"ValidationError-Output ist auffaellig gross ({len(err_str)} Bytes) — "
-        "moeglicherweise wird die ganze Listener-Liste in die Message gedumped."
-    )
+    block = HostStateBlock(listeners=many)
+    assert len(block.listeners) == MAX_LISTENERS, len(block.listeners)
 
 
-def test_10000_processes_rejected_with_validation_error() -> None:
-    """10000 Process-Eintraege ueberschreiten `MAX_PROCESSES=4096` -> ValidationError."""
+def test_10000_processes_truncated_to_cap() -> None:
+    """10000 process entries exceed `MAX_PROCESSES=4096` -> truncated to the cap."""
     many = [{"pid": i + 1, "user": "root", "comm": "x", "args": "x"} for i in range(10_000)]
-    with pytest.raises(ValidationError) as exc_info:
-        HostStateBlock(processes=many)
-
-    assert "processes" in str(exc_info.value)
+    block = HostStateBlock(processes=many)
+    assert len(block.processes) == MAX_PROCESSES, len(block.processes)
 
 
 # ---------------------------------------------------------------------------
@@ -164,10 +147,14 @@ def test_listeners_at_exact_max_accepted() -> None:
     assert len(block.listeners) == MAX_LISTENERS
 
 
-def test_listeners_one_over_max_rejected() -> None:
-    """`MAX_LISTENERS + 1` Eintraege -> ValidationError."""
+def test_listeners_one_over_max_truncated() -> None:
+    """`MAX_LISTENERS + 1` entries -> truncated to exactly `MAX_LISTENERS`.
+
+    Off-by-one guard for the slice-to-cap truncation: one entry over the cap is
+    silently dropped, the result is exactly `MAX_LISTENERS`.
+    """
     listeners = [
         {"proto": "tcp", "addr": "127.0.0.1", "port": 80} for _ in range(MAX_LISTENERS + 1)
     ]
-    with pytest.raises(ValidationError):
-        HostStateBlock(listeners=listeners)
+    block = HostStateBlock(listeners=listeners)
+    assert len(block.listeners) == MAX_LISTENERS, len(block.listeners)

@@ -82,28 +82,36 @@ _strip_non_ascii() {
 # ---------------------------------------------------------------------------
 # Helper: parse_addr_port
 #
-# Eingabe via stdin: eine Zeile mit `addr:port`-Token (IPv4, IPv6 mit/ohne
-# eckigen Klammern, `*:port`). Ausgabe: `addr<TAB>port` auf stdout.
-# Liefert leere Strings wenn nicht parsebar.
+# Input via "$1": one `addr:port` token (IPv4, IPv6 with/without square
+# brackets, optionally with a zone id like `%tun0`, `*:port`). Output:
+# `addr<TAB>port` on stdout. Emits empty strings when not parseable.
+#
+# The emitted addr is a bare IP literal: surrounding `[ ]` brackets and any
+# `%zone` suffix are stripped on every path, so a link-local socket such as
+# `[fe80::1]%tun0:22` yields `fe80::1`. The backend validator rejects anything
+# else, and a single bad listener used to discard the whole scan (TICKET-018).
 # ---------------------------------------------------------------------------
 _parse_addr_port() {
   local token="$1"
   local addr="" port=""
 
-  # IPv6 mit Klammern: [::]:22  -> addr=::  port=22
-  if [[ "$token" =~ ^\[(.*)\]:([0-9]+)$ ]]; then
+  # IPv6 with brackets, optionally followed by a `%zone`:
+  #   [::]:22 -> addr=::  port=22 ; [fe80::1]%tun0:22 -> addr=fe80::1 port=22
+  if [[ "$token" =~ ^\[(.*)\](%[^:]+)?:([0-9]+)$ ]]; then
     addr="${BASH_REMATCH[1]}"
-    port="${BASH_REMATCH[2]}"
+    port="${BASH_REMATCH[3]}"
   else
-    # Last ':' als Trenner — funktioniert fuer IPv4 (1.2.3.4:80) und fuer
-    # bare-IPv6 wie ss-Output `::ffff:127.0.0.1:443` (selten, aber moeglich).
+    # Last ':' as separator — works for IPv4 (1.2.3.4:80) and for bare-IPv6
+    # like ss output `::ffff:127.0.0.1:443` (rare, but possible).
     port="${token##*:}"
     addr="${token%:*}"
-    # `*` oder leer -> 0.0.0.0
+    # `*` or empty -> 0.0.0.0
     [[ "$addr" == "*" || -z "$addr" ]] && addr="0.0.0.0"
-    # Interface-Suffix `%lo` etc. entfernen
-    addr="${addr%%%*}"
   fi
+
+  # Strip a trailing interface/zone suffix `%lo` etc. on every path (the
+  # bracket branch can carry one inside the brackets on some ss versions).
+  addr="${addr%%%*}"
 
   # Validate
   [[ "$port" =~ ^[0-9]+$ ]] || { printf ''; return; }

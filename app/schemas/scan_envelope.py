@@ -76,6 +76,7 @@ from pydantic import (
     ConfigDict,
     Field,
     HttpUrl,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -781,12 +782,15 @@ class HostBlock(BaseModel):
 # plus `tools_available`/`gaps`-Tracking. Schema ist additiv — Agent 0.2.0
 # sendet den Block nicht, das Backend muss damit umgehen (`extra="ignore"`).
 #
-# Validatoren sind defensive Strict-Whitelists analog Trivy-Schema §10:
-# IP-Literal-Validierung via `ipaddress.ip_address()`, Port-Range, ASCII-only,
-# NUL-frei, Length-Bounds. Wenn ein einzelnes `ListenerEntry`/`ProcessEntry`
-# rejected wird, killt das nur diese Entry (Pydantic-Default); die
-# uebergeordnete Liste hat eine Max-Length-Schranke (Pydantic rejected den
-# ganzen `HostStateBlock` bei Ueberlauf, das ist Phase-C-Concern).
+# Validators are defensive strict whitelists analogous to the Trivy schema §10:
+# IP-literal validation via `ipaddress.ip_address()`, port range, ASCII-only,
+# NUL-free, length bounds. host_state is advisory/best-effort and must never
+# gate the vulnerability ingest (TICKET-018): a single malformed
+# `ListenerEntry`/`ProcessEntry` drops only itself, the rest of host_state and
+# all findings ingest normally. This per-item leniency is enforced by the
+# `mode="before"` validators on `HostStateBlock.listeners`/`processes` (each raw
+# item is validated against its entry model and skipped on `ValidationError`).
+# The parent list still has a max-length cap.
 # ---------------------------------------------------------------------------
 
 
@@ -804,15 +808,35 @@ class ListenerEntry(BaseModel):
     @field_validator("addr")
     @classmethod
     def _validate_addr(cls, v: str) -> str:
-        """ASCII-only IPv4/IPv6-Literal-Validierung."""
+        """ASCII-only IPv4/IPv6 literal validation with normalization.
+
+        Agents in the field send bracketed and/or zone-suffixed IPv6 literals
+        such as ``[fe80::1]%tun0`` (link-local VPN interface). The stdlib
+        ``ipaddress.ip_address()`` rejects the bracket form, so we normalize the
+        token shapes ``[addr]%zone``, ``[addr%zone]``, ``[addr]`` and
+        ``addr%zone`` down to a bare literal before validating, and return the
+        normalized form (zone information is not retained — link-local addresses
+        are never publicly exposed, so the exposure classifier is unaffected).
+        """
         v = _no_nul_bytes(v) or v
         if not _PRINTABLE_ASCII_RE.match(v):
-            raise ValueError("addr muss druckbares ASCII sein")
+            raise ValueError("addr must be printable ASCII")
+        # Strip a leading `[`, then cut a trailing `%zone` suffix (the zone can
+        # sit inside or outside the brackets), then strip a trailing `]`. This
+        # order normalizes all four token shapes uniformly.
+        normalized = v
+        if normalized.startswith("["):
+            normalized = normalized[1:]
+        zone_sep = normalized.find("%")
+        if zone_sep != -1:
+            normalized = normalized[:zone_sep]
+        if normalized.endswith("]"):
+            normalized = normalized[:-1]
         try:
-            ipaddress.ip_address(v)
+            ipaddress.ip_address(normalized)
         except ValueError as exc:
-            raise ValueError(f"addr ist kein gueltiges IP-Literal: {v}") from exc
-        return v
+            raise ValueError(f"addr is not a valid IP literal: {v}") from exc
+        return normalized
 
     @field_validator("process")
     @classmethod
@@ -882,13 +906,53 @@ def _filter_ascii_strings(items: Any, max_items: int, max_item_length: int) -> l
     return cleaned[:max_items]
 
 
-class HostStateBlock(BaseModel):
-    """`envelope.host_state` — optional, Forward-Compat-by-design.
+def _filter_entries(items: Any, entry_model: type[BaseModel], cap: int) -> list[Any]:
+    """Per-item leniency for `listeners`/`processes` (TICKET-018).
 
-    Der Agent ab v0.3.0 sendet diesen Block. Aeltere Agents senden ihn nicht;
-    der Envelope ignoriert das Fehlen (`extra="ignore"` greift hier nicht,
-    weil der Feld-Default `None` ist — Pre-Triage faellt auf
+    host_state is advisory/best-effort: a malformed entry must drop only itself,
+    never fail the whole envelope (which would discard all vulnerability
+    findings). Each raw item is validated against `entry_model`; items that raise
+    `ValidationError` are skipped, mirroring the per-item-drop pattern of
+    `_filter_ascii_strings`.
+
+    DoS bound (security-auditor must-fix): because this runs in `mode="before"`,
+    it executes BEFORE the field's `max_length` constraint, so per-item
+    `model_validate` would otherwise run on every raw item of an
+    attacker-supplied array (~25M minimal entries in a ~100MB authenticated
+    payload → ~20s single-core burn in the serial scan-ingest worker). We
+    therefore raw-truncate the input list to `cap` BEFORE validating any item,
+    restoring the O(cap) bound. Truncation is silent (best-effort): a huge list
+    is capped, not rejected.
+
+    Reject (ValueError) only if the input itself is not a list.
+    """
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        raise ValueError("field must be a list")
+    cleaned: list[Any] = []
+    for item in items[:cap]:
+        try:
+            cleaned.append(entry_model.model_validate(item))
+        except ValidationError:
+            continue
+    return cleaned
+
+
+class HostStateBlock(BaseModel):
+    """`envelope.host_state` — optional, forward-compat by design.
+
+    The agent from v0.3.0 onwards sends this block. Older agents do not; the
+    envelope tolerates its absence (`extra="ignore"` does not apply here because
+    the field default is `None` — pre-triage falls back to
     `snapshot_available=False`).
+
+    host_state is advisory/best-effort (TICKET-018): the `listeners`/`processes`
+    `mode="before"` validators drop malformed entries item-by-item so a single
+    bad listener/process never fails the whole scan ingest. The raw list is
+    truncated to `MAX_LISTENERS`/`MAX_PROCESSES` before per-item validation to
+    bound the work (DoS fast-fail guard); the parent `max_length` stays as
+    defense-in-depth.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -900,6 +964,16 @@ class HostStateBlock(BaseModel):
     processes: list[ProcessEntry] = Field(default_factory=list, max_length=MAX_PROCESSES)
     kernel_modules: list[str] = Field(default_factory=list)
     services: list[str] = Field(default_factory=list)
+
+    @field_validator("listeners", mode="before")
+    @classmethod
+    def _filter_listeners(cls, v: Any) -> list[Any]:
+        return _filter_entries(v, ListenerEntry, MAX_LISTENERS)
+
+    @field_validator("processes", mode="before")
+    @classmethod
+    def _filter_processes(cls, v: Any) -> list[Any]:
+        return _filter_entries(v, ProcessEntry, MAX_PROCESSES)
 
     @field_validator("tools_available", "gaps", mode="before")
     @classmethod
