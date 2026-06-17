@@ -50,6 +50,9 @@ def _make_finding(
     vendor_status: str | None = "affected",
     severity_by_provider: dict[str, str] | None = None,
     status: FindingStatus = FindingStatus.OPEN,
+    installed_version: str | None = "1.0",
+    fixed_version: str | None = None,
+    host_update_available: bool | None = None,
 ) -> Finding:
     now = datetime.now(tz=UTC)
     return Finding(
@@ -59,7 +62,9 @@ def _make_finding(
         finding_class=FindingClass.OS_PKGS,
         identifier_key=identifier_key,
         package_name=package_name,
-        installed_version="1.0",
+        installed_version=installed_version,
+        fixed_version=fixed_version,
+        host_update_available=host_update_available,
         severity=severity,
         attack_vector=AttackVector.UNKNOWN,
         status=status,
@@ -77,6 +82,7 @@ def _make_server(
     *,
     os_family: str = "ubuntu",
     os_version: str = "24.04",
+    kernel_version: str | None = None,
     listeners: list[ServerListener] | None = None,
     processes: list[ServerProcess] | None = None,
     modules: list[ServerKernelModule] | None = None,
@@ -90,6 +96,7 @@ def _make_server(
         expected_scan_interval_h=24,
         os_family=os_family,
         os_version=os_version,
+        kernel_version=kernel_version,
     )
     # In-Memory-Attribute, vom Fingerprint per getattr gelesen.
     srv.listeners = listeners or []  # type: ignore[attr-defined]
@@ -380,3 +387,97 @@ def test_cve_data_fingerprint_changes_on_attack_vector_change() -> None:
     f2 = _make_finding()
     f2.attack_vector = AttackVector.NETWORK
     assert cve_data_fingerprint([f1]) != cve_data_fingerprint([f2])
+
+
+# ---------------------------------------------------------------------------
+# TICKET-017 / ADR-0068 — Gate 2: kernel_version into server_context_fingerprint,
+# host_update_available/installed_version/fixed_version into cve_data_fingerprint.
+# ---------------------------------------------------------------------------
+
+
+def test_server_context_fingerprint_deterministic_with_kernel() -> None:
+    s = _make_server(kernel_version="5.14.0-687.15.1.el9_8.x86_64")
+    assert server_context_fingerprint(s) == server_context_fingerprint(s)
+
+
+def test_server_context_fingerprint_changes_on_kernel_version() -> None:
+    """TICKET-017: a running-kernel upgrade must flip the server-context
+    fingerprint so the cache misses and the LLM is re-asked."""
+    s_old = _make_server(kernel_version="5.14.0-687.15.1.el9_7.x86_64")
+    s_new = _make_server(kernel_version="5.14.0-687.15.1.el9_8.x86_64")
+    assert server_context_fingerprint(s_old) != server_context_fingerprint(s_new)
+
+
+def test_server_context_fingerprint_kernel_none_stable() -> None:
+    """A server with no recorded kernel version hashes without raising and is
+    stable across calls (legacy hosts predating the kernel snapshot)."""
+    s = _make_server(kernel_version=None)
+    fp1 = server_context_fingerprint(s)
+    fp2 = server_context_fingerprint(s)
+    assert fp1 == fp2
+    assert len(fp1) == 16
+
+
+def test_server_context_fingerprint_kernel_none_differs_from_set() -> None:
+    s_none = _make_server(kernel_version=None)
+    s_set = _make_server(kernel_version="5.14.0-687.15.1.el9_8.x86_64")
+    assert server_context_fingerprint(s_none) != server_context_fingerprint(s_set)
+
+
+def test_cve_data_fingerprint_deterministic_with_new_inputs() -> None:
+    f = _make_finding(
+        installed_version="687.15.1.el9_7",
+        fixed_version="687.15.1.el9_8",
+        host_update_available=True,
+    )
+    assert cve_data_fingerprint([f]) == cve_data_fingerprint([f])
+
+
+def test_cve_data_fingerprint_changes_on_host_update_available() -> None:
+    """TICKET-017: a ``host_update_available`` flip must move the CVE
+    fingerprint (re-eval even with an unchanged OPEN-set)."""
+    f_off = _make_finding(host_update_available=False)
+    f_on = _make_finding(host_update_available=True)
+    assert cve_data_fingerprint([f_off]) != cve_data_fingerprint([f_on])
+
+
+def test_cve_data_fingerprint_changes_on_installed_version() -> None:
+    f1 = _make_finding(installed_version="687.15.1.el9_7")
+    f2 = _make_finding(installed_version="687.15.1.el9_8")
+    assert cve_data_fingerprint([f1]) != cve_data_fingerprint([f2])
+
+
+def test_cve_data_fingerprint_changes_on_fixed_version() -> None:
+    f1 = _make_finding(fixed_version=None)
+    f2 = _make_finding(fixed_version="687.15.1.el9_8")
+    assert cve_data_fingerprint([f1]) != cve_data_fingerprint([f2])
+
+
+def test_cve_data_fingerprint_new_inputs_independent() -> None:
+    """Each of the three new inputs flips the fingerprint independently — the
+    other two held constant — so none masks another."""
+    base = _make_finding(installed_version="1.0", fixed_version="2.0", host_update_available=False)
+    base_fp = cve_data_fingerprint([base])
+
+    only_host = _make_finding(
+        installed_version="1.0", fixed_version="2.0", host_update_available=True
+    )
+    only_installed = _make_finding(
+        installed_version="1.1", fixed_version="2.0", host_update_available=False
+    )
+    only_fixed = _make_finding(
+        installed_version="1.0", fixed_version="2.1", host_update_available=False
+    )
+    assert cve_data_fingerprint([only_host]) != base_fp
+    assert cve_data_fingerprint([only_installed]) != base_fp
+    assert cve_data_fingerprint([only_fixed]) != base_fp
+
+
+def test_cve_data_fingerprint_none_new_inputs_stable() -> None:
+    """Findings with None host_update/installed/fixed hash without raising and
+    are stable across calls (``default=str`` keeps None serializing stably)."""
+    f = _make_finding(installed_version=None, fixed_version=None, host_update_available=None)
+    fp1 = cve_data_fingerprint([f])
+    fp2 = cve_data_fingerprint([f])
+    assert fp1 == fp2
+    assert len(fp1) == 16

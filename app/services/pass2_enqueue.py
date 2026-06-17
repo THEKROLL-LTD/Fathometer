@@ -29,8 +29,14 @@ from app.models import (
     Finding,
     FindingStatus,
     LLMJob,
+    Server,
 )
-from app.services.llm_fingerprints import group_findings_fingerprint
+from app.services.llm_fingerprints import (
+    cve_data_fingerprint,
+    group_findings_fingerprint,
+    make_cache_key,
+    server_context_fingerprint,
+)
 from app.services.pass2_input_selection import FIX_LANES, FixLane, partition_by_lane
 
 log = logging.getLogger("fathometer.pass2_enqueue")
@@ -90,9 +96,20 @@ def enqueue_pass2_for_server(
     - es noch keinen queued/in_progress Pass-2-Job fuer
       ``(group_id, server_id, fix_lane)`` gibt (Guard gegen Doppel-Enqueue
       durch fast gleichzeitige Trigger), und
-    - keine ``application_group_evaluations``-Row dieser Lane mit identischem
-      ``group_findings_fingerprint`` (ueber das **Lane**-OPEN-Set) existiert
-      (Fingerprint-Skip: schon bewertet).
+    - no ``application_group_evaluations`` row of this lane already stores the
+      identical **full** ``cache_key`` (TICKET-017 / ADR-0068 Gate 1).
+
+    Gate 1 compares the full ``make_cache_key`` (group id + the three
+    fingerprints + prompt-version salt + lane), not just
+    ``group_findings_fingerprint``. This subsumes the old fingerprint-only
+    check (``group_findings_fingerprint`` is one input to the key) and makes
+    the enqueue decision react to host/CVE state — running kernel,
+    ``host_update_available``, installed/fixed version. Enqueue and worker
+    MUST compute the key identically (same lane OPEN-set domain, same helper
+    argument order as :func:`app.workers.llm_worker._do_pass2`), otherwise a
+    mismatch would re-enqueue forever. Legacy rows have ``cache_key = NULL``
+    (!= any computed key) and are therefore re-enqueued exactly once.
+    ``group_findings_fingerprint`` stays on the row for diagnostics.
 
     Die neu erzeugten ``LLMJob``-Rows tragen **kein** ``depends_on`` — die
     Sibling-Wait-Semantik in der Pickup-SQL (``_pick_next_job_id``) ist die
@@ -123,6 +140,14 @@ def enqueue_pass2_for_server(
         return 0
 
     affected_ids = [grp.id for grp in affected_groups]
+
+    # TICKET-017 / ADR-0068 Gate 1: the server-context fingerprint is per-server
+    # (running kernel, host snapshot), not per-lane — compute it ONCE and reuse
+    # it for every (group, lane) cache_key below. A missing server would mean no
+    # findings, which is already handled by the empty-affected_groups return
+    # above; defensively fall back to None (every key then mismatches → re-eval).
+    server = session.get(Server, server_id)
+    sv_fp = server_context_fingerprint(server, session=session) if server is not None else None
 
     # Junction-Rows (bereits berechnete Evals) fuer alle affected_groups —
     # jetzt bis zu zwei pro Group (eine pro Lane), Schluessel ``(gid, lane)``.
@@ -198,13 +223,18 @@ def enqueue_pass2_for_server(
                 None,
             ) in active_pass2_group_lanes:
                 continue
-            # Fingerprint ueber das **Lane**-OPEN-Set, verglichen mit der
-            # Lane-Eval-Row.
-            new_fp = group_findings_fingerprint(lane_findings)
+            # TICKET-017 / ADR-0068 Gate 1: compute the full cache_key over the
+            # **Lane** OPEN-set and compare it against the stored row. Same
+            # helpers and same make_cache_key(group_id, gf_fp, cve_fp, sv_fp,
+            # fix_lane=lane) argument order as llm_worker._do_pass2, so enqueue
+            # and worker derive a bit-identical key for identical state.
+            gf_fp = group_findings_fingerprint(lane_findings)
+            cve_fp = cve_data_fingerprint(lane_findings)
+            cache_key = make_cache_key(grp.id, gf_fp, cve_fp, sv_fp or "", fix_lane=lane)
             existing_eval = evaluations_by_group_lane.get((grp.id, lane))
-            if existing_eval is not None and existing_eval.group_findings_fingerprint == new_fp:
-                # Junction-Row dieser Lane existiert und Fingerprint stimmt
-                # — kein Pass-2 fuer diese Lane noetig.
+            if existing_eval is not None and existing_eval.cache_key == cache_key:
+                # Junction-Row dieser Lane existiert und der volle cache_key
+                # stimmt — kein Pass-2 fuer diese Lane noetig.
                 continue
             _enqueue_lane_job(session, server_id=server_id, group_id=grp.id, fix_lane=lane)
             queued += 1

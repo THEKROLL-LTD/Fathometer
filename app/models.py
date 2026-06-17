@@ -1020,6 +1020,10 @@ class ApplicationGroupEvaluation(Base):
     )
     worst_finding_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     group_findings_fingerprint: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Full make_cache_key (TICKET-017 / ADR-0068 Gate 1): the enqueue gate
+    # compares this, not just group_findings_fingerprint. NULL on legacy rows
+    # forces exactly one re-enqueue (cache_key NULL != computed key).
+    cache_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     action_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     group: Mapped[ApplicationGroup] = relationship("ApplicationGroup", back_populates="evaluations")

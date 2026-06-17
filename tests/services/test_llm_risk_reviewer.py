@@ -29,6 +29,7 @@ from app.models import (
     Server,
     Severity,
 )
+from app.services.llm_prompts import PASS2_PROMPT_VERSION, PASS2_SYSTEM_PROMPT
 from app.services.llm_risk_reviewer import (
     MAX_REASON_LEN,
     LLMInvalidResponseError,
@@ -74,6 +75,9 @@ def _make_finding(
     package_name: str = "openssl",
     target_path: str | None = None,
     purl: str | None = None,
+    installed_version: str | None = "1.0",
+    fixed_version: str | None = None,
+    host_update_available: bool | None = None,
 ) -> Finding:
     now = datetime.now(tz=UTC)
     return Finding(
@@ -83,7 +87,9 @@ def _make_finding(
         finding_class=FindingClass.OS_PKGS,
         identifier_key=cve or f"CVE-2024-{fid:04d}",
         package_name=package_name,
-        installed_version="1.0",
+        installed_version=installed_version,
+        fixed_version=fixed_version,
+        host_update_available=host_update_available,
         severity=Severity.HIGH,
         attack_vector=AttackVector.UNKNOWN,
         status=FindingStatus.OPEN,
@@ -97,7 +103,7 @@ def _make_finding(
     )
 
 
-def _make_server() -> Server:
+def _make_server(*, kernel_version: str | None = None) -> Server:
     s = Server(
         id=1,
         name="srv-llm-test",
@@ -105,6 +111,7 @@ def _make_server() -> Server:
         expected_scan_interval_h=24,
         os_family="ubuntu",
         os_version="24.04",
+        kernel_version=kernel_version,
     )
     s.listeners = []  # type: ignore[attr-defined]
     s.processes = []  # type: ignore[attr-defined]
@@ -579,6 +586,202 @@ def test_pass2_prompt_no_aggregate_line_for_small_group() -> None:
     reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
     prompt = reviewer._render_pass2_prompt(server, [(grp, findings)])
     assert " more: " not in prompt
+
+
+# ---------------------------------------------------------------------------
+# TICKET-017 / ADR-0068 Part A — per-finding field rename + STALE-ARTIFACT
+# kernel-comparator wording + PASS2_PROMPT_VERSION bump.
+# ---------------------------------------------------------------------------
+
+
+def test_pass2_prompt_version_is_seven() -> None:
+    """ADR-0068: the field renames + STALE-ARTIFACT rewrite are a material
+    prompt-semantics change that salts the cache key."""
+    assert PASS2_PROMPT_VERSION == 7
+
+
+def test_pass2_prompt_renders_vulnerable_and_fixed_labels() -> None:
+    """Per-finding line uses ``vulnerable=`` / ``fixed=`` (role-encoding), not
+    the old ``installed=`` / ``fix=`` labels that read as 'active'."""
+    server = _make_server()
+    f1 = _make_finding(
+        1, package_name="linux", installed_version="687.15.1.el9_7", fixed_version="687.15.1.el9_8"
+    )
+    grp = _make_group("linux", [1])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f1])])
+    assert " vulnerable=687.15.1.el9_7" in prompt
+    assert " fixed=687.15.1.el9_8" in prompt
+
+
+def test_pass2_prompt_old_installed_and_fix_labels_gone_from_finding_line() -> None:
+    """The old ``installed=`` / ``fix=`` finding-line labels must no longer
+    appear (they encoded 'active' and drove the role-confusion)."""
+    server = _make_server()
+    f1 = _make_finding(
+        1, package_name="linux", installed_version="687.15.1.el9_7", fixed_version="687.15.1.el9_8"
+    )
+    grp = _make_group("linux", [1])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f1])])
+    # Find the finding line(s) (start with the finding id + CVE) and assert the
+    # legacy labels are absent there. (The system prompt is a separate string;
+    # this renders only the user-message body.)
+    assert " installed=" not in prompt
+    # ``fix=`` must not appear as a finding-line token. ``fixed=`` is allowed.
+    assert " fix=" not in prompt
+
+
+def test_pass2_prompt_renders_vulnerable_n_a_and_fixed_none_for_nulls() -> None:
+    server = _make_server()
+    f1 = _make_finding(1, installed_version=None, fixed_version=None)
+    grp = _make_group("openssl", [1])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f1])])
+    assert " vulnerable=n/a" in prompt
+    assert " fixed=none" in prompt
+
+
+def test_pass2_prompt_running_kernel_single_source_in_host_context() -> None:
+    """The running kernel appears only via ``_render_host_context``
+    (``kernel (running):``), NOT duplicated on the per-finding/group lines
+    (single-source rule, drift risk)."""
+    kernel = "5.14.0-687.15.1.el9_8.x86_64"
+    server = _make_server(kernel_version=kernel)
+    f1 = _make_finding(
+        1, package_name="linux", installed_version="687.15.1.el9_7", fixed_version="687.15.1.el9_8"
+    )
+    grp = _make_group("linux", [1])
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f1])])
+    assert f"kernel (running): {kernel}" in prompt
+    # The kernel string occurs exactly once — it is not duplicated onto the
+    # finding line as a per-finding comparator.
+    assert prompt.count(kernel) == 1
+
+
+def test_pass2_prompt_host_context_matches_render_host_context() -> None:
+    """Parity: the running-kernel line in the full prompt is produced by the
+    shared ``_render_host_context`` helper, not a second copy."""
+    kernel = "5.14.0-687.15.1.el9_8.x86_64"
+    server = _make_server(kernel_version=kernel)
+    reviewer = LLMRiskReviewer(client=_MockClient({"evaluations": []}))
+    host_lines = reviewer._render_host_context(server)
+    assert f"  kernel (running): {kernel}" in host_lines
+    f1 = _make_finding(1, package_name="linux")
+    grp = _make_group("linux", [1])
+    prompt = reviewer._render_pass2_prompt(server, [(grp, [f1])])
+    # Every host-context line the helper produced is present verbatim in the
+    # rendered prompt (single source).
+    for line in host_lines:
+        assert line in prompt
+
+
+# --- System prompt content (four-role field doc + STALE-ARTIFACT wording) ---
+
+
+def test_pass2_system_prompt_documents_four_version_roles() -> None:
+    """ADR-0068: the field doc names the four version roles explicitly."""
+    assert "vulnerable=<version>" in PASS2_SYSTEM_PROMPT
+    assert "fixed=<version>" in PASS2_SYSTEM_PROMPT
+    assert "host_update=available|none" in PASS2_SYSTEM_PROMPT
+    # The running kernel as the only attack-relevant version for kernel findings.
+    assert "kernel (running): <version>" in PASS2_SYSTEM_PROMPT
+
+
+def test_pass2_system_prompt_stale_artifact_kernel_comparator_wording() -> None:
+    """The STALE-ARTIFACT path must tell the model that kernel findings compare
+    ``fixed`` against the running kernel with 'at or above' semantics."""
+    prompt = PASS2_SYSTEM_PROMPT
+    assert "STALE-ARTIFACT" in prompt
+    assert "running kernel" in prompt
+    assert "at or above" in prompt
+    # The comparator is the running kernel, NOT the per-finding vulnerable=.
+    assert "NOT against" in prompt and "vulnerable" in prompt
+
+
+def test_pass2_system_prompt_forces_version_naming_in_reason() -> None:
+    """The reason must name the two versions compared and which is active."""
+    prompt = PASS2_SYSTEM_PROMPT
+    assert "always name the two versions you compared" in prompt
+    # The concrete worked example with the live-case versions.
+    assert "running 687.15.1.el9_8" in prompt
+    assert "fixed 687.15.1.el9_8" in prompt
+
+
+@pytest.mark.asyncio
+async def test_pass2_kernel_at_or_above_fixed_noise_verdict_roundtrips() -> None:
+    """DoD §8 (stubbed LLM): running kernel >= fixed -> the analyst returns
+    ``noise`` and the reviewer propagates it. The prompt must expose BOTH the
+    running kernel (host_context) and ``fixed=`` so the comparison is possible.
+
+    The verdict itself stays an LLM judgment (ADR-0066/ADR-0068, no deterministic
+    EVR compare in code); the stub supplies the band, we assert (a) the reviewer
+    rendered the comparator data and (b) it carries the band through unchanged.
+    """
+    server = _make_server(kernel_version="5.14.0-687.15.1.el9_8.x86_64")
+    f1 = _make_finding(
+        1,
+        cve="CVE-2025-0001",
+        package_name="linux",
+        installed_version="687.15.1.el9_7",  # old, non-booted artifact on disk
+        fixed_version="687.15.1.el9_8",  # == running kernel version
+        host_update_available=False,
+    )
+    grp = _make_group("linux", [1])
+    payload = {
+        "evaluations": [
+            {
+                "group_label": "linux",
+                "risk_band": "noise",
+                "worst_finding_id": 1,
+                "reason": "running 687.15.1.el9_8 >= fixed 687.15.1.el9_8 -> already patched",
+            },
+        ],
+    }
+    reviewer = LLMRiskReviewer(client=_MockClient(payload))
+    result, meta = await reviewer.pass2_evaluate_groups(server, [(grp, [f1])], fix_lane="patch")
+    assert result.evaluations[0].risk_band == "noise"
+    # The reviewer made the comparator available: running kernel in host_context,
+    # fixed= on the finding line, and the vulnerable (non-booted) artifact.
+    prompt = meta["user_prompt"]
+    assert "kernel (running): 5.14.0-687.15.1.el9_8.x86_64" in prompt
+    assert " fixed=687.15.1.el9_8" in prompt
+    assert " vulnerable=687.15.1.el9_7" in prompt
+    assert " host_update=none" in prompt
+
+
+@pytest.mark.asyncio
+async def test_pass2_kernel_below_fixed_actionable_verdict_roundtrips() -> None:
+    """DoD §8 (stubbed LLM): running kernel < fixed -> the fix is not yet booted,
+    the analyst keeps it actionable (``act``), and the reviewer propagates it."""
+    server = _make_server(kernel_version="5.14.0-687.15.1.el9_7.x86_64")
+    f1 = _make_finding(
+        1,
+        cve="CVE-2025-0002",
+        package_name="linux",
+        installed_version="687.15.1.el9_7",
+        fixed_version="687.15.1.el9_8",  # newer than running -> not yet booted
+        host_update_available=True,
+    )
+    grp = _make_group("linux", [1])
+    payload = {
+        "evaluations": [
+            {
+                "group_label": "linux",
+                "risk_band": "act",
+                "worst_finding_id": 1,
+                "reason": "running 687.15.1.el9_7 < fixed 687.15.1.el9_8 -> fix not booted",
+            },
+        ],
+    }
+    reviewer = LLMRiskReviewer(client=_MockClient(payload))
+    result, meta = await reviewer.pass2_evaluate_groups(server, [(grp, [f1])], fix_lane="patch")
+    assert result.evaluations[0].risk_band == "act"
+    prompt = meta["user_prompt"]
+    assert "kernel (running): 5.14.0-687.15.1.el9_7.x86_64" in prompt
+    assert " fixed=687.15.1.el9_8" in prompt
+    assert " host_update=available" in prompt
 
 
 def test_pass2_validation_rejects_worst_id_not_shown_in_prompt() -> None:

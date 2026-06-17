@@ -1590,6 +1590,7 @@ async def _do_pass2(job_id: int) -> None:
                 reason=cached.reason,
                 worst_finding_id=cached.worst_finding_id,
                 gf_fp=gf_fp,
+                cache_key=cache_key,
             )
             inherited = inherit_group_risk_to_findings(
                 session, group_ids=[group_id], server_id=server_id
@@ -1756,6 +1757,7 @@ async def _do_pass2(job_id: int) -> None:
                 reason=evaluation.reason,
                 worst_finding_id=evaluation.worst_finding_id,
                 gf_fp=gf_fp,
+                cache_key=cache_key,
                 # ADR-0053 / TICKET-013 Etappe 5: ``action_type`` ist kein
                 # LLM-Output mehr — ``_upsert_evaluation`` leitet ihn intern
                 # deterministisch aus ``(fix_lane, risk_band)`` ab.
@@ -1950,8 +1952,14 @@ def _upsert_evaluation(
     reason: str | None,
     worst_finding_id: int | None,
     gf_fp: str,
+    cache_key: str | None,
 ) -> None:
     """UPSERT in ``application_group_evaluations`` (ADR-0028, Block T; ADR-0053).
+
+    TICKET-017 / ADR-0068 Gate 1: ``cache_key`` (the full ``make_cache_key``
+    computed in :func:`_do_pass2`) is persisted on the row (insert column +
+    ``on_conflict`` set) so the enqueue gate can compare the full key, not just
+    ``group_findings_fingerprint``.
 
     Ersetzt das frühere ``_apply_pass2_to_group``: statt die Eval-Felder
     direkt auf der ``ApplicationGroup``-Row zu setzen (last-write-wins-
@@ -1980,6 +1988,7 @@ def _upsert_evaluation(
         risk_band_computed_at=datetime.now(UTC),
         worst_finding_id=worst_finding_id,
         group_findings_fingerprint=gf_fp,
+        cache_key=cache_key,
         action_type=action_type,
     )
     stmt = stmt.on_conflict_do_update(
@@ -1991,6 +2000,7 @@ def _upsert_evaluation(
             "risk_band_computed_at": stmt.excluded.risk_band_computed_at,
             "worst_finding_id": stmt.excluded.worst_finding_id,
             "group_findings_fingerprint": stmt.excluded.group_findings_fingerprint,
+            "cache_key": stmt.excluded.cache_key,
             "action_type": stmt.excluded.action_type,
         },
     )

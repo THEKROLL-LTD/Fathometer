@@ -45,6 +45,14 @@ from app.services.llm_fingerprints import group_findings_fingerprint
 from app.services.pass2_enqueue import enqueue_pass2_for_server
 from app.workers import llm_worker
 
+# TICKET-017 / ADR-0068: enqueue and worker stub the CVE/server fingerprints to
+# the SAME constants so the cache_key varies only with the (real)
+# group_findings_fingerprint over the OPEN-set + lane — which is exactly the
+# Bug-B domain this suite guards. ``make_cache_key`` stays REAL in both paths so
+# the parity assertion exercises the actual key derivation.
+_CVE_FP = "c" * 16
+_SV_FP = "s" * 16
+
 JOB_ID = 99
 GROUP_ID = 7
 SERVER_ID = 3
@@ -242,9 +250,10 @@ def _patch_phase1_helpers(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     monkeypatch.setattr(llm_worker, "_audit_pass2_with_failed_siblings", lambda *a, **k: None)
     monkeypatch.setattr(llm_worker, "group_findings_fingerprint", _spy_fp)
-    monkeypatch.setattr(llm_worker, "cve_data_fingerprint", lambda f: "c" * 16)
-    monkeypatch.setattr(llm_worker, "server_context_fingerprint", lambda s, session=None: "s" * 16)
-    monkeypatch.setattr(llm_worker, "make_cache_key", lambda *a, **k: "k" * 64)
+    monkeypatch.setattr(llm_worker, "cve_data_fingerprint", lambda f: _CVE_FP)
+    monkeypatch.setattr(llm_worker, "server_context_fingerprint", lambda s, session=None: _SV_FP)
+    # ``make_cache_key`` stays REAL so the persisted cache_key is the genuine
+    # key the enqueue gate (TICKET-017) compares against.
     return captured
 
 
@@ -272,14 +281,26 @@ async def _run_pass2_cache_hit(
 
 def _run_enqueue(store: list[SimpleNamespace], *, evals: list[Any]) -> tuple[int, _FakeSession]:
     """``enqueue_pass2_for_server`` gegen denselben Finding-Store (echter
-    Fingerprint, echte WHERE-Evaluation)."""
+    group_findings_fingerprint, echte WHERE-Evaluation, echtes make_cache_key).
+
+    TICKET-017: the CVE/server fingerprints are stubbed to the SAME constants the
+    worker uses (:data:`_CVE_FP` / :data:`_SV_FP`) so the gate's full cache_key
+    varies only with the OPEN-set group fingerprint + lane — the Bug-B domain.
+    The Server snapshot is reachable via the identity map so ``session.get`` does
+    not return None (which would force a re-enqueue regardless of the eval).
+    """
     sess = _FakeSession(
+        identity={(Server, SERVER_ID): SimpleNamespace(id=SERVER_ID)},
         groups=[SimpleNamespace(id=GROUP_ID)],
         evals=evals,
         active_jobs=[],
         findings=store,
     )
-    with patch("app.services.pass2_enqueue.log_event"):
+    with (
+        patch("app.services.pass2_enqueue.log_event"),
+        patch("app.services.pass2_enqueue.cve_data_fingerprint", return_value=_CVE_FP),
+        patch("app.services.pass2_enqueue.server_context_fingerprint", return_value=_SV_FP),
+    ):
         count = enqueue_pass2_for_server(sess, SERVER_ID, trigger="scan_ingest")
     return count, sess
 
@@ -353,16 +374,22 @@ async def test_no_reenqueue_after_worker_eval_on_mixed_group(
     """
     store = _mixed_store()
     out = await _run_pass2_cache_hit(monkeypatch, store)
+    # TICKET-017: the enqueue gate now compares the FULL cache_key, so seed the
+    # stored eval with the worker's persisted cache_key (not just the gf-fp).
     worker_fp = out["upsert"]["gf_fp"]
+    worker_cache_key = out["upsert"]["cache_key"]
 
     stored_eval = SimpleNamespace(
-        group_id=GROUP_ID, fix_lane="patch", group_findings_fingerprint=worker_fp
+        group_id=GROUP_ID,
+        fix_lane="patch",
+        group_findings_fingerprint=worker_fp,
+        cache_key=worker_cache_key,
     )
     count, _ = _run_enqueue(store, evals=[stored_eval])
     assert count == 0, "unchanged OPEN-set re-enqueued: Bug-B loop is back"
 
-    # Gegenprobe: aendert sich das OPEN-Set (ein Finding resolved), wird
-    # wieder enqueued — der Gate ist also nicht einfach tot.
+    # Gegenprobe: aendert sich das OPEN-Set (ein Finding resolved), aendert sich
+    # der group_findings_fingerprint und damit der cache_key -> wieder enqueued.
     store[0].status = FindingStatus.RESOLVED
     count_changed, _ = _run_enqueue(store, evals=[stored_eval])
     assert count_changed == 1

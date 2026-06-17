@@ -6,13 +6,15 @@
 Pure-Unit-Tests (reine String-Inspektion des gerenderten Prompts + Validator-
 Aufrufe; KEIN LLM-Call, kein DB-Roundtrip). Deckt die ADR-0066-§1-Aenderungen:
 
-* Per-Finding-Zeile traegt ``installed=<version>`` (NULL -> ``installed=n/a``).
+* Per-Finding-Zeile traegt ``vulnerable=<version>`` (NULL -> ``vulnerable=n/a``;
+  TICKET-017/ADR-0068 renamed ``installed=`` -> ``vulnerable=``).
 * Per-Finding-Zeile traegt ``host_update=<available|none>``
   (True -> available, False/None -> none).
 * ``_render_host_context`` traegt ``kernel (running): <version>`` wenn gesetzt,
   laesst die Zeile bei NULL weg (kein leerer Marker).
-* System-Prompt enthaelt den STALE-ARTIFACT-Correction-Path (Wortlaut-Kern).
-* ``PASS2_PROMPT_VERSION == 6``.
+* System-Prompt enthaelt den STALE-ARTIFACT-Correction-Path (Wortlaut-Kern,
+  TICKET-017: kernel comparator "at or above" gegen den running kernel).
+* ``PASS2_PROMPT_VERSION == 7``.
 * Reviewer-Verdikt: ``noise`` besteht die Validierung im patch-Call (Stale-FP
   -> noise); ``act`` bleibt im patch-Call ebenfalls gueltig (fix nicht gebootet).
 * Forward-Compat / Regression des konkreten el9_7-Leftover-Falls.
@@ -110,25 +112,29 @@ def _render(server: Server, findings: list[Finding], *, fix_lane: str = "patch")
 # ---------------------------------------------------------------------------
 
 
-def test_pass2_prompt_version_is_6() -> None:
-    assert PASS2_PROMPT_VERSION == 6
+def test_pass2_prompt_version_is_7() -> None:
+    # TICKET-017 / ADR-0068: 6 -> 7 (vulnerable=/fixed= rename + STALE-ARTIFACT
+    # kernel-comparator rewrite).
+    assert PASS2_PROMPT_VERSION == 7
 
 
 # ---------------------------------------------------------------------------
-# Per-Finding: installed= / host_update=
+# Per-Finding: vulnerable= / host_update= (TICKET-017 rename of installed=)
 # ---------------------------------------------------------------------------
 
 
-def test_per_finding_line_carries_installed_version() -> None:
+def test_per_finding_line_carries_vulnerable_version() -> None:
     f = _make_finding(1, installed_version="5.14.0-611.54.6.el9_7")
     prompt = _render(_make_server(), [f])
-    assert "installed=5.14.0-611.54.6.el9_7" in prompt
+    assert "vulnerable=5.14.0-611.54.6.el9_7" in prompt
+    # The old role-confusing label is gone.
+    assert "installed=" not in prompt
 
 
-def test_missing_installed_version_renders_na() -> None:
+def test_missing_vulnerable_version_renders_na() -> None:
     f = _make_finding(1, installed_version=None)
     prompt = _render(_make_server(), [f])
-    assert "installed=n/a" in prompt
+    assert "vulnerable=n/a" in prompt
 
 
 @pytest.mark.parametrize(
@@ -175,8 +181,11 @@ def test_system_prompt_contains_stale_artifact_correction_path() -> None:
     # daher Token-weise statt als zusammenhaengender Satz pruefen).
     assert "Three correction paths" in PASS2_SYSTEM_PROMPT
     assert "host_update=none" in PASS2_SYSTEM_PROMPT
-    assert "corroborates" in PASS2_SYSTEM_PROMPT
-    assert "NEWER than the running" in PASS2_SYSTEM_PROMPT
+    # TICKET-017 / ADR-0068: the kernel comparator wording was rewritten — the
+    # model now compares fixed against the running kernel with "at or above"
+    # semantics (replaces the old "corroborates" / "NEWER than the running").
+    assert "running kernel" in PASS2_SYSTEM_PROMPT
+    assert "at or above" in PASS2_SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -239,9 +248,10 @@ async def test_act_verdict_stays_actionable_when_fix_not_yet_booted() -> None:
 
 
 def test_concrete_stale_kernel_case_renders_all_three_signals() -> None:
-    """el9_7-Kernel-Leftover, laufend el9_8 >= fixed, host_update=none: der
-    Prompt traegt alle drei Signale (fix=, installed=, kernel (running):,
-    host_update=none), sodass das Modell `noise` herleiten kann."""
+    """el9_7-Kernel-Leftover, laufend el9_8 >= fixed, host_update=none: the
+    prompt carries all signals (fixed=, vulnerable=, kernel (running):,
+    host_update=none) so the model can derive `noise`. TICKET-017 renamed the
+    per-finding labels to vulnerable=/fixed=."""
     server = _make_server(kernel_version="5.14.0-687.15.1.el9_8")
     f = _make_finding(
         1,
@@ -250,7 +260,7 @@ def test_concrete_stale_kernel_case_renders_all_three_signals() -> None:
         host_update_available=False,
     )
     prompt = _render(server, [f])
-    assert "fix=5.14.0-687.12.1.el9_8" in prompt
-    assert "installed=5.14.0-611.54.6.el9_7" in prompt
+    assert "fixed=5.14.0-687.12.1.el9_8" in prompt
+    assert "vulnerable=5.14.0-611.54.6.el9_7" in prompt
     assert "kernel (running): 5.14.0-687.15.1.el9_8" in prompt
     assert "host_update=none" in prompt

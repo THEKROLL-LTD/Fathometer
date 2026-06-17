@@ -11,8 +11,8 @@ Pfad-/Title-/Aggregat-Zeilen prueft) um die Lane-Scope-Texte:
     auf den Default (alle Bands, kein Lane-Hinweis) zurueck, das Wort wird
     nicht als eigene Lane-Variante gerendert.
   * Der **patch**-Lane-Prompt erlaubt weiter alle vier Bands.
-  * ``PASS2_PROMPT_VERSION == 5`` (ADR-0064-Bump, invalidiert alte upstream-
-    Reasons).
+  * ``PASS2_PROMPT_VERSION == 7`` (ADR-0064-Bump war 5; ADR-0066 -> 6;
+    TICKET-017/ADR-0068 -> 7, invalidiert alte upstream-/role-confused Reasons).
 
 Reine String-Inspektion des gerenderten Prompts + Validator-Aufrufe; KEIN
 LLM-Call, kein DB-Roundtrip.
@@ -43,11 +43,11 @@ def _reviewer() -> LLMRiskReviewer:
 # ---------------------------------------------------------------------------
 
 
-def test_pass2_prompt_version_is_6() -> None:
-    """ADR-0066 zaehlt die Prompt-Version von 5 auf 6 hoch (neue Stale-Artifact-
-    Correction-Path-Semantik + drei neue Felder; invalidiert alte Eval-Rows
-    beim naechsten Re-Eval)."""
-    assert PASS2_PROMPT_VERSION == 6
+def test_pass2_prompt_version_is_7() -> None:
+    """TICKET-017 / ADR-0068 bumps the prompt version 6 -> 7 (vulnerable=/fixed=
+    rename + STALE-ARTIFACT kernel-comparator rewrite; invalidates old eval rows
+    on the next re-eval)."""
+    assert PASS2_PROMPT_VERSION == 7
 
 
 # ---------------------------------------------------------------------------

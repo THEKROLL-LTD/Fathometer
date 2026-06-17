@@ -1006,13 +1006,22 @@ class LLMRiskReviewer:
                     f" cvss={f.cvss_v3_score:.1f}" if f.cvss_v3_score is not None else " cvss=n/a"
                 )
                 epss_str = f" epss={f.epss_score:.2f}" if f.epss_score is not None else " epss=n/a"
-                fix_str = f" fix={f.fixed_version}" if f.fixed_version else " fix=none"
-                # Block AL (ADR-0066): ``installed=`` direkt neben ``fix=`` —
-                # der Reviewer braucht beide Versionen, um einen Trivy-Stale-
-                # Artifact-FP (``fixed`` bereits durch ``installed``/laufenden
-                # Kernel uebererfuellt) zu erkennen. NULL -> ``installed=n/a``.
-                installed_str = (
-                    f" installed={f.installed_version}" if f.installed_version else " installed=n/a"
+                # ADR-0068 / TICKET-017: label ``fixed=`` — the version that
+                # resolves the CVE (``fixed=none`` when no fix exists).
+                fix_str = f" fixed={f.fixed_version}" if f.fixed_version else " fixed=none"
+                # ADR-0068 / TICKET-017: label ``vulnerable=`` (renamed from
+                # ``installed=``) — the exact version Trivy flagged, i.e. the
+                # artifact found on disk; NOT necessarily the version actually
+                # in use (an installonly kernel package may be an old, non-booted
+                # artifact). The running kernel stays single-source in
+                # ``_render_host_context`` (``kernel (running):``); the reviewer
+                # compares against that, not against this per-finding value. The
+                # underlying value is unchanged (``f.installed_version``); only
+                # the rendered label changes. NULL -> ``vulnerable=n/a``.
+                vulnerable_str = (
+                    f" vulnerable={f.installed_version}"
+                    if f.installed_version
+                    else " vulnerable=n/a"
                 )
                 # Block AL (ADR-0066): deterministischer Host-Update-Anker.
                 # ``host_update=none`` korroboriert einen Stale-Artifact-FP
@@ -1046,7 +1055,7 @@ class LLMRiskReviewer:
                 )
                 lines.append(
                     f"      {f.id} {f.identifier_key} {f.package_name} "
-                    f"sev={f.severity.value}{cvss_str}{epss_str}{fix_str}{installed_str}"
+                    f"sev={f.severity.value}{cvss_str}{epss_str}{fix_str}{vulnerable_str}"
                     f"{host_update_str}{kev_str}{av_str}"
                     f"{path_str} "
                     f"{vendor_str}{title_str}"

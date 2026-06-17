@@ -47,7 +47,15 @@ from __future__ import annotations
 #: False-Positives (``fixed_version`` bereits durch laufenden Kernel/installierte
 #: Baseline uebererfuellt) selbst auf ``noise`` korrigiert. Cache-Invalidation
 #: noetig, sonst blieben Bestands-Reasons ohne die FP-Korrektur stehen.
-PASS2_PROMPT_VERSION = 6
+#: ADR-0068 / TICKET-017: 6 -> 7 — per-finding field renames
+#: ``installed=`` -> ``vulnerable=`` and ``fix=`` -> ``fixed=`` (the labels now
+#: name the role: ``vulnerable=`` is the artifact on disk, possibly not active),
+#: plus a sharpened STALE-ARTIFACT kernel-correction path (kernel findings
+#: compare ``fixed`` against the ``host_context`` running kernel with
+#: "at or above" semantics, and the reason must name the two versions
+#: compared). Material prompt-semantics change -> cache invalidation needed,
+#: else existing reasons keep the old role-confused verdict.
+PASS2_PROMPT_VERSION = 7
 
 PASS1_SYSTEM_PROMPT: str = """\
 You group Linux-host vulnerability findings by owner-application.
@@ -207,11 +215,22 @@ You receive:
    - label and explanation (what the application is)
    - findings: a compact list of CVEs in this group with severity,
      CVSS v3, EPSS (probability of exploitation in next 30 days),
-     KEV flag (CISA known-exploited list), has_fix indicator
-     (fix=<version> or fix=none), the currently installed version
-     (installed=<version> or installed=n/a), a host-update anchor
-     (host_update=available when the host package manager offers an
-     update for the owning package, host_update=none otherwise),
+     KEV flag (CISA known-exploited list), and FOUR version roles you
+     must keep apart:
+       * vulnerable=<version> (or vulnerable=n/a) — the exact version
+         Trivy flagged as vulnerable, i.e. the artifact found on disk.
+         This is NOT necessarily the version in use: for installonly
+         packages (notably the kernel) an old, non-booted artifact can
+         still be on disk and flagged.
+       * fixed=<version> (or fixed=none) — the version that resolves the
+         CVE; fixed=none means no fix is available.
+       * the host_context running kernel (kernel (running): <version>) —
+         the version actually booted and executing. For kernel findings
+         this is the only attack-relevant version; compare against it,
+         not against vulnerable=.
+       * host_update=available|none — the host package manager's own
+         verdict: available = an upgrade for the owning package is
+         offered; none = nothing to install.
      attack vector (av=, from CVSS v3), install path, a short
      finding title (distilled CVE summary; for kernel CVEs it names
      the affected subsystem), vendor severities.
@@ -272,18 +291,26 @@ two inputs:
               LDAP-parsing CVE in a daemon that has LDAP support
               compiled in but disabled in config → monitor.
 
-   STALE-ARTIFACT  Trivy scans every installed package on disk, not
-              only the running one. If fixed_version is already
-              satisfied by the running kernel / installed baseline
-              (e.g. an older, non-booted kernel is flagged while a
-              newer fixed kernel runs, compare fix= against
-              kernel (running): and installed=), treat it as a Trivy
-              stale-artifact false positive → noise. host_update=none
-              corroborates (the host package manager offers no
-              update for the owning package). If fixed_version is
-              NEWER than the running version (fix installed but not
-              yet booted, or not installed at all), it is NOT a false
-              positive — keep it actionable.
+   STALE-ARTIFACT  Trivy reports every vulnerable package file on disk,
+              including ones installed but NOT active. A finding is real
+              only if the version actually in use is the vulnerable one.
+              Kernel findings: compare fixed against the host_context
+              running kernel (kernel (running):) — NOT against
+              vulnerable. If the running kernel is at or above fixed
+              (same version or newer), the booted kernel already
+              contains the fix and vulnerable= is an older, non-booted
+              kernel left on disk → stale-artifact false positive →
+              noise; host_update=none confirms it. Only if the running
+              kernel is below fixed is it real (fix not yet booted, or
+              not installed) → keep actionable.
+              Other packages: vulnerable= is the effective version.
+              Below fixed with host_update=available → genuinely behind
+              → actionable. At or above fixed with host_update=none →
+              stale-artifact → noise.
+              In your reason, always name the two versions you compared
+              and which is active, e.g.
+              `running 687.15.1.el9_8 >= fixed 687.15.1.el9_8 ->
+              already patched -> noise`.
 
 3. Per-finding install path (the ``path=`` field on each finding
    line). This is the on-disk location Trivy recorded for the

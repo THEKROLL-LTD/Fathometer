@@ -13,17 +13,23 @@ Drei Eingangs-Fingerprints plus ein abgeleiteter Cache-Key:
   nie. Aendert sich genau wenn Findings der Group offen werden oder
   aufhoeren offen zu sein (neu, resolved, acknowledged, reopened).
 
-* :func:`cve_data_fingerprint` — SHA256[:16] ueber
+* :func:`cve_data_fingerprint` — SHA256[:16] over
   ``(identifier_key, severity, severity_by_provider_normalized, epss_score,
-  is_kev, vendor_status, title, attack_vector)``. Aendert sich wenn
-  EPSS/KEV/Vendor-Status-Daten fuer enthaltene Findings driften —
-  title/attack_vector sind seit TICKET-011 Teil des Pass-2-Prompts und
-  muessen daher mit-invalidieren (z.B. Title-Update durch CVE-Enrichment).
+  is_kev, vendor_status, title, attack_vector, host_update_available,
+  installed_version, fixed_version)``. Changes when EPSS/KEV/Vendor-status
+  data for contained findings drifts — title/attack_vector are part of the
+  Pass-2 prompt since TICKET-011 and must therefore co-invalidate (e.g.
+  title update via CVE enrichment). ``host_update_available`` /
+  ``installed_version`` / ``fixed_version`` are reviewer-load-bearing
+  host/CVE inputs (TICKET-017/ADR-0068): a kernel upgrade or host-update
+  flip must miss the cache so the LLM is re-asked.
 
-* :func:`server_context_fingerprint` — SHA256[:16] ueber kanonisch-
-  serialisierte Host-Felder. PIDs, args, snapshot_at und das User-Feld
-  der Prozesse fliessen bewusst NICHT ein (siehe ADR-0023
-  §"Two-Level-Caching").
+* :func:`server_context_fingerprint` — SHA256[:16] over canonically
+  serialized host fields (``os_family``, ``os_version``, ``kernel_version``,
+  tags, listeners, process comms, kernel modules, services, host-state gaps).
+  PIDs, args, snapshot_at and the process user field deliberately do NOT
+  flow in (see ADR-0023 §"Two-Level-Caching"). ``kernel_version`` is added
+  by TICKET-017/ADR-0068 so a running-kernel change invalidates the cache.
 
 * :func:`make_cache_key` — voller SHA256-hex (64 chars) ueber die vier
   Inputs (group_id + die drei 16-char-Fingerprints) plus den
@@ -88,19 +94,27 @@ def group_findings_fingerprint(findings: list[Finding]) -> str:
 
 
 def cve_data_fingerprint(findings: list[Finding]) -> str:
-    """SHA256[:16] ueber CVE-Daten-Tuple.
+    """SHA256[:16] over a CVE-data tuple.
 
-    Felder pro Finding:
+    Fields per finding:
 
     * ``identifier_key``
-    * ``severity.value`` (lowercase Severity-Enum)
+    * ``severity.value`` (lowercase Severity enum)
     * ``json.dumps(severity_by_provider or {}, sort_keys=True)`` —
-      Provider-Map normalisiert
+      provider map normalized
     * ``round(epss_score, 4) if epss_score is not None else None``
     * ``is_kev``
     * ``vendor_status``
-    * ``title`` (TICKET-011: Teil der Pass-2-Prompt-Zeile)
-    * ``attack_vector.value`` (TICKET-011: dito)
+    * ``title`` (TICKET-011: part of the Pass-2 prompt line)
+    * ``attack_vector.value`` (TICKET-011: ditto)
+    * ``host_update_available`` (TICKET-017/ADR-0068: host package
+      manager's own upgrade verdict; reviewer-load-bearing)
+    * ``installed_version`` (TICKET-017/ADR-0068: flagged on-disk
+      artifact version)
+    * ``fixed_version`` (TICKET-017/ADR-0068: value change otherwise
+      uncaptured by the lane partition)
+
+    ``default=str`` in :func:`json.dumps` keeps ``None`` serializing stably.
     """
     tuples = sorted(
         (
@@ -112,6 +126,9 @@ def cve_data_fingerprint(findings: list[Finding]) -> str:
             f.vendor_status,
             f.title or "",
             f.attack_vector.value,
+            f.host_update_available,
+            f.installed_version,
+            f.fixed_version,
         )
         for f in findings
     )
@@ -197,6 +214,7 @@ def server_context_fingerprint(server: Server, session: Session | None = None) -
         {
             "os_family": server.os_family,
             "os_version": server.os_version,
+            "kernel_version": server.kernel_version,
             "tags": tags,
             "listeners": listeners,
             "process_comms": process_comms,
