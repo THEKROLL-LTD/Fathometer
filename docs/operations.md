@@ -94,10 +94,18 @@ Fetch-Kosten sind $0 (SearXNG + lokales Fetch), nur LLM-Tokens fallen an
 The agent scans the live root filesystem (`trivy rootfs /`) but, by design,
 **excludes the well-known container-runtime data-roots**:
 
+- `**/io.containerd.runtime.*.task` (live running-container rootfs under the `/run` task tree — all containerd distros)
+- `**/io.containerd.snapshotter.*` (unpacked image layers / snapshots — all containerd distros)
 - `/var/lib/docker` (Docker overlay2 layers)
 - `/var/lib/containerd` (containerd snapshot store)
 - `/var/lib/rancher/k3s/agent/containerd` (k3s embedded containerd)
 - `/var/lib/containers` (podman / CRI-O storage)
+- `/run/containers` (podman / CRI-O runtime state)
+
+The two `io.containerd.*` glob entries were added by TICKET-019 so the **live**
+running-container rootfs under `/run/.../io.containerd.runtime.*.task/` is now
+excluded too, not just the persistent stores — covering all containerd distros
+(k3s/RKE2/k0s/MicroK8s/standalone/CRI) distro-agnostically.
 
 The contents of those directories are **unpacked container-image layers**, and
 container-image scanning is out of scope for Fathometer (ARCHITECTURE §17). So if
@@ -140,5 +148,7 @@ SELECT count(*) FROM findings
 WHERE target_path LIKE '/var/lib/docker/%'
    OR target_path LIKE '/var/lib/containerd/%'
    OR target_path LIKE '/var/lib/containers/%'
-   OR target_path LIKE '/var/lib/rancher/k3s/agent/containerd/%';
+   OR target_path LIKE '/var/lib/rancher/k3s/agent/containerd/%'
+   OR target_path LIKE '/run/%/containerd/%'
+   OR target_path LIKE '/run/containers/%';
 ```

@@ -99,16 +99,25 @@ Der `scan`-Block ist 1:1 die Trivy-Ausgabe. `host` wird aus
 `/etc/os-release` und `uname -r` zusammengestellt. `agent_version` zeigt
 dem Server an, mit welcher Skript-Version gepusht wurde.
 
-## Konfiguration via Umgebungsvariablen
+## Configuration via environment variables
 
-| Variable                | Pflicht | Default       | Bedeutung                              |
-|-------------------------|---------|---------------|----------------------------------------|
-| `FM_URL`           | ja      | —             | Backend-URL ohne Trailing-Slash        |
-| `FM_API_KEY`       | ja      | —             | Server-Key aus `fathometer-register.sh`   |
-| `FM_TRIVY_PATH`    | nein    | `trivy`       | Pfad zur Trivy-Binary                  |
-| `FM_SCAN_PATH`     | nein    | `/`           | Was Trivy scannen soll                 |
-| `FM_TIMEOUT_SEC`   | nein    | `60`          | curl-Upload-Timeout                    |
-| `FM_MASTER_KEY`    | nein    | (interaktiv)  | nur für `fathometer-register.sh`          |
+| Variable             | Required | Default       | Meaning                                          |
+|----------------------|----------|---------------|--------------------------------------------------|
+| `FM_URL`             | yes      | —             | Backend URL without trailing slash               |
+| `FM_API_KEY`         | yes      | —             | Server key from `fathometer-register.sh`         |
+| `FM_TRIVY_PATH`      | no       | `trivy`       | Path to the Trivy binary                         |
+| `FM_SCAN_PATH`       | no       | `/`           | What Trivy scans (rootfs target)                 |
+| `FM_SCAN_SKIP_DIRS`  | no       | (built-ins)   | Comma-separated absolute paths appended to the built-in `--skip-dirs` list (relocated Docker `data-root` / podman `graphroot`) |
+| `FM_SCAN_TIMEOUT`    | no       | `5m`          | Trivy scan `--timeout` (a scan still exceeding 5 min is a signal to skip more, not to raise this) |
+| `FM_TIMEOUT_SEC`     | no       | `60`          | curl upload timeout                              |
+| `FM_MASTER_KEY`      | no       | (interactive) | only for `fathometer-register.sh`                |
+
+The rootfs scan skips container-runtime content — the containerd-internal
+marker globs (`**/io.containerd.runtime.*.task`, `**/io.containerd.snapshotter.*`,
+covering the live `/run` task roots and persistent stores across all containerd
+distros) plus the explicit docker/podman/CRI-O roots — so container-image CVEs
+are out of scope (ADR-0067 / TICKET-019). Use `FM_SCAN_SKIP_DIRS` to add a
+relocated runtime data-root.
 
 ## Exit-Codes
 

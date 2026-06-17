@@ -301,11 +301,15 @@ deliberately unsupported.
 
 The agent scans the live root filesystem (`trivy rootfs /`) so statically built
 host binaries (k3s, tailscale, in-house Go/Java tools) are captured. On a host
-running a container runtime it **excludes the runtime's data-roots** by default —
-`/var/lib/docker`, `/var/lib/containerd`, `/var/lib/rancher/k3s/agent/containerd`,
-and `/var/lib/containers`. Their contents are unpacked container-image layers, and
-container-image scanning is out of scope for Fathometer. Host OS packages and host
-binaries live outside these roots and are still scanned in full.
+running a container runtime it **excludes all container-runtime content** by
+default — both the unpacked image layers/snapshots *and* the live running-container
+filesystems. This covers Docker, podman/CRI-O, and every containerd-based
+Kubernetes distribution (k3s, RKE2, k0s, MicroK8s, standalone containerd),
+regardless of where the runtime's data-root lives. Container-image scanning is out
+of scope for Fathometer, so **CVEs inside your containers/pods are not reported
+here** — use a dedicated image scanner for those. Host OS packages and host
+binaries (including the etcd/containerd versions compiled into the k3s host binary)
+live outside the runtime and are still scanned in full.
 
 Two environment variables tune this (set them in the agent's systemd unit /
 environment):

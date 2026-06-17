@@ -37,10 +37,15 @@ Pass `--skip-dirs` for the complete set of well-known runtime data-roots:
 
 | Path | Runtime | What is skipped |
 |---|---|---|
+| `**/io.containerd.runtime.*.task` | all containerd distros (k3s/RKE2/k0s/MicroK8s/standalone/CRI) | live running-container rootfs under the `/run` task tree |
+| `**/io.containerd.snapshotter.*` | all containerd distros | unpacked image layers / snapshots |
 | `/var/lib/docker` | Docker | overlay2 image/container layers |
 | `/var/lib/containerd` | containerd (standalone, k3d, CRI-O via containerd) | image snapshot stores |
 | `/var/lib/rancher/k3s/agent/containerd` | k3s embedded containerd | pod-image layers |
 | `/var/lib/containers` | podman / CRI-O (`containers/storage`) | image/overlay layers |
+| `/run/containers` | podman / CRI-O | runtime state |
+
+The two `io.containerd.*` glob rows and `/run/containers` were added by TICKET-019 to also cover the **live** running-container rootfs under the `/run` task roots (which the per-path list missed) and the RKE2/k0s/MicroK8s data-roots, by skipping on containerd's invariant internal directory markers instead of enumerating per-distro paths. The four original per-path roots (`/var/lib/docker`, `/var/lib/containerd`, `/var/lib/rancher/k3s/agent/containerd`, `/var/lib/containers`) are now **redundant-but-retained** explicit fallbacks (kept for the non-containerd ones and as belt-and-suspenders should a Trivy build's glob behavior differ).
 
 Rationale: skipping only `/var/lib/docker` leaves the identical timeout/scope gap on containerd-, k3s-, and podman-based hosts — the most likely deployments for this operator audience. Every path above holds only unpacked image content (out of scope); none holds host OS package state. The k3s entry is the **containerd sub-path only** (`…/agent/containerd`), not all of `/var/lib/rancher/k3s`, keeping the exclusion surgical and leaving the k3s host binary in `/usr/local/bin` fully scanned.
 
@@ -84,5 +89,5 @@ No schema change and no migration.
 ## Re-open triggers
 
 - **Custom data-root auto-detection.** If `FM_SCAN_SKIP_DIRS` proves too manual in the field, add opt-in detection of the Docker `data-root` from `docker info`/`/etc/docker/daemon.json` (and podman `graphroot` from `storage.conf`) — separate, runtime-specific logic; its own follow-up.
-- **New/relocated runtimes.** Additional or relocated data-roots (LXD `/var/lib/lxd`, nerdctl namespaces, rootless container stores under `$HOME/.local/share/containers`) extend the built-in list.
+- **New/relocated runtimes.** Additional or relocated data-roots (LXD `/var/lib/lxd`, nerdctl namespaces, rootless container stores under `$HOME/.local/share/containers`) extend the built-in list. TICKET-019 generalized this for containerd by skipping on the containerd-internal-marker globs (`**/io.containerd.runtime.*.task`, `**/io.containerd.snapshotter.*`) — covering the live `/run` task roots plus RKE2/k0s/MicroK8s — instead of per-distro path enumeration.
 - **Deliberate container-image scanning.** Still out of scope (§17); if ever wanted, a dedicated ADR for a `trivy image …` path, not a relaxation of this skip.

@@ -29,13 +29,14 @@ def test_min_trivy_le_recommended_trivy() -> None:
 
 
 def test_ticket015_version_bump_values() -> None:
-    """RECOMMENDED-Trivy on 0.71.0; agent on 0.9.0 (ADR-0067 — exclude
-    container-runtime data-roots from the rootfs scan, add --skip-dirs /
-    --timeout); MIN-Trivy stays at 0.70.0 deliberately (no hard retirement
-    of 0.70.0 hosts). MIN_AGENT_VERSION stays 0.1.0 — old agents that omit
-    the skip are not broken, only less precise -> mitigate, no hard reject."""
+    """RECOMMENDED-Trivy on 0.71.0; agent on 0.10.0 (TICKET-019 — completes
+    the ADR-0067 container-runtime skip list with the two distro-agnostic
+    containerd globs plus /run/containers, bumping the agent from 0.9.0).
+    MIN-Trivy stays at 0.70.0 deliberately (no hard retirement of 0.70.0
+    hosts). MIN_AGENT_VERSION stays 0.1.0 — old agents that omit the skip
+    are not broken, only less precise -> mitigate, no hard reject."""
     assert Settings.RECOMMENDED_TRIVY_VERSION == "0.71.0"
-    assert Settings.CURRENT_AGENT_VERSION == "0.9.0"
+    assert Settings.CURRENT_AGENT_VERSION == "0.10.0"
     assert Settings.MIN_TRIVY_VERSION == "0.70.0"
     assert Settings.MIN_AGENT_VERSION == "0.1.0"
 

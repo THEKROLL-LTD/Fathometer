@@ -101,7 +101,7 @@
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.9.0"
+readonly AGENT_VERSION="0.10.0"
 readonly REQUIRED_LIB_HOST_STATE_VERSION="0.5.0"
 readonly TRIVY_BIN="${FM_TRIVY_PATH:-trivy}"
 readonly SCAN_PATH="${FM_SCAN_PATH:-/}"
@@ -528,18 +528,37 @@ trivy_out="$(mktemp -t fathometer-trivy.XXXXXX.json)"
 response_body="$(mktemp -t fathometer-resp.XXXXXX)"
 trap 'rm -f "$trivy_raw" "$trivy_out" "$response_body"' EXIT
 
-# ADR-0067: exclude container-runtime data-roots from the rootfs scan.
-# Their contents are unpacked container-image layers, and container-image
-# scanning is out of scope (ARCHITECTURE §17). Host OS package DBs
+# ADR-0067 / TICKET-019: exclude container-runtime content from the rootfs
+# scan. Its contents are unpacked container-image layers and (live) running-
+# container root filesystems, both of which are container-image scanning —
+# out of scope (ARCHITECTURE §17).
+#
+# Beyond the persistent image stores, containerd also mounts the LIVE
+# running-container rootfs under the /run task tree, e.g.
+#   /run/.../io.containerd.runtime.v2.task/k8s.io/<hash>/rootfs/<binary>
+# A per-distro path list misses these (and RKE2/k0s/MicroK8s data-roots).
+# Instead we skip by the containerd-INTERNAL directory markers
+# (io.containerd.runtime.*.task, io.containerd.snapshotter.*), which are
+# invariant across distros and data-roots — one rule covers k3s, RKE2, k0s,
+# MicroK8s, standalone containerd, and CRI-on-containerd, including the live
+# /run task roots, and is future-proof against relocated roots.
+#
+# The explicit non-containerd roots (docker / podman / CRI-O) are kept
+# because they carry no io.containerd.* marker. Host OS package DBs
 # (/var/lib/dpkg, /var/lib/rpm, /lib/apk/db) and statically installed host
-# binaries (k3s, tailscale) live outside these roots and remain covered.
-# The k3s entry is the containerd sub-path only — the k3s host binary in
-# /usr/local/bin is never inside a data-root and stays fully scanned.
+# binaries (/usr/local/bin/k3s, tailscale, etcd-in-k3s) live elsewhere and
+# stay fully scanned.
+#
+# Glob patterns are single-quoted so the local shell does NOT glob-expand
+# them — they must reach Trivy's --skip-dirs literally.
 skip_dirs=(
-  /var/lib/docker
-  /var/lib/containerd
-  /var/lib/rancher/k3s/agent/containerd
-  /var/lib/containers
+  '**/io.containerd.runtime.*.task'     # live running-container rootfs (the /run task tree) — ALL containerd distros (k3s/RKE2/k0s/MicroK8s/standalone/CRI-on-containerd)
+  '**/io.containerd.snapshotter.*'      # unpacked image layers / snapshots — ALL containerd distros
+  /var/lib/docker                       # Docker overlay2 image/container layers (+ live merged mounts); no io.containerd.* marker
+  /var/lib/containerd                   # redundant under the snapshotter glob; kept as explicit fallback (TICKET-019)
+  /var/lib/rancher/k3s/agent/containerd # redundant under the snapshotter glob; kept as explicit fallback (TICKET-019)
+  /var/lib/containers                   # podman / CRI-O containers/storage
+  /run/containers                       # podman / CRI-O runtime state
 )
 # Operator escape hatch for relocated data-roots (Docker `data-root` /
 # podman `graphroot` set via daemon.json/storage.conf) that are not on a
