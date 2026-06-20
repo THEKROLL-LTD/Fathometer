@@ -69,8 +69,10 @@ jobs:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
 
-  # --- Image-Scan: OS-Pakete (trixie-Userland) + venv im tatsaechlich
-  # ausgelieferten Prod-Image (finale `runtime`-Stage, scratch-flattened). ---
+  # --- Image scan: OS packages (AlmaLinux 10-minimal userland) + venv in the
+  # actually shipped prod image (final `runtime` stage, scratch-flattened).
+  # Air-gap: the almalinux:10 / 10-minimal base images must be mirrored into
+  # the internal registry (see docs/operations.md / ADR-0069). ---
   image:
     name: image (os pkgs · app deps)
     runs-on: fathometer

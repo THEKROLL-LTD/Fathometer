@@ -732,7 +732,7 @@ git push --tags
 ### Build und Image
 
 - [ ] `docker build -t secscan:latest .` → exit 0.
-- [ ] Image-Size < 200 MB (Delta vs. v0.7.0 < 1 MB; Engine ist reines Python).
+- [ ] Image size < 256 MB (raised from 200 MB by ADR-0069: the AlmaLinux 10 base userland is larger than Debian-slim; measured ~249 MB on arm64 vs. the 192 MB Debian baseline. The risk engine itself is pure Python. Verify the amd64 release build also fits 256 MB in CI).
 - [ ] `docker compose up -d --build` → alle Container healthy.
 - [ ] `curl -fsSL http://localhost:8000/healthz` → 200.
 

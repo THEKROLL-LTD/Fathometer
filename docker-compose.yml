@@ -52,7 +52,9 @@ services:
     ports:
       - "8000:8000"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/readyz"]
+      # Python urllib probe (curl is not installed in the AlmaLinux 10-minimal
+      # runtime image — see Dockerfile / ADR-0069).
+      test: ["CMD", "/opt/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz')"]
       interval: 15s
       timeout: 5s
       retries: 5

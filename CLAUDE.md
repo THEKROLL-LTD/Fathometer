@@ -15,8 +15,9 @@ Subagent-Aufrufe nennen die zu lesenden Sektions-Nummern explizit (nicht "lies d
 
 ## Tech-Stack-Konstanten — NICHT abweichen
 
-- **Python 3.13**, **Flask**, **SQLAlchemy 2.x**, **Alembic**, **Pydantic v2**.
+- **Python 3.14** (EL10 AppStream — EL10 ships no python3.13; `requires-python >= 3.13` in pyproject stays as-is, 3.14 satisfies it), **Flask**, **SQLAlchemy 2.x**, **Alembic**, **Pydantic v2**.
 - **PostgreSQL 17** in eigenem Container (nicht all-in-one).
+- Runtime base image: **AlmaLinux 10-minimal** (builder on `almalinux:10`); replaces Debian `python:3.13-slim-trixie` (ADR-0069). Interpreter is **`python3.14`** (EL10 has no 3.13; AppStream stream — no source build).
 - **Jinja2** + **HTMX** + **Alpine.js** + **Plain CSS** mit eigenem Design-Token-Set (kein Tailwind, kein DaisyUI — entfernt mit ADR-0032). **Frontend-Build via esbuild + lightningcss** in einer Build-only Docker-Stage; Production-Image hat keine Node-Runtime (siehe ADR-0032, löst ADR-0001 ab).
 - **`openai`-Python-SDK** für LLM (OpenAI-kompatibles Protokoll, Default-Provider DeepInfra mit `deepseek-ai/DeepSeek-V3`).
 - **`pydantic-ai-slim[openai]` + `trafilatura`** (ab Block AI, ADR-0063) ausschließlich für die **optionale, operator-gated** agentische Upstream-Update-Suche: getypte Agenten-Schleife mit eigenen Tools (Web-Search via vorhandenem `httpx`, lokale HTML-/Datei-Extraktion via `trafilatura`). Nur im `research-worker`-Pfad importiert, Feature **default-off**; **kein** Ersatz für den `openai`-SDK der übrigen LLM-Konsumenten (Reviewer/Chat).

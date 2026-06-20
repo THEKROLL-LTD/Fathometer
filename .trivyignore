@@ -1,24 +1,24 @@
-# Trivy ignore list — accepted OS base-image findings.
+# Trivy ignore list — LEGACY Debian-tracker entries (moot after TICKET-020).
 #
-# Every ID below is an OS package vulnerability from the Debian "trixie" base
-# image with NO upstream fix available (Trivy `FixedVersion` is empty) as of
-# 2026-06-14. They are accepted, not fixed, on the following grounds:
-#
-#   1. No fix exists — there is nothing to upgrade to.
-#   2. Fathometer is a single-user, self-hosted, air-gap-first application
-#      (no multi-tenant exposure, no untrusted local users on the host).
-#   3. The affected package is not reachable by attacker-controlled input in
-#      the app's request path (see per-group rationale below).
+# Every ID below is a legacy Debian "trixie" base-image OS-package entry from
+# when the runtime image was `python:3.13-slim-trixie`. With the migration to
+# the AlmaLinux 10-minimal base (TICKET-020 / ADR-0069) these IDs are MOOT:
+# there are no Debian packages in the image anymore, so none of them can match
+# (a non-matching ignore entry is harmless). They are intentionally left in
+# place — NOT cleared — until the first AlmaLinux Trivy scan (operator-gated)
+# produces an EL-errata-keyed (ALSA) replacement set seeded from that scan.
+# At that point this whole list is replaced; the AlmaLinux errata feed maps
+# findings onto authoritative, backport-aware fix-state, so the replacement is
+# expected to be dramatically shorter.
 #
 # SCOPE IS INTENTIONALLY NARROW: only the specific IDs listed here are
 # suppressed. Any NEW CVE — including a new unfixable one — is deliberately
 # NOT covered and will surface in CI and the Security tab. That is the point:
 # keep the signal, drop the known-and-evaluated noise.
 #
-# REVIEW: drop an entry (and rebuild on a newer base) once an upstream fix
-# lands, or re-evaluate the whole list if the threat model changes (e.g. the
-# app stops being single-user / air-gap-first). Stale entries are harmless —
-# a fixed package simply no longer matches.
+# The per-package rationales below documented why each Debian finding was
+# accepted; they are retained for provenance and are superseded by the
+# upcoming EL-errata-keyed re-curation.
 
 # --- perl-base ---------------------------------------------------------------
 # The Perl files are physically removed from the runtime image at build time

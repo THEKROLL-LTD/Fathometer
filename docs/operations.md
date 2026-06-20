@@ -1,7 +1,18 @@
-# Operator-Notizen — fathometer
+# Operator notes — fathometer
 
-Lebende Sammlung von Betriebs-Hinweisen: Outbound-Ziele, Air-Gap-Setup,
-Feed-Pull-Health-Checks. Ergaenzt um neue Abschnitte pro Feature.
+Living collection of operational notes: outbound targets, air-gap setup,
+feed-pull health checks. Extended with a new section per feature.
+
+---
+
+## Container base image (air-gap)
+
+The runtime image is built on **AlmaLinux 10-minimal** (builder on
+`almalinux:10`); see ADR-0069. For air-gap deployments, mirror **both**
+`almalinux:10` (build) and `almalinux:10-minimal` (runtime) base images into
+the internal registry — symmetric to the base-image mirror expectation that
+already applied to the previous Debian `python:3.13-slim-trixie` base. Without
+the mirror, `docker compose up --build` cannot pull the FROM images.
 
 ---
 
