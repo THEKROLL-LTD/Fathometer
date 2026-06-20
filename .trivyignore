@@ -1,162 +1,21 @@
-# Trivy ignore list — accepted OS base-image findings.
+# Trivy ignore list — AlmaLinux 10 base (TICKET-020 / ADR-0069).
 #
-# Every ID below is an OS package vulnerability from the Debian "trixie" base
-# image with NO upstream fix available (Trivy `FixedVersion` is empty) as of
-# 2026-06-14. They are accepted, not fixed, on the following grounds:
+# This list is INTENTIONALLY EMPTY.
 #
-#   1. No fix exists — there is nothing to upgrade to.
-#   2. Fathometer is a single-user, self-hosted, air-gap-first application
-#      (no multi-tenant exposure, no untrusted local users on the host).
-#   3. The affected package is not reachable by attacker-controlled input in
-#      the app's request path (see per-group rationale below).
+# It previously held ~90 Debian "trixie" base-image OS-package IDs that Trivy
+# surfaced even though the Debian Security Tracker marked them "no fix planned /
+# minor" — perma-noise with nothing to upgrade to. The migration to the
+# AlmaLinux 10-minimal base (ADR-0069) removed the root cause:
 #
-# SCOPE IS INTENTIONALLY NARROW: only the specific IDs listed here are
-# suppressed. Any NEW CVE — including a new unfixable one — is deliberately
-# NOT covered and will surface in CI and the Security tab. That is the point:
-# keep the signal, drop the known-and-evaluated noise.
+#   * AlmaLinux ships authoritative OVAL/ALSA errata with backport-aware fixed
+#     versions. The first Alma image scan (PR #17, 2026-06-20) confirmed it —
+#     the remaining OS findings were openssl-libs CVEs, every one of which has
+#     a FIXED VERSION available (1:3.5.5-4.el10_2.alma.1). Fixable findings are
+#     resolved by rebuilding on the refreshed base, NOT by suppression.
 #
-# REVIEW: drop an entry (and rebuild on a newer base) once an upstream fix
-# lands, or re-evaluate the whole list if the threat model changes (e.g. the
-# app stops being single-user / air-gap-first). Stale entries are harmless —
-# a fixed package simply no longer matches.
-
-# --- perl-base ---------------------------------------------------------------
-# The Perl files are physically removed from the runtime image at build time
-# (`rm -rf .../perl-base` in the runtime-builder stage); only the dpkg metadata
-# entry remains, which is what Trivy keys off. No Perl interpreter is present
-# or invoked at runtime, so these are effectively not-present findings.
-CVE-2026-42496
-CVE-2026-8376
-CVE-2026-42497
-CVE-2026-48959
-CVE-2026-48962
-CVE-2026-9538
-CVE-2026-48961
-CVE-2026-7010
-CVE-2025-15649
-CVE-2011-4116
-
-# --- curl / libcurl4t64 ------------------------------------------------------
-# curl exists in the image solely for the container HEALTHCHECK, which hits a
-# fixed local URL (http://127.0.0.1:8000/readyz). It is never invoked on
-# attacker-controlled URLs or data. The app's own outbound traffic (LLM calls,
-# optional research-worker) uses the Python httpx/openai stack, not libcurl.
-CVE-2026-5773
-CVE-2026-6276
-CVE-2026-7168
-CVE-2026-6429
-CVE-2026-6253
-CVE-2026-5545
-CVE-2026-4873
-CVE-2026-3805
-CVE-2026-3784
-CVE-2026-3783
-CVE-2026-1965
-CVE-2025-15224
-CVE-2025-15079
-CVE-2025-14819
-CVE-2025-14524
-CVE-2025-14017
-CVE-2025-10966
-
-# --- ncurses (ncurses-base/bin, libtinfo6, libncursesw6) ---------------------
-# Terminal/TTY handling library. Fathometer is a headless Gunicorn web server;
-# it parses no terminfo and processes no terminal escape sequences from request
-# input. Not reachable over HTTP.
-CVE-2025-69720
-CVE-2025-6141
-
-# --- libsqlite3-0 ------------------------------------------------------------
-# The application uses PostgreSQL exclusively for all request-path data. SQLite
-# is linked transitively (Python stdlib) but never opens attacker-controlled
-# database files, so the parser CVEs are not reachable.
-CVE-2026-11822
-CVE-2026-11824
-CVE-2025-70873
-CVE-2021-45346
-
-# --- libssh2-1t64 ------------------------------------------------------------
-# SSH client library pulled in transitively (via libcurl). The app initiates no
-# SSH connections.
-CVE-2026-7598
-
-# --- krb5 (libgssapi-krb5-2, libk5crypto3, libkrb5-3, libkrb5support0) --------
-# Kerberos client libraries linked transitively (libcurl/ldap). The app
-# performs no Kerberos/GSSAPI authentication.
-CVE-2026-11850
-CVE-2024-26461
-CVE-2024-26458
-CVE-2018-5709
-
-# --- libldap2 ----------------------------------------------------------------
-# LDAP client linked transitively (via libcurl). The app performs no LDAP
-# queries.
-CVE-2026-22185
-CVE-2020-15719
-CVE-2017-17740
-CVE-2017-14159
-CVE-2015-3276
-
-# --- glibc (libc6, libc-bin) -------------------------------------------------
-# Core C library. The flagged CVEs concern regex/printf/iconv edge cases driven
-# by locally crafted inputs to those specific APIs; none are exposed to remote,
-# attacker-controlled input in this app. Several are decade-old, disputed, or
-# explicitly low-impact entries.
-CVE-2026-6238
-CVE-2026-5928
-CVE-2026-5450
-CVE-2026-5435
-CVE-2019-9192
-CVE-2019-1010025
-CVE-2019-1010024
-CVE-2019-1010023
-CVE-2019-1010022
-CVE-2018-20796
-CVE-2010-4756
-
-# --- util-linux family (bsdutils, libblkid1, libmount1, libsmartcols1, -------
-#     libuuid1, liblastlog2-2, mount, login, util-linux) ----------------------
-# Disk/mount/login utilities. The container mounts no filesystems at runtime
-# and runs as a single fixed non-root user; these tools are not invoked on
-# request input.
-CVE-2026-27456
-CVE-2026-3184
-CVE-2025-14104
-CVE-2022-0563
-
-# --- systemd libs (libsystemd0, libudev1) ------------------------------------
-# Linked transitively; the container runs under Gunicorn, not systemd, and does
-# no udev interaction.
-CVE-2026-40228
-CVE-2023-31439
-CVE-2023-31438
-CVE-2023-31437
-CVE-2013-4392
-
-# --- compression / TLS helper libs (libbz2-1.0, liblzma5, zlib1g, ------------
-#     libgnutls30t64, libtasn1-6) ---------------------------------------------
-# Linked transitively. Application TLS to the LLM provider uses Python's
-# ssl/OpenSSL stack; gnutls is only reachable via the healthcheck curl. No
-# attacker-controlled bz2/xz/zlib streams are decompressed in the request path.
-CVE-2026-42250
-CVE-2026-34743
-CVE-2026-27171
-CVE-2025-13151
-CVE-2011-3389
-
-# --- shell/base utilities (coreutils, tar, bash, sysvinit-utils, apt, --------
-#     libapt-pkg7.0, login.defs, passwd) --------------------------------------
-# Base-system tooling not exposed to remote input. apt is not invoked at
-# runtime (no package operations in the prod flow). The TEMP-* IDs are Debian
-# security-tracker placeholders for unfixed low-severity issues.
-CVE-2026-5704
-CVE-2025-5278
-CVE-2024-56433
-CVE-2017-18018
-CVE-2011-3374
-CVE-2007-5686
-CVE-2005-2541
-TEMP-0841856-B18BAF
-TEMP-0628843-DBAD28
-TEMP-0517018-A83CE6
-TEMP-0290435-0B57B5
+# Policy: do NOT pre-populate this file. Suppress an EL/ALSA ID here only after
+# evaluating a GENUINELY UNFIXABLE finding (Trivy reports an empty FixedVersion)
+# that is also not reachable in this app's request path — with a one-line
+# rationale per ID, the same narrow-scope discipline as before. Every new CVE,
+# including new unfixable ones, must surface in CI and the Security tab until
+# explicitly evaluated and added here. Keep the signal; drop only known noise.

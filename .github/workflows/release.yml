@@ -111,11 +111,18 @@ jobs:
           # default per GITHUB_REF separiert — jeder Tag-Build (refs/tags/
           # vX.Y.Z) bekommt eigenen Cache und startet bei null. Mit fixem
           # `scope=release` teilen alle Release-Builds denselben Cache, sodass
-          # pyproject.toml-Layer + apt-Layer ueber Tag-Grenzen hinweg gehittet
+          # pyproject.toml-Layer + dnf-Layer ueber Tag-Grenzen hinweg gehittet
           # werden. Cache wird automatisch nach 7 Tagen ohne Hit evictet
           # (GHA-LRU). System-Lib-Security-Updates kommen via Base-Image-Push
-          # (`python:3.13-slim-trixie`-Digest aendert sich) → Layer-Hash
-          # invalidiert automatisch.
+          # (`almalinux:10` / `almalinux:10-minimal`-Digest aendert sich) →
+          # Layer-Hash invalidiert automatisch (ADR-0069). Air-Gap: die
+          # AlmaLinux-Base-Images in die interne Registry spiegeln (siehe
+          # docs/operations.md).
+          #
+          # HINWEIS: dieser Build setzt kein explizites `target` → er baut die
+          # LETZTE Dockerfile-Stage. Die scratch-`runtime`-Stage muss daher die
+          # letzte Stage im Dockerfile bleiben (sonst hier `target: runtime`
+          # ergaenzen).
           cache-from: type=gha,scope=release
           cache-to: type=gha,scope=release,mode=max
           # Provenance-Attestations für Software-Supply-Chain. Sind ohnehin

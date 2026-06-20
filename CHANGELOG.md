@@ -4,7 +4,9 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/),
 und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — ADR-0067: exclude container-runtime data-roots from the agent host scan (v0.28.0)
+## [Unreleased]
+
+### ADR-0067: exclude container-runtime data-roots from the agent host scan (v0.28.0)
 
 The reference agent's `trivy rootfs /` scan now excludes the well-known
 container-runtime data-roots, because their contents are unpacked
@@ -16,7 +18,7 @@ before sending anything, so the host ingested no data at all and the timer retry
 hit the same cause every cycle. No backend, schema, migration, or envelope
 change. Quality gates green (shellcheck primary); agent 0.9.0.
 
-### Changed
+#### Changed
 
 - **`agent/fathometer-agent.sh`**: the `trivy rootfs` call gains `--skip-dirs`
   for the four built-in container-runtime data-roots (`/var/lib/docker`,
@@ -27,7 +29,7 @@ change. Quality gates green (shellcheck primary); agent 0.9.0.
   `CURRENT_AGENT_VERSION` 0.8.0 → 0.9.0 (`MIN_AGENT_VERSION` stays 0.1.0 — old
   agents that omit the skip are not broken, only less precise).
 
-### Added
+#### Added
 
 - **`FM_SCAN_SKIP_DIRS`** (agent env): comma-separated absolute paths appended
   to the built-in skip list — operator escape hatch for a Docker `data-root` /
@@ -40,7 +42,35 @@ change. Quality gates green (shellcheck primary); agent 0.9.0.
   appends `FM_SCAN_SKIP_DIRS`, and that `--timeout` is sourced from
   `FM_SCAN_TIMEOUT` (default `5m`).
 
-## [Unreleased] — Block AL (ADR-0066): Pass-2 sortiert Trivy-Stale-Artifact-False-Positives aus (v0.27.0)
+### TICKET-020 (ADR-0069): runtime base image → AlmaLinux 10-minimal
+
+Replace the Debian `python:3.13-slim-trixie` runtime base with AlmaLinux
+10-minimal (builder on `almalinux:10`) to cut Trivy OS-package noise: EL ships
+authoritative OVAL/ALSA errata with backport-aware fix-state, vs. the Debian
+tracker's no-fix-but-listed entries that drove the ~90-entry `.trivyignore`.
+First Alma scan: image OS findings 45 → 16 (all openssl-libs, all with an ALSA
+fix available), fs findings 2 → 0. No schema/migration.
+
+#### Changed
+- **`Dockerfile`**: builder `almalinux:10` (dnf), runtime `almalinux:10-minimal`
+  (microdnf); interpreter `python3.14` (EL10 ships no 3.13; `requires-python>=3.13`
+  satisfied). No libpq (psycopg[binary] bundles it), no curl. `entrypoint.sh` +
+  scratch-flatten stage kept; builder/runtime share `/usr/bin/python3.14` (no venv
+  relocation). HEALTHCHECK curl → Python `urllib` probe.
+- **Image-size DoD cap** raised 200 → 256 MB (Alma userland > Debian-slim; ~249 MB).
+- **`uv.lock`**: bump `cryptography` 48.0.0 → 48.0.1 (GHSA-537c-gmf6-5ccf, HIGH) and
+  `pydantic-settings` 2.14.1 → 2.14.2 (GHSA-4xgf-cpjx-pc3j); resync with `pyproject`
+  (Block-AI subtree was unlocked since 770dcf5 → full trivy-fs coverage restored).
+- **`.trivyignore`**: dropped the now-moot Debian-tracker list; empty documented
+  policy stub (AlmaLinux errata findings are fixable, not suppressed).
+
+#### Notes
+- 15 remaining `openssl-libs` image findings clear once `almalinux:10-minimal`
+  ships the openssl `-4.el10_2` errata build (base refresh; no code change).
+
+## [v0.27.0] — 2026-06-14
+
+### Block AL (ADR-0066): Pass-2 sortiert Trivy-Stale-Artifact-False-Positives aus (v0.27.0)
 
 Trivy meldet alte, **nicht gebootete** `installonly`-Kernel als verwundbar
 (`installed=<alt>`, `fixed=<neuer>`), obwohl der **laufende** Kernel den Fix
@@ -50,7 +80,7 @@ Trivy meldet alte, **nicht gebootete** `installonly`-Kernel als verwundbar
 `patch`), kein Auto-Band-Flip im Code, kein Outbound, **keine** Migration
 (reiner additiver Envelope-Feld-Zusatz). Quality-Gates grün; Agent 0.8.0 / Lib 0.5.0.
 
-### Changed
+#### Changed
 
 - **Pass-2-Prompt** (`llm_risk_reviewer.py`): Per-Finding-Zeile trägt jetzt
   `installed=<version>` (neben `fix=`) und `host_update=<available|none>`;
@@ -68,7 +98,7 @@ Trivy meldet alte, **nicht gebootete** `installonly`-Kernel als verwundbar
 - **Findings-Ingest** (`findings_ingest.py`): zweite Join-Map keyed by
   `package_name` für os-pkgs; lang-pkgs/`other` weiter über `target_path`.
 
-### Added
+#### Added
 
 - **`HostUpdateEntry.pkg_name`** (`scan_envelope.py`): additives optionales
   os-pkgs-Join-Key-Feld (ASCII/NUL-validiert); `path` ist additiv optional geworden
@@ -79,13 +109,13 @@ Trivy meldet alte, **nicht gebootete** `installonly`-Kernel als verwundbar
   unabhängig vom Flag), Schema-`pkg_name`-Varianten, Forward-Compat. Agent-Parser-
   Cases (os-pkgs-Pfad) in der bestehenden bats-Suite (on-demand, User-genehmigt).
 
-### Forward-Compat
+#### Forward-Compat
 
 - Alte Agenten (kein os-pkgs-`host_updates`-Eintrag) → Kernel-Finding
   `host_update_available=NULL`, Prompt rendert `host_update=none`, der Reviewer
   fällt auf den reinen Versionsvergleich (`fixed` vs. laufender Kernel) zurück.
 
-## [Unreleased] — TICKET-016: Risk-Band-Reason group-/lane-verschachtelt in den Findings-Listen (TD-020 + TD-021)
+### TICKET-016: Risk-Band-Reason group-/lane-verschachtelt in den Findings-Listen (TD-020 + TD-021)
 
 Die LLM-`risk_band_reason` (Lane-Level-Assessment) war für `monitor`/`noise`
 in den Findings-Listen unsichtbar (TD-020) und bei 256 Zeichen mitten im Satz
@@ -93,7 +123,7 @@ abgeschnitten (TD-021). Die Reason wird jetzt **group-/lane-verschachtelt** übe
 den Findings gezeigt — korrekt als Lane-Level verortet, nicht als Per-Finding-Box
 (ADR-0054-Falle bleibt vermieden). Quality-Gates grün. Alembic: Migration `0029`.
 
-### Added
+#### Added
 
 - **`reason_block(reason, limit=160)`-Macro** (`_macros.html`): Single-Source-
   Smart-Truncation (Wortgrenze) + Alpine-Toggle „Show all"/„Show less"
@@ -106,7 +136,7 @@ den Findings gezeigt — korrekt als Lane-Level verortet, nicht als Per-Finding-
   `fix_lane_for`); Pager zählt weiter Findings, nicht Header. Pending-Buckets
   ohne Group bekommen keinen Reason.
 
-### Changed
+#### Changed
 
 - **`ApplicationGroupEvaluation.risk_band_reason`** `String(256)` → `Text`
   (Migration `0029_widen_reason_text`, Downgrade `LEFT(…,256)`). Reviewer-
@@ -114,12 +144,12 @@ den Findings gezeigt — korrekt als Lane-Level verortet, nicht als Per-Finding-
   (`_REASON_DB_SAFETY_CAP`) in `_upsert_evaluation` (truncate statt fail,
   ADR-0065 §6). `risk_engine._truncate` nur noch für Pre-Triage-Reasons.
 
-### Docs
+#### Docs
 
 - **ADR-0065** angelegt (amendet ADR-0054 für den Listen-Kontext). TD-020/TD-021
   in `docs/techdebt.md` als erledigt + kreuzverlinkt.
 
-## [Unreleased] — TICKET-017: Drift-Reconciliation-Sweep (self-healing „re-evaluation pending")
+### TICKET-017: Drift-Reconciliation-Sweep (self-healing „re-evaluation pending")
 
 Der „re-evaluation pending"-Drift-Hint (ADR-0052) hing bisher, wenn sich das
 OPEN-Set einer Group **ohne** neue Pass-1-Aktivität änderte (Reopen/Resolve/
@@ -127,7 +157,7 @@ EPSS-Feed-Update) — der bestehende Backstop-Sweep deckt nur Server mit
 kürzlicher Group-Detection ab, also wurde nichts re-enqueued bis zum nächsten
 24h-Scan. Quality-Gates grün. Alembic: keine Migration.
 
-### Added
+#### Added
 
 - **`_run_pass2_drift_reconcile_sweep_safe`** (Worker-Sub-Tick, alle 15 min,
   `PASS2_DRIFT_RECONCILE_SWEEP_INTERVAL_SEC`): ruft den idempotenten
@@ -139,7 +169,7 @@ kürzlicher Group-Detection ab, also wurde nichts re-enqueued bis zum nächsten
   Neuer `Pass2Trigger`-Wert `drift_reconcile`. Re-Open: bei sehr großen Flotten
   den Sweep bounden/spreaden.
 
-## [Unreleased] — Block AK (ADR-0064): Upstream-Fix als Finding-Level-Enrichment statt eigener Lane
+### Block AK (ADR-0064): Upstream-Fix als Finding-Level-Enrichment statt eigener Lane
 
 Nimmt die separate `upstream`-Fix-Lane aus Block AG zurück: für den Operator sind
 „kein Host-Patch" und „Upstream-Fix existiert, braucht Rebuild" **dieselbe
@@ -150,7 +180,7 @@ in der `No host patch — mitigate`-Card). **AGs Korrektheits-Kern bleibt** (lan
 nie host-applizierbar → keine falsche „Apply app update"); AH/AI/AJ bleiben.
 Quality-Gates grün. Alembic-Roundtrip `0028` + Operator-Browser-Smoke beim User.
 
-### Changed
+#### Changed
 
 - **`fix_lane_for`/SQL-Spiegel** (`risk_engine.py`): `upstream`-Zweig entfernt —
   `lang-pkgs+has_fix` (ohne `host_update_available`) → `mitigate` (war `upstream`).
@@ -166,7 +196,7 @@ Quality-Gates grün. Alembic-Roundtrip `0028` + Operator-Browser-Smoke beim User
   (kein `upstream`-Lane-Filter mehr); Upstream-Check-Button/Panel hängen jetzt an
   den `escalate-mitigate`-Card-Rows. Routen/`derive_state`/Cache unverändert.
 
-### Added
+#### Added
 
 - **Finding-Level-Fix-Version** in der `No host patch — mitigate`-Card: „fixed
   upstream: `<component> <version>` — needs rebuild" (aus
@@ -174,7 +204,7 @@ Quality-Gates grün. Alembic-Roundtrip `0028` + Operator-Browser-Smoke beim User
 - **Migration `0028`** (`down_revision=0027`): CHECK `ck_app_group_evals_fix_lane`
   → `IN ('patch','mitigate')`, Eval-Rebuild (Pass-2 refüllt; Prompt-Version-Bump).
 
-## [Unreleased] — Block AJ (ADR-0063 §Integration): Upstream-Verdikt im Group-Chat-Snapshot
+### Block AJ (ADR-0063 §Integration): Upstream-Verdikt im Group-Chat-Snapshot
 
 Schliesst die ADR-0055-Snapshot-Erweiterung aus ADR-0063 §Integration: liegt für
 eine `(Server, Group)` ein abgeschlossenes Upstream-Check-Verdikt vor, wird es
@@ -183,7 +213,7 @@ kann mit dem Assistenten darüber reden („warum kein Fix?", „was heisst miti
 hier?"). Beratend, friert mit dem Snapshot ein, ändert nie den Risk-Band. **Kein
 Schema, keine Migration** — liest `upstream_check_results`. Quality-Gates grün.
 
-### Added
+#### Added
 
 - **`build_group_system_prompt(upstream_verdict=None)`** (`group_chat_prompt.py`):
   optionaler 8. Daten-Block „UPSTREAM CHECK (advisory · candidate · verify)"
@@ -194,7 +224,7 @@ Schema, keine Migration** — liest `upstream_check_results`. Quality-Gates grü
   Lazy-Create wird das Verdikt server-seitig via `lookup_state_for_group`
   (Reuse AI-2) ermittelt und nur bei `status == 'done'` eingefroren.
 
-## [Unreleased] — Block AI-2 (ADR-0063): Agentische Upstream-Update-Suche — Operator-UI
+### Block AI-2 (ADR-0063): Agentische Upstream-Update-Suche — Operator-UI
 
 Macht das in AI-1 gebaute Backend operator-nutzbar: Konfiguration im
 Provider-Tab (kein psql mehr nötig) + „Check for upstream fix"-Button mit
@@ -203,7 +233,7 @@ advisory-Panel auf der `ESCALATE · Upstream fix`-Card. Feature bleibt
 `ruff`/`ruff format`/`mypy app/`, Pure-Unit (`pytest`). reviewer + security-auditor
 (XSS-Fläche) grün. Live-Operator-Browser-Smoke steht beim User an.
 
-### Added
+#### Added
 
 - **Provider-Tab-Config** (`settings/llm_provider.html` + `UpstreamCheckSettingsForm`
   + `update_upstream`-View): Enable-Toggle, Such-Backend (searxng/tavily/firecrawl/
@@ -223,12 +253,12 @@ advisory-Panel auf der `ESCALATE · Upstream fix`-Card. Feature bleibt
 - **Card-State-Lookup** (`upstream_check_state.derive_state`/`worst_upstream_finding`):
   Initial-State pro escalate-upstream-Row ohne Sofort-Poll.
 
-### Changed
+#### Changed
 
 - README: der „Agentic upstream check"-Bullet ist jetzt operator-wahr (UI vorhanden)
   und wird mit AI-2 committet.
 
-## [Unreleased] — Block AI-1 (ADR-0063): Agentische Upstream-Update-Suche — Backend
+### Block AI-1 (ADR-0063): Agentische Upstream-Update-Suche — Backend
 
 **Optionale, operator-gated, beratende** agentische Suche, ob es für ein
 `upstream`-Lane-Finding (lang-pkgs, nicht host-patchbar — ADR-0061/0062) schon
@@ -239,7 +269,7 @@ Chat-Snapshot-Integration in einem Folge-Block. Quality-Gates grün:
 `ruff`/`ruff format`/`mypy app/`, Pure-Unit (`pytest`). Alembic-Roundtrip `0027`
 und der Live-Agent-Smoke (echtes Such-Backend + LLM) stehen beim User an.
 
-### Added
+#### Added
 
 - **Dependencies** `pydantic-ai-slim[openai]` + `trafilatura` (nur vom
   `research-worker` importiert; geteiltes Image, in app/llm-worker inert).
@@ -262,7 +292,7 @@ und der Live-Agent-Smoke (echtes Such-Backend + LLM) stehen beim User an.
 - **Docs** `docs/operations.md` (neu) — Outbound/Allowlist/Air-Gap; ARCHITECTURE
   §5/§11/§17 + CLAUDE.md §17 opt-in-Ausnahme zu ADR-0050.
 
-## [Unreleased] — Block AH (ADR-0062): Host-Update-Flag — präzise statt pauschal
+### Block AH (ADR-0062): Host-Update-Flag — präzise statt pauschal
 
 Verfeinert ADR-0061: ein lang-pkgs-Finding wird nur dann als `upstream`
 geführt, wenn der Host es **nicht** per Paketmanager patchen kann. Der
@@ -274,7 +304,7 @@ kein LLM. Quality-Gates grün: `ruff`/`ruff format`/`mypy app/`, Pure-Unit
 (`pytest`), `shellcheck`. Alembic-Roundtrip `0026`, der `.bats`-Resolver-Lauf
 und der Live-Host-Smoke (echter Paketmanager) stehen beim User an.
 
-### Added
+#### Added
 
 - **`host_update_available` (+ `owning_package`/`available_version`)** als
   nullable Finding-Spalten (Migration `0026`, `down_revision=0025`, reiner
@@ -289,7 +319,7 @@ und der Live-Host-Smoke (echter Paketmanager) stehen beim User an.
 - **`.bats`-Resolver-Tests** (`tests/agent/test_host_update_resolver.bats`,
   On-Demand-Suite) für die rpm/dpkg/dnf/apt-Output-Parser.
 
-### Changed
+#### Changed
 
 - **`fix_lane_for(finding_class, has_fix, host_update_available=None)`** +
   SQL-Spiegel um den Flag erweitert: `lang-pkgs/other & has_fix &
@@ -299,7 +329,7 @@ und der Live-Host-Smoke (echter Paketmanager) stehen beim User an.
   Ingest joint es pro Finding über `target_path`.
 - **Agent v0.7.0** (`CURRENT_AGENT_VERSION`), Lib `0.4.0`.
 
-## [Unreleased] — Block AG (ADR-0061): Fix-Ownership — `upstream`-Lane für lang-pkgs-Fixes
+### Block AG (ADR-0061): Fix-Ownership — `upstream`-Lane für lang-pkgs-Fixes
 
 lang-pkgs-Fixes (gobinary/jar/node — z. B. die in `tailscaled` einkompilierte
 Go-stdlib, CVE-2026-42504) werden nicht mehr fälschlich als host-applizierbarer
@@ -310,7 +340,7 @@ Agent-/Outbound-Change. Quality-Gates grün: `ruff`/`ruff format`/`mypy app/`,
 Pure-Unit (`pytest`). Alembic-Roundtrip `0025` und Operator-Browser-Smoke
 stehen beim User an.
 
-### Changed
+#### Changed
 
 - **Fix-Lane-Partition dreiteilig** (ADR-0061): `fix_lane ∈ {patch, upstream,
   mitigate}`. Neue Single-Source `risk_engine.fix_lane_for(finding_class,
@@ -328,7 +358,7 @@ stehen beim User an.
   `fix_lane`-Ausdruck (nicht mehr nur `has_fix`) — eine Group kann
   os-pkgs-Patch- **und** lang-pkgs-Upstream-Findings tragen (beide `has_fix`).
 
-### Added
+#### Added
 
 - **Migration `0025_upstream_fix_lane`** (`down_revision=0024`): CHECK
   `ck_app_group_evals_fix_lane` → `IN ('patch','mitigate','upstream')`,
@@ -339,7 +369,7 @@ stehen beim User an.
   Label (patch / upstream / no patch) in Workflow-Tabelle und Group-Card; die
   Fix-Version bleibt sichtbar.
 
-## [Unreleased] — Block AF (ADR-0057): Getrennte Modelle für Reviewer und Chat
+### Block AF (ADR-0057): Getrennte Modelle für Reviewer und Chat
 
 Das bisher geteilte `Setting.llm_model` wird in **zwei** Felder getrennt:
 **`llm_reviewer_model`** (Rename, nullable, Default `openai/gpt-oss-120b`,
@@ -351,7 +381,7 @@ Quality-Gates grün: `ruff`/`ruff format`/`mypy app/`, Pure-Unit (`pytest`,
 +62 Tests). Alembic-Roundtrip `0024`, Live-Test-Connection-Doppelprobe und
 Operator-Browser-Smoke stehen beim User an.
 
-### Changed
+#### Changed
 
 - **`settings.llm_model` → `llm_reviewer_model`** (Rename, Migration `0024`,
   `down_revision=0023_block_ae_group_chat`): der Risk-Reviewer (`llm_worker.py`,
@@ -373,7 +403,7 @@ Operator-Browser-Smoke stehen beim User an.
   gemappter Code (`model_not_found`/`provider_error`/`timeout`/`auth_error`/…) —
   kein API-Key, kein roher Exception-Text in der Response.
 
-### Added
+#### Added
 
 - **`settings.llm_chat_model`** (`String(128)`, `NOT NULL`, `server_default`
   `deepseek-ai/DeepSeek-V4-Flash`): dediziertes Chat-Modell. Der forced Backfill
@@ -381,9 +411,9 @@ Operator-Browser-Smoke stehen beim User an.
   schlägt der Chat mit `404` fehl (bewusst akzeptiert, ADR-0057 §Konsequenzen;
   die Test-Connection-Doppelprobe deckt es auf).
 
-## [Unreleased] — Fix (ADR-0056): Risk-Reviewer-Tages-Cap aus der DB statt Env
+### Fix (ADR-0056): Risk-Reviewer-Tages-Cap aus der DB statt Env
 
-### Fixed
+#### Fixed
 
 - **Risk-Reviewer-Token-Cap kommt jetzt aus `Setting.llm_daily_token_cap`**
   (Operator-steuerbar via Provider-Tab) statt aus dem Env
@@ -398,7 +428,7 @@ Operator-Browser-Smoke stehen beim User an.
   binnen ≤ 60 s ohne Pod-Restart. `FM_LLM_TOKEN_BUDGET_DAILY` ist nur noch der
   Install-Seed für frische Rows (`ensure_settings_row`), kein Laufzeit-Cap mehr.
 
-## [Unreleased] — Block AE (ADR-0055): Per-Group AI-Chat
+### Block AE (ADR-0055): Per-Group AI-Chat
 
 Wieder-Einführung eines LLM-Chats — anders als der mit ADR-0050 entfernte
 server-weite Chat: **fokussiert pro `(Server, Application-Group)`**, ausgelöst
@@ -411,7 +441,7 @@ grün: `ruff`/`mypy app/`, Pure-Unit (`pytest`, +69 Tests inkl.
 `tests/adversarial/`-Prompt-Injection + XSS). Alembic-Roundtrip `0023` +
 db_integration (UNIQUE/CASCADE) + SSE-E2E stehen beim User an.
 
-### Added
+#### Added
 
 - **Per-Group-AI-Chat** (`app/api/group_chat.py`, ADR-0055): vier Browser-Routen
   unter `/servers/<id>/groups/<gid>/chat[…]` — `GET …/chat` (Sub-View-Fragment
@@ -449,14 +479,14 @@ db_integration (UNIQUE/CASCADE) + SSE-E2E stehen beim User an.
   Scanner-Strings werden entschärft, damit untrusted Daten den Datenblock nicht
   vorzeitig schließen können).
 
-## [Unreleased] — TICKET-015: Trivy-Bump 0.71.0 + Trivy-Auto-Update im Agent
+### TICKET-015: Trivy-Bump 0.71.0 + Trivy-Auto-Update im Agent
 
 Agent hält die fathometer-managed Trivy-Binary künftig selbst auf der
 empfohlenen Version, statt nur eine „outdated"-Pill anzuzeigen. Quality-Gates
 grün: `ruff`/`mypy app/`, `shellcheck`, Pure-Unit (`pytest`,
 `tests/agent/test_auto_update.sh`).
 
-### Changed
+#### Changed
 
 - **`RECOMMENDED_TRIVY_VERSION` 0.70.0 → 0.71.0**, **`CURRENT_AGENT_VERSION`
   0.5.0 → 0.6.0** (`app/config.py`, gemeinsam mit `AGENT_VERSION="0.6.0"` im
@@ -464,7 +494,7 @@ grün: `ruff`/`mypy app/`, `shellcheck`, Pure-Unit (`pytest`,
   0.71.0 ist ein Minor-Release ohne Schema-Breaking-Changes, ein MIN-Bump würde
   0.70.0-Hosts unnötig hart als veraltet markieren.
 
-### Added
+#### Added
 
 - **`auto_update_trivy` im wiederkehrenden Agent-Lauf** (`fathometer-agent.sh`):
   läuft **nach** dem Agent-Selbst-Update und **vor** dem Scan. Hebt die
@@ -478,13 +508,13 @@ grün: `ruff`/`mypy app/`, `shellcheck`, Pure-Unit (`pytest`,
   Air-Gap via **`FM_TRIVY_AUTO_UPDATE=0`** (Default an); `tar`/`sha256sum` sind
   Soft-Deps des Update-Pfads (fehlen sie → Update-Skip, kein Abbruch).
 
-## [Unreleased] — Server-Action „Delete findings"
+### Server-Action „Delete findings"
 
 Neue Operator-Action im Settings-Server-Dropdown (`/settings/servers`) neben
 Rotate-key/Retire/Revoke, um einen defekten Scan-Stand durch Neu-Einspielen zu
 reparieren. Quality-Gates grün: `ruff`/`mypy app/`.
 
-### Added
+#### Added
 
 - **`POST /servers/{id}/delete-findings`:** löscht **alle** Findings eines
   Servers (jeden Status) unwiderruflich. Der Server-Eintrag und die Audit-Spur
@@ -496,7 +526,9 @@ reparieren. Quality-Gates grün: `ruff`/`mypy app/`.
   Neue Audit-Action `server.findings_deleted` in `KNOWN_ACTIONS`
   (Audit-View-Filter).
 
-## [Unreleased] — TICKET-010 (ADR-0052): Operator-Sichten zeigen Jetzt-Zustand
+## [v0.15.0] — 2026-06-07
+
+### TICKET-010 (ADR-0052): Operator-Sichten zeigen Jetzt-Zustand
 
 Drei zusammenhängende Konsistenz-Bugs (Befund ftp-server / CVE-2026-31431):
 fälschlich für immer RESOLVED bleibende Wiedergänger-Findings, Pass-2-Eval über
@@ -505,7 +537,7 @@ geschlossene CVEs als „Worst Finding" zeigten. Kein Schema, keine Migration,
 kein neuer Endpoint. Quality-Gates grün: `ruff`/`mypy app/`, Default-`pytest`
 2329 passed. db_integration-Läufe + Operator-Browser-Smoke stehen beim User an.
 
-### Fixed
+#### Fixed
 
 - **Reopen-on-Redetect (Bug A):** der Scan-Ingest reopened jetzt vor dem Upsert
   alle RESOLVED-Findings deren `(identifier_key, package_name)` im aktuellen
@@ -526,7 +558,7 @@ kein neuer Endpoint. Quality-Gates grün: `ruff`/`mypy app/`, Default-`pytest`
   nur noch Band/Reason/Action-Type. Bei Drift zwischen Snapshot- und Live-Worst
   rendern Workflow-Card und Group-Card den Hint „re-evaluation pending".
 
-### Added
+#### Added
 
 - **Sofort-Re-Eval bei Triage-Aktionen:** Acknowledge/Reopen/Group-Ack/Bulk-Ack
   (UI + API, alle Flavors) triggern nach erfolgreichem Status-Write
@@ -535,7 +567,7 @@ kein neuer Endpoint. Quality-Gates grün: `ruff`/`mypy app/`, Default-`pytest`
   geändert wurde. Vorher passierte das Re-Eval erst beim nächsten Scan
   (24-h-Lücke).
 
-## [Unreleased] — ADR-0050: "Request AI Assessment"-Chat-Feature entfernt
+### ADR-0050: "Request AI Assessment"-Chat-Feature entfernt
 
 Das server-weite interaktive LLM-Chat-Assessment (Block G) wird ersatzlos
 entfernt — UI, Routes, Prompts, Chat-Services, JS, DB-Tabellen, Tests. Die
@@ -544,7 +576,7 @@ unverändert. Quality-Gates grün: `ruff`/`ruff format`/`mypy app/`, Default-
 `pytest` 2233 passed / 0 failed. **`ARCHITECTURE.md` wird separat (paralleler
 Rewrite) nachgezogen.**
 
-### Removed
+#### Removed
 
 - **"Request AI assessment"-Button** auf der Server-Detail-Seite (`servers/detail.html`)
   + `sd-ai-button`-CSS.
@@ -567,7 +599,7 @@ Rewrite) nachgezogen.**
   `test_llm_update_hook.py`, `test_llm_token_tracker.py`, `test_llm_prompt.py`,
   `tests/adversarial/test_prompt_injection.py` (testete den Chat-Prompt).
 
-### Kept (geteilt mit Risk-Reviewer)
+#### Kept (geteilt mit Risk-Reviewer)
 
 - `llm_client.py`, `llm_budget.py`, der gesamte Risk-Reviewer (Block P), die
   Provider-Config auf `settings` (`llm_base_url`/`llm_model`/
@@ -575,14 +607,14 @@ Rewrite) nachgezogen.**
   `/settings/llm`-Provider-Tab und das Audit-Event `llm.provider_changed`
   (ohne `archived_conversations`-Metadata).
 
-## [Unreleased] — ADR-0047 (Block AD): Settings-Redesign (horizontale Tab-Nav + `s-*`-Schicht)
+### ADR-0047 (Block AD): Settings-Redesign (horizontale Tab-Nav + `s-*`-Schicht)
 
 Zielversion **v0.19.0**. Reines Restyling — keine Routen-/Schema-/Render-Helper-
 Änderung, keine Migration, kein neuer Endpoint. Phasen 0→E mit je einem Commit
 (Phase C in C1/C2 geteilt). `app/views/_settings_shell.py`, `settings.py` und
 `llm_settings.py` unangetastet.
 
-### Changed
+#### Changed
 
 - **Settings-Sekundär-Navigation: vertikale 224px-Nav → horizontale Sticky-Tab-
   Leiste** (`.settings-tabs`, ADR-0047). Sieben Tabs in Mockup-Reihenfolge
@@ -614,7 +646,7 @@ Zielversion **v0.19.0**. Reines Restyling — keine Routen-/Schema-/Render-Helpe
   wenn der Pfad unter `/settings` liegt; der entsprechende CSS-Block wurde aus
   dem Mockup-CSS nach `profile-menu.css` (Topbar-Scope) verschoben.
 
-#### Folge-Fixes (nach erstem Sichttest)
+##### Folge-Fixes (nach erstem Sichttest)
 
 - **External Feeds (EPSS/CISA-KEV)** vom LLM-Provider- auf den **About**-Tab
   verschoben (read-only; `about_view` reicht jetzt `feed_statuses` durch).
@@ -623,7 +655,7 @@ Zielversion **v0.19.0**. Reines Restyling — keine Routen-/Schema-/Render-Helpe
   wegen `container-type:inline-size` sonst Containing-Block für `position:fixed`).
 - **Master-Key-Tab-Badge** („new") aus der Nav entfernt.
 
-### Removed
+#### Removed
 
 - **`frontend/src/css/components/settings-manage.css`** (ADR-0040-`sd-manage-*`-
   Schicht) gelöscht — durch `s-table`/`s-tags__*`/`s-groups__*` ersetzt;
@@ -632,20 +664,20 @@ Zielversion **v0.19.0**. Reines Restyling — keine Routen-/Schema-/Render-Helpe
   Smoke) gelöscht — durch `test_settings_nav.py` + `test_settings_subpages_smoke.py`
   ersetzt.
 
-### Notes
+#### Notes
 
 - **Mockup-Features ohne Backend weggelassen** (kein Halb-Bau): Debug-Log-Filter/
   Level/Pause/Copy/Live-Stream (TD-017), Tag-Usage-Zählung in der Tags-Ansicht
   (TD-016, View-Vertrag liefert keine Zählung). Eyebrow-Nummerierung „01 / 07"
   bewusst weggelassen (User-Entscheidung).
 
-## [Unreleased] — ADR-0046 (Block AC): Persistenter Sidebar-Group-Aufklapp-Zustand
+### ADR-0046 (Block AC): Persistenter Sidebar-Group-Aufklapp-Zustand
 
 Zielversion **v0.18.0**. Kein Schema, kein neuer Endpoint, keine Migration,
 kein localStorage — Cookie + Server-Render. Drei Phasen (A Server-Read+Render,
 B Client-Write, C Doku).
 
-### Added
+#### Added
 
 - **Aufgeklappte Sidebar-Gruppen bleiben aufgeklappt** über den 60-s-Polling-Swap,
   Reload und Browser-Sessions hinweg (ADR-0046). Mechanik:
@@ -662,19 +694,19 @@ B Client-Write, C Doku).
   - `app/templates/sidebar/_group_section.html`: `open` + `aria-expanded`
     conditional aus `sidebar_open_group_ids`; Undefined-Fallback rendert collapsed.
 
-### Unchanged (bewusst)
+#### Unchanged (bewusst)
 
 - Default ohne Cookie bleibt **alles collapsed** (ADR-0034 §Sidebar-Verhalten) —
   bestehende Sidebar-Tests sind der Regressions-Anker und unverändert grün.
 - Kein Auto-Expand bei aktiver Sidebar-Suche (Out of Scope, Re-Open-Trigger
   in ADR-0046). Keine geräteübergreifende Persistenz (Cookie ist pro Browser).
 
-## [Unreleased] — ADR-0045 (Block AB): English-only UI
+### ADR-0045 (Block AB): English-only UI
 
 Zielversion **v0.17.0**. Reiner String-Touch — kein Markup-, Logik-, CSS- oder
 Schema-Umbau, keine Migration. Sechs Phasen (A–F), je ein Commit.
 
-### Changed
+#### Changed
 
 - **Gesamte operator-sichtbare UI ist jetzt ausschliesslich englisch**
   (ADR-0045, loest ADR-0033 §8 Phase-2-Strategie ab). Betroffen:
@@ -696,7 +728,7 @@ Schema-Umbau, keine Migration. Sechs Phasen (A–F), je ein Commit.
   - Chat-JSON-Error-`message`-Werte in `app/api/llm_chat.py` (maschinelle
     `error`-Codes unveraendert).
 
-### Added
+#### Added
 
 - **Sprach-Sweep-Test** `tests/test_ui_language.py` (Pure-Unit, Teil des
   Default-`pytest`): scannt Templates, ausgelieferte JS und String-Literale in
@@ -705,15 +737,15 @@ Schema-Umbau, keine Migration. Sechs Phasen (A–F), je ein Commit.
   Wortgrenzen-Marker) und schlaegt bei jedem neuen deutschen UI-String fehl.
   Explizite `_ALLOWLIST` als Ausnahme-Mechanismus.
 
-### Notes
+#### Notes
 
 - **Doc-Sprache, Code-Kommentare, Docstrings, ADRs bleiben deutsch**
   (ADR-0045 §Scope). Keine i18n-Infrastruktur, kein Daten-Rollout
   persistierter deutscher Strings (Audit-Metadata/Notes-Bestand).
 
-## [Unreleased] — ADR-0044 (TICKET-009): Per-Band Bulk-Acknowledge
+### ADR-0044 (TICKET-009): Per-Band Bulk-Acknowledge
 
-### Server-Detail
+#### Server-Detail
 
 - Jedes Risk-Band (ausser `pending`) hat ein "Acknowledge all"-Hover-Control
   am Band-Header (ADR-0044). Klick schaltet inline in eine Bestaetigung
@@ -725,18 +757,18 @@ Schema-Umbau, keine Migration. Sechs Phasen (A–F), je ein Commit.
 - `pending`/`unknown` sind server-seitig (`risk_band`-Whitelist, 422) vom
   Bulk-Ack ausgenommen — ein Urteil ohne Pass-2-Bewertung bleibt verboten.
 
-### Removed
+#### Removed
 
 - "Acknowledge all noise on this host"-Toolbar-Link, das Noise-Fragment
   (`GET /<id>/fragments/noise`), `app/static/js/bulk_ack_noise.js`, das
   Noise-Modal und das Schema-Feld `risk_band_filter` entfallen ersatzlos
   (abgeloest durch ADR-0044, vorher ADR-0022 §Bulk-Ack-Noise / ADR-0039 §2).
 
-## [Unreleased] — ADR-0041 (Block AA): Finding-Detail Inline, Flat-Switch entfernt
+### ADR-0041 (Block AA): Finding-Detail Inline, Flat-Switch entfernt
 
 Zielversion **v0.16.0**.
 
-### Added
+#### Added
 
 - **Inline-Finding-Body** (`app/templates/_partials/finding_inline_body.html`):
   Klick auf eine Finding-Row klappt jetzt in **jeder** Findings-Liste
@@ -751,14 +783,14 @@ Zielversion **v0.16.0**.
   verlinkt. Idempotent — Bestands-Findings bleiben `NULL` bis zum nächsten
   Re-Ingest, kein Backfill.
 
-### Changed
+#### Changed
 
 - Paginierte Listen-Endpoints (`triage_band_fragment`, `bucket_fragment`,
   `pending_fragment`, Group-/Pending-Lazy-Fragmente) hydrieren wieder volle
   ORM-`Finding`-Objekte mit `selectinload(Finding.notes)` (ersetzt die
   ADR-0039-Spalten-Projektion — bei Paginations-Größe 10/20 vernachlässigbar).
 
-### Removed
+#### Removed
 
 - **Flat-Switch `?flat=1`** und die flache Findings-Tabelle
   (`_view_list.html`), das **Detail-Modal** (`findings/_detail_modal.html`)
@@ -766,7 +798,7 @@ Zielversion **v0.16.0**.
   `_is_flat_mode` + der Flat-Branch in `_render_findings_section` entfallen;
   `_findings_section.html` rendert unkonditional die Group-Card-Ansicht.
 
-### Hinweis / bewusste Regression (Re-Open-Trigger, ADR-0041)
+#### Hinweis / bewusste Regression (Re-Open-Trigger, ADR-0041)
 
 - **URL-Filter** (`status`/`kev_only`/`q`/`class`/…) narrowen die
   Server-Detail-Ansicht **nicht mehr** — sie waren ein Flat-Pfad-only-Feature
@@ -775,9 +807,9 @@ Zielversion **v0.16.0**.
 - Die **Ursachen-Sub-Zeile** (Block N: `target_path`/`vendor_ids`/
   `package_purl`) entfällt als UI-Surface (Daten bleiben persistiert).
 
-## [Unreleased] — ADR-0042: Agent-Fire-and-Forget, Job-Status-Endpoint entfernt
+### ADR-0042: Agent-Fire-and-Forget, Job-Status-Endpoint entfernt
 
-### Changed
+#### Changed
 
 - `secscan-agent.sh`: Der Agent beendet nach der `202`-Annahme sofort mit Exit 0
   (Fire-and-Forget). Polling-Loop entfernt; die Meldung „Scan queued …, waiting
@@ -785,7 +817,7 @@ Zielversion **v0.16.0**.
 - `POST /api/scans` 202-Body schrumpft von `{job_id, status, status_url}` auf
   `{job_id, status}` — `status_url` zeigte auf den entfernten Endpoint.
 
-### Removed
+#### Removed
 
 - **Status-Endpoint `GET /api/scans/jobs/<job_id>`** (`app/api/scans.py`):
   Route `scan_job_status`, Serializer `_serialize_job_status`, Konstante
@@ -796,7 +828,7 @@ Zielversion **v0.16.0**.
   Serializer); `status_url`-Assert in `test_scans_async_edge.py` und
   Status-Endpoint-Abschnitt in `test_scan_ingest_e2e_flow.py`.
 
-### Notes
+#### Notes
 
 - Async-Ingest-Kern (Queue-Tabelle, Edge-Fast-Path, Worker-Sub-Tick,
   Idempotency, Payload-Transit) aus ADR-0026 bleibt unverändert. Scan-Ergebnis
@@ -804,16 +836,18 @@ Zielversion **v0.16.0**.
   Audit-Events `scan.queued`/`scan.ingested`/`scan.ingest_failed`.
 - ADR-0042 (`docs/decisions/0042-agent-fire-and-forget-ingest.md`).
 
-## [Unreleased] — TICKET-006: Findings Cross-Server Bucket-View (ADR-0037)
+## [v0.13.0] — 2026-05-25
 
-### Findings-Seite
+### TICKET-006: Findings Cross-Server Bucket-View (ADR-0037)
+
+#### Findings-Seite
 
 - `/findings` rendert eine Cross-Server Bucket-View nach `(Server, ApplicationGroup)` mit collapsed HTMX-Lazy-Cards (ADR-0037, ersetzt ADR-0025 §(5)).
 - Bulk-Acknowledge unterstuetzt Bucket-Header-Selektion (ganzer Bucket auf einen Klick) plus Mix mit Einzel-Finding-IDs.
 - Pending-Bucket (Findings ohne Group-Zuordnung) als Cross-Server-Sammler am Ende der Liste mit Server-Spalte.
 - Header-Counter zeigt "X Gruppen · Y Findings" statt "X Treffer · Seite N von M".
 
-### Added
+#### Added
 
 - `app/services/findings_bucket_query.py` — `BucketHeader`-Dataclass, `list_buckets()`, `pending_bucket_header()`, `list_bucket_findings()`, `resolve_bucket_to_finding_ids()`. Gemeinsamer `_apply_bucket_filters`-Helper fuer alle vier Public-Funktionen (Single-Source).
 - Routes `GET /findings/bucket`, `GET /findings/pending`, `POST /findings/bulk/acknowledge`.
@@ -822,39 +856,39 @@ Zielversion **v0.16.0**.
 - 55+ neue Pure-Unit-Tests (14 Service, 22 View, 19 Template).
 - ADR-0037 (`docs/decisions/0037-findings-cross-server-bucket-view.md`).
 
-### Changed
+#### Changed
 
 - `app/views/findings.py::index()` rendert Bucket-Liste via `list_buckets` statt flacher Tabelle via `list_findings_cross_server`.
 - `app/templates/findings/index.html` umgebaut auf Bucket-View. Sort-Hidden-Inputs (`sort`/`dir`) entfernt.
 - ARCHITECTURE.md §7 (`/findings`-Beschreibung).
 
-### Removed
+#### Removed
 
 - Outer-Pagination auf `/findings` (Bucket-Header werden alle gerendert).
 - Sort-Selector auf `/findings` (`?sort=`/`?dir=` werden ignoriert; Spec-fixe Sortierung).
 - `_explicit_sort()`-Helper in `app/views/findings.py` (Sort-Bookmark-Trigger entfaellt).
 - Backcompat-Stubs in `findings.index()`-Render-Context (Etappe-3-Temporaer).
 
-## [Unreleased] — ADR-0031: Theme-Switcher entfernt
+### ADR-0031: Theme-Switcher entfernt
 
 Operator nutzt seit Beginn ausschließlich das Dark-Theme; der Toggle war
 toter Code mit Maintenance-Overhead. Mit ADR-0031 ist er ersatzlos entfernt.
 
-### Added
+#### Added
 
 - ADR-0031 (`docs/decisions/0031-theme-switcher-removed.md`) — dokumentiert
   Entscheidung, Konsequenzen und geplante Folge-Arbeit (Option D: npm-Build).
 - Alembic-Migration 0013 (`0013_remove_default_theme.py`) — entfernt
   `settings.default_theme` und `ck_settings_theme`-Constraint.
 
-### Changed
+#### Changed
 
 - `base.html` und `base_app.html`: `<html data-theme="dark">` statisch
   gesetzt, `color-scheme`-Meta auf `dark` — kein Jinja-Conditional mehr.
 - ARCHITECTURE.md §6, §7, Block A, Block D: Theme-Toggle-Referenzen entfernt.
 - ADR-0016: Cross-Referenz zu ADR-0031 ergänzt (§"Theme-Toggle" abgelöst).
 
-### Removed
+#### Removed
 
 - `app/static/js/theme.js` (94 LOC Alpine-Komponente + Cookie-Handling)
 - `_VALID_THEMES`, `_resolve_theme()`, `_inject_theme()`, `_persist_theme()`
@@ -872,7 +906,7 @@ toter Code mit Maintenance-Overhead. Mit ADR-0031 ist er ersatzlos entfernt.
   `test_header_has_no_theme_toggle`)
 - `"js/theme.js"`-Einträge aus `tests/views/test_script_load_order.py`
 
-## [Unreleased] — Block V: Performance-Tuning UI-Views (ADR-0030)
+### Block V: Performance-Tuning UI-Views (ADR-0030)
 
 Dashboard `/` und Server-Detail `/servers/<id>` rendern signifikant
 schneller. Sammel-ADR-0030 mit neun Befunden in fünf Phasen umgesetzt,
@@ -940,7 +974,7 @@ Befunde + Maßnahmen:
   Server-Detail-View `show()` ruft Aggregatoren ohne `rows=` →
   SQL-Pfad aktiv im produktiven Render.
 
-### Added
+#### Added
 
 - **Neuer Service** `app/services/sidebar_risk_counts.py` mit
   `escalate_act_counts_by_server(session, server_ids) ->
@@ -975,7 +1009,7 @@ Befunde + Maßnahmen:
   `test_heartbeat_aggregation.py` (+4 für schmale Projektion),
   `test_sidebar_context.py` (8), `test_sidebar_partial.py` (15).
 
-### Changed
+#### Changed
 
 - **`app/views/dashboard.py::_load_open_aggregates`** liefert jetzt ein
   3-Tuple `(counts_by_server, kev_by_server, risk_bands_by_server)` —
@@ -1022,7 +1056,7 @@ Befunde + Maßnahmen:
   kommen nicht mehr beim initialen Page-Render). XSS-Schutz-Eigenschaft
   unverändert, anderer Render-Pfad.
 
-### Removed
+#### Removed
 
 - **`app/services/quick_stats.py`** und
   **`app/templates/sidebar/_quick_stats.html`** ersatzlos gelöscht
@@ -1041,7 +1075,7 @@ Befunde + Maßnahmen:
   **`tests/integration/test_quick_stats_db.py`** mit `quick_stats.py`
   gelöscht.
 
-### Performance-Erwartung (DoD-0030 — User-Verifikation gegen k8s-DB ausstehend)
+#### Performance-Erwartung (DoD-0030 — User-Verifikation gegen k8s-DB ausstehend)
 
 ADR-0030 §Definition of Done listet folgende Wallclock-Ziele, die nur
 gegen eine echte Postgres-DB messbar sind (Pure-Unit kann das nicht
@@ -1060,7 +1094,7 @@ Operator-Verifikation post-Deploy: Pod-Restart `secscan-app`, `/`
 öffnen (Sidebar-Skeleton-Swap sichtbar), `/servers/<id>` für einen
 großen Server prüfen (TTFB spürbar schneller).
 
-### Bekannte Re-Open-Trigger (deferred, eigene ADRs/Tech-Debt)
+#### Bekannte Re-Open-Trigger (deferred, eigene ADRs/Tech-Debt)
 
 - **Timezone-Edge-Case in `generate_series`** — korrekt unter
   UTC-Session-TZ (Standard-Setup), bei anderer DB-TZ Off-by-One an
@@ -1077,7 +1111,7 @@ großen Server prüfen (TTFB spürbar schneller).
   `NS_BINDING_ABORTED` (HTMX-Race-Analyse), `stale_servers`-Counter
   wenn er später wieder gebraucht wird.
 
-## [Unreleased] — v0.12.0: Scan-Ingest immer Async (Cutover-Abschluss Block R)
+### v0.12.0: Scan-Ingest immer Async (Cutover-Abschluss Block R)
 
 Das in ADR-0026 / Block R Phase H als Cutover-Schutz eingefuehrte
 Feature-Flag `SECSCAN_SCAN_INGEST_ASYNC` ist ersatzlos entfernt. Async
@@ -1091,7 +1125,7 @@ den Flag manuell setzen. Single-Operator-Single-Agent-Setups brauchen
 das Cutover-Sicherheitsnetz nicht; das Flag war damit dauerhafte
 Bedienfalle.
 
-### Removed
+#### Removed
 
 - **`SECSCAN_SCAN_INGEST_ASYNC`-Setting** in `app/config.py` und
   `docker-compose.yml`.
@@ -1109,7 +1143,7 @@ Bedienfalle.
   `tests/api/test_scans_async_edge.py` und
   `tests/services/test_finding_group_inheritance.py` weiter abgedeckt.
 
-### Changed
+#### Changed
 
 - **Adversarial-Tests** (`test_host_state_xss.py`,
   `test_pretriage_no_llm_override.py`, `test_outdated_agent_rejected.py`)
@@ -1128,7 +1162,7 @@ Bedienfalle.
 - **ARCHITECTURE.md §6** umgeschrieben: Async ist der einzige Pfad
   (kein Verweis auf Sync-Default mehr).
 
-### Migration
+#### Migration
 
 Operator muss vor dem Deploy von v0.12.0 sicherstellen, dass der
 `secscan-llm-worker`-Container laeuft (depends_on `db: healthy` plus
@@ -1142,7 +1176,7 @@ inert.
 
 ---
 
-## [Unreleased] — Block T: Application-Group-Evaluations als Junction
+### Block T: Application-Group-Evaluations als Junction
 
 ADR-0028. Behebt den last-write-wins-Bug zwischen Servern: dieselbe Pattern-
 Group hatte auf zwei unterschiedlichen Servern unterschiedliche Bewertungen
@@ -1151,7 +1185,7 @@ Group hatte auf zwei unterschiedlichen Servern unterschiedliche Bewertungen
 Sieben Eval-Spalten wandern in eine neue Junction-Tabelle
 `application_group_evaluations` mit Composite-PK `(group_id, server_id)`.
 
-### Added
+#### Added
 
 - **Neue Tabelle `application_group_evaluations`** (Migration 0011): pro
   `(group_id, server_id)` eine Junction-Row mit `risk_band` (NOT NULL,
@@ -1182,7 +1216,7 @@ Sieben Eval-Spalten wandern in eine neue Junction-Tabelle
   Fehlende Junction-Row → „Nicht bewertet"-Pille via
   `group_evaluating_card.html`.
 
-### Changed
+#### Changed
 
 - **`ApplicationGroup`-Model** verliert sieben Spalten und zwei
   CheckConstraints. Bleibt: fleet-weite Identitaet + Pattern-Library
@@ -1199,7 +1233,7 @@ Sieben Eval-Spalten wandern in eine neue Junction-Tabelle
   Schicht durch ADR-0028 aktualisiert ist.
 - **TICKET-002** geschlossen — "Erledigt durch Block T".
 
-### Migration ist Drop & Rebuild — kein Daten-Backfill
+#### Migration ist Drop & Rebuild — kein Daten-Backfill
 
 Bestehende Eval-Werte auf `application_groups` werden **nicht** in die
 Junction migriert (ADR-0028 §Migration). Begruendung: die Werte sind
@@ -1208,7 +1242,7 @@ den Fehler vervielfaeltigen. Pass-2 fuellt die Junction beim naechsten
 Scan jedes Servers automatisch neu — Cache-Hits in `llm_risk_cache`
 machen den Re-Eval nahezu kostenlos (~95% Hit-Rate erwartet).
 
-### Operator-UI-Luecke nach Deploy
+#### Operator-UI-Luecke nach Deploy
 
 Bis zum ersten Scan jedes Servers nach Deploy zeigt jede Group-Card auf
 der Server-Detail-Seite die **„Nicht bewertet"-Pille**. Der Block-P-Hook
@@ -1216,7 +1250,7 @@ im Scan-Ingest-Pfad triggert Pass-2 organisch beim naechsten Scan.
 `docs/operations.md` Sektion „Block-T-Application-Group-Evaluations"
 beschreibt den Force-Scan-Recipe falls Operator nicht warten will.
 
-### Tests
+#### Tests
 
 - **Pure-Unit (Default-CI):** `tests/services/test_finding_group_inheritance.py`
   auf Junction-Composite-Match umgestellt (8 Tests, gruen).
@@ -1228,7 +1262,7 @@ beschreibt den Force-Scan-Recipe falls Operator nicht warten will.
 
 ---
 
-## [Unreleased] — Block R: Asynchroner Scan-Ingest
+### Block R: Asynchroner Scan-Ingest
 
 ADR-0026. Loest das Agent-Timeout-Problem bei grossen Scans: `POST /api/scans`
 antwortet im Async-Modus binnen <1s mit 202 + `job_id`, die volle
@@ -1236,7 +1270,7 @@ Verarbeitung wandert in den `secscan-llm-worker`-Container als neuer
 Sub-Tick `scan_ingest_tick`. Default-Feature-Flag `SECSCAN_SCAN_INGEST_ASYNC=false`
 haelt den synchronen Pfad aktiv — Cutover ist Operator-gesteuert.
 
-### Added
+#### Added
 
 - **Neue Tabelle `scan_ingest_jobs`** (Migration 0010): Queue fuer den
   Async-Pfad mit `payload_gzip BYTEA STORAGE EXTERNAL`, `payload_sha256
@@ -1291,7 +1325,7 @@ haelt den synchronen Pfad aktiv — Cutover ist Operator-gesteuert.
   (Backoff, Truncate, Should-Fail, Result-Serialisierung),
   `tests/api/test_scan_status_endpoint_unit.py` (Body-Serialisierung).
 
-### Changed
+#### Changed
 
 - **ARCHITECTURE.md** §6 ergaenzt mit Block-R-Fast-Path-Beschreibung,
   §9 ergaenzt mit Per-Server-Soft-Cap, §13 ergaenzt mit `scan.queued`/`scan.ingest_failed`
@@ -1310,7 +1344,7 @@ haelt den synchronen Pfad aktiv — Cutover ist Operator-gesteuert.
   Phase im Entrypoint die Migration zuverlaessig durchlaufen kann bevor
   der Worker pickt.
 
-### Fixed
+#### Fixed
 
 - **Worker UPDATE-Statement bei `done`** (`app/workers/scan_ingest_worker.py`):
   `result = :result::jsonb` zu `result = CAST(:result AS jsonb)` korrigiert.
@@ -1319,7 +1353,7 @@ haelt den synchronen Pfad aktiv — Cutover ist Operator-gesteuert.
   und jeden ersten echten Worker-Pickup auf `queued`-Retry zwang. Fix
   verifiziert in `tests/workers/test_scan_ingest_payload_lifecycle.py`.
 
-### Deferred (On-Demand-Verifikation, nicht im CI-Default)
+#### Deferred (On-Demand-Verifikation, nicht im CI-Default)
 
 - Alembic-Roundtrip-Test fuer Migration 0010 (existiert als `tests/alembic/test_0010_scan_ingest_jobs.py`, db_integration-Marker).
 - `tests/api/test_scans_async_edge.py` (14 Edge-Handler-Tests, db_integration).
@@ -1332,7 +1366,7 @@ haelt den synchronen Pfad aktiv — Cutover ist Operator-gesteuert.
 Operator fuehrt diese auf Anweisung pro Lauf aus; im Default-CI laeuft
 nur Pure-Unit (ruff, mypy, shellcheck, pytest ohne db_integration-Marker).
 
-### Cutover
+#### Cutover
 
 `docs/operations.md` Abschnitt „Block-R-Async-Ingest" beschreibt den
 fuenf-Schritt-Cutover (Deploy mit Flag off → Sanity-Check → Flag on →
@@ -1340,7 +1374,7 @@ Agent-Auto-Update → MIN_AGENT_VERSION-Bump).
 
 ---
 
-## [Unreleased] — Block Q: External EPSS/KEV Enrichment
+### Block Q: External EPSS/KEV Enrichment
 
 ADR-0024. Loest die Pass-2-Risk-Bewertungsluecke: Trivy 0.70 liefert
 weder EPSS noch KEV im JSON-Output, deshalb waren die Pass-2-LLM-
@@ -1350,7 +1384,7 @@ Wir reichern EPSS und KEV jetzt **serverseitig** aus zwei oeffentlichen
 Daily-Feeds an, persistiert in zwei eigenen Tabellen, und im Ingest-
 Pfad pro Finding gelookupt. Trivy bleibt unveraendert als Scanner.
 
-### Added
+#### Added
 
 - **Agent 0.3.1 self-update + Trivy-DB-Metadaten**: Der Agent prueft vor
   jedem Scan `/agent/version`, laedt bei neuerer Server-Version
@@ -1390,7 +1424,7 @@ Pfad pro Finding gelookupt. Trivy bleibt unveraendert als Scanner.
   ``feed.epss_pull_failed``, ``feed.kev_pull_failed`` mit
   ``event_metadata`` (row_count, bytes, duration_ms, error).
 
-### Changed
+#### Changed
 
 - **`risk.band_changed`-Audit-Events ersatzlos entfernt** (ADR-0027).
   Das Aggregat ``risk.pretriage_evaluated`` bleibt die einzige Audit-Spur
@@ -1408,7 +1442,7 @@ Pfad pro Finding gelookupt. Trivy bleibt unveraendert als Scanner.
 - ``LLM-Risk-Reviewer`` (Pass 2) Renderer und System-Prompt nutzen
   jetzt die persistierten EPSS/KEV-Werte (war vorher Block P).
 
-### Operative Auswirkungen
+#### Operative Auswirkungen
 
 - **Outbound-Network neu**: Server braucht HTTPS-Zugriff auf
   ``epss.empiricalsecurity.com`` und ``cisa.gov``. Air-Gap-Setup:
