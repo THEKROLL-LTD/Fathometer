@@ -287,7 +287,7 @@ def list_events() -> Any:
 
     try:
         page = max(1, int(request.args.get("page", "1")))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         page = 1
 
     base_stmt = _build_audit_query(filt)

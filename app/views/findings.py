@@ -181,7 +181,7 @@ def _validate_bucket_id(raw: Any, *, allow_zero: bool = False) -> int:
         abort(400, description="Parameter fehlt")
     try:
         value = int(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         abort(400, description="Parameter must be an integer")
     minimum = 0 if allow_zero else 1
     if value < minimum:
@@ -284,7 +284,7 @@ def bucket_fragment() -> str:
 
     try:
         page_raw = int(request.args.get("page", "1"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         page_raw = 1
     page = max(1, page_raw)
     per_page = 20
@@ -350,7 +350,7 @@ def pending_fragment() -> str:
 
     try:
         page_raw = int(request.args.get("page", "1"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         page_raw = 1
     page = max(1, page_raw)
     per_page = 20
@@ -420,7 +420,7 @@ def _normalize_bucket_selections(raw: list[Any]) -> list[tuple[int, int, str]]:
         try:
             server_id = int(entry.get("server_id"))  # type: ignore[arg-type]
             group_id = int(entry.get("group_id"))  # type: ignore[arg-type]
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             abort(400, description="Bucket-Selektion erfordert int-IDs")
         filter_qs_raw = entry.get("filter") or ""
         if not isinstance(filter_qs_raw, str):
@@ -437,7 +437,7 @@ def _normalize_finding_ids(raw: list[Any]) -> list[int]:
     for entry in raw:
         try:
             fid = int(entry)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             abort(400, description="finding_ids must be a list of integers")
         if fid < 1:
             abort(400, description="finding_ids must be >= 1")

@@ -40,7 +40,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff>=0.5",
+    "ruff==0.15.13",  # pinned: ruff format output is target-version-sensitive; float caused CI flap
     "mypy>=1.10",
     "pytest>=8.2",
     "pytest-asyncio>=0.23",

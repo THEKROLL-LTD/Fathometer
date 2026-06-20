@@ -181,7 +181,7 @@ def _pre_validate_envelope(body: bytes) -> tuple[str | None, str | None]:
     """
     try:
         doc = json.loads(body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    except json.JSONDecodeError, UnicodeDecodeError:
         return None, "invalid_json"
 
     if not isinstance(doc, dict):

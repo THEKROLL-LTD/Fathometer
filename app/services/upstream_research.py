@@ -319,7 +319,7 @@ def _is_fetch_url_allowed(url: str) -> tuple[bool, str]:
 
     try:
         infos = socket.getaddrinfo(host, None)
-    except (OSError, UnicodeError):
+    except OSError, UnicodeError:
         # DNS-Fehler / kaputter Host -> fail-closed.
         return (False, "dns resolution failed")
 
