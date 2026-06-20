@@ -36,6 +36,16 @@ Subagent-Aufrufe nennen die zu lesenden Sektions-Nummern explizit (nicht "lies d
 - Niemals `text()` ohne `:param`-Bind in SQLAlchemy. Niemals `|safe` in Jinja auf Client- oder LLM-Daten.
 - Niemals Pflicht-Kommentare in der UI (siehe ADR-006).
 
+## Changelog — Pflicht bei jeder nennenswerten Änderung
+
+**Verbindlich für Hauptsession UND alle Subagenten.** `CHANGELOG.md` (Keep a Changelog + SemVer, **English**) wird bei jeder nennenswerten Änderung **im selben PR mitgepflegt** — fehlender Changelog-Eintrag ist ein Review-Reject-Grund.
+
+- **Format:** ein `###`-Block unter `## [Unreleased]` mit Titel `<TICKET/ADR/Block>: <kurz>` und `#### Changed` / `#### Added` / `#### Fixed`-Untersektionen. Stil an den bestehenden Einträgen orientieren.
+- **Scope:** alles Operator-/Verhaltens-/Schema-/Build-Relevante. Reine interne Refactors ohne Außenwirkung dürfen entfallen (im PR begründen).
+- **Version-Quelle = git-Tags `v*`** (NICHT `pyproject.toml`, das bleibt statisch; Runtime zeigt `FM_VERSION`/`FM_BUILD_REVISION` aus dem Build-Arg).
+- **Promotion `[Unreleased]` → `## [vX.Y.Z] — <YYYY-MM-DD>`** passiert **erst beim Release**, zusammen mit dem Tag — und Tags werden ausschließlich **auf `main` nach dem Merge** gesetzt (nie auf Feature-/Fix-Branch-Commits). SemVer: Operator-sichtbares Feature → MINOR; reiner Bugfix → PATCH.
+- **Subagent-Pflicht:** Implementer-/Reviewer-Prompts verlangen den Changelog-Eintrag als Teil der DoD; der Reviewer prüft ihn mit.
+
 ## Test-, Lint- und Build-Commands
 
 ```
