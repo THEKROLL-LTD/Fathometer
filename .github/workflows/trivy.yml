@@ -91,8 +91,13 @@ jobs:
           target: runtime        # finale Stage aus dem Dockerfile
           load: true             # ins lokale Daemon laden statt pushen
           tags: secscan:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # BuildKit gha cache disabled (ADR-0069 follow-up): on the self-hosted
+          # Hetzner runner the gha cache import (transatlantic, ~0.29 MB/s for the
+          # ~82 MB AlmaLinux+venv layer) was slower than a full cold build, and
+          # ephemeral runner pods keep no local layer store — so a fresh build
+          # wins. Revisit with a regional cache (Hetzner S3 / in-cluster registry)
+          # or a persistent BuildKit store later.
+          no-cache: true
 
       - name: Trivy image scan (SARIF)
         uses: aquasecurity/trivy-action@v0.36.0
