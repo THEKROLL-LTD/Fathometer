@@ -70,7 +70,7 @@
 
 | | |
 |---|---|
-| **Stack** | Python 3.13 · Flask · PostgreSQL 17 · HTMX + Alpine.js · plain CSS |
+| **Stack** | Python 3.14 · Flask · PostgreSQL 17 · HTMX + Alpine.js · plain CSS |
 | **Scanner** | Trivy filesystem scan, lightweight agent push model |
 | **LLM** | any OpenAI-compatible endpoint — bring your own key |
 | **Deploy** | docker-compose (Kubernetes possible; omnibus image on the roadmap) |
