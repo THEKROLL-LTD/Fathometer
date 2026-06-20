@@ -107,24 +107,19 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # GitHub-Actions-Cache mit expliziter Scope: ohne `scope` wird
-          # default per GITHUB_REF separiert — jeder Tag-Build (refs/tags/
-          # vX.Y.Z) bekommt eigenen Cache und startet bei null. Mit fixem
-          # `scope=release` teilen alle Release-Builds denselben Cache, sodass
-          # pyproject.toml-Layer + dnf-Layer ueber Tag-Grenzen hinweg gehittet
-          # werden. Cache wird automatisch nach 7 Tagen ohne Hit evictet
-          # (GHA-LRU). System-Lib-Security-Updates kommen via Base-Image-Push
-          # (`almalinux:10` / `almalinux:10-minimal`-Digest aendert sich) →
-          # Layer-Hash invalidiert automatisch (ADR-0069). Air-Gap: die
-          # AlmaLinux-Base-Images in die interne Registry spiegeln (siehe
-          # docs/operations.md).
+          # BuildKit gha cache intentionally disabled (ADR-0069 follow-up): on the
+          # self-hosted Hetzner runner the gha cache import (transatlantic, ~0.29
+          # MB/s for the ~82 MB AlmaLinux+venv layer) was slower than a full cold
+          # build, and ephemeral runner pods keep no local layer store. Cold build
+          # until a regional cache (Hetzner S3 / in-cluster registry) or a
+          # persistent BuildKit store is wired up. Air-gap: mirror the
+          # almalinux:10 / 10-minimal base images into the internal registry
+          # (docs/operations.md / ADR-0069).
           #
-          # HINWEIS: dieser Build setzt kein explizites `target` → er baut die
-          # LETZTE Dockerfile-Stage. Die scratch-`runtime`-Stage muss daher die
-          # letzte Stage im Dockerfile bleiben (sonst hier `target: runtime`
-          # ergaenzen).
-          cache-from: type=gha,scope=release
-          cache-to: type=gha,scope=release,mode=max
+          # NOTE: this build sets no explicit `target` → it builds the LAST
+          # Dockerfile stage. The scratch `runtime` stage must therefore stay last
+          # (otherwise add `target: runtime` here).
+          no-cache: true
           # Provenance-Attestations für Software-Supply-Chain. Sind ohnehin
           # ghcr-Default ab buildx-0.10, hier explizit.
           provenance: true
