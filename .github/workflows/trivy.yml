@@ -35,7 +35,7 @@ jobs:
   # (Dockerfile + docker-compose.yml). Billig, laeuft auf jedem PR.
   filesystem:
     name: fs (deps · secrets · misconfig)
-    runs-on: ubuntu-latest
+    runs-on: fathometer
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -73,7 +73,7 @@ jobs:
   # ausgelieferten Prod-Image (finale `runtime`-Stage, scratch-flattened). ---
   image:
     name: image (os pkgs · app deps)
-    runs-on: ubuntu-latest
+    runs-on: fathometer
     timeout-minutes: 20
     steps:
       - name: Checkout

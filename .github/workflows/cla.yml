@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   cla-assistant:
-    runs-on: ubuntu-latest
+    runs-on: fathometer
     steps:
       - name: "CLA Assistant"
         if: >-
