@@ -6,7 +6,9 @@ und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### ADR-0067: exclude container-runtime data-roots from the agent host scan (v0.28.0)
+## [v0.28.0] — 2026-06-21
+
+### ADR-0067: exclude container-runtime data-roots from the agent host scan
 
 The reference agent's `trivy rootfs /` scan now excludes the well-known
 container-runtime data-roots, because their contents are unpacked
@@ -53,8 +55,8 @@ fix available), fs findings 2 → 0. No schema/migration.
 
 #### Changed
 - **`Dockerfile`**: builder `almalinux:10` (dnf), runtime `almalinux:10-minimal`
-  (microdnf); interpreter `python3.14` (EL10 ships no 3.13; `requires-python>=3.13`
-  satisfied). No libpq (psycopg[binary] bundles it), no curl. `entrypoint.sh` +
+  (microdnf); interpreter `python3.14` (EL10 ships no 3.13). No libpq
+  (psycopg[binary] bundles it), no curl. `entrypoint.sh` +
   scratch-flatten stage kept; builder/runtime share `/usr/bin/python3.14` (no venv
   relocation). HEALTHCHECK curl → Python `urllib` probe.
 - **Image-size DoD cap** raised 200 → 256 MB (Alma userland > Debian-slim; ~249 MB).
