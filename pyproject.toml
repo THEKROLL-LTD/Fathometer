@@ -7,7 +7,7 @@ name = "fathometer"
 version = "0.1.0"
 description = "Selbst-gehostete Web-App für Trivy-Filesystem-Scans"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 license = { text = "Apache-2.0" }
 authors = [{ name = "THEKROLL LTD" }]
 

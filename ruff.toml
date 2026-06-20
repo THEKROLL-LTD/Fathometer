@@ -2,7 +2,7 @@
 # Siehe CLAUDE.md: ruff check . && ruff format --check . muss grün sein.
 
 line-length = 100
-target-version = "py313"
+target-version = "py314"
 
 extend-exclude = [
     "alembic/versions",
