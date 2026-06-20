@@ -277,7 +277,7 @@ def pull_epss(
                     epss=float(raw_row[1]),
                     percentile=float(raw_row[2]),
                 )
-            except (ValidationError, ValueError):
+            except ValidationError, ValueError:
                 invalid_count += 1
                 continue
             validated.append(

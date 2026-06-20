@@ -191,7 +191,7 @@ def _load_asset_manifest() -> dict[str, str]:
             return _asset_manifest
         try:
             raw: dict[str, str] = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             raw = {}
         _asset_manifest = raw
         return _asset_manifest

@@ -182,7 +182,7 @@ def enqueue_pass2_for_server(
             continue
         try:
             gid_int = int(gid)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         lane = payload.get("fix_lane")
         active_pass2_group_lanes.add((gid_int, lane if lane in FIX_LANES else None))

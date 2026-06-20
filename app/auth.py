@@ -219,7 +219,7 @@ def verify_server_key(stored_hash: str, key: str) -> bool:
 def _load_user(user_id: str) -> AuthUser | None:
     try:
         uid = int(user_id)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     session = get_session()
     row = session.execute(select(UserModel).where(UserModel.id == uid)).scalar_one_or_none()

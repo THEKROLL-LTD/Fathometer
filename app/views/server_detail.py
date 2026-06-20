@@ -549,7 +549,7 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
             return RISK_BAND_SORT_RANK[RiskBand.PENDING]
         try:
             return RISK_BAND_SORT_RANK[RiskBand(ev.risk_band)]
-        except (KeyError, ValueError):
+        except KeyError, ValueError:
             return 0
 
     def _group_rank(entry: dict[str, Any]) -> int:
@@ -1416,7 +1416,7 @@ def triage_band_fragment(server_id: int, band: str) -> str:
     raw_page = request.args.get("page", "1")
     try:
         page = int(raw_page)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         abort(400)
     if page < 1:
         page = 1

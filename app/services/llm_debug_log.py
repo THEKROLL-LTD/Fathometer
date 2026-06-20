@@ -82,7 +82,7 @@ def _apply_body_cap(body: dict[str, Any] | None, cap_bytes: int) -> dict[str, An
         return None
     try:
         serialized = json.dumps(body, default=str)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         # Nicht-serialisierbarer Inhalt → wir capen aggressiv auf einen
         # repr-String, damit der Insert nicht selbst explodiert.
         repr_str = repr(body)[: max(256, cap_bytes - 256)]

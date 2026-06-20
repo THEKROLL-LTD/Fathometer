@@ -419,7 +419,7 @@ def _probe_model(
             encryption_key=encryption_key,
             model_override=model_override,
         )
-    except (ValueError, RuntimeError):
+    except ValueError, RuntimeError:
         return {
             "success": False,
             "latency_ms": None,

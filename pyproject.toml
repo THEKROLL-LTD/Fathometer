@@ -7,7 +7,7 @@ name = "fathometer"
 version = "0.1.0"
 description = "Selbst-gehostete Web-App für Trivy-Filesystem-Scans"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 license = { text = "Apache-2.0" }
 authors = [{ name = "THEKROLL LTD" }]
 
@@ -40,7 +40,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff>=0.5",
+    "ruff==0.15.13",  # pinned: ruff format output is target-version-sensitive; float caused CI flap
     "mypy>=1.10",
     "pytest>=8.2",
     "pytest-asyncio>=0.23",

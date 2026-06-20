@@ -63,6 +63,9 @@ fix available), fs findings 2 → 0. No schema/migration.
   (Block-AI subtree was unlocked since 770dcf5 → full trivy-fs coverage restored).
 - **`.trivyignore`**: dropped the now-moot Debian-tracker list; empty documented
   policy stub (AlmaLinux errata findings are fixable, not suppressed).
+- **Declared Python floor bumped to 3.14** (`requires-python>=3.14`, ruff
+  `target-version=py314`, mypy `python_version=3.14`) — the appliance builds/tests
+  only 3.14; `uv.lock` re-resolved (cp313-only wheels pruned, no version changes).
 
 #### Notes
 - 15 remaining `openssl-libs` image findings clear once `almalinux:10-minimal`

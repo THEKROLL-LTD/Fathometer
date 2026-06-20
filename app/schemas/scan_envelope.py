@@ -494,7 +494,7 @@ class TrivyVulnerability(BaseModel):
             # Strict URL-Parse via Pydantic — wirft auf totalen Murks.
             try:
                 HttpUrl(item)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 continue
             cleaned.append(item)
         return cleaned[:MAX_REFERENCES_PER_VULN]
@@ -596,7 +596,7 @@ class TrivyVulnerability(BaseModel):
             return None
         try:
             HttpUrl(v)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return None
         return v
 

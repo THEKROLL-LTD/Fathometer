@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://github.com/THEKROLL-LTD/SecScanUI/actions/workflows/ci.yml"><img src="https://github.com/THEKROLL-LTD/SecScanUI/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
   <a href="https://github.com/THEKROLL-LTD/SecScanUI/tags"><img src="https://img.shields.io/github/v/tag/THEKROLL-LTD/SecScanUI?sort=semver&label=release&color=blue" alt="Latest release" /></a>
-  <img src="https://img.shields.io/badge/python-3.13%2B-blue" alt="Python 3.13+" />
+  <img src="https://img.shields.io/badge/python-3.14-blue" alt="Python 3.14" />
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" alt="Linted with Ruff" /></a>
   <img src="https://img.shields.io/badge/mypy-strict-blue" alt="Type-checked with mypy --strict" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0 license" /></a>
@@ -70,7 +70,7 @@
 
 | | |
 |---|---|
-| **Stack** | Python 3.13 · Flask · PostgreSQL 17 · HTMX + Alpine.js · plain CSS |
+| **Stack** | Python 3.14 · Flask · PostgreSQL 17 · HTMX + Alpine.js · plain CSS |
 | **Scanner** | Trivy filesystem scan, lightweight agent push model |
 | **LLM** | any OpenAI-compatible endpoint — bring your own key |
 | **Deploy** | docker-compose (Kubernetes possible; omnibus image on the roadmap) |
