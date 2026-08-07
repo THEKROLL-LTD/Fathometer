@@ -82,6 +82,9 @@ class ScanIngestResult:
     findings_class_os_pkgs: int
     findings_class_lang_pkgs: int
     findings_class_other: int
+    # Entries the envelope schema dropped per item (ADR-0072); counted by the
+    # caller of `Envelope.model_validate` and passed through for the audit log.
+    vulns_dropped: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -115,9 +118,8 @@ _CLASS_MAP: dict[str, FindingClass] = {
 def _safe_vuln(raw_vuln: Any, *, server_name: str) -> TrivyVulnerability | None:
     """Versucht einen rohen Vuln-Dict in `TrivyVulnerability` zu parsen.
 
-    Ein einzelner Validation-Fail killt nicht den ganzen Scan — Pro-Vuln-
-    Fehler werden geloggt und das Item verworfen. Top-Level-Fehler dagegen
-    sind durch das Envelope-Parsing schon abgefangen.
+    Safety net only: since ADR-0072 the schema already drops non-conforming
+    entries, so every item reaching the ingest loop has passed validation.
     """
     try:
         return TrivyVulnerability.model_validate(raw_vuln)
@@ -398,6 +400,7 @@ def ingest_scan(
     *,
     session: Session,
     now: datetime | None = None,
+    vulns_dropped: int = 0,
 ) -> ScanIngestResult:
     """Persistiert einen Scan-Envelope: Findings, Resolve, Server-Felder, Scan-Row.
 
@@ -438,8 +441,6 @@ def ingest_scan(
         finding_class = _CLASS_MAP[trivy_result.normalized_class()]
         target = trivy_result.target
         for raw_vuln in trivy_result.vulnerabilities or []:
-            # `raw_vuln` ist bereits durch Pydantic gelaufen — aber wir
-            # verwerfen per-Vuln-Fehler nochmal als Sicherheits-Netz.
             vuln = _safe_vuln(raw_vuln, server_name=server.name)
             if vuln is None:
                 continue
@@ -664,6 +665,7 @@ def ingest_scan(
         findings_class_os_pkgs=class_counter[FindingClass.OS_PKGS],
         findings_class_lang_pkgs=class_counter[FindingClass.LANG_PKGS],
         findings_class_other=class_counter[FindingClass.OTHER],
+        vulns_dropped=vulns_dropped,
     )
 
 

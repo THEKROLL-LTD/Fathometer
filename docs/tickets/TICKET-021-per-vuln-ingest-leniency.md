@@ -1,6 +1,6 @@
 # TICKET-021 — A single non-conforming Trivy vulnerability discards the whole scan (vuln ingest must be per-item best-effort)
 
-**Status:** Implemented 2026-08-06 on branch `fix/ticket-021-per-vuln-ingest-leniency` (uncommitted) · **Date:** 2026-08-05 · **Target release:** v0.28.1 · **Refs:** [GitHub issue #23](https://github.com/THEKROLL-LTD/Fathometer/issues/23) (reporter `HeartBtz`, Trivy 0.71.0 on Debian 13 Trixie), TICKET-018 (same bug class, solved for `host_state` — the direct precedent), ARCHITECTURE §9, scan-envelope schema docstring (`app/schemas/scan_envelope.py:333–335`, which already *claims* per-vuln leniency but does not deliver it).
+**Status:** Implemented 2026-08-06, PR #24 · **Date:** 2026-08-05 · **Target release:** v0.28.1 · **Refs:** GitHub issues [#22](https://github.com/THEKROLL-LTD/Fathometer/issues/22) (the `TEMP-*` case) and [#23](https://github.com/THEKROLL-LTD/Fathometer/issues/23) (the general case, same reporter — #22 is a subset; both are closed by this ticket) (reporter `HeartBtz`, Trivy 0.71.0 on Debian 13 Trixie), TICKET-018 (same bug class, solved for `host_state` — the direct precedent), ARCHITECTURE §9, scan-envelope schema docstring (`app/schemas/scan_envelope.py:333–335`, which already *claims* per-vuln leniency but does not deliver it).
 **Components:** `app/schemas/scan_envelope.py` (`TrivyResult.vulnerabilities`, `TrivyVulnerability._validate_vuln_id`, `title`/`description` fields), `app/services/findings_ingest.py` (`_safe_vuln`, `ScanIngestResult`), `app/services/scan_processing.py` (`ScanProcessingResult`, `Envelope.model_validate` wiring), `app/workers/scan_ingest_worker.py` (job-result JSONB), ARCHITECTURE §9, new ADR-0072, tests.
 **Scope:** Schema per-item leniency + identifier whitelist widening + two display-field trims + drop counters through the ingest result. No DB migration, no column change, no LLM contract change, no agent change, no UI work.
 **Protected — deliberately in scope here, flag in the PR:** the `MAX_VULNS_PER_SCAN` DoS bound. Solution §1 moves the cap to *before* per-item validation; getting that order wrong turns an attacker-supplied array into unbounded work. Everything else under `app/schemas/scan_envelope.py` is ordinary. No auth, key-handling, migration or rate-limit surface is touched.
@@ -124,7 +124,9 @@ Without this we trade "scan lost, loudly" for "findings vanish, silently" — th
 - **ADR-0072** — per-item leniency doctrine for the vulnerability list plus the widened identifier scope, citing TICKET-018 as precedent.
 - **ARCHITECTURE §9** — the section quotes the identifier regex verbatim; update it or spec and code drift.
 - **CHANGELOG** — entry under `[Unreleased]`, promoted on the v0.28.1 tag.
-- **TD-022** — `bulk_request.cve_id` (`_CVE_ID_RE` defined at `app/schemas/bulk_request.py:42`, applied at `:87`) still accepts CVE only, so bulk-acknowledge *by identifier* does not work for `TEMP-*` findings. Not a breakage (single-finding ack and ack-by-package work), but a deliberately recorded gap.
+### 5 — Bulk-acknowledge must accept the same identifiers
+
+`bulk_request.cve_id` validated against its own CVE-only copy of the regex, so findings keyed on a `TEMP-*` identifier could not be acknowledged in bulk once the ingest started accepting them. The patterns move into `app/schemas/vuln_identifiers.py` and both surfaces import them — a whitelist maintained in two places is what caused this bug in the first place. The field name `cve_id` stays for API compatibility.
 
 ## Definition of Done (machine-checkable)
 
@@ -137,7 +139,8 @@ Without this we trade "scan lost, loudly" for "findings vanish, silently" — th
 - [ ] The drop count reaches the job's `result` JSONB and is visible in the worker log with a truncated first-error sample.
 - [ ] The German validator message at `scan_envelope.py:419` is English; `tests/test_ui_language.py` green.
 - [ ] `TrivyVulnerability` docstring and the `_safe_vuln` call-site comment no longer claim an unimplemented guarantee.
-- [ ] ADR-0072 added; ARCHITECTURE §9 identifier regex updated to match the code; `CHANGELOG.md` entry under `[Unreleased]`; TD-022 recorded in `docs/techdebt.md`.
+- [ ] `POST /api/findings/bulk-acknowledge` flavor B accepts every identifier the ingest accepts (`TEMP-*`, `DSA`, `DLA`, `RUSTSEC`, `GO`, `PYSEC`) and still rejects garbage.
+- [ ] ADR-0072 added; ARCHITECTURE §9 identifier regex updated to match the code; `CHANGELOG.md` entry under `[Unreleased]`.
 - [ ] `ruff check . && ruff format --check .` green.
 - [ ] `mypy app/` green.
 - [ ] `pytest` (default selection) green.

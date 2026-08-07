@@ -38,24 +38,23 @@ Erkenntnisse aus den realen Fixtures (`tests/fixtures/trivy/`):
   - Testet alle Validierungs-Pfade (NUL-Byte, EPSS>1, CVE-foo-bar,
     Severity=ULTRA_CRITICAL, PkgName-Traversal, CVSS>10, Attack-Vector `Q`,
     CWE-Format, Reference-Scheme).
-  - Wir lassen einzelne *Vulns* mit ungueltigen Whitelist-Werten verwerfen
-    statt den ganzen Scan zu killen — der `ingest_scan`-Service entscheidet
-    pro-Vuln (Pydantic gibt eine ValidationError, der Caller fasst per-Vuln-
-    Versuche zusammen). Top-Level- und Strukturfehler dagegen → 422.
+  - Per-vuln leniency (ADR-0072): a non-conforming vulnerability drops
+    itself, not the scan. Top-level and structural errors still fail the
+    envelope.
 
-Pragmatische Defaults wo §10 unscharf war:
-- max 100 References pro Finding — defensiv per Validator getrimmt, nicht
-  hart abgelehnt. Trivy liefert fuer Distro-CVEs regelmaessig >50 Refs
-  (NVD + Mailinglisten + Vendor-Advisories). Limit war historisch 50 +
-  `Field(max_length=…)`, aber der Field-Constraint feuerte VOR dem
-  Trim-Validator und produzierte HTTP 422 statt das beabsichtigte Trim
-  (Fix v0.6.1).
-- max 50 CweIDs pro Finding — analog defensiv getrimmt.
-- max 32 VendorIDs pro Finding — Block N (ADR-0021).
-- max 50.000 Vulnerabilities aggregiert ueber alle Results (§9).
-- max 1.000 Results pro Scan (§10 "Listen-Bounds").
-- max 64 KB pro einzelnem String-Feld (§9 "Trivy-JSON-Sanity-Checks") — wir
-  reflektieren das per `max_length=65536` an Description.
+Pragmatic defaults where §9/§10 were vague:
+- max 100 references per finding — defensively trimmed in the validator,
+  not hard-rejected. Trivy regularly ships >50 refs for distro CVEs
+  (NVD + mailing lists + vendor advisories). The limit was historically
+  50 + `Field(max_length=…)`, but the field constraint fired BEFORE the
+  trim validator and produced an HTTP 422 instead of the intended trim
+  (fix v0.6.1).
+- max 50 CweIDs per finding — analog defensively trimmed.
+- max 32 VendorIDs per finding — Block N (ADR-0021).
+- max 50,000 vulnerabilities aggregated across all results (§9).
+- max 1,000 results per scan (§10 "listen bounds").
+- max 64 KB per single string field (§9 "Trivy JSON sanity checks") — for
+  `title`/`description` trimmed in the validator, see below.
 
 Block N (ADR-0021): `PkgIdentifier`/`SeveritySource`/`VendorIDs` werden ab
 v0.7.0 aktiv extrahiert und persistiert — frueher hat das Schema sie via
@@ -77,57 +76,61 @@ from pydantic import (
     Field,
     HttpUrl,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
 
 # Trivy-internes Severity-Integer-Mapping — Single-Source-of-Truth in
 # `app/services/risk_engine.py` (Block O Phase B Zentralisierung).
+from app.schemas.vuln_identifiers import VULN_ID_FORMATS, is_known_vuln_id
 from app.services.risk_engine import (
     VENDOR_SEVERITY_INT_MAP as _VENDOR_SEVERITY_INT_MAP,
 )
 
 # ---------------------------------------------------------------------------
-# Regex-Whitelists aus ARCHITECTURE.md §10
+# Regex whitelists from ARCHITECTURE.md §9
 # ---------------------------------------------------------------------------
 
-# CVE-IDs: `^CVE-\d{4}-\d{4,}$`
-_CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,7}$")
-# GHSA-IDs (kommen in lang-pkgs auch vor; akzeptiert als zusaetzliche identifier_key).
-_GHSA_ID_RE = re.compile(r"^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$")
-# Package-Names: druckbares ASCII gemaess §10 — Alpine, Debian, RPM, plus
-# typische Go-/Python-/Node-Module mit Pfad-aehnlichen Namen wie
-# `github.com/foo/bar`.
+# VulnerabilityID formats live in `app.schemas.vuln_identifiers` — shared with
+# bulk-acknowledge so the whitelist cannot drift (ADR-0072).
+# Package names: printable ASCII per §9 — Alpine, Debian, RPM, plus typical
+# Go/Python/Node modules with path-like names such as `github.com/foo/bar`.
 _PKG_NAME_RE = re.compile(r"^[a-zA-Z0-9._+\-:/@]+$")
-# Versionen: druckbares ASCII, max 256 Zeichen (Length wird ueber Field gesetzt).
-# Wir verbieten Control-Chars (inkl. NUL) explizit.
+# Versions: printable ASCII, max 256 chars (length is set via Field).
+# Control chars (incl. NUL) are explicitly forbidden.
 _PRINTABLE_ASCII_RE = re.compile(r"^[\x20-\x7e]+$")
-# CWE-IDs: `^CWE-\d{1,7}$`
+# CWE IDs: `^CWE-\d{1,7}$`
 _CWE_ID_RE = re.compile(r"^CWE-\d{1,7}$")
-# Architectures (aus §10: Whitelist).
+# Architectures (§9 whitelist).
 _ARCH_WHITELIST = frozenset({"x86_64", "aarch64", "armv7l", "i686", "ppc64le", "s390x"})
-# Bekannte Aliase werden vor dem Whitelist-Check kanonisiert. Reine
-# Normalisierung an der Grenze — wir akzeptieren keine unbekannten Werte,
-# nur dokumentierte Synonyme aus macOS, FreeBSD und Go-Toolchains.
+# Known aliases are canonicalized before the whitelist check. Pure
+# normalization at the boundary — we do not accept unknown values, only
+# documented synonyms from macOS, FreeBSD and Go toolchains.
 _ARCH_ALIASES = {
-    "arm64": "aarch64",  # macOS, FreeBSD, Docker (Go-Style)
-    "amd64": "x86_64",  # Go-Style, Docker, FreeBSD
+    "arm64": "aarch64",  # macOS, FreeBSD, Docker (Go style)
+    "amd64": "x86_64",  # Go style, Docker, FreeBSD
     "x86": "i686",
     "i386": "i686",
-    "aarch64_be": "aarch64",  # Big-Endian-Variante, selten aber real
+    "aarch64_be": "aarch64",  # big-endian variant, rare but real
 }
-# Agent-Version (semver-light, §10).
+# Agent version (semver-light, §10).
 _AGENT_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
-# OS-Family (§10).
+# OS family (§10).
 _OS_FAMILY_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-# Trivy-Severity-Werte. Trivy schreibt `UNKNOWN` wenn die DB nichts hat.
+# Trivy severity values. Trivy writes `UNKNOWN` when the DB has nothing.
 _TRIVY_SEVERITIES = frozenset({"CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"})
-# CVSS-v3-Vector (§10).
+# CVSS v3 vector (§9).
 _CVSS_V3_VECTOR_RE = re.compile(r"^CVSS:3\.[01]/.+$")
-# CVSS-v3 Vector parsing fuer Attack-Vector (Trivy: "AV:N", "AV:A", "AV:L", "AV:P").
+# CVSS v3 vector parsing for the attack vector (Trivy: "AV:N", "AV:A", "AV:L", "AV:P").
 _AV_RE = re.compile(r"(?:^|/)AV:([NALP])(?:/|$)")
 
-# Listen- und String-Bounds.
+# Validation-context key: the caller of `Envelope.model_validate` passes a
+# mutable dict that the per-vuln filter fills with
+# `{"dropped": int, "first_error": str | None}` (ADR-0072).
+VULN_DROP_STATS_CONTEXT_KEY = "vuln_drop_stats"
+
+# List and string bounds.
 MAX_VULNS_PER_SCAN = 50_000
 MAX_RESULTS_PER_SCAN = 1_000
 MAX_REFERENCES_PER_VULN = 100
@@ -330,9 +333,9 @@ class TrivyEPSSBlock(BaseModel):
 class TrivyVulnerability(BaseModel):
     """Eine Vulnerability aus `Result.Vulnerabilities`.
 
-    Strikte Validierung: ungueltige `VulnerabilityID` oder `Severity` lassen
-    den Validator fehlschlagen, womit der Ingest-Service diese eine Vuln
-    verwerfen kann ohne den ganzen Scan zu killen.
+    Strict validation, per entry: an invalid `VulnerabilityID` or `Severity`
+    fails this entry only — the filter on `TrivyResult.vulnerabilities` drops
+    it and keeps the rest of the scan (ADR-0072).
 
     Was wir aktiv extrahieren:
       - VulnerabilityID (identifier_key)
@@ -368,8 +371,11 @@ class TrivyVulnerability(BaseModel):
     status: str | None = Field(default=None, alias="Status", max_length=32)
 
     severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] = Field(alias="Severity")
-    title: str | None = Field(default=None, alias="Title", max_length=MAX_TITLE_LENGTH)
-    description: str | None = Field(default=None, alias="Description", max_length=MAX_STRING_LENGTH)
+    # No `max_length` here: a field constraint fires before the validator and
+    # would reject the vulnerability where `_scrub_display_text` trims it
+    # (same lesson as `cwe_ids`/`references`, v0.6.1).
+    title: str | None = Field(default=None, alias="Title")
+    description: str | None = Field(default=None, alias="Description")
 
     # Provider-Map: Schluessel sind Trivy-Provider-Namen (`nvd`, `redhat`,
     # `ghsa`, ...), Werte sind `TrivyCVSSEntry`. Wir parsen sie als generischer
@@ -415,8 +421,8 @@ class TrivyVulnerability(BaseModel):
     @field_validator("vulnerability_id")
     @classmethod
     def _validate_vuln_id(cls, v: str) -> str:
-        if not _CVE_ID_RE.match(v) and not _GHSA_ID_RE.match(v):
-            raise ValueError("VulnerabilityID muss CVE-YYYY-NNNN oder GHSA-xxxx-xxxx-xxxx sein")
+        if not is_known_vuln_id(v):
+            raise ValueError(f"VulnerabilityID must be one of: {VULN_ID_FORMATS}")
         return v
 
     @field_validator("pkg_name")
@@ -441,9 +447,14 @@ class TrivyVulnerability(BaseModel):
 
     @field_validator("title", "description")
     @classmethod
-    def _scrub_display_text(cls, v: str | None) -> str | None:
+    def _scrub_display_text(cls, v: str | None, info: ValidationInfo) -> str | None:
         v = _no_nul_bytes(v)
-        return _strip_control_chars(v)
+        v = _strip_control_chars(v)
+        if v is None:
+            return None
+        # Trim, do not reject — both are display-only.
+        cap = MAX_TITLE_LENGTH if info.field_name == "title" else MAX_STRING_LENGTH
+        return v[:cap]
 
     @field_validator("pkg_path")
     @classmethod
@@ -663,6 +674,9 @@ class TrivyResult(BaseModel):
 
     `Class` ist Whitelist `os-pkgs`/`lang-pkgs`; alles andere wird auf
     `other` gemappt (§10).
+
+    `vulnerabilities` is filtered per entry (ADR-0072): §9 says drop the item,
+    not reject the report.
     """
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -673,6 +687,17 @@ class TrivyResult(BaseModel):
     vulnerabilities: list[TrivyVulnerability] | None = Field(
         default=None, alias="Vulnerabilities", max_length=MAX_VULNS_PER_SCAN
     )
+
+    @field_validator("vulnerabilities", mode="before")
+    @classmethod
+    def _filter_vulnerabilities(cls, v: Any, info: ValidationInfo) -> list[Any]:
+        stats = (info.context or {}).get(VULN_DROP_STATS_CONTEXT_KEY)
+        return _filter_entries(
+            v,
+            TrivyVulnerability,
+            MAX_VULNS_PER_SCAN,
+            stats if isinstance(stats, dict) else None,
+        )
 
     @field_validator("target", "type_")
     @classmethod
@@ -906,23 +931,27 @@ def _filter_ascii_strings(items: Any, max_items: int, max_item_length: int) -> l
     return cleaned[:max_items]
 
 
-def _filter_entries(items: Any, entry_model: type[BaseModel], cap: int) -> list[Any]:
-    """Per-item leniency for `listeners`/`processes` (TICKET-018).
+def _single_line_log_token(value: str) -> str:
+    """Maps every non-printable character to a space — log-forging guard."""
+    return "".join(ch if 0x20 <= ord(ch) < 0x7F else " " for ch in value)
 
-    host_state is advisory/best-effort: a malformed entry must drop only itself,
-    never fail the whole envelope (which would discard all vulnerability
-    findings). Each raw item is validated against `entry_model`; items that raise
-    `ValidationError` are skipped, mirroring the per-item-drop pattern of
-    `_filter_ascii_strings`.
 
-    DoS bound (security-auditor must-fix): because this runs in `mode="before"`,
-    it executes BEFORE the field's `max_length` constraint, so per-item
-    `model_validate` would otherwise run on every raw item of an
-    attacker-supplied array (~25M minimal entries in a ~100MB authenticated
-    payload → ~20s single-core burn in the serial scan-ingest worker). We
-    therefore raw-truncate the input list to `cap` BEFORE validating any item,
-    restoring the O(cap) bound. Truncation is silent (best-effort): a huge list
-    is capped, not rejected.
+def _filter_entries(
+    items: Any,
+    entry_model: type[BaseModel],
+    cap: int,
+    drop_stats: dict[str, Any] | None = None,
+) -> list[Any]:
+    """Per-item leniency for `listeners`/`processes` (TICKET-018) and
+    `vulnerabilities` (ADR-0072). A malformed entry drops only itself.
+
+    Runs in `mode="before"`, i.e. ahead of the field's `max_length`, so the
+    raw list is truncated to `cap` before any item is validated — otherwise
+    an attacker-supplied array would cost one `model_validate` per element.
+    Truncation is silent; a huge list is capped, not rejected.
+
+    `drop_stats`, if given, accumulates `dropped` (validation failures plus
+    truncation overflow) and one `first_error` sample per scan.
 
     Reject (ValueError) only if the input itself is not a list.
     """
@@ -930,12 +959,30 @@ def _filter_entries(items: Any, entry_model: type[BaseModel], cap: int) -> list[
         return []
     if not isinstance(items, list):
         raise ValueError("field must be a list")
+    truncated = items[:cap]
+    dropped = len(items) - len(truncated)
+    first_error: str | None = None
     cleaned: list[Any] = []
-    for item in items[:cap]:
+    for item in truncated:
         try:
             cleaned.append(entry_model.model_validate(item))
-        except ValidationError:
-            continue
+        except ValidationError as exc:
+            dropped += 1
+            if first_error is None:
+                # `loc` can contain attacker-controlled dict keys (CVSS
+                # provider names are not key-validated), hence the scrub.
+                details = exc.errors()
+                if details:
+                    loc = ".".join(_single_line_log_token(str(p)) for p in details[0]["loc"])
+                    first_error = f"{loc}: {_single_line_log_token(details[0]['msg'])}"[:200]
+                else:  # pragma: no cover — ValidationError always has details
+                    first_error = _single_line_log_token(str(exc))[:200]
+    if first_error is None and dropped:
+        first_error = f"raw list exceeded cap={cap}; overflow entries truncated"
+    if dropped and drop_stats is not None:
+        drop_stats["dropped"] = int(drop_stats.get("dropped", 0)) + dropped
+        if first_error is not None and drop_stats.get("first_error") is None:
+            drop_stats["first_error"] = first_error
     return cleaned
 
 
@@ -1167,6 +1214,7 @@ __all__: list[str] = [
     "MAX_VENDOR_ID_LENGTH",
     "MAX_VENDOR_SEVERITY_PROVIDERS",
     "MAX_VULNS_PER_SCAN",
+    "VULN_DROP_STATS_CONTEXT_KEY",
     "Envelope",
     "HostBlock",
     "HostStateBlock",
