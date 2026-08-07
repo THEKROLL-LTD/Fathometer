@@ -247,13 +247,21 @@ def test_cwe_ids_at_50_boundary() -> None:
 
 
 def test_description_at_64kb_boundary() -> None:
-    """64 KB exakt erlaubt, 64 KB + 1 abgelehnt."""
+    """64 KB exakt erlaubt; 64 KB + 1 wird getrimmt statt abgelehnt (TICKET-021).
+
+    Vor TICKET-021 trug `description` ein `max_length`-Field-Constraint, das
+    VOR dem Validator feuerte und die ganze Vulnerability verwarf (und bis
+    zur Per-Item-Leniency den ganzen Scan). Display-only-Felder werden jetzt
+    wie `cwe_ids`/`references` (v0.6.1) defensiv getrimmt.
+    """
     ok = _minimal_vuln(Description="x" * 65536)
-    TrivyVulnerability.model_validate(ok)
+    parsed_ok = TrivyVulnerability.model_validate(ok)
+    assert parsed_ok.description == "x" * 65536
 
     too_big = _minimal_vuln(Description="x" * 65537)
-    with pytest.raises(ValidationError):
-        TrivyVulnerability.model_validate(too_big)
+    parsed_big = TrivyVulnerability.model_validate(too_big)
+    assert parsed_big.description is not None
+    assert len(parsed_big.description) == 65536
 
 
 # ---------------------------------------------------------------------------

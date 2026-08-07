@@ -18,7 +18,9 @@ ARCHITECTURE.md §6 und Block F-Plan: drei Flavors.
 `false` setzen um die Aktion wirklich auszufuehren.
 
 Sicherheits-Whitelists (siehe §10):
-- `cve_id` matcht `^CVE-\\d{4}-\\d{4,7}$` (gleicher RE wie im Ingest).
+- `cve_id` matcht die Identifier-Whitelist aus dem Ingest
+  (`app.schemas.vuln_identifiers`) — CVE, GHSA, TEMP, DSA, DLA, RUSTSEC, GO,
+  PYSEC. Der Feldname bleibt `cve_id` (API-Kompatibilitaet).
 - `package_name` matcht das gleiche Package-Charset wie beim Ingest.
 - `tag` matcht das Tag-Name-Pattern aus `app.forms`.
 - `status` ist eine Whitelist aus `{open, acknowledged, resolved}`.
@@ -35,11 +37,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.forms import TAG_NAME_REGEX
+from app.schemas.vuln_identifiers import VULN_ID_FORMATS, is_known_vuln_id
 
-# Wiederverwendung der Whitelist-Patterns aus dem Ingest — bewusst lokal
-# kopiert um Zirkel zwischen `app.schemas.bulk_request` und
-# `app.schemas.scan_envelope` zu vermeiden.
-_CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,7}$")
 # Package-Names wie im Envelope-Schema. `@` bleibt zugelassen wegen der
 # `package_name@target`-Disambiguation aus ADR-0011.
 _PKG_NAME_RE = re.compile(r"^[a-zA-Z0-9._+\-:/@]+$")
@@ -84,8 +83,8 @@ class BulkAckMatchCriterion(BaseModel):
         """
         if not self.cve_id and not self.package_name:
             raise ValueError("match braucht mindestens cve_id oder package_name")
-        if self.cve_id is not None and not _CVE_ID_RE.match(self.cve_id):
-            raise ValueError("cve_id matcht nicht CVE-YYYY-NNNN[..]")
+        if self.cve_id is not None and not is_known_vuln_id(self.cve_id):
+            raise ValueError(f"cve_id must be one of: {VULN_ID_FORMATS}")
         if self.package_name is not None:
             pkg = self.package_name.strip()
             if not pkg or not _PKG_NAME_RE.match(pkg):

@@ -195,7 +195,7 @@ class TestResultToJsonb:
         assert d == {}
 
     def test_expected_keys_present(self) -> None:
-        """Alle neun erwarteten Schluesselnamen sind im result-dict."""
+        """Alle zehn erwarteten Schluesselnamen sind im result-dict."""
         from app.services.scan_processing import ScanProcessingResult
 
         r = ScanProcessingResult(
@@ -217,6 +217,8 @@ class TestResultToJsonb:
             "findings_updated",
             "findings_resolved",
             "findings_reopened",
+            # TICKET-021 (ADR-0072): per-item gedroppte Vulnerability-Eintraege.
+            "vulns_dropped",
             "class_os_pkgs",
             "class_lang_pkgs",
             "class_other",

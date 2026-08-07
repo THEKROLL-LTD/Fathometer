@@ -31,18 +31,22 @@ Beschreibung des Angriffsvektors. Ingest-Logik muss alle ablehnen oder die
 schädlichen Werte verwerfen, ohne 500-Crash und ohne Persistierung von
 unsicheren Daten.
 
+Since TICKET-021 (ADR-0072) a non-conforming vulnerability is dropped
+per-item by the schema — it no longer rejects the whole scan (the old "422"
+column expectation). Expected ingest reaction per entry:
+
 | ID | Bad-Input | Erwartete Ingest-Reaktion |
 |----|-----------|---------------------------|
-| CVE-2026-00001 | NUL-Byte-Marker im Title (Test ersetzt vor Push durch echtes `\x00`) | 422 oder Title gestrippt |
+| CVE-2026-00001 | NUL-Byte-Marker im Title (Test ersetzt vor Push durch echtes `\x00`) | per-item drop (NUL-Byte) |
 | CVE-2026-00002 | `<script>` in Title | Persistiert, aber im Render mit Jinja-Autoescape |
-| CVE-2026-00003 | EPSS=1.5 (außerhalb 0–1) | 422 |
-| CVE-2026-00004 | CVE-ID `CVE-foo-bar` | 422 |
-| CVE-2026-00005 | Severity `ULTRA_CRITICAL` | 422 |
-| CVE-2026-00006 | PkgName mit Path-Traversal | 422 (Whitelist-Regex) |
-| CVE-2026-00007 | CVSS-Score 11.5 | 422 |
-| CVE-2026-00008 | Attack-Vector `Q` (ungültig) | 422 oder auf `unknown` gemappt |
-| CVE-2026-00009 | CWE `NOT-A-CWE` und `CWE-12345678` (zu viele Stellen) | 422 oder ungültige Items gestrippt |
-| CVE-2026-00010 | Reference mit `javascript:` und `file://` | 422 oder auf nur https-URLs gestrippt |
+| CVE-2026-00003 | EPSS=1.5 (außerhalb 0–1) | per-item drop |
+| CVE-2026-00004 | CVE-ID `CVE-foo-bar` | per-item drop |
+| CVE-2026-00005 | Severity `ULTRA_CRITICAL` | per-item drop |
+| CVE-2026-00006 | PkgName mit Path-Traversal | per-item drop (Whitelist-Regex) |
+| CVE-2026-00007 | CVSS-Score 11.5 | per-item drop |
+| CVE-2026-00008 | Attack-Vector `Q` (ungültig) | persistiert, auf `unknown` gemappt |
+| CVE-2026-00009 | CWE `NOT-A-CWE` und `CWE-12345678` (zu viele Stellen) | persistiert, ungültige Items gestrippt |
+| CVE-2026-00010 | Reference mit `javascript:` und `file://` | persistiert, auf nur https-URLs gestrippt |
 
 Plus diese Test-Cases die der `test-writer` programmatisch ergänzt:
 
@@ -51,8 +55,8 @@ Plus diese Test-Cases die der `test-writer` programmatisch ergänzt:
 - **Body ohne Auth über 10 MB**: muss mit 401 in <50 ms abgelehnt werden
   (Auth-vor-Body-Parse aus §9).
 - **JSON-Tiefe > 32**: muss mit 422 abgelehnt werden.
-- **Übergroßes String-Feld** (Description > 64 KB): muss mit 422 abgelehnt
-  werden.
+- **Übergroßes String-Feld** (Description > 64 KB): wird seit TICKET-021 auf
+  64 KB getrimmt statt abgelehnt (display-only, v0.6.1-Trim-Pattern).
 - **Übergroße References-Liste** (> 50 URLs pro Finding): muss mit 422
   abgelehnt werden oder auf 50 limitiert.
 

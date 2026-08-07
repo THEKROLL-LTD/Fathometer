@@ -170,6 +170,33 @@ def test_flavor_b_match_requires_cve_or_package() -> None:
         BulkAckRequest.model_validate({"match": {"status": "open"}})
 
 
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        "CVE-2024-12345",
+        "GHSA-abcd-1234-wxyz",
+        "TEMP-0000000-E57E4E",
+        "DSA-5678-1",
+        "DLA-3456-1",
+        "RUSTSEC-2024-0001",
+        "GO-2024-1234",
+        "PYSEC-2024-123",
+    ],
+)
+def test_flavor_b_accepts_every_ingestable_identifier(identifier: str) -> None:
+    """Bulk-ack by identifier must reach every identifier the ingest accepts
+    (ADR-0072) — otherwise non-CVE findings cannot be acknowledged in bulk."""
+    req = BulkAckRequest.model_validate({"match": {"cve_id": identifier}})
+    assert req.match is not None
+    assert req.match.cve_id == identifier
+
+
+@pytest.mark.parametrize("identifier", ["CVE-foo-bar", "TEMP-123-XY", "'; DROP TABLE--"])
+def test_flavor_b_rejects_unknown_identifier(identifier: str) -> None:
+    with pytest.raises(ValidationError):
+        BulkAckRequest.model_validate({"match": {"cve_id": identifier}})
+
+
 # ---------------------------------------------------------------------------
 # Comment-Helper
 # ---------------------------------------------------------------------------

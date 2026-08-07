@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
 from app.models import AttackVector, FindingClass, FindingStatus, Severity
 from app.schemas.scan_envelope import Envelope, TrivyVulnerability
@@ -205,16 +204,44 @@ def test_ingest_lang_pkgs_disambiguation_creates_unique_findings(
 # ---------------------------------------------------------------------------
 
 
-def test_envelope_validation_rejects_adversarial_on_top_level(
+def test_envelope_validation_drops_adversarial_vulns_per_item(
     adversarial_scan: dict[str, Any],
 ) -> None:
-    """Pydantic-Schema validiert strikt pro Vulnerability (z.B. Severity-Literal).
+    """TICKET-021 (ADR-0072): das Schema validiert strikt pro Vulnerability —
+    ein ungueltiges Item wird per-Item gedroppt, nicht mehr der ganze Scan.
 
-    `Envelope.model_validate` wirft `ValidationError` fuer ungueltige Items.
-    Das ist erwartetes Verhalten — die HTTP-Route gibt 422 zurueck.
+    Vor TICKET-021 warf `Envelope.model_validate` hier eine `ValidationError`
+    und der Worker verwarf saemtliche Findings des Hosts (issue #23). Jetzt
+    parst der Envelope, die invalider Items sind raus, die validen bleiben.
     """
-    with pytest.raises(ValidationError):
-        Envelope.model_validate(_envelope_dict(adversarial_scan))
+    envelope = Envelope.model_validate(_envelope_dict(adversarial_scan))
+
+    vulns = envelope.scan.results[0].vulnerabilities
+    assert vulns is not None
+    ids = {v.vulnerability_id for v in vulns}
+
+    # Ungueltige Items per-Item gedroppt: EPSS>1, CVE-foo-bar,
+    # ULTRA_CRITICAL-Severity, PkgName-Path-Traversal, CVSS>10.
+    dropped = {
+        "CVE-2026-00003",
+        "CVE-foo-bar",
+        "CVE-2026-00005",
+        "CVE-2026-00006",
+        "CVE-2026-00007",
+    }
+    assert dropped.isdisjoint(ids), ids & dropped
+
+    # Valide Items ueberleben (XSS-Title bleibt escaped im Render, AV:Q ->
+    # attack_vector=unknown, CWE/References/PURL/VendorIDs werden gestrippt).
+    assert {
+        "CVE-2026-00001",
+        "CVE-2026-00002",
+        "CVE-2026-00008",
+        "CVE-2026-00009",
+        "CVE-2026-00010",
+        "CVE-2026-00015",
+        "CVE-2026-00016",
+    }.issubset(ids)
 
 
 def test_adversarial_fixture_survives_build_when_per_vuln_filtered(

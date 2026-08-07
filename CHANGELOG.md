@@ -6,6 +6,27 @@ und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### TICKET-021 (ADR-0072): per-vulnerability ingest leniency
+
+#### Fixed
+
+- A single non-conforming vulnerability entry no longer discards the whole
+  scan ([#22](https://github.com/THEKROLL-LTD/Fathometer/issues/22),
+  [#23](https://github.com/THEKROLL-LTD/Fathometer/issues/23)):
+  `Vulnerabilities` is validated per entry, so a bad entry drops itself while
+  the remaining findings ingest. Accepted identifiers now cover `TEMP-*`
+  (Debian Security Tracker), `DSA`, `DLA`, `RUSTSEC`, `GO` and `PYSEC` next to
+  CVE and GHSA; over-long `Title`/`Description` are trimmed instead of
+  rejected. Server-side only — no agent update needed, previously failed scans
+  are not backfilled.
+- Bulk-acknowledge by identifier accepts the same identifier set, so non-CVE
+  findings can be acknowledged in bulk.
+
+#### Added
+
+- Dropped entries are counted per scan and reported as `vulns_dropped` in the
+  `scan.ingested` audit metadata, the scan-ingest job result and the log.
+
 ## [v0.28.0] — 2026-06-21
 
 ### ADR-0067: exclude container-runtime data-roots from the agent host scan

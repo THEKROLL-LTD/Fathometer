@@ -35,7 +35,7 @@ from app.models import (
     LLMJob,
     Server,
 )
-from app.schemas.scan_envelope import Envelope
+from app.schemas.scan_envelope import VULN_DROP_STATS_CONTEXT_KEY, Envelope
 from app.services.finding_group_inheritance import inherit_group_risk_to_findings
 from app.services.findings_ingest import ingest_scan as run_ingest
 from app.services.group_matcher import (
@@ -76,6 +76,9 @@ class ScanProcessingResult(BaseModel):
     class_os_pkgs: int
     class_lang_pkgs: int
     class_other: int
+    # TICKET-021 (ADR-0072): non-conforming vulnerability entries dropped
+    # per-item during envelope validation.
+    vulns_dropped: int = 0
 
     @field_validator(
         "scan_id",
@@ -87,6 +90,7 @@ class ScanProcessingResult(BaseModel):
         "class_os_pkgs",
         "class_lang_pkgs",
         "class_other",
+        "vulns_dropped",
     )
     @classmethod
     def must_be_non_negative(cls, v: int) -> int:
@@ -193,10 +197,18 @@ def process_scan_envelope(
         raise ValueError("Top-Level muss ein JSON-Objekt sein")
 
     # Kann ValidationError werfen — Worker faengt das ab und setzt failed.
-    envelope = Envelope.model_validate(raw_doc)
+    # TICKET-021 (ADR-0072): per-vuln leniency lives in the schema — the
+    # `mode="before"` filter on `TrivyResult.vulnerabilities` drops only the
+    # non-conforming entries. The mutable `drop_stats` dict collects the
+    # drop count + first error sample via the validation context, so a
+    # dropped finding is loudly observable instead of silently vanishing.
+    drop_stats: dict[str, Any] = {}
+    envelope = Envelope.model_validate(raw_doc, context={VULN_DROP_STATS_CONTEXT_KEY: drop_stats})
+    vulns_dropped = int(drop_stats.get("dropped", 0))
+    vuln_drop_first_error = drop_stats.get("first_error")
 
     # ---- 3. Findings-Ingest --------------------------------------------------
-    result = run_ingest(server, envelope, session=session)
+    result = run_ingest(server, envelope, session=session, vulns_dropped=vulns_dropped)
 
     # ---- 4. Host-Snapshot persistieren (Best-Effort) -------------------------
     snapshot_available = False
@@ -340,6 +352,8 @@ def process_scan_envelope(
             "findings_resolved": result.findings_resolved,
             # TICKET-010/ADR-0052 (Bug A): Reopen-on-Redetect-Zaehler.
             "findings_reopened": result.findings_reopened,
+            # TICKET-021 (ADR-0072): per-item gedroppte Vulnerability-Eintraege.
+            "vulns_dropped": result.vulns_dropped,
             "class_os_pkgs": result.findings_class_os_pkgs,
             "class_lang_pkgs": result.findings_class_lang_pkgs,
             "class_other": result.findings_class_other,
@@ -347,6 +361,17 @@ def process_scan_envelope(
         actor=server.name,
         session=session,
     )
+
+    if result.vulns_dropped:
+        # TICKET-021: one log line per scan (never one per dropped item) —
+        # "scan lost, loudly" must not become "findings vanish, silently".
+        log.info(
+            "scan_processing.vulns_dropped server_id=%s scan_id=%s dropped=%s first_error=%s",
+            server.id,
+            result.scan_id,
+            result.vulns_dropped,
+            str(vuln_drop_first_error or "")[:200],
+        )
 
     log.info(
         "scan_processing.completed server_id=%s scan_id=%s findings_total=%s",
@@ -366,6 +391,7 @@ def process_scan_envelope(
         class_os_pkgs=result.findings_class_os_pkgs,
         class_lang_pkgs=result.findings_class_lang_pkgs,
         class_other=result.findings_class_other,
+        vulns_dropped=result.vulns_dropped,
     )
 
 

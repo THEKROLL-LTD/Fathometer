@@ -138,7 +138,7 @@ class TestProcessScanEnvelopeValidationError:
 
         # Wir patchen Envelope.model_validate um einen ValidationError zu werfen.
         # Das entspricht einem strukturell ungueltigem Scan-Payload.
-        def fake_validate(data: Any) -> Any:
+        def fake_validate(data: Any, **kwargs: Any) -> Any:
             # Erzeuge einen echten Pydantic-ValidationError via ein kaputtes Modell.
             from pydantic import BaseModel
 
@@ -171,7 +171,7 @@ class TestProcessScanEnvelopeCallOrder:
 
         fake_result = _make_fake_ingest_result()
 
-        def fake_ingest(server: Any, envelope: Any, *, session: Any) -> Any:
+        def fake_ingest(server: Any, envelope: Any, *, session: Any, **kwargs: Any) -> Any:
             call_log.append("ingest_scan")
             return fake_result
 
@@ -500,6 +500,8 @@ class TestScanIngestedAuditMetadata:
         assert len(ingested_calls) == 1, mock_log.call_args_list
         metadata = ingested_calls[0].kwargs["metadata"]
         assert metadata["findings_reopened"] == fake_ingest_result.findings_reopened
+        # TICKET-021: per-item gedroppte Vulnerability-Eintraege mitgerechnet.
+        assert metadata["vulns_dropped"] == fake_ingest_result.vulns_dropped
         # Vollstaendiges Key-Set des Audit-Events (Drift-Schutz).
         assert set(metadata.keys()) == {
             "scan_id",
@@ -508,6 +510,7 @@ class TestScanIngestedAuditMetadata:
             "findings_updated",
             "findings_resolved",
             "findings_reopened",
+            "vulns_dropped",
             "class_os_pkgs",
             "class_lang_pkgs",
             "class_other",
