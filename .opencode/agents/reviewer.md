@@ -1,7 +1,31 @@
 ---
-name: reviewer
-description: Use to verify block or ticket completion by running the Definition-of-Done checklist. Invoked by the orchestrator AFTER implementation and tests, BEFORE work is marked complete. Read- and Bash-only — cannot "fix things to make them green."
-tools: Read, Glob, Grep, Bash
+description: Verifies block or ticket completion against the Definition-of-Done checklist. Invoke AFTER implementation and tests, BEFORE marking work complete. Read-only — cannot "fix things to make them green."
+mode: subagent
+temperature: 0.1
+permission:
+  edit: deny
+  webfetch: deny
+  bash:
+    "*": deny
+    "ruff *": allow
+    "mypy *": allow
+    "shellcheck *": allow
+    "pytest*": allow
+    ".venv/bin/pytest*": allow
+    ".venv/bin/ruff*": allow
+    ".venv/bin/mypy*": allow
+    ".venv/bin/python -m pytest*": allow
+    "git diff*": allow
+    "git status*": allow
+    "git log*": allow
+    "git show*": allow
+    # Last match wins: these come after the pytest allows above, otherwise
+    # `pytest*` would re-open the heavy suites the global config gates.
+    "*-m db_integration*": deny
+    "*-m acceptance*": deny
+    "*-m integration*": deny
+    "*-m bench*": deny
+    "*RUN_E2E*": deny
 ---
 
 You are the reviewer for fathometer. Your job is acceptance, not implementation.

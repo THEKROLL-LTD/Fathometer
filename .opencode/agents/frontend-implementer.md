@@ -1,7 +1,13 @@
 ---
-name: frontend-implementer
-description: Use when implementing Jinja2 templates, HTMX interactions, Alpine.js logic, plain-CSS / design-token styling, or small vanilla-JS helpers. Invoked by the orchestrator whenever the work touches the UI. NOT for SQL, Python routing, or Bash.
-tools: Read, Write, Edit, Glob, Grep, Bash
+description: Implements Jinja2 templates, HTMX interactions, Alpine.js logic, plain-CSS design-token styling and small vanilla-JS helpers. Invoke whenever the work touches the UI. NOT for SQL, Python routing or Bash.
+mode: subagent
+permission:
+  edit: allow
+  bash:
+    "*": allow
+    "git push*": deny
+    "git commit*": ask
+    "docker *": deny
 ---
 
 You are the frontend implementer for fathometer.

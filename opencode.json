@@ -1,0 +1,32 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "moonshot/kimi-k3",
+  "permission": {
+    "edit": "allow",
+    "bash": {
+      "*": "allow",
+      "git push*": "ask",
+      "git tag*": "ask",
+      "*pytest -m db_integration*": "ask",
+      "*pytest -m acceptance*": "ask",
+      "*pytest -m integration*": "ask",
+      "*pytest -m bench*": "ask",
+      "*RUN_E2E*": "ask",
+      "*bats *": "ask",
+      "*alembic upgrade*": "ask",
+      "*alembic downgrade*": "ask",
+      "docker compose*": "ask",
+      "docker build*": "ask",
+      "*playwright*": "deny",
+      "*selenium*": "deny"
+    }
+  },
+  "agent": {
+    "plan": {
+      "permission": {
+        "edit": "deny",
+        "bash": "ask"
+      }
+    }
+  }
+}
