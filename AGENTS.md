@@ -94,10 +94,37 @@ Rationale: the default suite runs in ~30 s. The heavy suites push iteration past
 
 `CHANGELOG.md` follows Keep a Changelog + SemVer and is updated **in the same PR**. A missing entry is a review reject.
 
-- One `###` block under `## [Unreleased]`, titled `<TICKET/ADR/Block>: <short>`, with `#### Added` / `#### Changed` / `#### Fixed` subsections.
+- One `###` block under `## [Unreleased]`, titled `<TICKET/ADR/Block>: <short>`, with `#### Added` / `#### Changed` / `#### Fixed` subsections. Budget ≤ 25 lines — see "Documentation hygiene".
 - Covers anything operator-, behaviour-, schema- or build-relevant. Pure internal refactors may be skipped, with a reason in the PR.
 - **Version source is the git tag `v*`**, not `pyproject.toml` (which stays static). Runtime shows `FM_VERSION` / `FM_BUILD_REVISION` from the build arg.
 - Promotion `[Unreleased]` → `## [vX.Y.Z] — <YYYY-MM-DD>` happens **at release only**, together with the tag. Tags go on `main` after the merge — never on a feature or fix branch. Operator-visible feature → MINOR; pure bugfix → PATCH.
+
+## Documentation hygiene — one job per artifact
+
+Failure-backed: TICKET-021 (2026-08-07) shipped a 46-line CHANGELOG block, a 1400-word `STATE.md` paragraph and an ADR that all re-narrated the same fix. The cause was not verbosity but **redundancy across artifacts** — each one retold the whole story, and each looked reasonable on its own.
+
+**1 — Length budgets, enforced by `tests/test_doc_budgets.py`.** A `###` block under `[Unreleased]` ≤ 25 lines; an ADR ≤ 80 lines; a `STATE.md` row is a row. Over budget is a failing test, not a matter of taste. The ADR budget applies from ADR-0072 on — everything before it is legacy and is not retrofitted.
+
+**2 — One job per artifact, no overlap.**
+
+| Artifact | Audience | Holds | Never |
+| --- | --- | --- | --- |
+| `CHANGELOG.md` | Operator | What changes for them | Implementation detail, rationale |
+| ADR | Future maintainer | The decision, the alternative rejected, the consequence | A work report |
+| `docs/tickets/` | Implementer, before the work | Problem, solution, DoD | A summary written afterwards |
+| `docs/blocks/STATE.md` | The next agent | One row: date, item, decision, release | Prose |
+| Commit message | Reviewer | What changed and why | Anything the diff already shows |
+| Code comment | The next reader of that line | Why this line is surprising | Provenance |
+
+If it is in the ADR, the CHANGELOG links to it instead of restating it.
+
+**3 — No ticket or ADR IDs in code comments** unless the code is incomprehensible without them. `git blame` carries provenance; `# TICKET-021 (ADR-0072): …` is proof-of-work, not documentation.
+
+**4 — `STATE.md` is a table.** The format has to make a wall of text impossible; a rule against prose does not survive contact with an agent that just finished a hard task.
+
+**5 — Write the ADR before the code.** An ADR written afterwards turns into a work report with self-praise ("observability is part of the fix, not a nice-to-have"). One written first stays a decision.
+
+**6 — The `reviewer` checks all of this.** Over budget, or content repeated from another artifact, is a RED item like any failing gate.
 
 ## HTMX OOB single-source pattern
 
@@ -137,6 +164,8 @@ If an agent wants to widen scope: refuse, and require a new ADR.
 7. **Stop at every block transition** and ask the user before starting the next one.
 
 Every implementer, test-writer and reviewer prompt restates the quality-gate rule and the changelog requirement as part of its DoD. The reviewer runs the gates itself and has no write access.
+
+The five subagents are defined twice — `.claude/agents/` for Claude Code, `.opencode/agents/` for OpenCode — because the two tools read different frontmatter. **The bodies are identical and must stay identical**: edit one, port the same text to the other in the same commit. Only the frontmatter (tool grants vs. permission map) differs.
 
 A ticket is delegated the same way, minus the block steps: branch, implement against the ticket's Solution and DoD, gates, reviewer, commit.
 

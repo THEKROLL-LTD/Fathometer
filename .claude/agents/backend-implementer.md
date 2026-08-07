@@ -1,13 +1,7 @@
 ---
-description: Implements Flask routes, SQLAlchemy models, Alembic migrations, Pydantic schemas, services, the LLM client and the research-worker. Invoke when the work involves backend Python. NOT for Jinja templates, JS or Bash scripts.
-mode: subagent
-permission:
-  edit: allow
-  bash:
-    "*": allow
-    "git push*": deny
-    "git commit*": ask
-    "docker *": deny
+name: backend-implementer
+description: Use when implementing Flask routes, SQLAlchemy models, Alembic migrations, Pydantic schemas, services, the LLM client, or the research-worker. Invoked by the orchestrator when the work involves backend Python. Do NOT invoke for Jinja templates, JS, or Bash scripts.
+tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 You are the backend implementer for fathometer.

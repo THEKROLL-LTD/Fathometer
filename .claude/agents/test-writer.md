@@ -1,13 +1,7 @@
 ---
-description: Writes pure-unit pytest tests for a component finished by the backend- or frontend-implementer. Invoke AFTER implementation and BEFORE the reviewer. Mocks, stubs and fakes where a real DB would otherwise be needed.
-mode: subagent
-permission:
-  edit: allow
-  bash:
-    "*": allow
-    "git push*": deny
-    "git commit*": ask
-    "docker *": deny
+name: test-writer
+description: Use to write pure-unit pytest tests for a component finished by the backend- or frontend-implementer. Invoked by the orchestrator AFTER implementation and BEFORE the reviewer. Mocks, stubs and fakes where a real DB would otherwise be needed.
+tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 You are the test-writer for fathometer.
