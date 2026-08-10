@@ -6,6 +6,23 @@ und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### TICKET-023: Trivy DB metadata read after the scan, not before
+
+#### Fixed
+
+- The agent now reads `trivy version --format json` after the `rootfs`
+  scan instead of before it, so the reported DB version/timestamps reflect
+  the DB the scan actually used. Previously a host whose DB refreshed
+  during the scan submitted fresh findings but reported the pre-scan DB
+  state, showing a `trivy-db stale` pill that was already wrong. Agent-side
+  only — server, schema and UI are unchanged.
+
+#### Changed
+
+- `AGENT_VERSION` / `CURRENT_AGENT_VERSION` bumped `0.10.0` → `0.11.0` so
+  the fix reaches hosts via `auto_update_self`. Hosts pick it up on their
+  next run; no backfill of existing `servers.trivy_db_*` rows.
+
 ### TICKET-022: bump recommended Trivy to 0.73.0
 
 #### Changed

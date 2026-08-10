@@ -101,7 +101,7 @@
 
 set -euo pipefail
 
-readonly AGENT_VERSION="0.10.0"
+readonly AGENT_VERSION="0.11.0"
 readonly REQUIRED_LIB_HOST_STATE_VERSION="0.5.0"
 readonly TRIVY_BIN="${FM_TRIVY_PATH:-trivy}"
 readonly SCAN_PATH="${FM_SCAN_PATH:-/}"
@@ -498,28 +498,6 @@ arch="$(uname -m)"
 # Block N (ADR-0021) — capture the trivy CLI version for the envelope.
 trivy_version="$("$TRIVY_BIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo "unknown")"
 
-# `trivy version --format json` ist normalerweise <1s. Hard-Cap auf 10s
-# damit ein haengender DB-Update-Lock o.ae. den Scan nicht blockiert.
-# `timeout` ist GNU-coreutils; falls nicht verfuegbar (sehr alte BusyBox)
-# faellt der Aufruf zurueck ohne Cap — kein Showstopper.
-if command -v timeout >/dev/null 2>&1; then
-  trivy_db_meta_raw="$(timeout 10 "$TRIVY_BIN" version --format json 2>/dev/null || echo '')"
-else
-  trivy_db_meta_raw="$("$TRIVY_BIN" version --format json 2>/dev/null || echo '')"
-fi
-trivy_db_block="null"
-if [[ -n "$trivy_db_meta_raw" ]] && printf '%s' "$trivy_db_meta_raw" | jq -e '.VulnerabilityDB' >/dev/null 2>&1; then
-  trivy_db_block="$(printf '%s' "$trivy_db_meta_raw" | jq -c '{
-    version: (.VulnerabilityDB.Version | tostring),
-    updated_at: .VulnerabilityDB.UpdatedAt,
-    next_update_at: .VulnerabilityDB.NextUpdate,
-    downloaded_at: .VulnerabilityDB.DownloadedAt
-  }')"
-  log "Trivy-DB meta: version=$(printf '%s' "$trivy_db_block" | jq -r .version) updated_at=$(printf '%s' "$trivy_db_block" | jq -r .updated_at)"
-else
-  log "Warning: trivy version --format json returned no VulnerabilityDB data; sending trivy_db=null"
-fi
-
 log "Host: ${os_pretty} (kernel ${kernel_version}, ${arch}, trivy ${trivy_version})"
 
 # ----- Trivy scan + Packages[] strip -------------------------------------
@@ -594,6 +572,29 @@ fi
 if [[ ! -s "$trivy_raw" ]]; then
   log "Error: trivy output is empty"
   exit 2
+fi
+
+# Read the DB metadata *after* the scan, not before: `trivy rootfs`
+# downloads/refreshes the vulnerability DB when it is due, so a pre-scan
+# read would report the state the scan did not use. `timeout 10` caps a
+# hanging DB-update lock; if `timeout` is unavailable (very old BusyBox)
+# the call falls back uncapped — not a showstopper.
+if command -v timeout >/dev/null 2>&1; then
+  trivy_db_meta_raw="$(timeout 10 "$TRIVY_BIN" version --format json 2>/dev/null || echo '')"
+else
+  trivy_db_meta_raw="$("$TRIVY_BIN" version --format json 2>/dev/null || echo '')"
+fi
+trivy_db_block="null"
+if [[ -n "$trivy_db_meta_raw" ]] && printf '%s' "$trivy_db_meta_raw" | jq -e '.VulnerabilityDB' >/dev/null 2>&1; then
+  trivy_db_block="$(printf '%s' "$trivy_db_meta_raw" | jq -c '{
+    version: (.VulnerabilityDB.Version | tostring),
+    updated_at: .VulnerabilityDB.UpdatedAt,
+    next_update_at: .VulnerabilityDB.NextUpdate,
+    downloaded_at: .VulnerabilityDB.DownloadedAt
+  }')"
+  log "Trivy-DB meta: version=$(printf '%s' "$trivy_db_block" | jq -r .version) updated_at=$(printf '%s' "$trivy_db_block" | jq -r .updated_at)"
+else
+  log "Warning: trivy version --format json returned no VulnerabilityDB data; sending trivy_db=null"
 fi
 
 # Block N (ADR-0021) — strip the `Results[].Packages` inventory block.

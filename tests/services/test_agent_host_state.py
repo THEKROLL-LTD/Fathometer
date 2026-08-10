@@ -359,17 +359,36 @@ def test_envelope_compat(stub_bin: Path) -> None:
 
 def test_agent_script_has_host_state_integration() -> None:
     """Sanity check: the main script carries the current version bump and
-    sources the lib (TICKET-019 moves the agent to 0.10.0 — completing the
-    ADR-0067 container-runtime skip list with the containerd globs; lib
-    stays 0.5.0)."""
+    sources the lib (TICKET-023 moves the agent to 0.11.0 — reads the Trivy
+    DB metadata after the scan instead of before; lib stays 0.5.0)."""
     agent_sh = Path(__file__).parent.parent.parent / "agent" / "fathometer-agent.sh"
     body = agent_sh.read_text()
-    assert 'AGENT_VERSION="0.10.0"' in body, "Agent version bump to 0.10.0 missing"
+    assert 'AGENT_VERSION="0.11.0"' in body, "Agent version bump to 0.11.0 missing"
     assert 'REQUIRED_LIB_HOST_STATE_VERSION="0.5.0"' in body
     assert "lib_host_state.sh" in body, "Agent sourct lib_host_state.sh nicht"
     assert "host_state" in body, "Agent baut host_state nicht in Envelope ein"
     assert "collect_host_updates" in body, "Agent ruft den Host-Update-Resolver nicht auf"
     assert "host_updates" in body, "Agent baut host_updates nicht in Envelope ein"
+
+
+def test_agent_script_reads_trivy_db_meta_after_scan() -> None:
+    """TICKET-023: the DB-metadata read must come after the `rootfs` scan
+    that can refresh the DB, not before — otherwise the reported metadata
+    describes a DB state the scan did not use."""
+    agent_sh = Path(__file__).parent.parent.parent / "agent" / "fathometer-agent.sh"
+    body = agent_sh.read_text()
+
+    rootfs_idx = body.index('"$TRIVY_BIN" rootfs "$SCAN_PATH"')
+    db_meta_idx = body.index('"$TRIVY_BIN" version --format json')
+    assert db_meta_idx > rootfs_idx, (
+        "trivy version --format json must run after trivy rootfs, not before"
+    )
+
+    # The timeout guard, the null default and the warning path all moved
+    # with the block, unchanged.
+    assert "timeout 10" in body
+    assert 'trivy_db_block="null"' in body
+    assert "no VulnerabilityDB data; sending trivy_db=null" in body
 
 
 def test_agent_script_skips_container_runtime_data_roots() -> None:
