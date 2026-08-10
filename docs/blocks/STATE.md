@@ -17,6 +17,7 @@ What has landed, what is open, what is waiting on the operator. One row per item
 
 | Date | Item | Decision | Release |
 | --- | --- | --- | --- |
+| 2026-08-10 | TICKET-023 — Trivy DB metadata read after the scan, not before | — | v0.28.1 (tag pending) |
 | 2026-08-10 | TICKET-022 — recommended Trivy bumped to 0.73.0 (revised from 0.72.0 draft) | — | v0.29.0 (tag pending) |
 | 2026-08-06 | TICKET-021 — per-vulnerability ingest leniency (issues #22, #23) | ADR-0072 | v0.28.1 (tag pending) |
 | 2026-06-15 | Exclude container-runtime data-roots from the agent host scan | ADR-0067 | v0.28.0 |
