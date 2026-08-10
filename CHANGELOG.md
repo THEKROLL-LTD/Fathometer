@@ -6,6 +6,16 @@ und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### TICKET-022: bump recommended Trivy to 0.73.0
+
+#### Changed
+
+- `RECOMMENDED_TRIVY_VERSION` raised from `0.71.0` to `0.73.0`. Every host
+  with a fathometer-managed Trivy binary picks up the new version on its
+  next scheduled run via the existing `auto_update_trivy` mechanism —
+  server-side only, no agent update needed. `MIN_TRIVY_VERSION` stays
+  `0.70.0`; hosts on a system-package Trivy are unaffected.
+
 ### TICKET-021 (ADR-0072): per-vulnerability ingest leniency
 
 #### Fixed
