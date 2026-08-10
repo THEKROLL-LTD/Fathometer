@@ -29,13 +29,13 @@ def test_min_trivy_le_recommended_trivy() -> None:
 
 
 def test_ticket015_version_bump_values() -> None:
-    """RECOMMENDED-Trivy on 0.71.0; agent on 0.10.0 (TICKET-019 — completes
-    the ADR-0067 container-runtime skip list with the two distro-agnostic
-    containerd globs plus /run/containers, bumping the agent from 0.9.0).
-    MIN-Trivy stays at 0.70.0 deliberately (no hard retirement of 0.70.0
-    hosts). MIN_AGENT_VERSION stays 0.1.0 — old agents that omit the skip
-    are not broken, only less precise -> mitigate, no hard reject."""
-    assert Settings.RECOMMENDED_TRIVY_VERSION == "0.71.0"
+    """RECOMMENDED-Trivy on 0.73.0 (TICKET-022); agent on 0.10.0 (TICKET-019
+    — completes the ADR-0067 container-runtime skip list with the two
+    distro-agnostic containerd globs plus /run/containers, bumping the agent
+    from 0.9.0). MIN-Trivy stays at 0.70.0 deliberately (no hard retirement
+    of 0.70.0 hosts). MIN_AGENT_VERSION stays 0.1.0 — old agents that omit
+    the skip are not broken, only less precise -> mitigate, no hard reject."""
+    assert Settings.RECOMMENDED_TRIVY_VERSION == "0.73.0"
     assert Settings.CURRENT_AGENT_VERSION == "0.10.0"
     assert Settings.MIN_TRIVY_VERSION == "0.70.0"
     assert Settings.MIN_AGENT_VERSION == "0.1.0"
@@ -55,3 +55,19 @@ def test_trivy_release_url_template_has_placeholders() -> None:
     assert "{version}" in template
     assert "{arch}" in template
     assert template.startswith("https://github.com/aquasecurity/trivy/releases/")
+
+
+def test_trivy_release_url_template_renders_recommended_assets() -> None:
+    """TICKET-022: Template loest fuer RECOMMENDED_TRIVY_VERSION beide
+    Arch-Werte auf die echten Upstream-Asset-Namen auf (verifiziert gegen
+    das reale v0.73.0-Release, kein Netzwerk-Call)."""
+    template = Settings.TRIVY_RELEASE_URL_TEMPLATE
+    version = Settings.RECOMMENDED_TRIVY_VERSION
+    assert template.format(version=version, arch="64bit") == (
+        f"https://github.com/aquasecurity/trivy/releases/download/"
+        f"v{version}/trivy_{version}_Linux-64bit.tar.gz"
+    )
+    assert template.format(version=version, arch="ARM64") == (
+        f"https://github.com/aquasecurity/trivy/releases/download/"
+        f"v{version}/trivy_{version}_Linux-ARM64.tar.gz"
+    )
