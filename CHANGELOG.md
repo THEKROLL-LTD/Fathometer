@@ -6,6 +6,8 @@ und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.28.1] — 2026-08-10
+
 ### TICKET-023: Trivy DB metadata read after the scan, not before
 
 #### Fixed
