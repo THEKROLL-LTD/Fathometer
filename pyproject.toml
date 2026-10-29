@@ -14,7 +14,7 @@ authors = [{ name = "THEKROLL LTD" }]
 # Runtime-Dependencies — Stack-Konstanten siehe CLAUDE.md
 dependencies = [
     "flask>=3.0",
-    "sqlalchemy[asyncio]>=2.0",
+    "sqlalchemy[asyncio]>=2.1",
     "psycopg[binary]>=3.2",
     "alembic>=1.13",
     "pydantic>=2.7",
@@ -22,6 +22,7 @@ dependencies = [
     "flask-login>=0.6",
     "flask-limiter>=3.7",
     "flask-wtf>=1.2",
+    "wtforms>=3.3",
     "structlog>=24.1",
     "argon2-cffi>=23.1",
     "cryptography>=50.0.0",

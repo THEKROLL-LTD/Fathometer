@@ -1130,8 +1130,10 @@ def test_server_group_form_choices_built_from_available_groups(no_csrf_app: Flas
             formdata=ImmutableMultiDict(),  # Leeres Formdata -> kein Request-Input
         )
 
-    choices = form.group_id.choices
-    assert choices is not None, "ServerGroupForm.group_id.choices darf nicht None sein"
+    assert form.group_id.choices is not None, (
+        "ServerGroupForm.group_id.choices darf nicht None sein"
+    )
+    choices = [(c.value, c.label) for c in form.group_id.choices]
 
     assert choices[0] == ("none", "— none —"), (
         f"Erste Choice soll ('none', '— none —') sein, ist: {choices[0]}"

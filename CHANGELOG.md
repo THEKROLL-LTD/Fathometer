@@ -15,6 +15,9 @@ und das Projekt folgt [Semantic Versioning](https://semver.org/).
   `cryptography` 50, `urllib3` 2.8, `pydantic-ai-slim` 1.107.9 (research
   worker), `httpx2`/`httpcore2` 2.16, plus `mako`, `werkzeug` and
   `opentelemetry-api`.
+- Forms and the server-detail query no longer use APIs deprecated in
+  `wtforms` 3.3 and `sqlalchemy` 2.1; both packages now have a minimum version
+  of 3.3 / 2.1.
 
 #### Changed
 
