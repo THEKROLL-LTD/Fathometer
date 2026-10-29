@@ -23,7 +23,7 @@
       "description": "Python Dev-Dependencies (mypy, pytest, etc.) in einem gemeinsamen PR bündeln",
       "matchManagers": ["pep621"],
       "matchDepTypes": ["optional-dependencies"],
-      "excludePackageNames": ["ruff"],
+      "matchPackageNames": ["!ruff"],
       "groupName": "Python dev tooling (mypy, pytest)",
       "labels": ["dependencies", "python"]
     },
@@ -43,9 +43,21 @@
       "labels": ["dependencies", "frontend"]
     },
     {
+      "description": "aquasecurity/trivy-action über git-tags statt GitHub GraphQL API abfragen (umgeht die GitHub Org IP-Allowlist von aquasecurity)",
+      "matchPackageNames": ["aquasecurity/trivy-action"],
+      "overrideDatasource": "git-tags",
+      "overridePackageName": "https://github.com/aquasecurity/trivy-action"
+    },
+    {
+      "description": "aquasecurity/trivy über git-tags statt GitHub GraphQL API abfragen (umgeht die GitHub Org IP-Allowlist von aquasecurity)",
+      "matchPackageNames": ["aquasecurity/trivy"],
+      "overrideDatasource": "git-tags",
+      "overridePackageName": "https://github.com/aquasecurity/trivy"
+    },
+    {
       "description": "GitHub Actions: Alle Action-Updates in .github/workflows/*.yml in einem PR bündeln",
       "matchManagers": ["github-actions"],
-      "excludePackageNames": ["python", "actions/python-versions"],
+      "matchPackageNames": ["!python", "!actions/python-versions"],
       "groupName": "GitHub Actions",
       "labels": ["dependencies", "ci"]
     },
