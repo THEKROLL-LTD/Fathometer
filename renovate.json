@@ -45,13 +45,14 @@
     {
       "description": "GitHub Actions: Alle Action-Updates in .github/workflows/*.yml in einem PR bündeln",
       "matchManagers": ["github-actions"],
-      "excludePackageNames": ["python"],
+      "excludePackageNames": ["python", "actions/python-versions"],
       "groupName": "GitHub Actions",
       "labels": ["dependencies", "ci"]
     },
     {
       "description": "Python-Version überall (pyproject.toml requires-python + actions/setup-python in CI) nicht automatisch auf 3.15+ heben (EL10 AppStream / ADR-0069)",
-      "matchPackageNames": ["python"],
+      "matchPackageNames": ["python", "actions/python-versions"],
+      "matchDepNames": ["python"],
       "allowedVersions": "<3.15.0",
       "enabled": false
     },
