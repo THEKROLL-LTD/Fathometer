@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.28
 # Multi-stage build for fathometer.
 # The builder installs dependencies into a venv; the runtime copies the venv
 # and runs as a non-root user. Runtime base OS is AlmaLinux 10-minimal
