@@ -14,6 +14,16 @@
     ".playwright-mcp/**",
     "tests/integration/installer/**"
   ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Trivy scanner version pinned via the trivy-action `version:` input",
+      "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\n\\s*version: (?<currentValue>v[^\\s]+)"
+      ]
+    }
+  ],
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 5am on monday"]

@@ -44,6 +44,9 @@ jobs:
       - name: Trivy filesystem scan (SARIF)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          # The action's built-in default is much older; pin the scanner itself.
+          # renovate: datasource=github-tags depName=aquasecurity/trivy
+          version: v0.76.1
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret,misconfig
@@ -102,6 +105,9 @@ jobs:
       - name: Trivy image scan (SARIF)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          # The action's built-in default is much older; pin the scanner itself.
+          # renovate: datasource=github-tags depName=aquasecurity/trivy
+          version: v0.76.1
           scan-type: image
           image-ref: secscan:ci
           scanners: vuln,secret

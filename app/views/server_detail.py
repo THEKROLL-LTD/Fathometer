@@ -35,6 +35,7 @@ import structlog
 from flask import Blueprint, abort, render_template, request
 from flask_login import login_required
 from sqlalchemy import case, func, nulls_last, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
@@ -416,7 +417,7 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
     # Severity-Rank: `findings_query._severity_rank_expr`). Postgres verlangt
     # dass die DISTINCT-ON-Ausdruecke die fuehrenden ORDER-BY-Ausdruecke sind
     # — derselbe `case`-Objekt-Identitaet (`worst_lane_case`) wird in
-    # distinct() UND order_by() verwendet.
+    # distinct_on() UND order_by() verwendet.
     worst_lane_case = fix_lane_sql_case(
         Finding.finding_class, Finding.has_fix, Finding.host_update_available
     )
@@ -440,7 +441,7 @@ def _load_application_groups_for_server(sess: Any, server_id: int) -> list[dict[
             Finding.status == FindingStatus.OPEN,
             Finding.application_group_id.in_(group_ids),
         )
-        .distinct(Finding.application_group_id, worst_lane_case)
+        .ext(distinct_on(Finding.application_group_id, worst_lane_case))
         .order_by(
             Finding.application_group_id,
             worst_lane_case,

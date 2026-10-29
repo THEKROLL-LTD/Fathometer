@@ -14,7 +14,7 @@ authors = [{ name = "THEKROLL LTD" }]
 # Runtime-Dependencies — Stack-Konstanten siehe CLAUDE.md
 dependencies = [
     "flask>=3.0",
-    "sqlalchemy[asyncio]>=2.0",
+    "sqlalchemy[asyncio]>=2.1",
     "psycopg[binary]>=3.2",
     "alembic>=1.13",
     "pydantic>=2.7",
@@ -22,9 +22,10 @@ dependencies = [
     "flask-login>=0.6",
     "flask-limiter>=3.7",
     "flask-wtf>=1.2",
+    "wtforms>=3.3",
     "structlog>=24.1",
     "argon2-cffi>=23.1",
-    "cryptography>=42.0",
+    "cryptography>=50.0.0",
     "openai>=1.30",
     "nh3>=0.2",
     "httpx>=0.27",
@@ -34,8 +35,17 @@ dependencies = [
     # Agenten-Schleife (eigene Tools) + lokale HTML/Datei-Extraktion. Nur vom
     # research-worker importiert (opt-in, Feature default-off); in app/llm-worker
     # inert. Such-Backend via vorhandenem httpx, keine weitere Dep.
-    "pydantic-ai-slim[openai]>=1.0,<2",
+    "pydantic-ai-slim[openai]>=1.107.7,<2",
     "trafilatura>=2.0,<3",
+    # Security floors for transitive dependencies. The image installs with
+    # `pip install .` and no lockfile, so these floors are what keeps patched
+    # versions in the shipped image.
+    "urllib3>=2.8.0",
+    "certifi>=2026.10.19",
+    "anyio>=4.14.2",
+    "httpx2>=2.12.0",
+    "httpcore2>=2.10.0",
+    "genai-prices>=0.0.73,<0.1",
 ]
 
 [project.optional-dependencies]

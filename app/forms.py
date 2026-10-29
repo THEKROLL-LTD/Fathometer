@@ -18,6 +18,7 @@ from wtforms import (
     BooleanField,
     IntegerField,
     PasswordField,
+    SelectChoice,
     SelectField,
     StringField,
     TextAreaField,
@@ -47,11 +48,11 @@ USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9._\-]{3,64}$")
 # (Phase C) — Block-Z-Risiken-Tabelle verlangt identische Regex in beiden Pfaden.
 SERVER_GROUP_NAME_REGEX = re.compile(r"^[A-Za-z0-9 _.-]+$")
 
-SEVERITY_CHOICES: list[tuple[str, str]] = [
-    ("critical", "Critical"),
-    ("high", "High"),
-    ("medium", "Medium"),
-    ("low", "Low"),
+SEVERITY_CHOICES: list[SelectChoice] = [
+    SelectChoice("critical", "Critical"),
+    SelectChoice("high", "High"),
+    SelectChoice("medium", "Medium"),
+    SelectChoice("low", "Low"),
 ]
 
 
@@ -215,9 +216,9 @@ class LlmReviewerModeForm(FlaskForm):
     new_mode = SelectField(
         "New mode",
         choices=[
-            ("off", "off"),
-            ("observation", "observation"),
-            ("live", "live"),
+            SelectChoice("off", "off"),
+            SelectChoice("observation", "observation"),
+            SelectChoice("live", "live"),
         ],
         validators=[DataRequired()],
     )
@@ -438,11 +439,11 @@ class UpstreamCheckSettingsForm(FlaskForm):
     upstream_search_backend = SelectField(
         "Search backend",
         choices=[
-            ("", "— none —"),
-            ("searxng", "SearXNG (self-hosted)"),
-            ("tavily", "Tavily"),
-            ("firecrawl", "Firecrawl"),
-            ("serper", "Serper"),
+            SelectChoice("", "— none —"),
+            SelectChoice("searxng", "SearXNG (self-hosted)"),
+            SelectChoice("tavily", "Tavily"),
+            SelectChoice("firecrawl", "Firecrawl"),
+            SelectChoice("serper", "Serper"),
         ],
         validators=[OptionalValidator()],
     )
@@ -552,9 +553,9 @@ class ServerGroupForm(FlaskForm):
         **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)
-        choices: list[tuple[str, str]] = [("none", "— none —")]
+        choices: list[SelectChoice] = [SelectChoice("none", "— none —")]
         if available_groups:
-            choices.extend((str(g.id), g.name) for g in available_groups)
+            choices.extend(SelectChoice(str(g.id), g.name) for g in available_groups)
         self.group_id.choices = choices
 
 
@@ -601,9 +602,9 @@ class ServerSettingsForm(FlaskForm):
         **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)
-        choices: list[tuple[str, str]] = [("none", "— none —")]
+        choices: list[SelectChoice] = [SelectChoice("none", "— none —")]
         if available_groups:
-            choices.extend((str(g.id), g.name) for g in available_groups)
+            choices.extend(SelectChoice(str(g.id), g.name) for g in available_groups)
         self.group_id.choices = choices
 
 
@@ -677,7 +678,7 @@ class GroupMoveForm(FlaskForm):
 
     direction = SelectField(
         "Direction",
-        choices=[("up", "up"), ("down", "down")],
+        choices=[SelectChoice("up", "up"), SelectChoice("down", "down")],
         validators=[DataRequired()],
     )
 

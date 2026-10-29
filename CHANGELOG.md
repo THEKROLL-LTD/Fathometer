@@ -6,6 +6,27 @@ und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Dependency security bumps
+
+#### Fixed
+
+- Python dependencies updated to close 24 advisories (2 critical, 7 high):
+  `certifi` (compromised emSign root CAs), `anyio` (TLS name spoofing),
+  `cryptography` 50, `urllib3` 2.8, `pydantic-ai-slim` 1.107.9 (research
+  worker), `httpx2`/`httpcore2` 2.16, plus `mako`, `werkzeug` and
+  `opentelemetry-api`.
+- Forms and the server-detail query no longer use APIs deprecated in
+  `wtforms` 3.3 and `sqlalchemy` 2.1; both packages now have a minimum version
+  of 3.3 / 2.1.
+
+#### Changed
+
+- `pyproject.toml` now carries minimum versions for the patched transitive
+  packages, because the image installs without a lockfile. Rebuild the image
+  without cache (`docker compose build --no-cache`) to pick them up.
+- The CI Trivy workflow now pins Trivy `v0.76.1` instead of the older default
+  bundled with `trivy-action`; Renovate tracks the pin.
+
 ## [v0.28.1] — 2026-08-10
 
 ### TICKET-023: Trivy DB metadata read after the scan, not before
