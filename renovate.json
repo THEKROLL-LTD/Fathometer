@@ -20,47 +20,6 @@
   },
   "packageRules": [
     {
-      "description": "Python-Version überall (requires-python in pyproject.toml + actions/setup-python in CI) fest auf 3.14.x halten (EL10 AppStream / ADR-0069)",
-      "matchPackageNames": ["python"],
-      "allowedVersions": "3.14.x"
-    },
-    {
-      "description": "requires-python in pyproject.toml niemals automatisch durch Renovate umschreiben lassen",
-      "matchManagers": ["pep621"],
-      "matchDepTypes": ["requires-python"],
-      "enabled": false
-    },
-    {
-      "description": "PostgreSQL fest auf Major 17 halten (AGENTS.md Stack-Konstante & fathometer-db Volume)",
-      "matchDatasources": ["docker"],
-      "matchPackageNames": ["postgres"],
-      "allowedVersions": "17.x"
-    },
-    {
-      "description": "AlmaLinux Docker Base-Images fest auf Major 10 halten (ADR-0069)",
-      "matchDatasources": ["docker"],
-      "matchPackageNames": ["almalinux", "almalinux/10-minimal"],
-      "allowedVersions": "10.x"
-    },
-    {
-      "description": "Ruff ist in pyproject.toml bewusst auf ==0.15.13 gepinnt (Format-Output ist versionssensitiv) — keine automatischen PRs",
-      "matchManagers": ["pep621"],
-      "matchPackageNames": ["ruff"],
-      "enabled": false
-    },
-    {
-      "description": "Bewusste Major-Obergrenze in pyproject.toml (pydantic-ai-slim <2, ADR-0063) respektieren",
-      "matchManagers": ["pep621"],
-      "matchPackageNames": ["pydantic-ai-slim"],
-      "allowedVersions": "<2.0.0"
-    },
-    {
-      "description": "Bewusste Major-Obergrenze in pyproject.toml (trafilatura <3, ADR-0063) respektieren",
-      "matchManagers": ["pep621"],
-      "matchPackageNames": ["trafilatura"],
-      "allowedVersions": "<3.0.0"
-    },
-    {
       "description": "Python Dev-Dependencies (mypy, pytest, etc.) in einem gemeinsamen PR bündeln",
       "matchManagers": ["pep621"],
       "matchDepTypes": ["optional-dependencies"],
@@ -86,8 +45,51 @@
     {
       "description": "GitHub Actions: Alle Action-Updates in .github/workflows/*.yml in einem PR bündeln",
       "matchManagers": ["github-actions"],
+      "excludePackageNames": ["python"],
       "groupName": "GitHub Actions",
       "labels": ["dependencies", "ci"]
+    },
+    {
+      "description": "Python-Version überall (pyproject.toml requires-python + actions/setup-python in CI) nicht automatisch auf 3.15+ heben (EL10 AppStream / ADR-0069)",
+      "matchPackageNames": ["python"],
+      "allowedVersions": "<3.15.0",
+      "enabled": false
+    },
+    {
+      "description": "requires-python in pyproject.toml niemals automatisch durch Renovate umschreiben lassen",
+      "matchManagers": ["pep621"],
+      "matchDepTypes": ["requires-python"],
+      "enabled": false
+    },
+    {
+      "description": "PostgreSQL fest auf Major 17 halten (AGENTS.md Stack-Konstante & fathometer-db Volume)",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["postgres"],
+      "allowedVersions": "<18.0.0"
+    },
+    {
+      "description": "AlmaLinux Docker Base-Images fest auf Major 10 halten (ADR-0069)",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["almalinux", "almalinux/10-minimal"],
+      "allowedVersions": "<11.0.0"
+    },
+    {
+      "description": "Ruff ist in pyproject.toml bewusst auf ==0.15.13 gepinnt (Format-Output ist versionssensitiv) — keine automatischen PRs",
+      "matchManagers": ["pep621"],
+      "matchPackageNames": ["ruff"],
+      "enabled": false
+    },
+    {
+      "description": "Bewusste Major-Obergrenze in pyproject.toml (pydantic-ai-slim <2, ADR-0063) respektieren",
+      "matchManagers": ["pep621"],
+      "matchPackageNames": ["pydantic-ai-slim"],
+      "allowedVersions": "<2.0.0"
+    },
+    {
+      "description": "Bewusste Major-Obergrenze in pyproject.toml (trafilatura <3, ADR-0063) respektieren",
+      "matchManagers": ["pep621"],
+      "matchPackageNames": ["trafilatura"],
+      "allowedVersions": "<3.0.0"
     }
   ]
 }
