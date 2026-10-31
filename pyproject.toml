@@ -45,7 +45,7 @@ dependencies = [
     "anyio>=4.14.2",
     "httpx2>=2.12.0",
     "httpcore2>=2.10.0",
-    "genai-prices>=0.0.73,<0.1",
+    "genai-prices>=0.2.1,<0.3",
 ]
 
 [project.optional-dependencies]
