@@ -46,7 +46,7 @@ jobs:
         with:
           # The action's built-in default is much older; pin the scanner itself.
           # renovate: datasource=github-tags depName=aquasecurity/trivy
-          version: v0.76.1
+          version: v0.76.2
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret,misconfig
@@ -107,7 +107,7 @@ jobs:
         with:
           # The action's built-in default is much older; pin the scanner itself.
           # renovate: datasource=github-tags depName=aquasecurity/trivy
-          version: v0.76.1
+          version: v0.76.2
           scan-type: image
           image-ref: secscan:ci
           scanners: vuln,secret
