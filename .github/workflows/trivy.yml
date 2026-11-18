@@ -35,7 +35,7 @@ jobs:
   # (Dockerfile + docker-compose.yml). Billig, laeuft auf jedem PR.
   filesystem:
     name: fs (deps · secrets · misconfig)
-    runs-on: fathometer
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -78,7 +78,7 @@ jobs:
   # the internal registry (see docs/operations.md / ADR-0069). ---
   image:
     name: image (os pkgs · app deps)
-    runs-on: fathometer
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -94,13 +94,11 @@ jobs:
           target: runtime        # finale Stage aus dem Dockerfile
           load: true             # ins lokale Daemon laden statt pushen
           tags: secscan:ci
-          # BuildKit gha cache disabled (ADR-0069 follow-up): on the self-hosted
-          # Hetzner runner the gha cache import (transatlantic, ~0.29 MB/s for the
-          # ~82 MB AlmaLinux+venv layer) was slower than a full cold build, and
-          # ephemeral runner pods keep no local layer store — so a fresh build
-          # wins. Revisit with a regional cache (Hetzner S3 / in-cluster registry)
-          # or a persistent BuildKit store later.
-          no-cache: true
+          # BuildKit layer cache in the GitHub Actions cache. Dependency and dnf
+          # layers are reused until pyproject.toml, uv.lock or a base image
+          # digest changes.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Trivy image scan (SARIF)
         uses: aquasecurity/trivy-action@v0.36.0

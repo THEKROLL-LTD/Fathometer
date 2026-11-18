@@ -19,12 +19,13 @@ and make sure you're authorized to sign on its behalf.
 
 ## Development setup
 
+Requires [uv](https://docs.astral.sh/uv/). `make install` installs Python 3.14
+and exactly the dependencies pinned in `uv.lock`.
+
 ```bash
-python3.13 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+make install
 docker compose up -d db          # PostgreSQL 17
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 See [`README.md`](README.md) for running the app and
@@ -35,14 +36,12 @@ See [`README.md`](README.md) for running the app and
 Pull requests must pass:
 
 ```bash
-ruff check . && ruff format --check .
-mypy app/
-pytest
+make lint        # ruff check, ruff format --check, shellcheck agent/*.sh
+make typecheck   # mypy --strict on app/
+make test        # pytest default selection with the coverage gate
 ```
 
-- **Ruff** for lint and formatting.
-- **mypy --strict** on `app/` — no type errors.
-- **pytest** default selection (pure unit tests).
+CI runs exactly these targets.
 
 New source files in `app/` should carry the SPDX header:
 

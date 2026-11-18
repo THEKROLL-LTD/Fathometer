@@ -39,7 +39,7 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: fathometer
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
@@ -107,19 +107,17 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # BuildKit gha cache intentionally disabled (ADR-0069 follow-up): on the
-          # self-hosted Hetzner runner the gha cache import (transatlantic, ~0.29
-          # MB/s for the ~82 MB AlmaLinux+venv layer) was slower than a full cold
-          # build, and ephemeral runner pods keep no local layer store. Cold build
-          # until a regional cache (Hetzner S3 / in-cluster registry) or a
-          # persistent BuildKit store is wired up. Air-gap: mirror the
-          # almalinux:10 / 10-minimal base images into the internal registry
-          # (docs/operations.md / ADR-0069).
+          # BuildKit layer cache in the GitHub Actions cache with a fixed scope:
+          # without `scope` the cache is keyed per GITHUB_REF, so every tag build
+          # would start cold. With `scope=release` all release builds share one
+          # cache; base image updates change the digest and invalidate the
+          # affected layers (ADR-0069). Unused entries are evicted after 7 days.
           #
           # NOTE: this build sets no explicit `target` → it builds the LAST
           # Dockerfile stage. The scratch `runtime` stage must therefore stay last
           # (otherwise add `target: runtime` here).
-          no-cache: true
+          cache-from: type=gha,scope=release
+          cache-to: type=gha,scope=release,mode=max
           # Provenance-Attestations für Software-Supply-Chain. Sind ohnehin
           # ghcr-Default ab buildx-0.10, hier explizit.
           provenance: true

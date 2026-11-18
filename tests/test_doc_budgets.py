@@ -87,38 +87,6 @@ def test_adr_stays_within_budget(path: Path) -> None:
     )
 
 
-_SUBAGENTS = (
-    "backend-implementer",
-    "frontend-implementer",
-    "reviewer",
-    "security-auditor",
-    "test-writer",
-)
-
-
-def _agent_body(path: Path) -> str:
-    """The Markdown below the frontmatter."""
-    text = path.read_text(encoding="utf-8")
-    match = re.match(r"^---\n.*?\n---\n(.*)$", text, re.S)
-    assert match is not None, f"{path} has no frontmatter"
-    return match.group(1)
-
-
-@pytest.mark.parametrize("name", _SUBAGENTS)
-def test_subagent_bodies_are_identical_across_tools(name: str) -> None:
-    """Claude Code and OpenCode read different frontmatter but the same rules.
-
-    Two copies of a prompt drift; a drifted reviewer prompt stops catching what
-    the other one catches. Only the frontmatter may differ.
-    """
-    claude = _agent_body(REPO_ROOT / ".claude" / "agents" / f"{name}.md")
-    opencode = _agent_body(REPO_ROOT / ".opencode" / "agents" / f"{name}.md")
-    assert claude == opencode, (
-        f"{name}: .claude/agents and .opencode/agents have drifted. "
-        "Edit one, port the same text to the other in the same commit."
-    )
-
-
 def test_state_md_status_sections_are_tables() -> None:
     """`## Open` and `## Completed` hold table rows, nothing else.
 

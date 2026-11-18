@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build for fathometer.
-# The builder installs dependencies into a venv; the runtime copies the venv
+# The builder installs the dependencies pinned in uv.lock into a venv; the runtime copies the venv
 # and runs as a non-root user. Runtime base OS is AlmaLinux 10-minimal
 # (builder on almalinux:10) — see ADR-0069.
 
@@ -10,13 +10,18 @@
 ARG FM_BUILD_REVISION=dev
 
 # ---------------------------------------------------------------------------
+# uv — the single source of the uv version. The builder copies the binary from
+# here; CI reads the same version for its own uv install (ADR-0073).
+# ---------------------------------------------------------------------------
+FROM ghcr.io/astral-sh/uv:0.13.9 AS uv
+
+# ---------------------------------------------------------------------------
 # Stage 1 — Builder
 # ---------------------------------------------------------------------------
 FROM almalinux:10 AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PYTHONUNBUFFERED=1
 
 # Build tools for native wheels (argon2-cffi, cryptography, psycopg). The
 # toolchain is a safety net for any sdist-only dependency; in practice our
@@ -27,45 +32,39 @@ RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked \
     dnf install -y \
         python3.14 \
         python3.14-devel \
-        python3.14-pip \
         gcc \
         libffi-devel \
         openssl-devel \
     && dnf clean all
 
+COPY --from=uv /uv /usr/local/bin/uv
+
 WORKDIR /build
 
-# Create the venv — gets copied into the runtime stage. EL10 ships no
-# python3.13; the AppStream interpreter is `python3.14` (not `python`).
-# `python3.14-pip` is installed so `python3.14 -m venv` has ensurepip/pip.
-RUN python3.14 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:${PATH}"
+# The venv gets copied into the runtime stage. uv creates it on the AppStream
+# interpreter (EL10 ships no python3.13), never on a downloaded Python, so the
+# runtime stage finds the same /usr/bin/python3.14.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON=/usr/bin/python3.14 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    PATH="/opt/venv/bin:${PATH}"
 
-# ---- Dependency layer (changes only on pyproject.toml updates) ------------
-# Trick: copy only pyproject.toml + README.md + a stub app first and run
-# `pip install .`. This installs exclusively the dependencies (including the
-# wheel builds for cryptography/argon2-cffi/psycopg). The stub package itself
-# is uninstalled right away — the real app code is reinstalled `--no-deps` in
-# the next layer.
-#
-# Cache mount on /root/.cache/pip: pip's HTTP wheel cache survives layer
-# invalidations, so even on pyproject changes not all wheels have to be
-# re-downloaded.
-COPY pyproject.toml README.md ./
-RUN --mount=type=cache,target=/root/.cache/pip \
-    mkdir -p app && touch app/__init__.py && \
-    pip install --upgrade pip && \
-    pip install --no-compile . && \
-    pip uninstall -y fathometer
+# ---- Dependency layer (changes only on pyproject.toml or uv.lock updates) --
+# Installs exactly the versions pinned in uv.lock, without the project itself.
+# `--locked` fails the build if uv.lock does not match pyproject.toml.
+# The uv cache mount survives layer invalidations, so a lock change does not
+# re-download every wheel.
+COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-install-project
 
 # ---- App layer (changes on every code change) -----------------------------
-# Copy the real app code and install the package without re-resolving the
-# dependencies. This is cheap (no wheel build), so the majority of code-change
-# builds finish in single-digit seconds.
+# Install the real app package non-editable; the dependencies are already in
+# place, so this finishes in seconds.
 COPY app ./app
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-compile --no-deps . && \
-    pip uninstall -y pip setuptools wheel 2>/dev/null || true && \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-editable && \
     find /opt/venv -name '*.pyc' -delete && \
     find /opt/venv -depth -name '__pycache__' -type d -exec rm -rf {} + && \
     find /opt/venv -depth -name 'tests' -type d -exec rm -rf {} + && \

@@ -10,7 +10,6 @@
   "labels": ["dependencies"],
   "ignorePaths": [
     "**/node_modules/**",
-    ".opencode/**",
     ".playwright-mcp/**",
     "tests/integration/installer/**"
   ],

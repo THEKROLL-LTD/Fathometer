@@ -14,6 +14,10 @@ the internal registry — symmetric to the base-image mirror expectation that
 already applied to the previous Debian `python:3.13-slim-trixie` base. Without
 the mirror, `docker compose up --build` cannot pull the FROM images.
 
+The build also pulls `ghcr.io/astral-sh/uv` (the uv binary that installs the
+locked dependencies, ADR-0073) and `node:20-alpine` (frontend build stage);
+mirror both as well. The exact tags are in the `Dockerfile`.
+
 ---
 
 ## Upstream-Update-Suche (ADR-0063, optional)
