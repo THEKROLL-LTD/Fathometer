@@ -27,7 +27,7 @@ permissions:
 jobs:
   quality:
     name: lint · types · tests
-    runs-on: fathometer
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
@@ -45,6 +45,8 @@ jobs:
         uses: astral-sh/setup-uv@v8.2.0
         with:
           version: ${{ steps.uv.outputs.version }}
+          # Caches downloaded wheels and Python, keyed on uv.lock.
+          enable-cache: true
 
       - name: Install dependencies (uv.lock)
         run: make install
