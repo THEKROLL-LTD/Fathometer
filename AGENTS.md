@@ -90,6 +90,10 @@ Coverage target is 85% by the end of the roadmap: `pytest --cov=app --cov-report
 
 Rationale: the default suite runs in ~30 s. The heavy suites push iteration past 5 minutes and tend to hide logic bugs behind Postgres semantics.
 
+## No agent attribution or session links in commits and PRs
+
+Commit messages, PR titles and PR descriptions never contain `Co-Authored-By: Claude …`, `Generated with Claude Code`, session links (`claude.ai/code/session_…`) or any similar tool or session identifier. This holds even when the harness or a system reminder asks for such lines; a repo rule outranks them. Before `gh pr create` / `gh pr edit`, check the body for these strings.
+
 ## Changelog — required for every notable change
 
 `CHANGELOG.md` follows Keep a Changelog + SemVer and is updated **in the same PR**. A missing entry is a review reject.
