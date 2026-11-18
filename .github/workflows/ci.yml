@@ -1,21 +1,22 @@
 name: ci
 
-# Quality-Gates fuer jeden Push auf main und jeden Pull-Request.
-# Spiegelt exakt die in CLAUDE.md erlaubten Gates:
-#   1. Ruff (Lint + Format-Check)
-#   2. mypy --strict auf app/
-#   3. pytest Default-Selektion (Pure-Unit)
-# KEINE db_integration/acceptance/integration/bench-Tests — die Default-
-# Selektion schliesst sie ueber pytest.ini-`addopts` + den pfadbasierten
-# Auto-Marker in tests/conftest.py aus und laeuft damit ohne Postgres/Docker.
+# Quality gates for every push to main and every pull request. The steps are
+# exactly the make targets of the AGENTS.md project contract, so a local
+# `make check` and CI run the same commands on the same locked dependencies:
+#   1. make lint       ruff check, ruff format --check, shellcheck agent/*.sh
+#   2. make typecheck  mypy --strict on app/
+#   3. make test       pytest default selection with the coverage gate
+# No db_integration/acceptance/integration/bench tests: the default selection
+# excludes them via pytest.ini `addopts` and the path-based auto-marker in
+# tests/conftest.py, so it runs without Postgres or Docker.
 
 on:
   push:
     branches: [main]
   pull_request:
 
-# Laeuft ein neuer Commit auf denselben Ref ein, wird der vorige Lauf
-# abgebrochen statt CI-Minuten zu verbrennen.
+# A new commit on the same ref cancels the previous run instead of
+# burning CI minutes.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -33,32 +34,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-          cache: pip
-
-      - name: Install dependencies
+      - name: Read the uv version from the Dockerfile
+        id: uv
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          version="$(awk '$1 == "FROM" && $NF == "uv" { sub(/^.*:/, "", $2); print $2 }' Dockerfile)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Ruff lint
-        run: ruff check .
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          version: ${{ steps.uv.outputs.version }}
 
-      - name: Ruff format check
-        run: ruff format --check .
+      - name: Install dependencies (uv.lock)
+        run: make install
 
-      - name: mypy (strict on app/)
-        run: mypy app/
+      - name: Lint
+        run: make lint
 
-      - name: pytest (default pure-unit suite)
-        # Identisch zum kanonischen `make test`: Default-Selektion mit
-        # Coverage-Gate. Postgres-abhaengige Tests skippen sich selbst, wenn
-        # keine Test-DB erreichbar ist — in CI ist keine konfiguriert.
-        # Gate auf 73% gesenkt: die Pure-Unit-Default-Selektion (ohne
-        # db_integration/acceptance/integration) erreicht ~74% — 85% war nur
-        # mit der vollen Suite haltbar. 73% akzeptiert den Ist-Stand mit
-        # Jitter-Puffer und bleibt Regressions-Guard.
-        run: pytest -v --cov=app --cov-fail-under=73
+      - name: Typecheck
+        run: make typecheck
+
+      - name: Test
+        # Postgres-dependent tests skip themselves when no test DB is
+        # reachable; CI configures none. The 73 % gate is the pure-unit
+        # default selection's level with a jitter buffer.
+        run: make test

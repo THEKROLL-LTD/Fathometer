@@ -6,6 +6,19 @@ und das Projekt folgt [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### ADR-0073: locked dependency installs in CI and the image
+
+#### Changed
+
+- The image now installs exactly the Python versions pinned in `uv.lock`
+  (previously `pip install .` resolved fresh from minimum versions). Rebuild
+  without cache once (`docker compose build --no-cache`). See ADR-0073.
+- Air-gap builds additionally need `ghcr.io/astral-sh/uv` mirrored
+  (`docs/operations.md`).
+- Development setup is `make install` (uv); CI runs `make lint`,
+  `make typecheck` and `make test`. `make lint` now includes shellcheck on
+  `agent/*.sh`.
+
 ### Dependency security bumps
 
 #### Fixed
@@ -22,8 +35,8 @@ und das Projekt folgt [Semantic Versioning](https://semver.org/).
 #### Changed
 
 - `pyproject.toml` now carries minimum versions for the patched transitive
-  packages, because the image installs without a lockfile. Rebuild the image
-  without cache (`docker compose build --no-cache`) to pick them up.
+  packages. Rebuild the image without cache (`docker compose build --no-cache`)
+  to pick them up.
 - The CI Trivy workflow now pins Trivy `v0.76.1` instead of the older default
   bundled with `trivy-action`; Renovate tracks the pin.
 
