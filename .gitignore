@@ -31,6 +31,9 @@ htmlcov/
 frontend/node_modules/
 app/static/dist/
 
+# Local Claude Code settings (per user, not shared)
+.claude/settings.local.json
+
 # Playwright-MCP-Output (Snapshots, Konsolen-Logs aus Browser-Sessions)
 .playwright-mcp/
 .DS_Store
