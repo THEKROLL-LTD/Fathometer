@@ -82,7 +82,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # No Node in the production image — only the finished static files are taken
 # over via COPY --from=frontend-build in stage 3.
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS frontend-build
+FROM node:26-alpine AS frontend-build
 
 WORKDIR /repo/frontend
 
