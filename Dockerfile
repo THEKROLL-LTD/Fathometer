@@ -13,7 +13,7 @@ ARG FM_BUILD_REVISION=dev
 # uv — the single source of the uv version. The builder copies the binary from
 # here; CI reads the same version for its own uv install (ADR-0073).
 # ---------------------------------------------------------------------------
-FROM ghcr.io/astral-sh/uv:0.13.9 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.10 AS uv
 
 # ---------------------------------------------------------------------------
 # Stage 1 — Builder
